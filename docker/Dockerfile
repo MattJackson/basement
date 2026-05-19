@@ -25,10 +25,17 @@ COPY . .
 COPY --from=frontend /internal/web/dist /src/internal/web/dist
 ARG TARGETOS
 ARG TARGETARCH
+# Build-time metadata stamped into internal/version.
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILT_AT=unknown
 # Strip + static + trimpath = smallest reproducible binary.
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -tags 'osusergo netgo' \
-    -ldflags="-s -w -buildid=" \
+    -ldflags="-s -w -buildid= \
+      -X 'github.com/mattjackson/basement/internal/version.Version=${VERSION}' \
+      -X 'github.com/mattjackson/basement/internal/version.Commit=${COMMIT}' \
+      -X 'github.com/mattjackson/basement/internal/version.BuiltAt=${BUILT_AT}'" \
     -buildvcs=false \
     -o /out/basement ./cmd/basement-server
 

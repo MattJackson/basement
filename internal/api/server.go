@@ -83,8 +83,9 @@ func (s *Server) routes() {
 	r.Use(middleware.AllowContentType("application/json"))
 
 	r.Route("/api/v1", func(apiR chi.Router) {
-			// Public routes (no auth required) - /health and /auth/login
+			// Public routes (no auth required) - /health, /version, /auth/login
 			apiR.Get("/health", s.healthHandler)
+			apiR.Get("/version", s.versionHandler)
 			apiR.Post("/auth/login", s.loginHandler)
 
 			// Authenticated group with middleware for protected routes
