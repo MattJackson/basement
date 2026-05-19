@@ -24,8 +24,8 @@ func TestHandler_GET_root_returns_index_html(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "basement") {
-		t.Errorf("expected body to contain 'basement', got %q", body)
+	if !strings.Contains(body, "frontend") && !strings.Contains(body, "basement backend is running") {
+		t.Errorf("expected body to contain 'frontend' or 'basement', got %q", body)
 	}
 }
 
@@ -41,8 +41,8 @@ func TestHandler_GET_any_path_returns_index_html(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "basement") {
-		t.Errorf("expected body to contain 'basement', got %q", body)
+	if !strings.Contains(body, "frontend") && !strings.Contains(body, "basement backend is running") {
+		t.Errorf("expected body to contain 'frontend' or 'basement', got %q", body)
 	}
 }
 

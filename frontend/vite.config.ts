@@ -11,6 +11,9 @@ export default defineConfig({
       routesDirectory: "./src/routes",
       generatedRouteTree: "./src/routeTree.gen.ts",
       autoCodeSplitting: true,
+      // Non-route files in routes/ use the "-" prefix (tsr.config.json
+      // routeFileIgnorePrefix). Example: -AdminLanding.tsx beside
+      // admin/index.tsx.
     }),
     react(),
     tailwindcss(),
