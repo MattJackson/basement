@@ -27,13 +27,15 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
 import { useKeys } from "@/shared/api/queries";
+import type { components } from "@/shared/api/types.gen";
 import { adminPage } from "@/shared/layout/adminPage";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCreateKey } from "@/shared/api/mutations";
 import { DeleteKeyConfirm } from "@/shared/ui/DeleteKeyConfirm";
 import { useDeleteKey } from "@/shared/api/mutations";
 import { Checkbox } from "@/components/ui/checkbox";
-import type { components } from "@/shared/api/types.gen";
+import { ClusterBadge } from "@/components/ClusterBadge";
+import { ClusterFilter } from "@/components/ClusterFilter";
 
 export const Route = createFileRoute("/admin/keys/")({
   component: adminPage(KeysScreen),
@@ -42,7 +44,8 @@ export const Route = createFileRoute("/admin/keys/")({
 function KeysScreen() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const { data: keys, isLoading, error } = useKeys();
+  const [clusterFilter, setClusterFilter] = useState<string | null>(null);
+  const { data: keysData, isLoading, error } = useKeys();
   
   // Create key dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -56,10 +59,35 @@ function KeysScreen() {
   const [keyToDelete, setKeyToDelete] = useState<{ id: string; name?: string } | null>(null);
   const deleteKey = useDeleteKey();
 
-  const filteredKeys = keys?.filter((key) => {
+  const keys = keysData?.keys ?? [];
+  const errors = keysData?.errors ?? [];
+
+  const filteredKeys = keys.filter((key) => {
+    if (clusterFilter && key.connectionId !== clusterFilter) return false;
     const nameMatch = key.name?.toLowerCase().includes(search.toLowerCase()) ?? false;
     return nameMatch;
   });
+
+  const errorBanner = errors.length > 0 ? (
+    <div className="rounded-lg border bg-destructive/10 p-4">
+      <p className="text-sm text-destructive font-medium">
+        Couldn&apos;t load keys from {errors.length} cluster{errors.length > 1 ? "s" : ""}:{" "}
+        {errors.map((e) => e.connectionId.slice(0, 8)).join(", ")}
+      </p>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+          View details
+        </summary>
+        <ul className="mt-2 space-y-1">
+          {errors.map((e, idx) => (
+            <li key={idx} className="text-destructive">
+              {e.connectionId.slice(0, 8)}: {e.message}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  ) : null;
 
   const header = (
     <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -76,6 +104,7 @@ function KeysScreen() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 sm:w-64"
         />
+        <ClusterFilter selectedClusterId={clusterFilter} onFilterChange={setClusterFilter} />
         <Button variant="outline" onClick={() => { setCreateOpen(true); setNewKeyName(""); }}>
           New
         </Button>
@@ -87,7 +116,8 @@ function KeysScreen() {
     return (
       <div className="space-y-6">
         {header}
-        <ErrorBanner message="Couldn't connect to cluster. Retrying automatically..." />
+        {errorBanner}
+        <ErrorBanner message="Couldn&apos;t connect to cluster. Retrying automatically..." />
       </div>
     );
   }
@@ -125,12 +155,14 @@ function KeysScreen() {
   return (
     <div className="space-y-6">
       {header}
+      {errorBanner}
 
       {isLoading ? (
-        <div className="rounded-lg border bg-card">
+        <div className="rounded-lg border bg-card overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-48">Cluster</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Access Key ID</TableHead>
                 <TableHead>Buckets</TableHead>
@@ -141,6 +173,7 @@ function KeysScreen() {
             <TableBody>
               {[...Array(5)].map((_, i) => (
                 <TableRow key={i}>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-48" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
@@ -166,6 +199,7 @@ function KeysScreen() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-48">Cluster</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Access Key ID</TableHead>
                 <TableHead>Buckets</TableHead>
@@ -178,8 +212,15 @@ function KeysScreen() {
                 <TableRow
                   key={key.id}
                   className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => navigate({ to: "/admin/keys/$id", params: { id: key.id } })}
+                  onClick={() => {
+                      // PLANNED: /admin/clusters/{cid}/keys/{id} route (CLUSTER.RESOURCE-DETAIL)
+                      // @ts-expect-error route not yet defined
+                      navigate({ to: "/admin/clusters/$cid/keys/$id", params: { cid: key.connectionId, id: key.id } });
+                    }}
                 >
+                  <TableCell>
+                    <ClusterBadge connectionId={key.connectionId} />
+                  </TableCell>
                   <TableCell className="font-medium">{key.name ?? "-"}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -225,51 +266,53 @@ function KeysScreen() {
                         not on ListKeys — surfaced on /admin/keys/$id (v0.2). */}
                     <span className="opacity-60">—</span>
                   </TableCell>
-                  <TableCell>{humanizeTime(key.created)}</TableCell>
+                  <TableCell>{key.created ? humanizeTime(key.created) : "—"}</TableCell>
                   <TableCell>
-                     <DropdownMenu>
-                       <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
-                         <Button variant="ghost" className="h-8 w-8 p-0">
-                           <span className="sr-only">Open menu</span>
-                           <svg
-                             xmlns="http://www.w3.org/2000/svg"
-                             viewBox="0 0 24 24"
-                             fill="none"
-                             stroke="currentColor"
-                             strokeWidth="2"
-                             strokeLinecap="round"
-                             strokeLinejoin="round"
-                             className="h-4 w-4"
-                           >
-                             <circle cx="12" cy="12" r="1" />
-                             <circle cx="19" cy="12" r="1" />
-                             <circle cx="5" cy="12" r="1" />
-                           </svg>
-                         </Button>
-                       </DropdownMenuTrigger>
-                       <DropdownMenuContent align="end">
-                         <DropdownMenuItem
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             navigate({ to: "/admin/keys/$id", params: { id: key.id } });
-                           }}
-                         >
-                           View
-                         </DropdownMenuItem>
-                         <DropdownMenuItem 
-                           variant="destructive" 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             handleDeleteClick(key.id, key.name);
-                           }}
-                         >
-                           Delete
-                         </DropdownMenuItem>
-                       </DropdownMenuContent>
-                     </DropdownMenu>
-                   </TableCell>
-                 </TableRow>
-               ))}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Open menu</span>
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                            >
+                              <circle cx="12" cy="12" r="1" />
+                              <circle cx="19" cy="12" r="1" />
+                              <circle cx="5" cy="12" r="1" />
+                            </svg>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                // PLANNED: /admin/clusters/{cid}/keys/{id} route (CLUSTER.RESOURCE-DETAIL)
+                                // @ts-expect-error route not yet defined
+                                navigate({ to: "/admin/clusters/$cid/keys/$id", params: { cid: key.connectionId, id: key.id } });
+                              }}
+                          >
+                            View
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            variant="destructive" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(key.id, key.name);
+                            }}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
             </TableBody>
           </Table>
         </div>
