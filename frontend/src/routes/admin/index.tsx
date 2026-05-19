@@ -5,9 +5,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HealthPill } from "@/shared/ui/HealthPill";
 import { humanizeBytes } from "@/shared/lib/format";
 import { useNodes, useLayout, useCapabilities } from "@/shared/api/queries";
+import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/")({
-  component: Dashboard,
+  component: adminPage(Dashboard),
 });
 
 function Dashboard() {
