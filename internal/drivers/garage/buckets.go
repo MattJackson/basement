@@ -43,9 +43,12 @@ func (d *driver) GetBucket(ctx context.Context, _ string) (driverpkg.Bucket, err
 	}
 
 	bucket := driverpkg.Bucket{
-		ID:      resp.ID,
-		Aliases: resp.GlobalAliases,
-		Created: resp.Created,
+		ID:                resp.ID,
+		Aliases:           resp.GlobalAliases,
+		Created:           resp.Created,
+		Objects:           resp.Objects,
+		Bytes:             resp.Bytes,
+		UnfinishedUploads: resp.UnfinishedUploads,
 	}
 
 	if resp.Quotas != nil {
@@ -58,6 +61,23 @@ func (d *driver) GetBucket(ctx context.Context, _ string) (driverpkg.Bucket, err
 		}
 		bucket.Quotas = &quotas
 	}
+
+	keys := make([]driverpkg.BucketKeyAccess, 0, len(resp.Keys))
+	for _, k := range resp.Keys {
+		for _, p := range k.Permissions {
+			if p.BucketID == bucket.ID || p.BucketID == "" {
+				keys = append(keys, driverpkg.BucketKeyAccess{
+					KeyID: k.AccessKeyID,
+					Name:  k.Name,
+					Read:  p.Read,
+					Write: p.Write,
+					Owner: p.Owner,
+				})
+				break
+			}
+		}
+	}
+	bucket.Keys = keys
 
 	return bucket, nil
 }
@@ -75,9 +95,12 @@ func (d *driver) CreateBucket(ctx context.Context, spec driverpkg.BucketSpec) (d
 	}
 
 	bucket := driverpkg.Bucket{
-		ID:      resp.ID,
-		Aliases: resp.GlobalAliases,
-		Created: resp.Created,
+		ID:                resp.ID,
+		Aliases:           resp.GlobalAliases,
+		Created:           resp.Created,
+		Objects:           resp.Objects,
+		Bytes:             resp.Bytes,
+		UnfinishedUploads: resp.UnfinishedUploads,
 	}
 
 	if resp.Quotas != nil {
@@ -90,6 +113,23 @@ func (d *driver) CreateBucket(ctx context.Context, spec driverpkg.BucketSpec) (d
 		}
 		bucket.Quotas = &quotas
 	}
+
+	keys := make([]driverpkg.BucketKeyAccess, 0, len(resp.Keys))
+	for _, k := range resp.Keys {
+		for _, p := range k.Permissions {
+			if p.BucketID == bucket.ID || p.BucketID == "" {
+				keys = append(keys, driverpkg.BucketKeyAccess{
+					KeyID: k.AccessKeyID,
+					Name:  k.Name,
+					Read:  p.Read,
+					Write: p.Write,
+					Owner: p.Owner,
+				})
+				break
+			}
+		}
+	}
+	bucket.Keys = keys
 
 	return bucket, nil
 }
@@ -127,9 +167,12 @@ func (d *driver) UpdateBucket(ctx context.Context, id string, update driverpkg.B
 	}
 
 	bucket := driverpkg.Bucket{
-		ID:      resp.ID,
-		Aliases: resp.GlobalAliases,
-		Created: resp.Created,
+		ID:                resp.ID,
+		Aliases:           resp.GlobalAliases,
+		Created:           resp.Created,
+		Objects:           resp.Objects,
+		Bytes:             resp.Bytes,
+		UnfinishedUploads: resp.UnfinishedUploads,
 	}
 
 	if resp.Quotas != nil {
@@ -144,6 +187,23 @@ func (d *driver) UpdateBucket(ctx context.Context, id string, update driverpkg.B
 		}
 		bucket.Quotas = &quotas
 	}
+
+	keys := make([]driverpkg.BucketKeyAccess, 0, len(resp.Keys))
+	for _, k := range resp.Keys {
+		for _, p := range k.Permissions {
+			if p.BucketID == bucket.ID || p.BucketID == "" {
+				keys = append(keys, driverpkg.BucketKeyAccess{
+					KeyID: k.AccessKeyID,
+					Name:  k.Name,
+					Read:  p.Read,
+					Write: p.Write,
+					Owner: p.Owner,
+				})
+				break
+			}
+		}
+	}
+	bucket.Keys = keys
 
 	return bucket, nil
 }
