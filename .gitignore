@@ -30,3 +30,15 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Embedded SPA (built artifact)
+internal/web/dist/
+
+# JSON store runtime data (for local dev)
+data/
+*.local.json
