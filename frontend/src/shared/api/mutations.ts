@@ -58,7 +58,7 @@ export function useUpdateBucket() {
     mutationFn: async ({ id, update }) => {
       const { data: _data, error, response } = await client.PATCH("/admin/buckets/{id}", {
         params: { path: { id } },
-        body: update as any,
+        body: update as never,
       });
       if (!response.ok || !_data) throw apiError(`updateBucket/${id}`, response.status, error);
       return _data as Bucket;
@@ -70,16 +70,38 @@ export function useUpdateBucket() {
   });
 }
 
+/**
+ * Two-phase delete: POST /_arm-delete to mint a short-lived HMAC
+ * token, then DELETE with X-Confirm-Delete header carrying the token.
+ * No single curl-by-hand can destroy a bucket.
+ */
 export function useDeleteBucket() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
-      const { data: _data, error, response } = await client.DELETE("/admin/buckets/{id}", {
+      // Phase 1 — arm. Server verifies the bucket exists and mints a
+      // 60-second HMAC token bound to (bucket id, current user).
+      const arm = await client.POST("/admin/buckets/{id}/_arm-delete", {
         params: { path: { id } },
       });
-      if (!response.ok) throw apiError(`deleteBucket/${id}`, response.status, error);
+      if (!arm.response.ok || !arm.data?.token) {
+        throw apiError(`armDeleteBucket/${id}`, arm.response.status, arm.error);
+      }
+      // Phase 2 — fire. Token goes in X-Confirm-Delete; server
+      // re-verifies it matches the requested bucket + user before
+      // calling the backend delete.
+      const del = await client.DELETE("/admin/buckets/{id}", {
+        params: {
+          path: { id },
+          header: { "X-Confirm-Delete": arm.data.token },
+        },
+        headers: { "X-Confirm-Delete": arm.data.token },
+      });
+      if (!del.response.ok) {
+        throw apiError(`deleteBucket/${id}`, del.response.status, del.error);
+      }
     },
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });

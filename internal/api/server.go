@@ -116,6 +116,7 @@ func (s *Server) routes() {
 			adminG.Get("/admin/buckets/{id}", s.getBucketHandler)
 			adminG.Patch("/admin/buckets/{id}", s.updateBucketHandler)
 			adminG.Delete("/admin/buckets/{id}", s.deleteBucketHandler)
+			adminG.Post("/admin/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
 
 			adminG.Get("/admin/keys", s.listKeysHandler)
 			adminG.Post("/admin/keys", s.createKeyHandler)
