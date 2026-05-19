@@ -74,10 +74,21 @@ func (d *driver) HealthCheck(ctx context.Context) (driverpkg.HealthReport, error
 // network state from knownNodes when present. Any knownNode NOT in the
 // layout (newly-connected, unassigned) is appended at the end.
 func (d *driver) ListNodes(ctx context.Context) ([]driverpkg.Node, error) {
-	var resp getStatusResponseV1
-	if err := d.client.do(ctx, "GET", "/v1/status", nil, &resp); err != nil {
+	// Garage v1.0.1's GET /v1/status returns layout.version but NOT
+	// layout.roles[]. Roles only come back from the dedicated
+	// GET /v1/layout endpoint. Hit both and merge.
+	var status getStatusResponseV1
+	if err := d.client.do(ctx, "GET", "/v1/status", nil, &status); err != nil {
 		return nil, err
 	}
+	var layoutResp clusterLayoutV1
+	if err := d.client.do(ctx, "GET", "/v1/layout", nil, &layoutResp); err != nil {
+		return nil, err
+	}
+	// Splice the freshly-fetched roles back into the status response so the
+	// rest of the function reads naturally.
+	resp := status
+	resp.Layout = layoutResp
 
 	// Index knownNodes by id for O(1) enrichment.
 	known := make(map[string]nodeNetworkInfoV1, len(resp.KnownNodes))
