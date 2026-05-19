@@ -173,31 +173,11 @@ function KeysScreen() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {key.buckets_permissions?.length ?? 0}
-                    {key.buckets_permissions && key.buckets_permissions.length > 0 ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="ml-1 opacity-60 text-xs">
-                              ({key.buckets_permissions.slice(0, 5).map(bp => bp.global_alias || bp.bucket_id).join(", ")})
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>
-                              {key.buckets_permissions.length > 5
-                                ? `${key.buckets_permissions.slice(0, 5).map(bp => bp.global_alias || bp.bucket_id).join(", ")}... and ${key.buckets_permissions.length - 5} more`
-                                : key.buckets_permissions.map(bp => bp.global_alias || bp.bucket_id).join(", ")}
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : (
-                      <span className="opacity-60">-</span>
-                    )}
+                    {/* Per-bucket permissions only live on GetKey detail,
+                        not on ListKeys — surfaced on /admin/keys/$id (v0.2). */}
+                    <span className="opacity-60">—</span>
                   </TableCell>
-                  <TableCell>
-                    {key.id ? humanizeTime(new Date().toISOString()) : "-"}
-                  </TableCell>
+                  <TableCell>{humanizeTime(key.created)}</TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
