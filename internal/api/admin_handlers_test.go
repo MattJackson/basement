@@ -227,7 +227,7 @@ func TestListNodesHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/nodes")
 	rr := httptest.NewRecorder()
@@ -250,7 +250,7 @@ func TestListNodesHandler_EmptyList(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/nodes")
 	rr := httptest.NewRecorder()
@@ -273,7 +273,7 @@ func TestListNodesHandler_DriverUnsupported(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/nodes")
 	rr := httptest.NewRecorder()
@@ -302,7 +302,7 @@ func TestListNodesHandler_DriverPermissionDenied(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/nodes")
 	rr := httptest.NewRecorder()
@@ -319,7 +319,7 @@ func TestListNodesHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/nodes", nil)
 	rr := httptest.NewRecorder()
@@ -336,7 +336,7 @@ func TestListNodesHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodGet, "/api/v1/admin/nodes")
 	rr := httptest.NewRecorder()
@@ -353,7 +353,7 @@ func TestListNodesHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/nodes", nil)
 	rr := httptest.NewRecorder()
@@ -382,7 +382,7 @@ func TestGetLayoutHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/layout")
 	rr := httptest.NewRecorder()
@@ -413,7 +413,7 @@ func TestGetLayoutHandler_DriverUnsupported(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/layout")
 	rr := httptest.NewRecorder()
@@ -437,7 +437,7 @@ func TestGetLayoutHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/layout", nil)
 	rr := httptest.NewRecorder()
@@ -454,7 +454,7 @@ func TestGetLayoutHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodGet, "/api/v1/admin/layout")
 	rr := httptest.NewRecorder()
@@ -480,7 +480,7 @@ func TestListBucketsHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets")
 	rr := httptest.NewRecorder()
@@ -503,7 +503,7 @@ func TestListBucketsHandler_EmptyList(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets")
 	rr := httptest.NewRecorder()
@@ -526,7 +526,7 @@ func TestListBucketsHandler_DriverUnsupported(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets")
 	rr := httptest.NewRecorder()
@@ -555,7 +555,7 @@ func TestListBucketsHandler_DriverPermissionDenied(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets")
 	rr := httptest.NewRecorder()
@@ -572,7 +572,7 @@ func TestListBucketsHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/buckets", nil)
 	rr := httptest.NewRecorder()
@@ -589,7 +589,7 @@ func TestListBucketsHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodGet, "/api/v1/admin/buckets")
 	rr := httptest.NewRecorder()
@@ -607,7 +607,7 @@ func TestListBucketsHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets", nil)
 	rr := httptest.NewRecorder()
@@ -633,7 +633,7 @@ func TestListKeysHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys")
 	rr := httptest.NewRecorder()
@@ -656,7 +656,7 @@ func TestListKeysHandler_EmptyList(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys")
 	rr := httptest.NewRecorder()
@@ -679,7 +679,7 @@ func TestListKeysHandler_DriverUnsupported(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys")
 	rr := httptest.NewRecorder()
@@ -708,7 +708,7 @@ func TestListKeysHandler_DriverPermissionDenied(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys")
 	rr := httptest.NewRecorder()
@@ -725,7 +725,7 @@ func TestListKeysHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/keys", nil)
 	rr := httptest.NewRecorder()
@@ -742,7 +742,7 @@ func TestListKeysHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodGet, "/api/v1/admin/keys")
 	rr := httptest.NewRecorder()
@@ -760,7 +760,7 @@ func TestListKeysHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys", nil)
 	rr := httptest.NewRecorder()
@@ -794,7 +794,7 @@ func TestGetBucketHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets/bucket-123")
 	rr := httptest.NewRecorder()
@@ -837,7 +837,7 @@ func TestGetBucketHandler_BucketNotFound(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets/nonexistent")
 	rr := httptest.NewRecorder()
@@ -855,7 +855,7 @@ func TestGetBucketHandler_InvalidID(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/buckets/")
 	rr := httptest.NewRecorder()
@@ -872,7 +872,7 @@ func TestGetBucketHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/buckets/bucket-123", nil)
 	rr := httptest.NewRecorder()
@@ -889,7 +889,7 @@ func TestGetBucketHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodGet, "/api/v1/admin/buckets/bucket-123")
 	rr := httptest.NewRecorder()
@@ -906,7 +906,7 @@ func TestGetBucketHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123", nil)
 	rr := httptest.NewRecorder()
@@ -939,7 +939,7 @@ func TestCreateBucketHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -958,7 +958,7 @@ func TestCreateBucketHandler_InvalidBody(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets")
 	req.Body = io.NopCloser(strings.NewReader("not json"))
@@ -990,7 +990,7 @@ func TestCreateBucketHandler_Conflict(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1017,7 +1017,7 @@ func TestCreateBucketHandler_EmptyAliasRejected(t *testing.T) {
 			return driver.Bucket{}, nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets")
 	req.Body = io.NopCloser(strings.NewReader(`{"alias": ""}`))
@@ -1037,7 +1037,7 @@ func TestCreateBucketHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets", nil)
 	rr := httptest.NewRecorder()
@@ -1054,7 +1054,7 @@ func TestCreateBucketHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPost, "/api/v1/admin/buckets")
 	rr := httptest.NewRecorder()
@@ -1084,7 +1084,7 @@ func TestUpdateBucketHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/buckets/bucket-123")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1110,7 +1110,7 @@ func TestUpdateBucketHandler_BucketNotFound(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/buckets/nonexistent")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1128,7 +1128,7 @@ func TestUpdateBucketHandler_InvalidBody(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/buckets/bucket-123")
 	req.Body = io.NopCloser(strings.NewReader("not json"))
@@ -1149,7 +1149,7 @@ func TestUpdateBucketHandler_InvalidID(t *testing.T) {
 	body := `{"quotas": {"max_size": 1073741824}}`
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/buckets/")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1167,7 +1167,7 @@ func TestUpdateBucketHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/buckets/bucket-123", nil)
 	rr := httptest.NewRecorder()
@@ -1184,7 +1184,7 @@ func TestUpdateBucketHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPatch, "/api/v1/admin/buckets/bucket-123")
 	rr := httptest.NewRecorder()
@@ -1201,7 +1201,7 @@ func TestUpdateBucketHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123", nil)
 	rr := httptest.NewRecorder()
@@ -1228,7 +1228,7 @@ func TestDeleteBucketHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
 	req.Header.Set("X-Confirm-Delete", mintAdminDeleteToken("bucket-123"))
@@ -1258,7 +1258,7 @@ func TestDeleteBucketHandler_NoConfirmHeader(t *testing.T) {
 			return nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
 	rr := httptest.NewRecorder()
@@ -1283,7 +1283,7 @@ func TestDeleteBucketHandler_BadConfirmToken(t *testing.T) {
 			return nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
 	req.Header.Set("X-Confirm-Delete", "not-a-real-token")
@@ -1309,7 +1309,7 @@ func TestDeleteBucketHandler_TokenForWrongBucket(t *testing.T) {
 			return nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	// Token armed for bucket-A; request DELETEs bucket-B.
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-B")
@@ -1335,7 +1335,7 @@ func TestDeleteBucketHandler_BucketNotFound(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/nonexistent")
 	req.Header.Set("X-Confirm-Delete", mintAdminDeleteToken("nonexistent"))
@@ -1356,7 +1356,7 @@ func TestArmDeleteBucketHandler_HappyPath(t *testing.T) {
 			return driver.Bucket{ID: id, Aliases: []string{"some-alias"}}, nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123/_arm-delete")
 	rr := httptest.NewRecorder()
@@ -1393,7 +1393,7 @@ func TestArmDeleteBucketHandler_BucketNotFound(t *testing.T) {
 			return driver.Bucket{}, &driver.Error{Op: "GetBucket", Driver: "test", Err: driver.ErrNotFound, Message: "not found"}
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets/nonexistent/_arm-delete")
 	rr := httptest.NewRecorder()
@@ -1407,7 +1407,7 @@ func TestArmDeleteBucketHandler_BucketNotFound(t *testing.T) {
 func TestArmDeleteBucketHandler_NoAuth(t *testing.T) {
 	cfg := newTestConfig()
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
-	srv := New(cfg, st, &testMockDriver{})
+	srv := New(cfg, st, &testMockDriver{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123/_arm-delete", nil)
 	rr := httptest.NewRecorder()
@@ -1424,7 +1424,7 @@ func TestDeleteBucketHandler_InvalidID(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/")
 	rr := httptest.NewRecorder()
@@ -1441,7 +1441,7 @@ func TestDeleteBucketHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123", nil)
 	rr := httptest.NewRecorder()
@@ -1458,7 +1458,7 @@ func TestDeleteBucketHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
 	rr := httptest.NewRecorder()
@@ -1475,7 +1475,7 @@ func TestDeleteBucketHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123", nil)
 	rr := httptest.NewRecorder()
@@ -1517,7 +1517,7 @@ func TestGetKeyHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys/key-123")
 	rr := httptest.NewRecorder()
@@ -1550,7 +1550,7 @@ func TestGetKeyHandler_KeyNotFound(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys/nonexistent")
 	rr := httptest.NewRecorder()
@@ -1568,7 +1568,7 @@ func TestGetKeyHandler_InvalidID(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/keys/")
 	rr := httptest.NewRecorder()
@@ -1585,7 +1585,7 @@ func TestGetKeyHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/keys/key-123", nil)
 	rr := httptest.NewRecorder()
@@ -1602,7 +1602,7 @@ func TestGetKeyHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodGet, "/api/v1/admin/keys/key-123")
 	rr := httptest.NewRecorder()
@@ -1619,7 +1619,7 @@ func TestGetKeyHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys/key-123", nil)
 	rr := httptest.NewRecorder()
@@ -1651,7 +1651,7 @@ func TestCreateKeyHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/keys")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1670,7 +1670,7 @@ func TestCreateKeyHandler_InvalidBody(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/keys")
 	req.Body = io.NopCloser(strings.NewReader("not json"))
@@ -1688,7 +1688,7 @@ func TestCreateKeyHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys", nil)
 	rr := httptest.NewRecorder()
@@ -1705,7 +1705,7 @@ func TestCreateKeyHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPost, "/api/v1/admin/keys")
 	rr := httptest.NewRecorder()
@@ -1723,7 +1723,7 @@ func TestCreateKeyHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/keys", nil)
 	rr := httptest.NewRecorder()
@@ -1758,7 +1758,7 @@ func TestUpdateKeyHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/key-123")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1785,7 +1785,7 @@ func TestUpdateKeyHandler_KeyNotFound(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/nonexistent")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1804,7 +1804,7 @@ func TestUpdateKeyHandler_InvalidBody(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/key-123")
 	req.Body = io.NopCloser(strings.NewReader("not json"))
@@ -1825,7 +1825,7 @@ func TestUpdateKeyHandler_InvalidID(t *testing.T) {
 	body := `[{"bucket_id": "bucket-1", "read": true, "write": false, "owner": false}]`
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -1843,7 +1843,7 @@ func TestUpdateKeyHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/keys/key-123", nil)
 	rr := httptest.NewRecorder()
@@ -1860,7 +1860,7 @@ func TestUpdateKeyHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPatch, "/api/v1/admin/keys/key-123")
 	rr := httptest.NewRecorder()
@@ -1877,7 +1877,7 @@ func TestUpdateKeyHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys/key-123", nil)
 	rr := httptest.NewRecorder()
@@ -1907,7 +1907,7 @@ func TestDeleteKeyHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
 	req.Header.Set("X-Confirm-Delete", token)
@@ -1936,7 +1936,7 @@ func TestDeleteKeyHandler_KeyNotFound(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	token := auth.MintConfirmToken(testSecret, opDeleteKey, "nonexistent", "admin", confirmDeleteTTL)
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/nonexistent")
@@ -1956,7 +1956,7 @@ func TestDeleteKeyHandler_InvalidID(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/")
 	rr := httptest.NewRecorder()
@@ -1973,7 +1973,7 @@ func TestDeleteKeyHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/keys/key-123", nil)
 	rr := httptest.NewRecorder()
@@ -1990,7 +1990,7 @@ func TestDeleteKeyHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
 	rr := httptest.NewRecorder()
@@ -2007,7 +2007,7 @@ func TestDeleteKeyHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys/key-123", nil)
 	rr := httptest.NewRecorder()
@@ -2040,7 +2040,7 @@ func TestStageLayoutHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/layout/stage")
 	req.Body = io.NopCloser(strings.NewReader(body))
@@ -2059,7 +2059,7 @@ func TestStageLayoutHandler_InvalidBody(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/layout/stage")
 	req.Body = io.NopCloser(strings.NewReader("not json"))
@@ -2077,7 +2077,7 @@ func TestStageLayoutHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/layout/stage", nil)
 	rr := httptest.NewRecorder()
@@ -2094,7 +2094,7 @@ func TestStageLayoutHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPost, "/api/v1/admin/layout/stage")
 	rr := httptest.NewRecorder()
@@ -2111,7 +2111,7 @@ func TestStageLayoutHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/layout/stage", nil)
 	rr := httptest.NewRecorder()
@@ -2133,7 +2133,7 @@ func TestApplyLayoutHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/layout/apply")
 	rr := httptest.NewRecorder()
@@ -2155,7 +2155,7 @@ func TestApplyLayoutHandler_Conflict(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/layout/apply")
 	rr := httptest.NewRecorder()
@@ -2172,7 +2172,7 @@ func TestApplyLayoutHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/layout/apply", nil)
 	rr := httptest.NewRecorder()
@@ -2189,7 +2189,7 @@ func TestApplyLayoutHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPost, "/api/v1/admin/layout/apply")
 	rr := httptest.NewRecorder()
@@ -2206,7 +2206,7 @@ func TestApplyLayoutHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/layout/apply", nil)
 	rr := httptest.NewRecorder()
@@ -2228,7 +2228,7 @@ func TestRevertLayoutHandler_HappyPath(t *testing.T) {
 		},
 	}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/layout/revert")
 	rr := httptest.NewRecorder()
@@ -2245,7 +2245,7 @@ func TestRevertLayoutHandler_NoAuth(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/layout/revert", nil)
 	rr := httptest.NewRecorder()
@@ -2262,7 +2262,7 @@ func TestRevertLayoutHandler_NonAdminRole(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createNonAdminRequest(http.MethodPost, "/api/v1/admin/layout/revert")
 	rr := httptest.NewRecorder()
@@ -2279,7 +2279,7 @@ func TestRevertLayoutHandler_MethodNotAllowed(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	drv := &testMockDriver{}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/layout/revert", nil)
 	rr := httptest.NewRecorder()
@@ -2301,7 +2301,7 @@ func TestArmDeleteKeyHandler_HappyPath(t *testing.T) {
 			return driver.Key{ID: id, Name: "test-key"}, nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/keys/key-123/_arm-delete")
 	rr := httptest.NewRecorder()
@@ -2338,7 +2338,7 @@ func TestArmDeleteKeyHandler_KeyNotFound(t *testing.T) {
 			return driver.Key{}, &driver.Error{Op: "GetKey", Driver: "test", Err: driver.ErrNotFound, Message: "not found"}
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/keys/nonexistent/_arm-delete")
 	rr := httptest.NewRecorder()
@@ -2352,7 +2352,7 @@ func TestArmDeleteKeyHandler_KeyNotFound(t *testing.T) {
 func TestArmDeleteKeyHandler_NoAuth(t *testing.T) {
 	cfg := newTestConfig()
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
-	srv := New(cfg, st, &testMockDriver{})
+	srv := New(cfg, st, &testMockDriver{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys/key-123/_arm-delete", nil)
 	rr := httptest.NewRecorder()
@@ -2378,7 +2378,7 @@ func TestDeleteKeyHandler_NoConfirmHeader(t *testing.T) {
 			return nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
 	rr := httptest.NewRecorder()
@@ -2415,7 +2415,7 @@ func TestDeleteKeyHandler_BadConfirmToken(t *testing.T) {
 			return nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
 	req.Header.Set("X-Confirm-Delete", "invalid-token-here")
@@ -2457,7 +2457,7 @@ func TestDeleteKeyHandler_TokenForWrongKey(t *testing.T) {
 			return nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
 	req.Header.Set("X-Confirm-Delete", token)
@@ -2504,7 +2504,7 @@ func TestUpdateKeyHandler_PermissionsOnly(t *testing.T) {
 			return driver.Key{ID: id, Name: "test-key"}, nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	body := map[string]interface{}{
 		"bucketsPermissions": perms,
@@ -2532,7 +2532,7 @@ func TestUpdateKeyHandler_NameOnly(t *testing.T) {
 			return driver.Key{ID: id, Name: "test-key"}, nil
 		},
 	}
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	body := map[string]interface{}{
 		"name": "new-name",

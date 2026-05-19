@@ -19,6 +19,11 @@ var (
 // Factory creates a new driver instance.
 type Factory func(cfg Config) (Driver, error)
 
+// Builder is the per-driver-type constructor; takes a connection's flat config
+// map and returns a Driver. Used by Registry.BuildFor to build instances from
+// Connection records.
+type Builder func(cfg Config) (Driver, error)
+
 // Register adds a driver factory. Panics if name is empty or already registered
 // (called from init() — programmer error).
 func Register(name string, f Factory) {

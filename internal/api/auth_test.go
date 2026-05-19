@@ -277,7 +277,7 @@ func TestAuthEndpoints(t *testing.T) {
 			drv := &stubDriver{}
 
 			// Create server
-			srv := New(cfg, store, drv)
+			srv := New(cfg, store, drv, nil)
 
 			// Create request
 			var bodyBytes []byte
