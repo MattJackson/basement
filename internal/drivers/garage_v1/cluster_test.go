@@ -82,27 +82,37 @@ func TestHealthCheck_403(t *testing.T) {
 }
 
 func TestListNodes(t *testing.T) {
+	// Garage v1.0.1 returns roles[] only via GET /v1/layout — NOT in the
+	// layout sub-object on GET /v1/status. ListNodes hits both and merges.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/status" || r.Method != "GET" {
-			t.Errorf("expected GET /v1/status, got %s %s", r.Method, r.URL.Path)
+		if r.Method != "GET" {
+			t.Errorf("unexpected method %s for %s", r.Method, r.URL.Path)
 		}
-		resp := getStatusResponseV1{
-			Node:          "node-self",
-			GarageVersion: "v1.0.1",
-			KnownNodes: []nodeNetworkInfoV1{
-				{ID: "n1", Addr: "10.0.0.1:3901", IsUp: true, Hostname: "orion"},
-				{ID: "n2", Addr: "10.0.0.2:3901", IsUp: false, Hostname: "pegasus"},
-				{ID: "n3", Addr: "10.0.0.3:3901", IsUp: true, Hostname: "gateway-node"},
-			},
-			Layout: clusterLayoutV1{
+		switch r.URL.Path {
+		case "/v1/status":
+			resp := getStatusResponseV1{
+				Node:          "node-self",
+				GarageVersion: "v1.0.1",
+				KnownNodes: []nodeNetworkInfoV1{
+					{ID: "n1", Addr: "10.0.0.1:3901", IsUp: true, Hostname: "orion"},
+					{ID: "n2", Addr: "10.0.0.2:3901", IsUp: false, Hostname: "pegasus"},
+					{ID: "n3", Addr: "10.0.0.3:3901", IsUp: true, Hostname: "gateway-node"},
+				},
+				Layout: clusterLayoutV1{Version: 7}, // no roles on /v1/status
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		case "/v1/layout":
+			resp := clusterLayoutV1{
 				Version: 7,
 				Roles: []nodeClusterInfoV1{
 					{ID: "n1", Zone: "dc1", Capacity: int64Ptr(1000000), Tags: []string{"fast"}},
 					{ID: "n3", Zone: "dc2", Capacity: nil, Tags: []string{"gateway"}},
 				},
-			},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -149,19 +159,27 @@ func TestListNodes(t *testing.T) {
 // Iterating knownNodes alone (the previous behavior) produced an empty
 // dashboard despite a healthy cluster.
 func TestListNodes_singleNodeCluster(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		resp := getStatusResponseV1{
-			Node:          "self-id",
-			GarageVersion: "v1.0.1",
-			KnownNodes:    []nodeNetworkInfoV1{}, // empty — single-node, no gossip peers
-			Layout: clusterLayoutV1{
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/status":
+			resp := getStatusResponseV1{
+				Node:          "self-id",
+				GarageVersion: "v1.0.1",
+				KnownNodes:    []nodeNetworkInfoV1{}, // empty — single-node, no gossip peers
+				Layout:        clusterLayoutV1{Version: 1},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		case "/v1/layout":
+			resp := clusterLayoutV1{
 				Version: 1,
 				Roles: []nodeClusterInfoV1{
 					{ID: "self-id", Zone: "dc1", Capacity: int64Ptr(1000000000000), Tags: []string{}},
 				},
-			},
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
