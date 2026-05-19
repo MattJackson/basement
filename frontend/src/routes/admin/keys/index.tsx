@@ -92,7 +92,20 @@ function KeysScreen() {
 
   const handleCreateKey = () => {
     if (!newKeyName.trim()) return;
-    createKey.mutate({ name: newKeyName.trim() });
+    createKey.mutate(
+      { name: newKeyName.trim() },
+      {
+        onSuccess: (key) => {
+          // Close the create dialog and surface the secret in the
+          // one-shot display dialog. Do NOT navigate — Garage gives
+          // us secretAccessKey exactly once; losing it makes the key
+          // unusable.
+          setCreateOpen(false);
+          setNewKeyName("");
+          setCreatedKey(key);
+        },
+      },
+    );
   };
 
   const handleDeleteClick = (id: string, name?: string) => {
@@ -285,35 +298,65 @@ function KeysScreen() {
         </DialogContent>
       </Dialog>
 
-      {/* Created Key Secret Display Dialog */}
+      {/* Created Key Secret Display Dialog — Garage returns the
+          secret access key exactly once. If the user closes without
+          saving it, the key is unusable until rotated/recreated. */}
       {createdKey && (
         <Dialog open={true} onOpenChange={(open) => { if (!open) setCreatedKey(null); }}>
-          <DialogContent>
+          <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Access key created</DialogTitle>
+              <DialogTitle>Save this — it won&apos;t be shown again</DialogTitle>
               <DialogDescription>
-                Save the secret access key below. It will not be shown again.
+                Garage returns the secret access key for{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-foreground">
+                  {createdKey.name ?? createdKey.id}
+                </code>{" "}
+                exactly once. Copy it now, then store it in your password
+                manager / S3 client. We can&apos;t show it again later.
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-3 py-4">
-              <div className="text-sm font-medium">Access Key ID:</div>
-              <div className="font-mono text-sm break-all">{createdKey.accessKeyId}</div>
-              <div className="text-sm font-medium pt-2">Secret Access Key:</div>
-              <div className="flex gap-2">
-                <code className="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm break-all">
-                  {createdKey.secretAccessKey}
-                </code>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => navigator.clipboard.writeText(createdKey.secretAccessKey ?? "")}
-                >
-                  Copy
-                </Button>
+
+            <div className="space-y-3">
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-1">
+                  Access Key ID
+                </div>
+                <div className="flex gap-2">
+                  <code className="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm break-all">
+                    {createdKey.accessKeyId ?? createdKey.id}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigator.clipboard.writeText(createdKey.accessKeyId ?? createdKey.id)}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-1">
+                  Secret Access Key — shown once
+                </div>
+                <div className="flex gap-2">
+                  <code className="flex-1 rounded border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 font-mono text-sm break-all">
+                    {createdKey.secretAccessKey ?? "(no secret returned by backend)"}
+                  </code>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigator.clipboard.writeText(createdKey.secretAccessKey ?? "")}
+                    disabled={!createdKey.secretAccessKey}
+                  >
+                    Copy
+                  </Button>
+                </div>
               </div>
             </div>
+
             <DialogFooter>
-              <Button onClick={() => setCreatedKey(null)}>Got it, save it</Button>
+              <Button onClick={() => setCreatedKey(null)}>I&apos;ve saved it</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
