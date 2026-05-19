@@ -1,9 +1,14 @@
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { useUser } from "./useUser";
 import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 
-export function ProtectedRoute({ children }: { children: React.ReactNode }) {
+interface ProtectedRouteProps {
+  children: ReactNode;
+}
+
+export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { data, isLoading } = useUser();
