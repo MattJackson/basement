@@ -25,3 +25,6 @@ dist-ssr
 
 # Generated API types (do not commit)
 src/shared/api/types.gen.ts
+
+# Generated TanStack Router route tree (do not commit)
+src/routeTree.gen.ts
