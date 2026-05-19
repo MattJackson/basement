@@ -71,10 +71,13 @@ func (d *driver) CreateKey(ctx context.Context, spec driverpkg.KeySpec) (driverp
 
 	key := keyFromGetKeyInfo(resp, time.Now())
 
-	if resp.SecretAccessKey != nil {
-		key.AccessKeyID = *resp.SecretAccessKey
-	} else {
-		key.AccessKeyID = resp.ID
+	// AccessKeyID is the PUBLIC credential (GK... in Garage). The
+	// previous code mixed up the secret here — it assigned
+	// secret_access_key into AccessKeyID, hiding the secret from the
+	// UI on top of leaking it into the wrong field. Fix:
+	key.AccessKeyID = resp.ID
+	if resp.SecretAccessKey != nil && *resp.SecretAccessKey != "" {
+		key.SecretAccessKey = resp.SecretAccessKey
 	}
 
 	return key, nil

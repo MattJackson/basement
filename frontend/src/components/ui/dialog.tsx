@@ -4,18 +4,26 @@ import { cn } from "@/lib/utils";
 interface DialogProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Set false to disable backdrop-click and Escape dismissal. Use
+   * for irreversible disclosures (e.g. create-key secret-shown-once)
+   * where accidental dismissal loses data.
+   */
+  dismissible?: boolean;
   children: React.ReactNode;
   className?: string;
 }
 
-export function Dialog({ open, onOpenChange, children, className }: DialogProps) {
+export function Dialog({ open, onOpenChange, dismissible = true, children, className }: DialogProps) {
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!dismissible) return;
     if (e.target === e.currentTarget) {
       onOpenChange?.(false);
     }
   };
 
   React.useEffect(() => {
+    if (!dismissible) return;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onOpenChange?.(false);
@@ -24,12 +32,12 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
 
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [onOpenChange]);
+  }, [onOpenChange, dismissible]);
 
   if (!open) return null;
 
   return (
-    <div 
+    <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={handleBackdropClick}
     >
