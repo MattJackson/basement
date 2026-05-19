@@ -1928,38 +1928,31 @@ components:
       type: object
       required:
       - id
-      - global_alias
-      - objects
-      - bytes
       properties:
         id:
           type: string
-          format: uuid
-          description: Unique bucket identifier.
-        created_at:
-          type: string
-          format: date-time
-          description: Bucket creation timestamp.
-        global_aliases:
+          description: Unique bucket identifier (UUID or backend-native).
+        aliases:
           type: array
           items:
             type: string
-          description: Global aliases for this bucket (accessible by any key).
-        keys:
-          type: array
-          items:
-            $ref: '#/components/schemas/BucketKeyPermission'
-          description: Keys with permissions on this bucket.
-        objects:
-          type: integer
-          format: int64
-          minimum: 0
-          description: Number of objects in the bucket.
-        bytes:
-          type: integer
-          format: int64
-          minimum: 0
-          description: Total size of all objects in bytes.
+          description: Human-readable aliases. The first alias is the bucket's primary display name.
+        quotas:
+          type: object
+          nullable: true
+          properties:
+            maxSize:
+              type: integer
+              format: int64
+              description: Maximum total bytes; null = unlimited.
+            maxObjects:
+              type: integer
+              format: int64
+              description: Maximum object count; null = unlimited.
+        created:
+          type: string
+          format: date-time
+          description: Bucket creation timestamp (zero value if backend doesn't track this).
     BucketSpec:
       type: object
       required:
