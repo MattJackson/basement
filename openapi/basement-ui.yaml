@@ -2012,24 +2012,33 @@ components:
       type: object
       required:
       - id
-      - name
-      - buckets_permissions
       properties:
         id:
           type: string
           description: Access key ID.
-        secret_access_key:
-          type: string
-          nullable: true
-          description: Secret access key (only returned on CreateKey response).
         name:
           type: string
           description: Human-friendly name for the key.
-        buckets_permissions:
+        accessKeyId:
+          type: string
+          description: S3 access key ID (typically equals id).
+        created:
+          type: string
+          format: date-time
+          nullable: true
+          description: Creation timestamp; nullable when backend doesn't surface it on list.
+        allowCreateBucket:
+          type: boolean
+          description: Whether this key may create new buckets.
+        secretAccessKey:
+          type: string
+          nullable: true
+          description: Secret access key (only returned on CreateKey response).
+        bucketsPermissions:
           type: array
           items:
             $ref: '#/components/schemas/BucketPermission'
-          description: Bucket-level permissions granted to this key.
+          description: Bucket-level permissions granted to this key. Present only on GetKey (detail) responses, not on ListKeys.
     KeySpec:
       type: object
       properties:
@@ -2045,19 +2054,14 @@ components:
     BucketPermission:
       type: object
       required:
-      - bucket_id
+      - bucketId
       - owner
       - read
       - write
       properties:
-        bucket_id:
+        bucketId:
           type: string
-          format: uuid
           description: Bucket ID this permission applies to.
-        global_alias:
-          type: string
-          nullable: true
-          description: Global alias of the bucket (for display purposes).
         owner:
           type: boolean
           description: Owner permission on this bucket.

@@ -1,4 +1,5 @@
-export function humanizeBytes(bytes: number): string {
+export function humanizeBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return "—";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let unitIndex = 0;
   let value = bytes;
@@ -11,8 +12,10 @@ export function humanizeBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
 
-export function humanizeTime(timestamp: string): string {
+export function humanizeTime(timestamp: string | null | undefined): string {
+  if (!timestamp) return "—";
   const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 1971) return "—";
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffSeconds = Math.floor(diffMs / 1000);
