@@ -3,7 +3,7 @@ import { Outlet } from "@tanstack/react-router";
 import { HealthPill } from "@/shared/ui/HealthPill";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
-import { useNodes } from "@/shared/api/queries";
+import { useNodes, useVersion } from "@/shared/api/queries";
 
 interface AppShellProps {
   children?: ReactNode;
@@ -16,6 +16,7 @@ interface AppShellProps {
  */
 export function AppShell({ children }: AppShellProps): ReactNode {
   const { data: nodes, isLoading: loadingNodes } = useNodes();
+  const { data: version } = useVersion();
   
   const totalNodes = nodes?.length ?? 0;
   const healthyNodes = nodes?.filter(n => n.address).length ?? 0;
@@ -84,8 +85,21 @@ export function AppShell({ children }: AppShellProps): ReactNode {
         </nav>
 
         <div className="p-4 border-t text-xs opacity-60 space-y-1">
-          <span>v0.1.0-dev</span>
-          <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:underline block">
+          <span
+            title={
+              version
+                ? `commit ${version.commit?.slice(0, 7) ?? "unknown"} · built ${version.builtAt}`
+                : undefined
+            }
+          >
+            {version?.version ?? "dev"}
+          </span>
+          <a
+            href="https://github.com/MattJackson/basement"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline block"
+          >
             GitHub
           </a>
         </div>
