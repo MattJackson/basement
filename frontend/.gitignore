@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Generated API types (do not commit)
+src/shared/api/types.gen.ts
