@@ -12,7 +12,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
-import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
+import { humanizeTime } from "@/shared/lib/format";
 import { useBuckets } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 
@@ -42,7 +42,7 @@ function MyBuckets() {
   const filteredBuckets = buckets?.filter((bucket) => {
     if (!search) return true;
     const needle = search.toLowerCase();
-    return bucket.global_aliases?.some((a) => a.toLowerCase().includes(needle)) ?? false;
+    return (bucket.aliases ?? []).some((a: string) => a.toLowerCase().includes(needle));
   });
 
   if (error) {
@@ -94,7 +94,7 @@ function MyBuckets() {
       ) : (
         <ul className="rounded-lg border bg-card divide-y divide-border">
           {filteredBuckets?.map((bucket) => {
-            const aliases = bucket.global_aliases ?? [];
+            const aliases = bucket.aliases ?? [];
             const [primary, ...rest] = aliases;
             const name = primary ?? bucket.id.slice(0, 8);
 
@@ -118,20 +118,23 @@ function MyBuckets() {
                       </span>
                     )}
                   </div>
-                  {bucket.created_at && (
+                  {bucket.created && (
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      Created {humanizeTime(bucket.created_at)}
+                      Created {humanizeTime(bucket.created)}
                     </p>
                   )}
                 </button>
 
                 <div className="flex items-center gap-6 text-sm">
                   <div className="text-right">
-                    <div className="font-medium tabular-nums">
-                      {humanizeBytes(bucket.bytes)}
+                    {/* Bytes + object counts come from per-bucket info
+                        endpoint; the bucket-list endpoint omits them
+                        (a follow-up in v0.2 — see GetBucket stats). */}
+                    <div className="font-medium tabular-nums text-muted-foreground">
+                      —
                     </div>
                     <div className="text-xs text-muted-foreground tabular-nums">
-                      {bucket.objects.toLocaleString()} {bucket.objects === 1 ? "object" : "objects"}
+                      —
                     </div>
                   </div>
 

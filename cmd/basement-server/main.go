@@ -11,6 +11,8 @@ import (
 	"github.com/mattjackson/basement/internal/api"
 	"github.com/mattjackson/basement/internal/config"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
+	// TODO(aws-s3): re-enable when driver implements full driver.Driver interface
+	// _ "github.com/mattjackson/basement/internal/drivers/aws_s3"
 	_ "github.com/mattjackson/basement/internal/drivers/garage"
 	_ "github.com/mattjackson/basement/internal/drivers/garage_v1"
 	"github.com/mattjackson/basement/internal/store"
@@ -53,6 +55,16 @@ func main() {
 		"s3_region":    cfg.Driver.Garage.S3Region,
 		"s3_access_key": cfg.Driver.Garage.S3AccessKey,
 		"s3_secret_key": cfg.Driver.Garage.S3SecretKey,
+	}
+
+	// Add AWS config if driver is aws-s3
+	if cfg.Driver.Name == "aws-s3" {
+		driverCfg["region"] = cfg.Driver.Aws.Region
+		driverCfg["access_key"] = cfg.Driver.Aws.AccessKey
+		driverCfg["secret_key"] = cfg.Driver.Aws.SecretKey
+		if cfg.Driver.Aws.Endpoint != "" {
+			driverCfg["endpoint"] = cfg.Driver.Aws.Endpoint
+		}
 	}
 
 	drv, err := driverpkg.Open(cfg.Driver.Name, driverCfg)

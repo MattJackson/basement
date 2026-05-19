@@ -29,6 +29,7 @@ type Config struct {
 type DriverConfig struct {
 	Name   string
 	Garage GarageConfig
+	Aws    AwsConfig
 	// Future: Basement BasementConfig
 }
 
@@ -40,6 +41,14 @@ type GarageConfig struct {
 	S3Region    string
 	S3AccessKey string
 	S3SecretKey string
+}
+
+// AwsConfig holds AWS S3 driver configuration.
+type AwsConfig struct {
+	Region    string // BASEMENT_DRIVER_AWS_S3_REGION, required if Driver=aws-s3
+	AccessKey string // BASEMENT_DRIVER_AWS_S3_ACCESS_KEY, required if Driver=aws-s3
+	SecretKey string // BASEMENT_DRIVER_AWS_S3_SECRET_KEY, required if Driver=aws-s3
+	Endpoint  string // BASEMENT_DRIVER_AWS_S3_ENDPOINT (optional), for S3-compatible non-AWS endpoints
 }
 
 // AdminConfig holds admin authentication configuration.
@@ -113,6 +122,12 @@ func Load() (*Config, error) {
 	cfg.Driver.Garage.S3AccessKey = envOr("BASEMENT_DRIVER_GARAGE_S3_ACCESS_KEY", "")
 	cfg.Driver.Garage.S3SecretKey = envOr("BASEMENT_DRIVER_GARAGE_S3_SECRET_KEY", "")
 
+	// Load AWS-specific driver config (if Driver=aws-s3)
+	cfg.Driver.Aws.Region = envOr("BASEMENT_DRIVER_AWS_S3_REGION", "")
+	cfg.Driver.Aws.AccessKey = envOr("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "")
+	cfg.Driver.Aws.SecretKey = envOr("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "")
+	cfg.Driver.Aws.Endpoint = envOr("BASEMENT_DRIVER_AWS_S3_ENDPOINT", "")
+
 	// Load admin configuration (always required)
 	cfg.Admin.User = os.Getenv("BASEMENT_ADMIN_USER")
 	cfg.Admin.PasswordHash = os.Getenv("BASEMENT_ADMIN_PASSWORD_HASH")
@@ -148,8 +163,8 @@ func Load() (*Config, error) {
 	// Validate driver name (required)
 	if cfg.Driver.Name == "" {
 		errs = append(errs, errors.New("BASEMENT_DRIVER is required"))
-	} else if cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" {
-		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: supported values are \"garage\" (v2 admin API) or \"garage-v1\" (v1 admin API)", cfg.Driver.Name))
+	} else if cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" && cfg.Driver.Name != "aws-s3" {
+		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: supported values are \"garage\" (v2 admin API), \"garage-v1\" (v1 admin API), or \"aws-s3\"", cfg.Driver.Name))
 	}
 
 	// Validate Garage driver config (required if Driver=garage*)
@@ -161,6 +176,20 @@ func Load() (*Config, error) {
 			errs = append(errs, errors.New("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN is required when DRIVER=garage"))
 		}
 		// S3 fields are optional per design (can be omitted if not needed)
+	}
+
+	// Validate AWS driver config (required if Driver=aws-s3)
+	if cfg.Driver.Name == "aws-s3" {
+		if cfg.Driver.Aws.Region == "" {
+			errs = append(errs, errors.New("BASEMENT_DRIVER_AWS_S3_REGION is required when DRIVER=aws-s3"))
+		}
+		if cfg.Driver.Aws.AccessKey == "" {
+			errs = append(errs, errors.New("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY is required when DRIVER=aws-s3"))
+		}
+		if cfg.Driver.Aws.SecretKey == "" {
+			errs = append(errs, errors.New("BASEMENT_DRIVER_AWS_S3_SECRET_KEY is required when DRIVER=aws-s3"))
+		}
+		// Endpoint is optional for S3-compatible services
 	}
 
 	// Validate admin config (always required)
