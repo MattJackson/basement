@@ -47,3 +47,17 @@ MIT. See [LICENSE](LICENSE).
 
 Once v0.1 lands. For now, design discussion welcome in GitHub Discussions
 when they're opened.
+
+## Build locally
+
+Multi-arch image build (requires Docker Buildx + QEMU for cross-arch):
+
+```bash
+docker buildx bake -f docker/docker-bake.hcl
+```
+
+Single-arch (your host's arch) for quick iteration:
+
+```bash
+docker build -f docker/Dockerfile -t basement:dev .
+```
