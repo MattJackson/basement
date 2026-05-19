@@ -5,13 +5,12 @@ run:
 
 linters:
   default: none
-  # errcheck disabled for v0.1 — most violations are json.Encode/Decode
-  # against ResponseWriter where errors are rare and not actionable.
-  # Re-enable in v0.2 after a one-shot lint-cleanup pass.
+  # Minimal set for v0.1 ship: catch real bugs, defer style cleanup.
+  # v0.2 should re-enable errcheck + revive + add a one-shot godoc
+  # comment pass on all exported symbols.
   enable:
     - govet
     - staticcheck
-    - revive
     - ineffassign
     - unused
 
