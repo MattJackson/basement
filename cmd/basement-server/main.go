@@ -11,8 +11,7 @@ import (
 	"github.com/mattjackson/basement/internal/api"
 	"github.com/mattjackson/basement/internal/config"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
-	// TODO(aws-s3): re-enable when driver implements full driver.Driver interface
-	// _ "github.com/mattjackson/basement/internal/drivers/aws_s3"
+	_ "github.com/mattjackson/basement/internal/drivers/aws_s3"
 	_ "github.com/mattjackson/basement/internal/drivers/garage"
 	_ "github.com/mattjackson/basement/internal/drivers/garage_v1"
 	"github.com/mattjackson/basement/internal/store"
