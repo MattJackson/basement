@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
@@ -468,30 +468,13 @@ function AdminBucketDetail() {
              </Button>
            </div>
 
-           <AlertDialog 
-             open={deleteDialogOpen} 
-             onOpenChange={(open) => {
-               if (!open) setDeleteDialogOpen(false);
-             }}
-           >
-             <AlertDialogContent>
-               <AlertDialogHeader>
-                 <AlertDialogTitle>Delete bucket?</AlertDialogTitle>
-                 <AlertDialogDescription>
-                   Delete bucket "{bucket.aliases?.[0] ?? bucket.id.slice(0, 8)}"? This cannot be undone and will remove all data.
-                 </AlertDialogDescription>
-               </AlertDialogHeader>
-               <AlertDialogFooter>
-                 <AlertDialogCancel onClick={() => setDeleteDialogOpen(false)}>Cancel</AlertDialogCancel>
-                 <AlertDialogAction 
-                   onClick={handleDelete}
-                   disabled={deleteMutation.isPending}
-                 >
-                   {deleteMutation.isPending ? "Deleting..." : "Delete"}
-                 </AlertDialogAction>
-               </AlertDialogFooter>
-             </AlertDialogContent>
-           </AlertDialog>
+           <DeleteBucketConfirm
+             open={deleteDialogOpen}
+             bucketAlias={bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
+             isDeleting={deleteMutation.isPending}
+             onConfirm={handleDelete}
+             onCancel={() => setDeleteDialogOpen(false)}
+           />
      </div>
    );
  }

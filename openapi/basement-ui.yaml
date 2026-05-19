@@ -1973,12 +1973,12 @@ components:
     BucketSpec:
       type: object
       required:
-      - global_alias
+      - alias
       properties:
-        global_alias:
+        alias:
           type: string
           pattern: ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
-          description: Global alias for the bucket (lowercase letters, numbers, hyphens; 3-63 chars).
+          description: Global alias for the new bucket (lowercase letters, numbers, hyphens; 3-63 chars).
     BucketUpdate:
       type: object
       properties:
@@ -2015,6 +2015,31 @@ components:
         name:
           type: string
           description: Human-friendly key name (display only).
+        read:
+          type: boolean
+        write:
+          type: boolean
+        owner:
+          type: boolean
+    KeyBucketAccess:
+      type: object
+      required:
+      - bucketId
+      - read
+      - write
+      - owner
+      properties:
+        bucketId:
+          type: string
+          description: Bucket ID this access applies to.
+        globalAliases:
+          type: array
+          items: { type: string }
+          description: Global aliases for the bucket (optional).
+        localAliases:
+          type: array
+          items: { type: string }
+          description: Per-key local aliases for the bucket (optional).
         read:
           type: boolean
         write:
@@ -2076,6 +2101,11 @@ components:
           items:
             $ref: '#/components/schemas/BucketPermission'
           description: Bucket-level permissions granted to this key. Present only on GetKey (detail) responses, not on ListKeys.
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyBucketAccess'
+          description: Per-key bucket access. Present on GetKey (detail), omitted on ListKeys. Symmetric to Bucket.keys from T2.37a.
     KeySpec:
       type: object
       properties:

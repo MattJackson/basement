@@ -23,6 +23,7 @@ func TestGetKey(t *testing.T) {
 			SecretAccessKey: &secret,
 			BucketsPermissions: []bucketPermissionResp{
 				{BucketID: "bucket-1", Read: true, Write: false, Owner: false},
+				{BucketID: "bucket-2", Read: true, Write: true, Owner: true},
 			},
 		}
 
@@ -44,6 +45,18 @@ key, err := d.GetKey(context.Background(), "access-key-id")
 
 	if key.Name != "Test Key" {
 		t.Errorf("expected name 'Test Key', got '%s'", key.Name)
+	}
+
+	if len(key.Buckets) != 2 {
+		t.Fatalf("expected 2 buckets, got %d", len(key.Buckets))
+	}
+
+	if !key.Buckets[0].Read || key.Buckets[0].Write || key.Buckets[0].Owner {
+		t.Errorf("bucket[0] = %+v, want read=true, write=false, owner=false", key.Buckets[0])
+	}
+
+	if !key.Buckets[1].Read || !key.Buckets[1].Write || !key.Buckets[1].Owner {
+		t.Errorf("bucket[1] = %+v, want all permissions true", key.Buckets[1])
 	}
 }
 

@@ -21,14 +21,6 @@ export function AppShell({ children }: AppShellProps): ReactNode {
             <Logo />
             <nav className="flex items-center gap-5" aria-label="Primary">
               <Link
-                to="/admin"
-                activeOptions={{ exact: true }}
-                className={NAV_LINK}
-                activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-              >
-                Buckets
-              </Link>
-              <Link
                 to="/admin/cluster"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}

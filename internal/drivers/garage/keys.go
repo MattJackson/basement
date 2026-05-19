@@ -46,12 +46,7 @@ func (d *driver) GetKey(ctx context.Context, id string) (driverpkg.Key, error) {
 		return driverpkg.Key{}, err
 	}
 
-	key := driverpkg.Key{
-		ID:                resp.ID,
-		Name:              resp.Name,
-		Created:           time.Now(), // Created not returned by default per spec
-		AllowCreateBucket: false,      // Not returned by GetKeyInfo
-	}
+	key := keyFromGetKeyInfo(resp, time.Now())
 
 	if resp.SecretAccessKey != nil {
 		key.AccessKeyID = *resp.SecretAccessKey
@@ -74,12 +69,7 @@ func (d *driver) CreateKey(ctx context.Context, spec driverpkg.KeySpec) (driverp
 		return driverpkg.Key{}, err
 	}
 
-	key := driverpkg.Key{
-		ID:                resp.ID,
-		Name:              resp.Name,
-		Created:           time.Now(), // Created not returned by default per spec
-		AllowCreateBucket: false,     // Not returned by CreateKey response
-	}
+	key := keyFromGetKeyInfo(resp, time.Now())
 
 	if resp.SecretAccessKey != nil {
 		key.AccessKeyID = *resp.SecretAccessKey
@@ -150,6 +140,35 @@ type bucketPermissionResp struct {
 	Write            bool               `json:"write"`
 	Owner            bool               `json:"owner"`
 	BucketLocalAliases []bucketLocalAlias `json:"bucketLocalAliases,omitempty"`
+}
+
+// keyFromGetKeyInfo converts a GetKeyInfo response into a driver.Key.
+func keyFromGetKeyInfo(resp getKeyInfoResponse, now time.Time) driverpkg.Key {
+	buckets := make([]driverpkg.KeyBucketAccess, 0, len(resp.BucketsPermissions))
+	for _, b := range resp.BucketsPermissions {
+		globalAliases := []string{}
+		localAliases := make([]string, 0, len(b.BucketLocalAliases))
+		for _, la := range b.BucketLocalAliases {
+			localAliases = append(localAliases, la.Alias)
+		}
+
+		buckets = append(buckets, driverpkg.KeyBucketAccess{
+			BucketID:      b.BucketID,
+			GlobalAliases: globalAliases,
+			LocalAliases:  localAliases,
+			Read:          b.Read,
+			Write:         b.Write,
+			Owner:         b.Owner,
+		})
+	}
+
+	return driverpkg.Key{
+		ID:                resp.ID,
+		Name:              resp.Name,
+		Created:           now, // Created not returned by default per spec
+		AllowCreateBucket: false,      // Not returned by GetKeyInfo
+		Buckets:           buckets,
+	}
 }
 
 type createKeyRequest struct {

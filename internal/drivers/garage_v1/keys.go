@@ -146,11 +146,24 @@ func (d *driver) DeleteKey(ctx context.Context, id string) error {
 // that needs to capture the secret on create must do so at the call site
 // before passing the response through this helper.
 func keyFromInfo(resp keyInfoV1) driverpkg.Key {
+	buckets := make([]driverpkg.KeyBucketAccess, 0, len(resp.Buckets))
+	for _, b := range resp.Buckets {
+		buckets = append(buckets, driverpkg.KeyBucketAccess{
+			BucketID:      b.ID,
+			GlobalAliases: b.GlobalAliases,
+			LocalAliases:  b.LocalAliases,
+			Read:          b.Permissions.Read,
+			Write:         b.Permissions.Write,
+			Owner:         b.Permissions.Owner,
+		})
+	}
+
 	return driverpkg.Key{
 		ID:                resp.AccessKeyID,
 		Name:              resp.Name,
 		AccessKeyID:       resp.AccessKeyID,
 		AllowCreateBucket: resp.Permissions.CreateBucket,
+		Buckets:           buckets,
 		// KeyInfo (garage-admin-v1.yml:1228-1276) has no created timestamp.
 		Created: time.Time{},
 	}

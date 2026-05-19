@@ -1304,6 +1304,16 @@ func TestGetKeyHandler_HappyPath(t *testing.T) {
 		AccessKeyID:       "AKIAIOSFODNN7EXAMPLE",
 		Created:           time.Now(),
 		AllowCreateBucket: true,
+		Buckets: []driver.KeyBucketAccess{
+			{
+				BucketID:      "bucket-1",
+				GlobalAliases: []string{"my-bucket"},
+				LocalAliases:  []string{},
+				Read:          true,
+				Write:         false,
+				Owner:         false,
+			},
+		},
 	}
 
 	drv := &testMockDriver{
@@ -1322,6 +1332,16 @@ func TestGetKeyHandler_HappyPath(t *testing.T) {
 	data := assertJSONResponse(t, rr, http.StatusOK).(map[string]any)
 	if data["id"] != "key-123" {
 		t.Errorf("expected id key-123, got %v", data["id"])
+	}
+	
+	buckets := data["buckets"].([]interface{})
+	if len(buckets) != 1 {
+		t.Fatalf("expected 1 bucket, got %d", len(buckets))
+	}
+	
+	bucketMap := buckets[0].(map[string]interface{})
+	if bucketMap["bucketId"] != "bucket-1" {
+		t.Errorf("expected bucketId bucket-1, got %v", bucketMap["bucketId"])
 	}
 }
 

@@ -32,17 +32,17 @@ export function useCreateBucket() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  return useMutation<{ bucket: Bucket }, Error, { global_alias: string }>({
+  return useMutation<Bucket, Error, { alias: string }>({
     mutationFn: async (spec) => {
       const { data, error, response } = await client.POST("/admin/buckets", {
         body: spec,
       });
       if (!response.ok || !data) throw apiError("createBucket", response.status, error);
-      return data as any;
+      return data;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: (bucket) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
-      navigate({ to: "/admin/buckets/$id", params: { id: variables.global_alias } });
+      navigate({ to: "/admin/buckets/$id", params: { id: bucket.id } });
     },
   });
 }

@@ -113,6 +113,20 @@ type BucketKeyAccess struct {
 	Owner bool   `json:"owner"`
 }
 
+// KeyBucketAccess represents the per-key view of bucket access permissions.
+// This is symmetric to Bucket.Keys[] (the per-bucket view). Each entry contains
+// the bucket ID, optional global and local aliases, and the key's permissions
+// on that bucket (read, write, owner). Present only on GetKey/UpdateKeyPermissions
+// detail responses, not on ListKeys.
+type KeyBucketAccess struct {
+	BucketID      string   `json:"bucketId"`
+	GlobalAliases []string `json:"globalAliases,omitempty"`
+	LocalAliases  []string `json:"localAliases,omitempty"`
+	Read          bool     `json:"read"`
+	Write         bool     `json:"write"`
+	Owner         bool     `json:"owner"`
+}
+
 // BucketSpec is the specification for creating a bucket.
 type BucketSpec struct {
 	Alias string `json:"alias"`
@@ -126,11 +140,12 @@ type BucketUpdate struct {
 
 // Key represents an access key.
 type Key struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	AccessKeyID       string    `json:"accessKeyId"`
-	Created           time.Time `json:"created,omitempty"`
-	AllowCreateBucket bool      `json:"allowCreateBucket"`
+	ID                string            `json:"id"`
+	Name              string            `json:"name"`
+	AccessKeyID       string            `json:"accessKeyId"`
+	Created           time.Time         `json:"created,omitempty"`
+	AllowCreateBucket bool              `json:"allowCreateBucket"`
+	Buckets           []KeyBucketAccess `json:"buckets,omitempty"`
 }
 
 // KeySpec is the specification for creating a key.
