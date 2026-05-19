@@ -36,8 +36,8 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Embedded SPA (built artifact)
-internal/web/dist/
+# Embedded SPA assets (built artifacts only)
+internal/web/dist/assets/
 
 # JSON store runtime data (for local dev)
 data/

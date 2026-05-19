@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/web"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
@@ -81,8 +82,7 @@ func (s *Server) routes() {
 	r.Use(s.logHandler)
 	r.Use(middleware.AllowContentType("application/json"))
 
-	r.Group(func(r chi.Router) {
-		r.Route("/api/v1", func(apiR chi.Router) {
+	r.Route("/api/v1", func(apiR chi.Router) {
 			// Public routes (no auth required) - /health and /auth/login
 			apiR.Get("/health", s.healthHandler)
 			apiR.Post("/auth/login", s.loginHandler)
@@ -96,7 +96,8 @@ func (s *Server) routes() {
 				authG.Get("/capabilities", s.capabilitiesHandler)
 			})
 		})
-	})
+
+	r.Handle("/*", web.Handler())
 }
 
 // logHandler is a middleware equivalent to chi.Logger using slog.
