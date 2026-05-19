@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
@@ -22,13 +21,10 @@ function BackLink() {
   );
 }
 
-function PermissionChips({ read, write, owner }: { read: boolean; write: boolean; owner: boolean }) {
-  const chips = [];
-  if (owner) chips.push(<Badge key="owner" variant="destructive" className="text-xs">Owner</Badge>);
-  if (write) chips.push(<Badge key="write" variant="secondary" className="text-xs">Write</Badge>);
-  if (read) chips.push(<Badge key="read" variant="outline" className="text-xs">Read</Badge>);
-  return <div className="flex gap-1">{chips}</div>;
-}
+// PermissionChips is the shared R/W/O badge component with tooltips —
+// re-exported under the same local name so the rest of the file keeps
+// working without a rename pass.
+import { PermissionChips } from "@/shared/ui/PermissionChips";
 
 function BucketName({ globalAliases, localAliases, bucketId }: { globalAliases?: string[]; localAliases?: string[]; bucketId: string }) {
   const primaryAlias = globalAliases?.[0] ?? (localAliases && localAliases.length > 0 ? localAliases[0] : null);
