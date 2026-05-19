@@ -1,0 +1,36 @@
+# Basement UI — Docker build context ignore list
+
+# Frontend deps and builds (stage 1 handles these)
+frontend/node_modules/
+frontend/dist/
+frontend/src/shared/api/types.gen.ts
+
+# Backend build artifacts
+internal/web/dist/
+
+# Git and docs (not needed in image)
+.git/
+*.md
+!README.md
+
+# Docker files at root (only docker/Dockerfile is used)
+docker/*.sh
+!.dockerignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test and coverage
+coverage.out
+*.test.go
+*_test.go
+
+# Local configs and secrets
+.env
+.env.local
+*.pem
+*.key
