@@ -97,6 +97,21 @@ export function useBuckets() {
   });
 }
 
+export function useBucket(id: string) {
+  return useQuery<Bucket>({
+    queryKey: ["admin", "buckets", id],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/admin/buckets/{id}", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/buckets/${id}`, response.status, error);
+      return data as Bucket;
+    },
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+}
+
 export function useKeys() {
   return useQuery<Key[]>({
     queryKey: ["admin", "keys"],

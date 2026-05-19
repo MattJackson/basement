@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ export const Route = createFileRoute("/admin/")({
  */
 function MyBuckets() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const { data: buckets, isLoading, error } = useBuckets();
 
@@ -103,10 +104,9 @@ function MyBuckets() {
                 key={bucket.id}
                 className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-muted/40 transition-colors group has-focus-visible:bg-muted/50"
               >
-                {/* TODO(v0.2) — link to /admin/buckets/$id */}
-                <button
-                  type="button"
-                  onClick={() => {}}
+                <Link
+                  to="/admin/buckets/$id"
+                  params={{ id: bucket.id }}
                   className="flex-1 min-w-0 text-left focus-visible:outline-none"
                   aria-label={`Open bucket ${name}`}
                 >
@@ -123,7 +123,7 @@ function MyBuckets() {
                       Created {humanizeTime(bucket.created)}
                     </p>
                   )}
-                </button>
+                </Link>
 
                 <div className="flex items-center gap-6 text-sm">
                   <div className="text-right">
@@ -160,8 +160,11 @@ function MyBuckets() {
                       </svg>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      {/* TODO(v0.2) — view bucket details */}
-                      <DropdownMenuItem onClick={() => {}}>View</DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => navigate({ to: "/admin/buckets/$id", params: { id: bucket.id } })}
+                      >
+                        View
+                      </DropdownMenuItem>
                       {/* TODO(v0.2) — delete bucket */}
                       <DropdownMenuItem variant="destructive" onClick={() => {}}>
                         Delete
