@@ -1,5 +1,10 @@
 name: Release
 
+# Fast dev cycle: amd64-only, no separate CI/lint gate (run locally
+# before tagging). When we want to ship a "stable" multi-arch release,
+# revisit — add arm64 + lint+test job back, or split into a separate
+# release-stable.yml triggered on vX.Y.Z (no patch suffix).
+
 on:
   push:
     tags:
@@ -14,9 +19,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v3
@@ -38,12 +40,12 @@ jobs:
             type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }},pattern=^[0-9]+\.[0-9]+\.[0-9]+$
 
-      - name: Build and push
+      - name: Build and push (amd64-only for dev speed)
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
@@ -51,3 +53,5 @@ jobs:
             COMMIT=${{ github.sha }}
             BUILT_AT=${{ github.event.repository.updated_at }}
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
