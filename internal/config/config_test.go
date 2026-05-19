@@ -1,0 +1,405 @@
+package config
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestLoad_AllRequiredPresent(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq") // 32 bytes base64
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Listen != ":8080" {
+		t.Errorf("Listen=%q, want \":8080\"", cfg.Listen)
+	}
+	if cfg.DataDir != "/var/lib/basement" {
+		t.Errorf("DataDir=%q, want \"/var/lib/basement\"", cfg.DataDir)
+	}
+	if cfg.LogLevel != "info" {
+		t.Errorf("LogLevel=%q, want \"info\"", cfg.LogLevel)
+	}
+	if cfg.SessionTTL != 24*time.Hour {
+		t.Errorf("SessionTTL=%v, want 24h", cfg.SessionTTL)
+	}
+	if cfg.AuditRetention != 90*24*time.Hour {
+		t.Errorf("AuditRetention=%v, want 90 days", cfg.AuditRetention)
+	}
+	if cfg.Driver.Name != "garage" {
+		t.Errorf("Driver.Name=%q, want \"garage\"", cfg.Driver.Name)
+	}
+	if cfg.Driver.Garage.AdminURL != "http://garage:3903" {
+		t.Errorf("Driver.Garage.AdminURL=%q, want \"http://garage:3903\"", cfg.Driver.Garage.AdminURL)
+	}
+	if cfg.Driver.Garage.AdminToken != "testtoken123" {
+		t.Errorf("Driver.Garage.AdminToken=%q, want \"testtoken123\"", cfg.Driver.Garage.AdminToken)
+	}
+	if cfg.Admin.User != "admin" {
+		t.Errorf("Admin.User=%q, want \"admin\"", cfg.Admin.User)
+	}
+	if len(cfg.JWT.Secret) < 32 {
+		t.Errorf("JWT.Secret length=%d, want >= 32", len(cfg.JWT.Secret))
+	}
+}
+
+func TestLoad_MissingDriver(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER") {
+		t.Errorf("error missing BASEMENT_DRIVER: %v", err)
+	}
+}
+
+func TestLoad_MissingDriverGarageAdminURL(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER_GARAGE_ADMIN_URL") {
+		t.Errorf("error missing BASEMENT_DRIVER_GARAGE_ADMIN_URL: %v", err)
+	}
+}
+
+func TestLoad_MissingDriverGarageAdminToken(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN") {
+		t.Errorf("error missing BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN: %v", err)
+	}
+}
+
+func TestLoad_MissingAdminUser(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_ADMIN_USER") {
+		t.Errorf("error missing BASEMENT_ADMIN_USER: %v", err)
+	}
+}
+
+func TestLoad_MissingAdminPasswordHash(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_ADMIN_PASSWORD_HASH") {
+		t.Errorf("error missing BASEMENT_ADMIN_PASSWORD_HASH: %v", err)
+	}
+}
+
+func TestLoad_MissingJWTSecret(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_JWT_SECRET") {
+		t.Errorf("error missing BASEMENT_JWT_SECRET: %v", err)
+	}
+}
+
+func TestLoad_InvalidSessionTTL(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_SESSION_TTL", "invalid")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_SESSION_TTL") {
+		t.Errorf("error missing BASEMENT_SESSION_TTL: %v", err)
+	}
+}
+
+func TestLoad_InvalidJWTSecretBase64(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "not-valid-base64!!!")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_JWT_SECRET") {
+		t.Errorf("error missing BASEMENT_JWT_SECRET: %v", err)
+	}
+}
+
+func TestLoad_TOOShortJWTSecret(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	// Only 8 bytes base64 encoded = "dGVzdDEyMw=="
+	t.Setenv("BASEMENT_JWT_SECRET", "dGVzdDEyMw==")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_JWT_SECRET") || !strings.Contains(err.Error(), "32 bytes") {
+		t.Errorf("error missing 32-byte check: %v", err)
+	}
+}
+
+func TestLoad_UnknownDriverName(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "unknown-driver")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER") || !strings.Contains(err.Error(), "garage") {
+		t.Errorf("error not mentioning garage: %v", err)
+	}
+}
+
+func TestLoad_InvalidLogLevel(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_LOG_LEVEL", "debugg")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_LOG_LEVEL") {
+		t.Errorf("error missing BASEMENT_LOG_LEVEL: %v", err)
+	}
+}
+
+func TestLoad_CustomSessionTTL(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_SESSION_TTL", "2h30m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := 2*time.Hour + 30*time.Minute
+	if cfg.SessionTTL != expected {
+		t.Errorf("SessionTTL=%v, want %v", cfg.SessionTTL, expected)
+	}
+}
+
+func TestLoad_CustomAuditRetentionDays(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_AUDIT_RETENTION_DAYS", "30")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := 30 * 24 * time.Hour
+	if cfg.AuditRetention != expected {
+		t.Errorf("AuditRetention=%v, want %v", cfg.AuditRetention, expected)
+	}
+}
+
+func TestLoad_OIDCAutoProvision(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
+	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
+	t.Setenv("BASEMENT_OIDC_CLIENT_SECRET", "secret456")
+	t.Setenv("BASEMENT_OIDC_AUTO_PROVISION", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.OIDC.Issuer != "https://oidc.example.com" {
+		t.Errorf("OIDC.Issuer=%q, want \"https://oidc.example.com\"", cfg.OIDC.Issuer)
+	}
+	if cfg.OIDC.ClientID != "client123" {
+		t.Errorf("OIDC.ClientID=%q, want \"client123\"", cfg.OIDC.ClientID)
+	}
+	if cfg.OIDC.ClientSecret != "secret456" {
+		t.Errorf("OIDC.ClientSecret=%q, want \"secret456\"", cfg.OIDC.ClientSecret)
+	}
+	if !cfg.OIDC.AutoProvision {
+		t.Error("OIDC.AutoProvision=false, want true")
+	}
+}
+
+func TestLoad_OIDCAutoProvisionInvalid(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_OIDC_AUTO_PROVISION", "maybe")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_OIDC_AUTO_PROVISION") {
+		t.Errorf("error missing BASEMENT_OIDC_AUTO_PROVISION: %v", err)
+	}
+}
+
+func TestLoad_AggregatedErrors(t *testing.T) {
+	// Only set one required field, expect all others to be reported
+	t.Setenv("BASEMENT_DRIVER", "garage")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	errStr := err.Error()
+	requiredVars := []string{
+		"BASEMENT_DRIVER_GARAGE_ADMIN_URL",
+		"BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN",
+		"BASEMENT_ADMIN_USER",
+		"BASEMENT_ADMIN_PASSWORD_HASH",
+		"BASEMENT_JWT_SECRET",
+	}
+
+	for _, varName := range requiredVars {
+		if !strings.Contains(errStr, varName) {
+			t.Errorf("aggregated error missing %s: %v", varName, err)
+		}
+	}
+}
+
+func TestLoad_InvalidAuditRetentionDays(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_AUDIT_RETENTION_DAYS", "not-a-number")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_AUDIT_RETENTION_DAYS") {
+		t.Errorf("error missing BASEMENT_AUDIT_RETENTION_DAYS: %v", err)
+	}
+}
+
+func TestLoad_Defaults(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check optional fields use defaults
+	if cfg.Listen != ":8080" {
+		t.Errorf("Listen default=%q, want \":8080\"", cfg.Listen)
+	}
+	if cfg.DataDir != "/var/lib/basement" {
+		t.Errorf("DataDir default=%q, want \"/var/lib/basement\"", cfg.DataDir)
+	}
+	if cfg.PublicURL != "" {
+		t.Errorf("PublicURL default=%q, want \"\"", cfg.PublicURL)
+	}
+	if cfg.LogLevel != "info" {
+		t.Errorf("LogLevel default=%q, want \"info\"", cfg.LogLevel)
+	}
+	if cfg.SessionTTL != 24*time.Hour {
+		t.Errorf("SessionTTL default=%v, want 24h", cfg.SessionTTL)
+	}
+	if cfg.AuditRetention != 90*24*time.Hour {
+		t.Errorf("AuditRetention default=%v, want 90 days", cfg.AuditRetention)
+	}
+	if cfg.OIDC.AutoProvision != false {
+		t.Errorf("OIDC.AutoProvision default=%v, want false", cfg.OIDC.AutoProvision)
+	}
+}
