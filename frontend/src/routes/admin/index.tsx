@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -10,11 +11,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
 import { useBuckets } from "@/shared/api/queries";
+import { useCreateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
+
+const _createBucketSchema = z.object({
+  alias: z.string().min(1, "Alias is required"),
+});
+
+type CreateBucketFormValues = z.infer<typeof _createBucketSchema>;
 
 export const Route = createFileRoute("/admin/")({
   component: adminPage(MyBuckets),
@@ -34,10 +44,40 @@ function MyBuckets() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
+  const createMutation = useCreateBucket();
+  const deleteMutation = useDeleteBucket();
   const { data: buckets, isLoading, error } = useBuckets();
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
+  };
+
+  const handleCreateSubmit = async (values: CreateBucketFormValues) => {
+    try {
+      createMutation.mutate(
+        { global_alias: values.alias },
+        {
+          onError: () => {
+            // Error stays in dialog, don't close
+          }
+        }
+      );
+    } catch {
+      // Handled by mutation error state
+    }
+  };
+
+  const handleDeleteClick = (bucketId: string) => {
+    setDeleteDialogId(bucketId);
+  };
+
+  const confirmDelete = () => {
+    if (deleteDialogId) {
+      deleteMutation.mutate(deleteDialogId);
+      setDeleteDialogId(null);
+    }
   };
 
   const filteredBuckets = buckets?.filter((bucket) => {
@@ -72,8 +112,10 @@ function MyBuckets() {
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1 sm:w-64"
             />
-            {/* TODO(v0.2) — create bucket */}
-            <Button variant="outline" onClick={() => {}}>
+            <Button 
+              variant="outline" 
+              onClick={() => setCreateDialogOpen(true)}
+            >
               New
             </Button>
           </div>
@@ -165,8 +207,10 @@ function MyBuckets() {
                       >
                         View
                       </DropdownMenuItem>
-                      {/* TODO(v0.2) — delete bucket */}
-                      <DropdownMenuItem variant="destructive" onClick={() => {}}>
+                      <DropdownMenuItem 
+                        variant="destructive" 
+                        onClick={() => handleDeleteClick(bucket.id)}
+                      >
                         Delete
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -177,6 +221,96 @@ function MyBuckets() {
           })}
         </ul>
       )}
+
+      <Dialog open={createDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setCreateDialogOpen(false);
+          createMutation.reset();
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create new bucket</DialogTitle>
+            <DialogDescription>
+              Enter a unique alias for your new bucket. The alias must be
+              lowercase, 3-63 characters, and contain only letters, numbers,
+              and hyphens.
+            </DialogDescription>
+          </DialogHeader>
+
+          {createMutation.isError && (
+            <div className="text-sm text-destructive">
+              {String(createMutation.error?.message ?? "Failed to create bucket")}
+            </div>
+          )}
+
+          <form onSubmit={(e) => {
+            e.preventDefault();
+            const formData = new FormData(e.currentTarget);
+            const alias = String(formData.get("alias") || "");
+            handleCreateSubmit({ alias });
+          }}>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <label htmlFor="alias" className="text-sm font-medium">
+                  Bucket alias
+                </label>
+                <Input
+                  id="alias"
+                  name="alias"
+                  placeholder="my-bucket"
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <button 
+                type="button"
+                onClick={() => setCreateDialogOpen(false)}
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-transparent hover:bg-accent hover:text-accent-foreground"
+              >
+                Cancel
+              </button>
+              <Button 
+                type="submit" 
+                disabled={createMutation.isPending}
+              >
+                {createMutation.isPending ? "Creating..." : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog 
+        open={deleteDialogId !== null} 
+        onOpenChange={(open) => {
+          if (!open) setDeleteDialogId(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete bucket?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDialogId && (() => {
+                const bucket = buckets?.find((b) => b.id === deleteDialogId);
+                const alias = bucket?.aliases?.[0] ?? deleteDialogId.slice(0, 8);
+                return `Delete bucket "${alias}"? This cannot be undone.`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteDialogId(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={confirmDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
