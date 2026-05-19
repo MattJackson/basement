@@ -26,7 +26,7 @@ func (d *driver) Capabilities(ctx context.Context) (driverpkg.Caps, error) {
 // Endpoint: GET /v2/GetClusterHealth (docs/garage-admin-api.md lines 65-72)
 func (d *driver) HealthCheck(ctx context.Context) (driverpkg.HealthReport, error) {
 	var resp getClusterHealthResponse
-	if err := d.client.do(ctx, "HealthCheck", "/v2/GetClusterHealth", nil, &resp); err != nil {
+	if err := d.client.do(ctx, "GET", "/v2/GetClusterHealth", nil, &resp); err != nil {
 		return driverpkg.HealthReport{}, err
 	}
 
@@ -50,7 +50,7 @@ func (d *driver) HealthCheck(ctx context.Context) (driverpkg.HealthReport, error
 // Endpoint: GET /v2/GetClusterStatus (docs/garage-admin-api.md lines 74-81)
 func (d *driver) ListNodes(ctx context.Context) ([]driverpkg.Node, error) {
 	var resp getClusterStatusResponse
-	if err := d.client.do(ctx, "ListNodes", "/v2/GetClusterStatus", nil, &resp); err != nil {
+	if err := d.client.do(ctx, "GET", "/v2/GetClusterStatus", nil, &resp); err != nil {
 		return nil, err
 	}
 
@@ -90,7 +90,7 @@ func (d *driver) ListNodes(ctx context.Context) ([]driverpkg.Node, error) {
 // Endpoint: GET /v2/GetClusterLayout (docs/garage-admin-api.md lines 126-133)
 func (d *driver) GetLayout(ctx context.Context) (driverpkg.Layout, error) {
 	var resp getClusterLayoutResponse
-	if err := d.client.do(ctx, "GetLayout", "/v2/GetClusterLayout", nil, &resp); err != nil {
+	if err := d.client.do(ctx, "GET", "/v2/GetClusterLayout", nil, &resp); err != nil {
 		return driverpkg.Layout{}, err
 	}
 
@@ -213,11 +213,56 @@ type clusterLayoutVersion struct {
 	Status  string `json:"status"`
 }
 
-type getClusterLayoutResponse struct {
-	Version            int64                 `json:"version"`
-	Roles              []layoutNodeRole      `json:"roles"`
-	StagedRoleChanges  *[]stagedRoleChange   `json:"stagedRoleChanges,omitempty"`
+type stagedRoleChange struct {
+	ID        string      `json:"nodeId"`
+	NewRole   *nodeRole   `json:"newRole,omitempty"`
+	Remove    bool        `json:"remove,omitempty"`
 }
+
+// Request/Response types for StageLayout, ApplyLayout, RevertLayout
+
+type updateClusterLayoutRequest struct {
+	NodeId  string            `json:"nodeId"`
+	NewRole *layoutNodeRole   `json:"storageNode,omitempty"`
+	Gateway *bool             `json:"gateway,omitempty"`
+	Remove  bool              `json:"remove,omitempty"`
+}
+
+type applyClusterLayoutRequest struct {
+	Version int64 `json:"version"`
+}
+
+type applyClusterLayoutResponse struct {
+	Layout     getClusterLayoutResponse `json:"layout"`
+	Message    []string                 `json:"message"`
+	Statistics *computationStat         `json:"statistics,omitempty"`
+}
+
+type revertClusterLayoutRequest struct {
+	Version int64 `json:"version"`
+}
+
+type revertClusterLayoutResponse struct{}
+
+type computationStat struct {
+	ReplicationFactor           int               `json:"replicationFactor"`
+	EffectiveZoneRedundancy     int               `json:"effectiveZoneRedundancy"`
+	PartitionSize               int64             `json:"partitionSize"`
+	LowPartitionSize            bool              `json:"lowPartitionSize"`
+	UsableCapacity              int64             `json:"usableCapacity"`
+	TotalCapacity               int64             `json:"totalCapacity"`
+	EffectiveCapacity           int64             `json:"effectiveCapacity"`
+	LowUsableCapacity           bool              `json:"lowUsableCapacity"`
+	Zones                       []computationStatZone `json:"zones"`
+}
+
+type computationStatZone struct {
+	Name                    string  `json:"name"`
+	StorageNodes            int64   `json:"storageNodes"`
+	TotalCapacity           int64   `json:"totalCapacity"`
+	UsableCapacity          int64   `json:"usableCapacity"`
+}
+
 
 type layoutNodeRole struct {
 	ID               string   `json:"id"`
@@ -227,8 +272,8 @@ type layoutNodeRole struct {
 	Gateway          *bool    `json:"gateway,omitempty"`
 }
 
-type stagedRoleChange struct {
-	ID        string      `json:"nodeId"`
-	NewRole   *nodeRole   `json:"newRole,omitempty"`
-	Remove    bool        `json:"remove,omitempty"`
+type getClusterLayoutResponse struct {
+	Version            int64                 `json:"version"`
+	Roles              []layoutNodeRole      `json:"roles"`
+	StagedRoleChanges  *[]stagedRoleChange   `json:"stagedRoleChanges,omitempty"`
 }

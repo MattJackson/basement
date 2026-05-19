@@ -3,130 +3,228 @@ package garage
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
-func TestListKeys_HappyPath(t *testing.T) {
-	wantResp := []listKeysResponseItem{
-		{
-			ID:         "key-abc123",
-			Name:       "admin-key",
-			Created:    "2024-01-10T08:00:00Z",
-			Expiration: "",
-			Expired:    false,
-		},
-		{
-			ID:         "key-def456",
-			Name:       "app-key",
-			Created:    "2024-03-15T12:30:00Z",
-			Expiration: "2025-03-15T12:30:00Z",
-			Expired:    false,
-		},
-	}
+func TestGetKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/GetKeyInfo" || r.Method != "GET" {
+			t.Errorf("expected GET /v2/GetKeyInfo, got %s %s", r.Method, r.URL.Path)
+		}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secret := "test-secret-key-12345"
+		response := getKeyInfoResponse{
+			ID:     "access-key-id",
+			Name:   "Test Key",
+			SecretAccessKey: &secret,
+			BucketsPermissions: []bucketPermissionResp{
+				{BucketID: "bucket-1", Read: true, Write: false, Owner: false},
+			},
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(wantResp)
+		json.NewEncoder(w).Encode(response)
 	}))
-	defer ts.Close()
+	defer server.Close()
 
-	cfg := map[string]string{
-		"admin_url":   ts.URL,
-		"admin_token": "test-token",
-	}
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
 
-	d := &driver{client: newClient(cfg)}
-
-	keys, err := d.ListKeys(context.Background())
+	key, err := d.GetKey(context.Background(), "access-key-id")
 	if err != nil {
-		t.Fatalf("ListKeys() error = %v", err)
+		t.Fatalf("GetKey failed: %v", err)
 	}
 
-	if len(keys) != 2 {
-		t.Errorf("len(keys) = %d, want 2", len(keys))
+	if key.ID != "access-key-id" {
+		t.Errorf("expected ID 'access-key-id', got '%s'", key.ID)
 	}
 
-	if keys[0].ID != "key-abc123" {
-		t.Errorf("keys[0].ID = %q, want \"key-abc123\"", keys[0].ID)
-	}
-
-	if keys[0].Name != "admin-key" {
-		t.Errorf("keys[0].Name = %q, want \"admin-key\"", keys[0].Name)
-	}
-
-	expectedTime := time.Date(2024, 1, 10, 8, 0, 0, 0, time.UTC)
-	if !keys[0].Created.Equal(expectedTime) {
-		t.Errorf("keys[0].Created = %v, want %v", keys[0].Created, expectedTime)
-	}
-
-	if keys[1].AllowCreateBucket != false {
-		t.Errorf("keys[1].AllowCreateBucket = %v, want false", keys[1].AllowCreateBucket)
+	if key.Name != "Test Key" {
+		t.Errorf("expected name 'Test Key', got '%s'", key.Name)
 	}
 }
 
-func TestListKeys_403(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
+func TestGetKeyNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "key not found"}`))
 	}))
-	defer ts.Close()
+	defer server.Close()
 
-	cfg := map[string]string{
-		"admin_url":   ts.URL,
-		"admin_token": "test-token",
-	}
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
 
-	d := &driver{client: newClient(cfg)}
-
-	keys, err := d.ListKeys(context.Background())
+	_, err := d.GetKey(context.Background(), "nonexistent")
 	if err == nil {
-		t.Fatal("expected error for 403")
-	}
-
-	var driverErr *driverpkg.Error
-	if !errors.As(err, &driverErr) {
-		t.Fatalf("error is not a driver.Error: %v", err)
-	}
-
-	if driverErr.Err != driverpkg.ErrPermissionDenied {
-		t.Errorf("err = %v, want ErrPermissionDenied", driverErr.Err)
-	}
-
-	if keys != nil {
-		t.Errorf("keys = %+v, want nil on error", keys)
+		t.Fatal("expected error for nonexistent key, got nil")
 	}
 }
 
-func TestListKeys_500(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestCreateKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/CreateKey" || r.Method != "POST" {
+			t.Errorf("expected POST /v2/CreateKey, got %s %s", r.Method, r.URL.Path)
+		}
+
+		var req createKeyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+
+		if req.Name != "my-new-key" {
+			t.Errorf("expected Name 'my-new-key', got '%s'", req.Name)
+		}
+
+		secret := "generated-secret-67890"
+		response := getKeyInfoResponse{
+			ID:     "new-access-key",
+			Name:   "my-new-key",
+			SecretAccessKey: &secret,
+			BucketsPermissions: []bucketPermissionResp{},
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+
+	key, err := d.CreateKey(context.Background(), driverpkg.KeySpec{Name: "my-new-key"})
+	if err != nil {
+		t.Fatalf("CreateKey failed: %v", err)
+	}
+
+	if key.ID != "new-access-key" {
+		t.Errorf("expected ID 'new-access-key', got '%s'", key.ID)
+	}
+
+	if key.Name != "my-new-key" {
+		t.Errorf("expected name 'my-new-key', got '%s'", key.Name)
+	}
+}
+
+func TestCreateKeyError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "internal error"}`))
 	}))
-	defer ts.Close()
+	defer server.Close()
 
-	cfg := map[string]string{
-		"admin_url":   ts.URL,
-		"admin_token": "test-token",
-	}
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
 
-	d := &driver{client: newClient(cfg)}
-
-	keys, err := d.ListKeys(context.Background())
+	_, err := d.CreateKey(context.Background(), driverpkg.KeySpec{Name: "my-new-key"})
 	if err == nil {
-		t.Fatal("expected error for 500")
+		t.Fatal("expected error on 500, got nil")
+	}
+}
+
+func TestUpdateKeyPermissions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/AllowBucketKey" || r.Method != "POST" {
+			t.Errorf("expected POST /v2/AllowBucketKey, got %s %s", r.Method, r.URL.Path)
+		}
+
+		var req allowBucketKeyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+
+		if req.AccessKeyId != "test-key-id" {
+			t.Errorf("expected AccessKeyId 'test-key-id', got '%s'", req.AccessKeyId)
+		}
+
+		if !req.Permissions.Read || !req.Permissions.Write || !req.Permissions.Owner {
+			t.Errorf("expected all permissions true, got read=%v write=%v owner=%v", 
+				req.Permissions.Read, req.Permissions.Write, req.Permissions.Owner)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+
+	perms := []driverpkg.BucketPermission{
+		{BucketID: "bucket-1", Read: true, Write: true, Owner: true},
 	}
 
-	var driverErr *driverpkg.Error
-	if !errors.As(err, &driverErr) {
-		t.Fatalf("error is not a driver.Error: %v", err)
+	err := d.UpdateKeyPermissions(context.Background(), "test-key-id", perms)
+	if err != nil {
+		t.Fatalf("UpdateKeyPermissions failed: %v", err)
+	}
+}
+
+func TestUpdateKeyPermissionsMultipleBuckets(t *testing.T) {
+	callCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/AllowBucketKey" || r.Method != "POST" {
+			t.Errorf("expected POST /v2/AllowBucketKey, got %s %s", r.Method, r.URL.Path)
+		}
+
+		var req allowBucketKeyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("failed to decode request: %v", err)
+		}
+
+		callCount++
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+
+	perms := []driverpkg.BucketPermission{
+		{BucketID: "bucket-1", Read: true, Write: false, Owner: false},
+		{BucketID: "bucket-2", Read: false, Write: true, Owner: false},
 	}
 
-	if keys != nil {
-		t.Errorf("keys = %+v, want nil on error", keys)
+	err := d.UpdateKeyPermissions(context.Background(), "test-key-id", perms)
+	if err != nil {
+		t.Fatalf("UpdateKeyPermissions failed: %v", err)
+	}
+
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls (one per bucket), got %d", callCount)
+	}
+}
+
+func TestDeleteKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/DeleteKey" || r.Method != "POST" {
+			t.Errorf("expected POST /v2/DeleteKey, got %s %s", r.Method, r.URL.Path)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+
+	err := d.DeleteKey(context.Background(), "key-to-delete")
+	if err != nil {
+		t.Fatalf("DeleteKey failed: %v", err)
+	}
+}
+
+func TestDeleteKeyError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "key not found"}`))
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+
+	err := d.DeleteKey(context.Background(), "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent key, got nil")
 	}
 }
