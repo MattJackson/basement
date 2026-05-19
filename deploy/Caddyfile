@@ -1,0 +1,89 @@
+# basement Standalone Caddyfile
+# Use this if running basement + Garage without docker-compose
+# (e.g., `docker run` commands or bare-metal deployment)
+#
+# This config handles:
+#   - TLS termination with automatic Let's Encrypt certificates
+#   - Reverse proxy to basement for admin UI
+#   - Reverse proxy to Garage S3 API with **Host header preservation**
+#
+# Prerequisites:
+#   - Replace `basement.example.com` and `s3.example.com` with your actual domains
+#   - Ensure ports 80/443 are reachable from the internet
+#   - Basement-ui running on port 8080 (or adjust `to:` below)
+#   - Garage S3 API accessible (default :3900)
+#
+# To run Caddy standalone:
+#   docker run -d --name caddy \
+#     -p 80:80 -p 443:443 \
+#     -v ./Caddyfile:/etc/caddy/Caddyfile:ro \
+#     -v caddy_data:/data \
+#     -v caddy_config:/config \
+#     caddy:2
+
+basement.example.com {
+    # TLS automatically requested for this hostname
+    # Certificates stored in /data/caddy
+    
+    # Serve basement SPA + API
+    @admin {
+        path_regexp .*
+    }
+    
+    reverse_proxy @admin basement:8080 {
+        header_up Host {host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+        
+        # Preserve original scheme for share links
+        rewrite headers Upstream-Host {upstream_host}
+    }
+    
+    # Logging for admin UI access
+    log {
+        output file /data/caddy_admin.log {
+            format json
+        }
+    }
+}
+
+s3.example.com {
+    # TLS termination for S3 API endpoint
+    
+    # CRITICAL: S3 SigV4 signing requires Host header preservation
+    # Without this, signature validation fails with SignatureDoesNotMatch errors
+    reverse_proxy to s3-gateway:3900 {
+        header_up Host {host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+        
+        # S3 clients expect exact host match for signature validation
+        # Caddy's default behavior would replace Host with upstream address — this prevents that
+    }
+    
+    # Logging for S3 API access (can be noisy)
+    log {
+        output file /data/caddy_s3.log {
+            format json
+        }
+    }
+}
+
+# =============================================================================
+# Notes
+# =============================================================================
+#
+# 1. Host header preservation is the #1 footgun when reverse proxying S3.
+#    Garage's SigV4 implementation validates that the Host header matches
+#    what was signed in the request. If Caddy replaces it with the upstream
+#    address (s3-gateway:3900), signature validation fails.
+#
+# 2. The `@admin` matcher above ensures basement gets proper headers for
+#    share link generation and CORS handling.
+#
+# 3. For docker-compose deployments, use the embedded Caddy config in
+#    deploy/docker-compose.yml and reference docs/configuration.md instead.
+#
+# 4. If you need custom TLS certificates (self-signed or commercial), add:
+#    tls /path/to/cert.pem /path/to/key.pem
+#    before each site block.

@@ -1,0 +1,151 @@
+# basement Docker Compose — Tier-1 Reference Deployment
+# Three-service stack: garage (data) → basement (admin UI) → caddy (TLS/proxy)
+#
+# Prerequisites:
+#   - Docker Engine with Compose plugin installed
+#   - A Garage cluster already deployed (or use the included garage service for demo)
+#   - TLS certificates for your domains (Caddy handles automatic issuance)
+#
+# This compose file references deploy/.env.example — copy it to .env and fill in:
+#   CHANGE_ME markers for secrets before running `docker compose up`
+#
+# See docs/configuration.md for the full env var reference.
+# See README.md for architecture overview and Caddy Host header gotcha.
+
+version: "3.9"
+
+services:
+  # =============================================================================
+  # Garage — backend S3 storage + admin API
+  # =============================================================================
+  garage:
+    image: dxflrs/garage:v1.0.1  # CHANGE_ME: verify against garagehq.deuxfleurs.fr latest stable
+    container_name: basement-garage
+    restart: unless-stopped
+
+    # Internal ports only — Caddy proxies externally
+    # 3900 = S3 data plane, 3903 = admin API (v2 RPC)
+    ports:
+      - "127.0.0.1:3900"  # local access only for diagnostics
+      - "127.0.0.1:3903"
+
+    volumes:
+      - garage-data:/data
+      - garage-meta:/meta
+
+    environment:
+      # Garage configuration — see https://garagehq.deuxfleurs.fr/docs/admin/config.html
+      # CHANGE_ME: Set your Garage admin token here (generated from `garage admin-token create`)
+      - GARAGE_ADMIN_SECRET=CHANGE_ME_GARAGE_ADMIN_SECRET
+
+      # Layout configuration for a 3-node demo cluster
+      # CHANGE_ME: Adjust layout to match your actual node count/roles
+      - LAYOUT_REPLICATED=120
+      - LAYOUT_LAYOUT_VERSION=1
+
+    healthcheck:
+      test: ["CMD", "garage", "health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # =============================================================================
+  # basement — admin UI + driver proxy
+  # =============================================================================
+  basement:
+    image: ghcr.io/mattjackson/basement:latest  # CHANGE_ME: pin to v1.0.x when stable
+    container_name: basement
+    restart: unless-stopped
+
+    ports:
+      - "8080"
+
+    volumes:
+      - basement-data:/var/lib/basement
+
+    environment:
+      # Server configuration (required: none, recommended: all)
+      - BASEMENT_LISTEN=:8080
+      - BASEMENT_DATA_DIR=/var/lib/basement
+      - BASEMENT_LOG_LEVEL=info
+
+      # Driver configuration — Garage v1.x+ admin API (v2)
+      - BASEMENT_DRIVER=garage
+      - BASEMENT_DRIVER_GARAGE_ADMIN_URL=http://garage:3903
+      # CHANGE_ME: Copy from .env.example or set directly here
+      - BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN=CHANGE_ME
+
+      # S3 data-plane credentials (optional — required for object browsing)
+      - BASEMENT_DRIVER_GARAGE_S3_URL=http://garage:3900
+      - BASEMENT_DRIVER_GARAGE_S3_REGION=garage
+      # CHANGE_ME: Set your S3 access key here
+      - BASEMENT_DRIVER_GARAGE_S3_ACCESS_KEY=CHANGE_ME
+      # CHANGE_ME: Set your S3 secret key here
+      - BASEMENT_DRIVER_GARAGE_S3_SECRET_KEY=CHANGE_ME
+
+      # Admin authentication (required in v1.0)
+      # CHANGE_ME: Set admin username
+      - BASEMENT_ADMIN_USER=admin
+      # CHANGE_ME: bcrypt hash of admin password — generate with `echo "pass" | bcrypt -g 12`
+      - BASEMENT_ADMIN_PASSWORD_HASH=CHANGE_ME
+
+      # JWT secret (required, base64-encoded, >=32 bytes after decode)
+      # Generate with: openssl rand -base64 32
+      # CHANGE_ME: Set your JWT secret here
+      - BASEMENT_JWT_SECRET=CHANGE_ME
+
+      # Optional — set PUBLIC_URL if you want absolute share links
+      # - BASEMENT_PUBLIC_URL=https://basement.example.com
+
+    depends_on:
+      garage:
+        condition: service_healthy
+
+    labels:
+      # Watchtower auto-update label — see https://github.com/containrrr/watchtower
+      com.centurylinklabs.watchtower.enable: "true"
+
+  # =============================================================================
+  # Caddy — TLS termination + reverse proxy to both services
+  # =============================================================================
+  caddy:
+    image: caddy:2  # CHANGE_ME: pin to specific version if needed (e.g., caddy:2.8.4)
+    container_name: basement-caddy
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+      # CHANGE_ME: If using local Caddyfile instead of Caddyfile.env, uncomment below:
+      # - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # For docker-compose env-based config (recommended), use Caddyfile.env below
+
+    environment:
+      # Caddy uses the HOSTNAME environment variable for automatic TLS
+      # See deploy/Caddyfile for standalone usage without compose
+      - CADDY_GLOBAL_OPTIONS=reuse_cert
+      - CADDY_ADMIN=unix:/config/admin.sock
+
+    depends_on:
+      basement:
+        condition: service_started
+      garage:
+        condition: service_healthy
+
+volumes:
+  # Named volumes for data persistence across restarts/updates
+  garage-data:
+    name: basement-garage-data
+  garage-meta:
+    name: basement-garage-meta
+  basement-data:
+    name: basement-basement-data
+  caddy-data:
+    name: basement-caddy-data
+  caddy-config:
+    name: basement-caddy-config
