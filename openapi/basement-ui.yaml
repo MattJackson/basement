@@ -1022,7 +1022,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /admin/buckets:
+    /admin/buckets:
     get:
       operationId: listAllBuckets
       summary: List all buckets across connections (cross-cluster aggregate)
@@ -1052,9 +1052,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /admin/keys:
-    get:
-      operationId: listAllKeys
+    /admin/keys:
+      get:
+        operationId: listAllKeys
       summary: List all keys across connections (cross-cluster aggregate)
       description: |
         Fans out to all configured connections and aggregates key listings.

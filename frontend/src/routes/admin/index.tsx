@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
@@ -19,6 +20,8 @@ import { humanizeTime } from "@/shared/lib/format";
 import { useBuckets } from "@/shared/api/queries";
 import { useCreateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
+import { ClusterBadge } from "@/components/ClusterBadge";
+import { ClusterFilter } from "@/components/ClusterFilter";
 
 const _createBucketSchema = z.object({
   alias: z.string().min(1, "Alias is required"),
@@ -30,25 +33,16 @@ export const Route = createFileRoute("/admin/")({
   component: adminPage(MyBuckets),
 });
 
-/**
- * MyBuckets is the new landing — the primary admin surface. Each row
- * is a satisfying primary object: bucket name as the lead, aliases as
- * secondary, then size · objects · created on the right.
- *
- * Backend-agnostic note: when N>1 backend connections exist we'll
- * suffix each row with `· backend·label`; today (N=1) we drop it so
- * the user sees just the bucket name. The `Bucket` schema already
- * carries identity — we just don't surface it yet.
- */
 function MyBuckets() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [deleteDialogId, setDeleteDialogId] = useState<string | null>(null);
+  const [clusterFilter, setClusterFilter] = useState<string | null>(null);
   const createMutation = useCreateBucket();
   const deleteMutation = useDeleteBucket();
-  const { data: buckets, isLoading, error } = useBuckets();
+  const { data: bucketsData, isLoading, error } = useBuckets();
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
@@ -80,11 +74,36 @@ function MyBuckets() {
     }
   };
 
-  const filteredBuckets = buckets?.filter((bucket) => {
+  const buckets = bucketsData?.buckets ?? [];
+  const errors = bucketsData?.errors ?? [];
+
+  const filteredBuckets = buckets.filter((bucket) => {
+    if (clusterFilter && bucket.connectionId !== clusterFilter) return false;
     if (!search) return true;
     const needle = search.toLowerCase();
     return (bucket.aliases ?? []).some((a: string) => a.toLowerCase().includes(needle));
   });
+
+  const errorBanner = errors.length > 0 ? (
+    <div className="rounded-lg border bg-destructive/10 p-4">
+      <p className="text-sm text-destructive font-medium">
+        Couldn&apos;t load buckets from {errors.length} cluster{errors.length > 1 ? "s" : ""}:{" "}
+        {errors.map((e) => e.connectionId.slice(0, 8)).join(", ")}
+      </p>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+          View details
+        </summary>
+        <ul className="mt-2 space-y-1">
+          {errors.map((e, idx) => (
+            <li key={idx} className="text-destructive">
+              {e.connectionId.slice(0, 8)}: {e.message}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  ) : null;
 
   if (error) {
     return (
@@ -94,7 +113,8 @@ function MyBuckets() {
           description="Storage buckets you own or have access to."
           actions={<Button variant="outline" onClick={handleRefresh}>Refresh</Button>}
         />
-        <ErrorBanner message="Couldn't connect to cluster. Retrying automatically..." />
+        {errorBanner}
+        <ErrorBanner message="Couldn&apos;t connect to cluster. Retrying automatically..." />
       </div>
     );
   }
@@ -112,6 +132,7 @@ function MyBuckets() {
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1 sm:w-64"
             />
+            <ClusterFilter selectedClusterId={clusterFilter} onFilterChange={setClusterFilter} />
             <Button 
               variant="outline" 
               onClick={() => setCreateDialogOpen(true)}
@@ -121,6 +142,8 @@ function MyBuckets() {
           </div>
         }
       />
+
+      {errorBanner}
 
       {isLoading ? (
         <BucketListSkeleton />
@@ -135,91 +158,91 @@ function MyBuckets() {
           }
         />
       ) : (
-        <ul className="rounded-lg border bg-card divide-y divide-border">
-          {filteredBuckets?.map((bucket) => {
-            const aliases = bucket.aliases ?? [];
-            const [primary, ...rest] = aliases;
-            const name = primary ?? bucket.id.slice(0, 8);
+        <div className="rounded-lg border bg-card overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-48">Cluster</TableHead>
+                <TableHead>Bucket Name</TableHead>
+                <TableHead>Aliases</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="w-16">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredBuckets?.map((bucket) => {
+                const aliases = bucket.aliases ?? [];
+                const [primary, ...rest] = aliases;
+                const name = primary ?? bucket.id.slice(0, 8);
 
-            return (
-              <li
-                key={bucket.id}
-                className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-muted/40 transition-colors group has-focus-visible:bg-muted/50"
-              >
-                <Link
-                  to="/admin/buckets/$id"
-                  params={{ id: bucket.id }}
-                  className="flex-1 min-w-0 text-left focus-visible:outline-none"
-                  aria-label={`Open bucket ${name}`}
-                >
-                  <div className="flex items-baseline gap-2 min-w-0">
-                    <span className="font-medium text-base truncate">{name}</span>
-                    {rest.length > 0 && (
-                      <span className="text-xs text-muted-foreground truncate">
-                        also: {rest.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                  {bucket.created && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Created {humanizeTime(bucket.created)}
-                    </p>
-                  )}
-                </Link>
-
-                <div className="flex items-center gap-6 text-sm">
-                  <div className="text-right">
-                    {/* Bytes + object counts come from per-bucket info
-                        endpoint; the bucket-list endpoint omits them
-                        (a follow-up in v0.2 — see GetBucket stats). */}
-                    <div className="font-medium tabular-nums text-muted-foreground">
-                      —
-                    </div>
-                    <div className="text-xs text-muted-foreground tabular-nums">
-                      —
-                    </div>
-                  </div>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      className="rounded-md p-1.5 hover:bg-muted opacity-60 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 transition-opacity"
-                      aria-label={`Actions for ${name}`}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-4 w-4"
-                        aria-hidden="true"
-                      >
-                        <circle cx="12" cy="12" r="1" />
-                        <circle cx="19" cy="12" r="1" />
-                        <circle cx="5" cy="12" r="1" />
-                      </svg>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() => navigate({ to: "/admin/buckets/$id", params: { id: bucket.id } })}
-                      >
-                        View
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        variant="destructive" 
-                        onClick={() => handleDeleteClick(bucket.id)}
-                      >
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                return (
+                  <TableRow
+                    key={bucket.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => {
+                      // PLANNED: /admin/clusters/{cid}/buckets/{id} route (CLUSTER.RESOURCE-DETAIL)
+                      // @ts-expect-error route not yet defined
+                      navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
+                    }}
+                  >
+                    <TableCell>
+                      <ClusterBadge connectionId={bucket.connectionId} />
+                    </TableCell>
+                    <TableCell className="font-medium">{name}</TableCell>
+                    <TableCell>
+                      {rest.length > 0 ? rest.join(", ") : "—"}
+                    </TableCell>
+                    <TableCell>{bucket.created ? humanizeTime(bucket.created) : "—"}</TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" className="h-8 w-8 p-0">
+                            <span className="sr-only">Open menu</span>
+                            <svg
+                              xmlns="http://www.w3.org/2000/svg"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                            >
+                              <circle cx="12" cy="12" r="1" />
+                              <circle cx="19" cy="12" r="1" />
+                              <circle cx="5" cy="12" r="1" />
+                            </svg>
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                             onClick={(e) => {
+                                e.stopPropagation();
+                                // PLANNED: /admin/clusters/{cid}/buckets/{id} route (CLUSTER.RESOURCE-DETAIL)
+                                // @ts-expect-error route not yet defined
+                                navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
+                              }}
+                          >
+                            View
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            variant="destructive" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(bucket.id);
+                            }}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
 
       <Dialog open={createDialogOpen} onOpenChange={(open) => {
@@ -287,7 +310,7 @@ function MyBuckets() {
         open={deleteDialogId !== null}
         bucketAlias={(() => {
           if (!deleteDialogId) return "";
-          const bucket = buckets?.find((b) => b.id === deleteDialogId);
+          const bucket = buckets.find((b) => b.id === deleteDialogId);
           return bucket?.aliases?.[0] ?? deleteDialogId.slice(0, 12);
         })()}
         isDeleting={deleteMutation.isPending}
@@ -322,19 +345,29 @@ function PageHeader({ title, description, actions }: PageHeaderProps) {
 
 function BucketListSkeleton() {
   return (
-    <ul className="rounded-lg border bg-card divide-y divide-border">
-      {[...Array(5)].map((_, i) => (
-        <li key={i} className="px-4 sm:px-6 py-4 flex items-center gap-4">
-          <div className="flex-1 space-y-2">
-            <Skeleton className="h-4 w-48" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-          <div className="space-y-2 text-right">
-            <Skeleton className="h-4 w-20 ml-auto" />
-            <Skeleton className="h-3 w-16 ml-auto" />
-          </div>
-        </li>
-      ))}
-    </ul>
+    <div className="rounded-lg border bg-card overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-48">Cluster</TableHead>
+            <TableHead>Bucket Name</TableHead>
+            <TableHead>Aliases</TableHead>
+            <TableHead>Created</TableHead>
+            <TableHead className="w-16">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {[...Array(5)].map((_, i) => (
+            <TableRow key={i}>
+              <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+              <TableCell><Skeleton className="h-4 w-48" /></TableCell>
+              <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+              <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+              <TableCell><Skeleton className="h-8 w-8 rounded" /></TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
 }

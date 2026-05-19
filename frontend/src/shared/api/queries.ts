@@ -7,6 +7,7 @@ type Layout = components["schemas"]["Layout"];
 type Caps = components["schemas"]["Caps"];
 type Bucket = components["schemas"]["Bucket"];
 type Key = components["schemas"]["Key"];
+type Connection = components["schemas"]["Connection"];
 
 /**
  * apiError builds a user-presentable Error from a non-2xx response.
@@ -84,17 +85,28 @@ export function useLayout() {
 }
 
 export function useBuckets() {
-  return useQuery<Bucket[]>({
+  return useQuery<components["schemas"]["AggregatedBucketsResponse"]>({
     queryKey: ["admin", "buckets"],
     queryFn: async () => {
       const { data, error, response } = await client.GET("/admin/buckets");
       if (!response.ok || !data) throw apiError("admin/buckets", response.status, error);
-      return data as Bucket[];
+      return (data as unknown) as components["schemas"]["AggregatedBucketsResponse"];
     },
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
     retry: 1,
   });
+}
+
+export function useBucketsFlat() {
+  const query = useBuckets();
+  if (query.data) {
+    return {
+      ...query,
+      data: query.data.buckets,
+    };
+  }
+  return query;
 }
 
 export function useBucket(id: string) {
@@ -113,17 +125,28 @@ export function useBucket(id: string) {
 }
 
 export function useKeys() {
-  return useQuery<Key[]>({
+  return useQuery<components["schemas"]["AggregatedKeysResponse"]>({
     queryKey: ["admin", "keys"],
     queryFn: async () => {
       const { data, error, response } = await client.GET("/admin/keys");
       if (!response.ok || !data) throw apiError("admin/keys", response.status, error);
-      return data as Key[];
+      return (data as unknown) as components["schemas"]["AggregatedKeysResponse"];
     },
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
     retry: 1,
   });
+}
+
+export function useKeysFlat() {
+  const query = useKeys();
+  if (query.data) {
+    return {
+      ...query,
+      data: query.data.keys,
+    };
+  }
+  return query;
 }
 
 export function useKey(id: string) {
@@ -138,5 +161,19 @@ export function useKey(id: string) {
     },
     enabled: !!id,
     staleTime: 30_000,
+  });
+}
+
+export function useListClusters() {
+  return useQuery<Connection[]>({
+    queryKey: ["admin", "clusters"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/admin/clusters");
+      if (!response.ok || !data) throw apiError("admin/clusters", response.status, error);
+      return (data as unknown[]) as Connection[];
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: 1,
   });
 }
