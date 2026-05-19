@@ -5,10 +5,15 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
 import { useBucket } from "@/shared/api/queries";
+import { useUpdateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/buckets/$id")({
@@ -69,6 +74,12 @@ function CopyButton({ text }: { text: string }) {
 
 function AdminBucketDetail() {
   const { id } = Route.useParams();
+  const updateMutation = useUpdateBucket();
+  const deleteMutation = useDeleteBucket();
+  const [isEditingAlias, setIsEditingAlias] = useState(false);
+  const [aliasInput, setAliasInput] = useState("");
+  const [quotaDialogOpen, setQuotaDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const { data: bucket, isLoading, error } = useBucket(id);
 
   if (error) {
@@ -143,26 +154,99 @@ function AdminBucketDetail() {
     );
   }
 
+  const handleAliasSave = () => {
+    if (!aliasInput.trim()) return;
+    
+    const aliases = bucket.aliases ?? [];
+    const newAliases = [aliasInput, ...aliases.filter((a) => a !== aliases[0])];
+    updateMutation.mutate({
+      id: bucket.id,
+      update: { aliases: newAliases },
+    });
+    setIsEditingAlias(false);
+  };
+
+  const handleCancelEdit = () => {
+    setAliasInput(bucket.aliases?.[0] ?? "");
+    setIsEditingAlias(false);
+  };
+
+  const handleQuotaSubmit = (maxSizeGB: number | null, maxObjects: number | null) => {
+    const quotas = {
+      max_size: maxSizeGB !== null ? Math.round(maxSizeGB * 1024 ** 3) : null,
+      max_objects: maxObjects !== null ? maxObjects : null,
+    };
+
+    updateMutation.mutate({
+      id: bucket.id,
+      update: { quotas },
+    });
+    setQuotaDialogOpen(false);
+  };
+
+  const handleDelete = () => {
+    deleteMutation.mutate(bucket.id);
+    setDeleteDialogOpen(false);
+  };
+
   return (
     <div className="space-y-6">
           <BackLink />
 
           {/* Header */}
           <div className="space-y-2">
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
-              {bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
-            </h1>
-            <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-              <span>{bucket.id}</span>
-              <CopyButton text={bucket.id} />
-              {bucket.aliases && bucket.aliases.length > 1 ? (
-                bucket.aliases.slice(1).map((alias) => (
-                  <Badge key={alias} variant="secondary" className="text-xs">
-                    {alias}
-                  </Badge>
-                ))
-              ) : null}
-            </div>
+            {isEditingAlias ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={aliasInput}
+                  onChange={(e) => setAliasInput(e.target.value)}
+                  onBlur={handleAliasSave}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleAliasSave();
+                    if (e.key === "Escape") handleCancelEdit();
+                  }}
+                  className="flex-1"
+                  autoFocus
+                />
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={handleAliasSave}
+                >
+                  Save
+                </Button>
+                <Button 
+                  size="sm" 
+                  variant="ghost"
+                  onClick={handleCancelEdit}
+                >
+                  Cancel
+                </Button>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    setAliasInput(bucket.aliases?.[0] ?? "");
+                    setIsEditingAlias(true);
+                  }}
+                  className="text-2xl sm:text-3xl font-semibold tracking-tight hover:underline underline-offset-4 text-left"
+                >
+                  {bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
+                </button>
+                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                  <span>{bucket.id}</span>
+                  <CopyButton text={bucket.id} />
+                  {bucket.aliases && bucket.aliases.length > 1 ? (
+                    bucket.aliases.slice(1).map((alias) => (
+                      <Badge key={alias} variant="secondary" className="text-xs">
+                        {alias}
+                      </Badge>
+                    ))
+                  ) : null}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Stats card */}
@@ -193,38 +277,124 @@ function AdminBucketDetail() {
             </CardContent>
           </Card>
 
-          {/* Quotas card */}
-          <Card>
-            <CardHeader>Quotas</CardHeader>
-            <CardContent className="pt-6">
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
-                <div>
-                  <dt className="text-sm text-muted-foreground">Max size</dt>
-                  <dd className="font-medium tabular-nums mt-1">
-                    {bucket.quotas?.maxSize != null ? (
-                      humanizeBytes(bucket.quotas.maxSize)
-                    ) : bucket.quotas == null ? (
-                      "Unlimited"
-                    ) : (
-                      "—"
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-muted-foreground">Max objects</dt>
-                  <dd className="font-medium tabular-nums mt-1">
-                    {bucket.quotas?.maxObjects != null ? (
-                      bucket.quotas.maxObjects.toLocaleString()
-                    ) : bucket.quotas == null ? (
-                      "Unlimited"
-                    ) : (
-                      "—"
-                    )}
-                  </dd>
-                </div>
-              </dl>
-            </CardContent>
-          </Card>
+         {/* Quotas card */}
+           <Card>
+             <CardHeader className="flex flex-row items-center justify-between">
+               <span>Quotas</span>
+               <Button 
+                 size="sm" 
+                 variant="outline"
+                 onClick={() => setQuotaDialogOpen(true)}
+               >
+                 Edit quotas
+               </Button>
+             </CardHeader>
+             <CardContent className="pt-6">
+               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
+                 <div>
+                   <dt className="text-sm text-muted-foreground">Max size</dt>
+                   <dd className="font-medium tabular-nums mt-1">
+                     {bucket.quotas?.maxSize != null ? (
+                       humanizeBytes(bucket.quotas.maxSize)
+                     ) : bucket.quotas == null ? (
+                       "Unlimited"
+                     ) : (
+                       "—"
+                     )}
+                   </dd>
+                 </div>
+                 <div>
+                   <dt className="text-sm text-muted-foreground">Max objects</dt>
+                   <dd className="font-medium tabular-nums mt-1">
+                     {bucket.quotas?.maxObjects != null ? (
+                       bucket.quotas.maxObjects.toLocaleString()
+                     ) : bucket.quotas == null ? (
+                       "Unlimited"
+                     ) : (
+                       "—"
+                     )}
+                   </dd>
+                 </div>
+               </dl>
+             </CardContent>
+           </Card>
+
+           <Dialog open={quotaDialogOpen} onOpenChange={(open) => {
+             if (!open) setQuotaDialogOpen(false);
+           }}>
+             <DialogContent className="sm:max-w-md">
+               <DialogHeader>
+                 <DialogTitle>Edit quotas</DialogTitle>
+                 <DialogDescription>
+                   Set limits for bucket size and object count. Leave empty for unlimited.
+                 </DialogDescription>
+               </DialogHeader>
+
+               {updateMutation.isError && (
+                 <div className="text-sm text-destructive">
+                   {String(updateMutation.error?.message ?? "Failed to update quotas")}
+                 </div>
+               )}
+
+               <form onSubmit={(e) => {
+                 e.preventDefault();
+                 const formData = new FormData(e.currentTarget);
+                 const maxSizeGBStr = String(formData.get("maxSizeGB") || "");
+                 const maxObjectsStr = String(formData.get("maxObjects") || "");
+                 
+                 const maxSizeGB = maxSizeGBStr === "" ? null : parseFloat(maxSizeGBStr) || null;
+                 const maxObjects = maxObjectsStr === "" ? null : parseInt(maxObjectsStr, 10) || null;
+                 
+                 handleQuotaSubmit(maxSizeGB, maxObjects);
+               }}>
+                 <div className="grid gap-4 py-4">
+                   <div className="grid gap-2">
+                     <label htmlFor="maxSizeGB" className="text-sm font-medium">
+                       Max size (GB)
+                     </label>
+                     <Input 
+                       id="maxSizeGB" 
+                       name="maxSizeGB" 
+                       type="number" 
+                       min="0"
+                       step="0.1"
+                       placeholder="Unlimited"
+                       defaultValue={bucket.quotas?.maxSize != null ? bucket.quotas.maxSize / (1024 ** 3) : ""}
+                     />
+                   </div>
+                   <div className="grid gap-2">
+                     <label htmlFor="maxObjects" className="text-sm font-medium">
+                       Max objects
+                     </label>
+                     <Input 
+                       id="maxObjects" 
+                       name="maxObjects" 
+                       type="number" 
+                       min="0"
+                       placeholder="Unlimited"
+                       defaultValue={bucket.quotas?.maxObjects ?? ""}
+                     />
+                   </div>
+                 </div>
+
+               <DialogFooter>
+                  <button 
+                    type="button"
+                    onClick={() => setQuotaDialogOpen(false)}
+                    className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-transparent hover:bg-accent hover:text-accent-foreground"
+                  >
+                    Cancel
+                  </button>
+                  <Button 
+                    type="submit" 
+                    disabled={updateMutation.isPending}
+                  >
+                    {updateMutation.isPending ? "Saving..." : "Save"}
+                  </Button>
+                </DialogFooter>
+               </form>
+             </DialogContent>
+           </Dialog>
 
           {/* Attached keys table */}
           <Card>
@@ -281,13 +451,50 @@ function AdminBucketDetail() {
             </CardContent>
           </Card>
 
-          {/* Created */}
-          {bucket.created && humanizeTime(bucket.created) !== "—" && (
-            <p className="text-xs text-muted-foreground">Created {humanizeTime(bucket.created)}</p>
-          )}
-    </div>
-  );
-}
+        {/* Created */}
+           {bucket.created && humanizeTime(bucket.created) !== "—" && (
+             <p className="text-xs text-muted-foreground">Created {humanizeTime(bucket.created)}</p>
+           )}
+
+           <div className="pt-6 border-t">
+             <h3 className="text-sm font-medium mb-2">Danger zone</h3>
+             <Button 
+               variant="destructive" 
+               size="sm"
+               onClick={() => setDeleteDialogOpen(true)}
+               disabled={deleteMutation.isPending}
+             >
+               {deleteMutation.isPending ? "Deleting..." : "Delete bucket"}
+             </Button>
+           </div>
+
+           <AlertDialog 
+             open={deleteDialogOpen} 
+             onOpenChange={(open) => {
+               if (!open) setDeleteDialogOpen(false);
+             }}
+           >
+             <AlertDialogContent>
+               <AlertDialogHeader>
+                 <AlertDialogTitle>Delete bucket?</AlertDialogTitle>
+                 <AlertDialogDescription>
+                   Delete bucket "{bucket.aliases?.[0] ?? bucket.id.slice(0, 8)}"? This cannot be undone and will remove all data.
+                 </AlertDialogDescription>
+               </AlertDialogHeader>
+               <AlertDialogFooter>
+                 <AlertDialogCancel onClick={() => setDeleteDialogOpen(false)}>Cancel</AlertDialogCancel>
+                 <AlertDialogAction 
+                   onClick={handleDelete}
+                   disabled={deleteMutation.isPending}
+                 >
+                   {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                 </AlertDialogAction>
+               </AlertDialogFooter>
+             </AlertDialogContent>
+           </AlertDialog>
+     </div>
+   );
+ }
 
 function BackLink() {
   return (
