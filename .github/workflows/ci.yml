@@ -22,11 +22,11 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          # v1.65+ is built with Go 1.25, required because go.mod
-          # declares go 1.25.
-          version: v1.65.0
+          # v2.x is the first major built with Go 1.25, required
+          # because go.mod declares go 1.25.
+          version: latest
 
       - name: Run tests
         run: go test -race ./...
@@ -51,6 +51,7 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
         working-directory: frontend
