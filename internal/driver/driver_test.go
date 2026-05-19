@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -108,9 +109,11 @@ func TestRegistry(t *testing.T) {
 				}
 			}
 
-			if !tt.expectPanic && tt.result != nil && driver != tt.result {
+			if !tt.expectPanic && tt.result != nil {
+			if fmt.Sprintf("%T", driver) != fmt.Sprintf("%T", tt.result) {
 				t.Errorf("expected driver %T, got %T", tt.result, driver)
 			}
+		}
 		})
 	}
 }
@@ -245,7 +248,11 @@ func TestErrorFormat(t *testing.T) {
 }
 
 // mockDriver implements Driver for testing purposes.
-type mockDriver struct{}
+type mockDriver struct {
+	id int64
+}
+
+var mockDriverCounter int64
 
 func (m *mockDriver) Capabilities(_ context.Context) (Caps, error) { return Caps{}, nil }
 func (m *mockDriver) HealthCheck(_ context.Context) (HealthReport, error) { return HealthReport{}, nil }

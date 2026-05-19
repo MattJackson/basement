@@ -49,7 +49,7 @@ func TestHealthHandler(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 	drv := &mockDriver{}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	rr := httptest.NewRecorder()
@@ -79,7 +79,7 @@ func TestHealthHandler404(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 	drv := &mockDriver{}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
 	rr := httptest.NewRecorder()
@@ -96,7 +96,7 @@ func TestHealthHandler405(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 	drv := &mockDriver{}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/health", nil)
 	rr := httptest.NewRecorder()
@@ -113,7 +113,7 @@ func TestContentTypeMiddleware(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 	drv := &mockDriver{}
 
-	srv := New(cfg, st, drv)
+	srv := New(cfg, st, drv, nil)
 
 	body := bytes.NewBufferString(`{"test": "data"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/health", body)

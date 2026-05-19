@@ -22,13 +22,14 @@ type Server struct {
 	cfg        *config.Config
 	store      *store.Store
 	drv        driver.Driver
+	reg        *driver.Registry
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
 }
 
-// New creates a new Server instance.
-func New(cfg *config.Config, store *store.Store, drv driver.Driver) *Server {
+// New creates a new Server instance with both legacy single-driver (for back-compat) and registry.
+func New(cfg *config.Config, store *store.Store, drv driver.Driver, reg *driver.Registry) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -37,6 +38,7 @@ func New(cfg *config.Config, store *store.Store, drv driver.Driver) *Server {
 		cfg:    cfg,
 		store:  store,
 		drv:    drv,
+		reg:    reg,
 		router: chi.NewRouter(),
 		logger: logger,
 	}
