@@ -53,6 +53,7 @@ function KeyDetailScreen() {
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editPermissions, setEditPermissions] = useState<components["schemas"]["BucketPermission"][]>([]);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   if (error) {
     return (
@@ -164,15 +165,19 @@ function KeyDetailScreen() {
       <BackLink />
 
       {/* Header */}
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{key.name ?? "Unnamed key"}</h1>
-        <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-          <span>{key.accessKeyId}</span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="uppercase tracking-wide text-[10px] font-medium opacity-70">
+            Access Key ID
+          </span>
+          <span className="font-mono text-xs">{key.accessKeyId ?? key.id}</span>
           <button
             type="button"
             onClick={() => navigator.clipboard.writeText(key.accessKeyId ?? key.id)}
-            className="rounded-md p-1.5 hover:bg-muted opacity-60 hover:opacity-100 transition-opacity"
-            aria-label="Copy to clipboard"
+            className="rounded-md p-1 hover:bg-muted opacity-60 hover:opacity-100 transition-opacity"
+            aria-label="Copy Access Key ID"
+            title="Copy Access Key ID"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -189,6 +194,10 @@ function KeyDetailScreen() {
             </svg>
           </button>
         </div>
+        <p className="text-xs text-muted-foreground/70 max-w-prose">
+          This is the public credential — pair it with the secret access key (shown
+          once at creation) in your S3 client (mc, aws-cli, Cyberduck, etc.).
+        </p>
       </div>
 
       {/* Metadata card */}
@@ -337,28 +346,27 @@ function KeyDetailScreen() {
         </CardContent>
       </Card>
 
-      {/* Delete section */}
-      <div className="pt-4">
-        <Button 
-          variant="destructive" 
-          onClick={() => setIsEditing(true)} // Reuse edit state to trigger delete dialog
+      {/* Danger zone */}
+      <div className="pt-6 border-t">
+        <h3 className="text-sm font-medium mb-2">Danger zone</h3>
+        <Button
+          variant="destructive"
+          onClick={() => setDeleteDialogOpen(true)}
         >
           Delete key
         </Button>
       </div>
 
-      {/* Delete confirmation dialog (reuse isEditing as open state) */}
-      {isEditing && updatePermissions.isSuccess && (
-        <DeleteKeyConfirm
-          open={true}
-          keyName={key.name}
-          onConfirm={() => {
-            deleteKey.mutate(id);
-            setIsEditing(false);
-          }}
-          onCancel={() => setIsEditing(false)}
-        />
-      )}
+      <DeleteKeyConfirm
+        open={deleteDialogOpen}
+        keyName={key.name}
+        isDeleting={deleteKey.isPending}
+        onConfirm={() => {
+          deleteKey.mutate(id);
+          setDeleteDialogOpen(false);
+        }}
+        onCancel={() => setDeleteDialogOpen(false)}
+      />
 
       {/* Show error if permission update fails */}
       {updatePermissions.isError && (

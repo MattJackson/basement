@@ -33,9 +33,10 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={handleBackdropClick}
     >
-      <div 
+      <div
         className={cn(
-          "w-full max-w-md rounded-lg bg-background p-6 shadow-lg",
+          "mx-4 w-full max-w-lg rounded-lg bg-background p-6 shadow-lg",
+          "flex flex-col gap-4",
           "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
           className
         )}
@@ -102,9 +103,9 @@ interface DialogFooterProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function DialogFooter({ children, className }: DialogFooterProps) {
   return (
-    <div 
+    <div
       className={cn(
-        "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-2 sm:space-x-0 pt-2",
         className
       )}
     >

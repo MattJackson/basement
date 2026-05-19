@@ -113,11 +113,15 @@ export function useDeleteBucket() {
 
 /**
  * Create a new access key. Returns the key with its secretAccessKey
- * (shown ONCE only). Invalidates [admin, keys].
+ * — Garage returns the secret ONLY on this response and never again.
+ *
+ * The mutation does NOT auto-navigate. The caller is expected to
+ * surface the secret to the user (one-shot dialog with copy button)
+ * BEFORE navigating to the detail page, otherwise the secret is
+ * lost forever and the key is unusable.
  */
 export function useCreateKey() {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
 
   return useMutation<components["schemas"]["Key"], Error, { name: string }>({
     mutationFn: async (spec) => {
@@ -127,9 +131,9 @@ export function useCreateKey() {
       if (!response.ok || !data) throw apiError("createKey", response.status, error);
       return data;
     },
-    onSuccess: (key) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
-      navigate({ to: "/admin/keys/$id", params: { id: key.id } });
+      // No navigate — the caller surfaces secretAccessKey first.
     },
   });
 }
