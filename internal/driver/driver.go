@@ -86,16 +86,31 @@ type LayoutDiff struct {
 
 // Bucket represents a storage bucket.
 type Bucket struct {
-	ID      string    `json:"id"`
-	Aliases []string  `json:"aliases"`
-	Quotas  *Quotas   `json:"quotas,omitempty"`
-	Created time.Time `json:"created,omitempty"`
+	ID                string            `json:"id"`
+	Aliases           []string          `json:"aliases"`
+	Quotas            *Quotas           `json:"quotas,omitempty"`
+	Created           time.Time         `json:"created,omitempty"`
+	Objects           int64             `json:"objects"`
+	Bytes             int64             `json:"bytes"`
+	UnfinishedUploads int64             `json:"unfinishedUploads"`
+	Keys              []BucketKeyAccess `json:"keys,omitempty"`
 }
 
 // Quotas represents bucket quota limits.
 type Quotas struct {
 	MaxSize    *int64 `json:"maxSize,omitempty"`
 	MaxObjects *int64 `json:"maxObjects,omitempty"`
+}
+
+// BucketKeyAccess represents the per-bucket view of a key's access permissions.
+// This data mirrors what is also accessible from the Key side via Key.BucketsPermissions,
+// which will be exposed through a future driver method not yet on the interface.
+type BucketKeyAccess struct {
+	KeyID string `json:"keyId"`
+	Name  string `json:"name"`
+	Read  bool   `json:"read"`
+	Write bool   `json:"write"`
+	Owner bool   `json:"owner"`
 }
 
 // BucketSpec is the specification for creating a bucket.

@@ -64,11 +64,19 @@ func TestGetBucket(t *testing.T) {
 			t.Errorf("id query = %q, want b-123", got)
 		}
 		_ = json.NewEncoder(w).Encode(bucketInfoV1{
-			ID:            "b-123",
-			GlobalAliases: []string{"my-bucket"},
-			Objects:       42,
-			Bytes:         1024,
-			Quotas:        &bucketQuotasV1{MaxSize: int64Ptr(1000000), MaxObjects: int64Ptr(100)},
+			ID:                "b-123",
+			GlobalAliases:     []string{"my-bucket"},
+			Objects:           42,
+			Bytes:             1024 * 1024,
+			UnfinishedUploads: 3,
+			Keys: []bucketKeyInfoV1{
+				{
+					AccessKeyID: "key-abc",
+					Name:        "Test Key",
+					Permissions: bucketKeyPermV1{Read: true, Write: false, Owner: false},
+				},
+			},
+			Quotas: &bucketQuotasV1{MaxSize: int64Ptr(1000000), MaxObjects: int64Ptr(100)},
 		})
 	}))
 	defer ts.Close()
@@ -81,8 +89,114 @@ func TestGetBucket(t *testing.T) {
 	if b.ID != "b-123" {
 		t.Errorf("ID = %q, want b-123", b.ID)
 	}
+	if b.Objects != 42 {
+		t.Errorf("Objects = %d, want 42", b.Objects)
+	}
+	if b.Bytes != 1024*1024 {
+		t.Errorf("Bytes = %d, want %d", b.Bytes, 1024*1024)
+	}
+	if b.UnfinishedUploads != 3 {
+		t.Errorf("UnfinishedUploads = %d, want 3", b.UnfinishedUploads)
+	}
+if len(b.Keys) != 1 {
+		t.Fatalf("Keys length = %d, want 1", len(b.Keys))
+	}
+	if b.Keys[0].KeyID != "key-abc" || b.Keys[0].Read != true || b.Keys[0].Write != false || b.Keys[0].Owner != false {
+		t.Errorf("Keys[0] = %+v, want KeyID=key-abc Read=true Write=false Owner=false", b.Keys[0])
+	}
+	if b.Keys[0].Name != "Test Key" {
+		t.Errorf("Keys[0].Name = %q, want Test Key", b.Keys[0].Name)
+	}
 	if b.Quotas == nil || *b.Quotas.MaxSize != 1000000 || *b.Quotas.MaxObjects != 100 {
 		t.Errorf("Quotas = %+v", b.Quotas)
+	}
+}
+
+func TestGetBucket_Fields(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/bucket" || r.Method != "GET" {
+			t.Errorf("expected GET /v1/bucket, got %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(bucketInfoV1{
+			ID:                "b-stats",
+			GlobalAliases:     []string{"stats-bucket"},
+			Objects:           12345,
+			Bytes:             9876543210,
+			UnfinishedUploads: 7,
+			Keys: []bucketKeyInfoV1{
+				{
+					AccessKeyID: "k-1",
+					Name:        "Admin Key",
+					Permissions: bucketKeyPermV1{Read: true, Write: true, Owner: true},
+				},
+				{
+					AccessKeyID: "k-2",
+					Name:        "Reader Key",
+					Permissions: bucketKeyPermV1{Read: true, Write: false, Owner: false},
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	d := newTestDriver(ts.URL)
+	b, err := d.GetBucket(context.Background(), "b-stats")
+	if err != nil {
+		t.Fatalf("GetBucket: %v", err)
+	}
+	if b.Objects != 12345 {
+		t.Errorf("Objects = %d, want 12345", b.Objects)
+	}
+	if b.Bytes != 9876543210 {
+		t.Errorf("Bytes = %d, want 9876543210", b.Bytes)
+	}
+	if b.UnfinishedUploads != 7 {
+		t.Errorf("UnfinishedUploads = %d, want 7", b.UnfinishedUploads)
+	}
+	if len(b.Keys) != 2 {
+		t.Fatalf("Keys length = %d, want 2", len(b.Keys))
+	}
+	if b.Keys[0].KeyID != "k-1" || !b.Keys[0].Read || !b.Keys[0].Write || !b.Keys[0].Owner {
+		t.Errorf("Keys[0] = %+v", b.Keys[0])
+	}
+	if b.Keys[1].KeyID != "k-2" || !b.Keys[1].Read || b.Keys[1].Write || b.Keys[1].Owner {
+		t.Errorf("Keys[1] = %+v", b.Keys[1])
+	}
+}
+
+func TestListBuckets_NoStatsOnList(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/bucket" || r.URL.RawQuery != "list" || r.Method != "GET" {
+			t.Errorf("expected GET /v1/bucket?list, got %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+		_ = json.NewEncoder(w).Encode([]listBucketsItemV1{
+			{ID: "bucket-a", GlobalAliases: []string{"docs"}},
+			{ID: "bucket-b", GlobalAliases: []string{"site.com"}},
+		})
+	}))
+	defer ts.Close()
+
+	d := newTestDriver(ts.URL)
+	buckets, err := d.ListBuckets(context.Background())
+	if err != nil {
+		t.Fatalf("ListBuckets: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("got %d buckets, want 2", len(buckets))
+	}
+	for i, b := range buckets {
+		if b.Objects != 0 {
+			t.Errorf("buckets[%d].Objects = %d, want 0 (list endpoint omits stats)", i, b.Objects)
+		}
+		if b.Bytes != 0 {
+			t.Errorf("buckets[%d].Bytes = %d, want 0 (list endpoint omits stats)", i, b.Bytes)
+		}
+		if b.UnfinishedUploads != 0 {
+			t.Errorf("buckets[%d].UnfinishedUploads = %d, want 0", i, b.UnfinishedUploads)
+		}
+		if len(b.Keys) != 0 {
+			t.Errorf("buckets[%d].Keys length = %d, want 0 (list endpoint omits keys)", i, len(b.Keys))
+		}
 	}
 }
 

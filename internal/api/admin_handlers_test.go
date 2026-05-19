@@ -778,9 +778,13 @@ func TestGetBucketHandler_HappyPath(t *testing.T) {
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
 	bucket := driver.Bucket{
-		ID:        "bucket-123",
-		Aliases:   []string{"my-bucket"},
-		Created:   time.Now(),
+		ID:                "bucket-123",
+		Aliases:           []string{"my-bucket"},
+		Created:           time.Now(),
+		Objects:           42,
+		Bytes:             1024 * 1024,
+		UnfinishedUploads: 3,
+		Keys:              []driver.BucketKeyAccess{{KeyID: "key-abc", Name: "Test Key", Read: true, Write: false, Owner: false}},
 	}
 
 	drv := &testMockDriver{
@@ -799,6 +803,26 @@ func TestGetBucketHandler_HappyPath(t *testing.T) {
 	data := assertJSONResponse(t, rr, http.StatusOK).(map[string]any)
 	if data["id"] != "bucket-123" {
 		t.Errorf("expected id bucket-123, got %v", data["id"])
+	}
+	if data["objects"] != float64(42) {
+		t.Errorf("objects = %v, want 42", data["objects"])
+	}
+	if data["bytes"] != float64(1024*1024) {
+		t.Errorf("bytes = %v, want %d", data["bytes"], 1024*1024)
+	}
+	if data["unfinishedUploads"] != float64(3) {
+		t.Errorf("unfinishedUploads = %v, want 3", data["unfinishedUploads"])
+	}
+	keys := data["keys"].([]any)
+	if len(keys) != 1 {
+		t.Fatalf("keys length = %d, want 1", len(keys))
+	}
+	keyMap := keys[0].(map[string]any)
+	if keyMap["keyId"] != "key-abc" {
+		t.Errorf("keyId = %v, want key-abc", keyMap["keyId"])
+	}
+	if keyMap["read"].(bool) != true || keyMap["write"].(bool) != false || keyMap["owner"].(bool) != false {
+		t.Errorf("permissions = %+v, want read=true write=false owner=false", keyMap)
 	}
 }
 

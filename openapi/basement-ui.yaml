@@ -1953,6 +1953,23 @@ components:
           type: string
           format: date-time
           description: Bucket creation timestamp (zero value if backend doesn't track this).
+        objects:
+          type: integer
+          format: int64
+          description: Number of objects in the bucket.
+        bytes:
+          type: integer
+          format: int64
+          description: Total size of objects in the bucket, in bytes.
+        unfinishedUploads:
+          type: integer
+          format: int64
+          description: Number of in-progress multipart uploads.
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/BucketKeyAccess'
+          description: Access keys with permissions on this bucket. Present on GetBucket; omitted on ListBuckets.
     BucketSpec:
       type: object
       required:
@@ -1984,6 +2001,26 @@ components:
           minimum: 0
           nullable: true
           description: Maximum number of objects; null means no limit.
+    BucketKeyAccess:
+      type: object
+      required:
+      - keyId
+      - read
+      - write
+      - owner
+      properties:
+        keyId:
+          type: string
+          description: Access key ID (matches Key.id).
+        name:
+          type: string
+          description: Human-friendly key name (display only).
+        read:
+          type: boolean
+        write:
+          type: boolean
+        owner:
+          type: boolean
     BucketKeyPermission:
       type: object
       required:

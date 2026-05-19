@@ -120,8 +120,11 @@ func (d *driver) DeleteBucket(ctx context.Context, id string) error {
 // BucketInfo schema: garage-admin-v1.yml:1277-1328.
 func bucketFromInfo(resp bucketInfoV1) driverpkg.Bucket {
 	bucket := driverpkg.Bucket{
-		ID:      resp.ID,
-		Aliases: resp.GlobalAliases,
+		ID:                resp.ID,
+		Aliases:           resp.GlobalAliases,
+		Objects:           resp.Objects,
+		Bytes:             resp.Bytes,
+		UnfinishedUploads: resp.UnfinishedUploads,
 		// BucketInfo (garage-admin-v1.yml:1277-1328) has no "created" field.
 		Created: time.Time{},
 	}
@@ -131,6 +134,17 @@ func bucketFromInfo(resp bucketInfoV1) driverpkg.Bucket {
 			MaxObjects: resp.Quotas.MaxObjects,
 		}
 	}
+	keys := make([]driverpkg.BucketKeyAccess, 0, len(resp.Keys))
+	for _, k := range resp.Keys {
+		keys = append(keys, driverpkg.BucketKeyAccess{
+			KeyID: k.AccessKeyID,
+			Name:  k.Name,
+			Read:  k.Permissions.Read,
+			Write: k.Permissions.Write,
+			Owner: k.Permissions.Owner,
+		})
+	}
+	bucket.Keys = keys
 	return bucket
 }
 
