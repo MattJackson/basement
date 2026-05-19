@@ -36,12 +36,10 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Embedded SPA build artifacts (the placeholder index.html stays tracked
-# so `go build` works on a fresh clone; pnpm build overwrites it).
-internal/web/dist/assets/
-internal/web/dist/favicon.svg
-internal/web/dist/icons.svg
-internal/web/dist/index.html
+# Embedded SPA: dist/ is build output; only .gitkeep is tracked
+# (keeps the dir present for //go:embed all:dist to compile).
+internal/web/dist/*
+!internal/web/dist/.gitkeep
 
 # JSON store runtime data (for local dev)
 data/
