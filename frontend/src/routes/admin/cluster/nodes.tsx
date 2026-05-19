@@ -14,9 +14,10 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes } from "@/shared/lib/format";
 import { useNodes } from "@/shared/api/queries";
+import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/cluster/nodes")({
-  component: NodesScreen,
+  component: adminPage(NodesScreen),
 });
 
 function NodesScreen() {

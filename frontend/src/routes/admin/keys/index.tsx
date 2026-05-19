@@ -28,9 +28,10 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
 import { useKeys } from "@/shared/api/queries";
+import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/keys/")({
-  component: KeysScreen,
+  component: adminPage(KeysScreen),
 });
 
 function KeysScreen() {

@@ -22,9 +22,10 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
 import { useBuckets } from "@/shared/api/queries";
+import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/buckets/")({
-  component: BucketsScreen,
+  component: adminPage(BucketsScreen),
 });
 
 function BucketsScreen() {

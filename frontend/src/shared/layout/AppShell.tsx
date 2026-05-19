@@ -5,9 +5,16 @@ import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { useNodes } from "@/shared/api/queries";
 
-interface AppShellProps {}
+interface AppShellProps {
+  children?: ReactNode;
+}
 
-export function AppShell(_props: AppShellProps): ReactNode {
+/**
+ * AppShell renders the authed admin chrome (sidebar + topbar) around
+ * either explicit children OR the TanStack Router <Outlet/> for the
+ * current matched child route.
+ */
+export function AppShell({ children }: AppShellProps): ReactNode {
   const { data: nodes, isLoading: loadingNodes } = useNodes();
   
   const totalNodes = nodes?.length ?? 0;
@@ -95,7 +102,7 @@ export function AppShell(_props: AppShellProps): ReactNode {
         </header>
 
         <div className="flex-1 pt-14 p-8 max-w-[1280px] mx-auto w-full">
-          <Outlet />
+          {children ?? <Outlet />}
         </div>
       </main>
     </div>
