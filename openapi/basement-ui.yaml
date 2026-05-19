@@ -925,6 +925,418 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+  /buckets/{bucket}/multipart:
+    post:
+      operationId: createMultipart
+      summary: Start multipart upload (data plane)
+      description: Initiates a multipart upload for large objects (>100MB). Returns an upload ID that must be used for subsequent part uploads and completion. RBAC-checked against user's grants — requires write permission for the bucket/prefix. Used by end-user Upload screen for large files.
+      tags:
+        - DataPlane
+      x-basement-since: "1.2"
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMultipartRequest'
+      responses:
+        '201':
+          description: Multipart upload initiated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartUpload'
+        '400':
+          description: Invalid request (e.g., invalid bucket or key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks write permission for this bucket/prefix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /buckets/{bucket}/multipart/{uploadId}:
+    delete:
+      operationId: abortMultipart
+      summary: Abort multipart upload (data plane)
+      description: Cancels an in-progress multipart upload, discarding all uploaded parts. Must be called when uploads fail or are no longer needed to avoid orphaned parts. RBAC-checked against user's grants — requires write permission for the bucket/prefix. Used by end-user Upload screen on cancel/error.
+      tags:
+        - DataPlane
+      x-basement-since: "1.2"
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          description: Multipart upload ID to abort
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Multipart upload aborted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Multipart upload aborted
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks write permission for this bucket/prefix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Multipart upload not found (already completed or aborted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      operationId: presignMultipartPart
+      summary: Get presigned URL for multipart part (data plane)
+      description: Returns a presigned PUT URL for uploading a single part of a multipart upload. The caller specifies the part number (1-10000); the server returns a short-lived URL that can be used to upload the part directly to storage. RBAC-checked against user's grants — requires write permission for the bucket/prefix. Used by end-user Upload screen to upload file chunks.
+      tags:
+        - DataPlane
+      x-basement-since: "1.2"
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          description: Multipart upload ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MultipartPartRequest'
+      responses:
+        '200':
+          description: Presigned URL generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MultipartPartResponse'
+        '400':
+          description: Invalid request (e.g., part number out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks write permission for this bucket/prefix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Multipart upload not found (already completed or aborted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /buckets/{bucket}/multipart/{uploadId}/complete:
+    post:
+      operationId: completeMultipart
+      summary: Complete multipart upload (data plane)
+      description: Finalizes a multipart upload by combining all uploaded parts into a single object. The caller must provide the list of part numbers and their ETags in order. On success, the object becomes immediately accessible; on failure, the multipart upload remains active for retry. RBAC-checked against user's grants — requires write permission for the bucket/prefix. Used by end-user Upload screen upon successful completion.
+      tags:
+        - DataPlane
+      x-basement-since: "1.2"
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          description: Multipart upload ID to complete
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteMultipartRequest'
+      responses:
+        '200':
+          description: Multipart upload completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectInfo'
+        '400':
+          description: Invalid request (e.g., missing parts, duplicate part numbers)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks write permission for this bucket/prefix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Multipart upload not found (already completed or aborted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /buckets/{bucket}/objects/{key+}:
+    delete:
+      operationId: deleteObject
+      summary: Delete an object (data plane)
+      description: Deletes a specific object from the bucket. Requires write permission for the bucket/prefix. For multipart uploads, use the dedicated abort endpoint instead. Used by end-user Browse screen on file delete action.
+      tags:
+        - DataPlane
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          description: Bucket name or ID
+          schema:
+            type: string
+        - name: key+
+          in: path
+          required: true
+          description: Object key (supports splat for nested paths)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Object deleted
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks write permission for this object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      operationId: presignObjectGet
+      summary: Get presigned URL for object download (data plane)
+      description: Returns a presigned GET URL for downloading an object. The caller specifies the desired TTL (default 300 seconds, min 60, max 86400). The returned URL can be used directly to download the object without further authentication. RBAC-checked against user's grants — requires read permission for the bucket/prefix. Used by end-user Browse screen on file download action.
+      tags:
+        - DataPlane
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          description: Bucket name or ID
+          schema:
+            type: string
+        - name: key+
+          in: path
+          required: true
+          description: Object key (supports splat for nested paths)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignRequest'
+      responses:
+        '200':
+          description: Presigned URL generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedURL'
+        '400':
+          description: Invalid request (e.g., TTL out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks read permission for this object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /buckets/{bucket}/objects/{key+}/presign-put:
+    post:
+      operationId: presignObjectPut
+      summary: Get presigned URL for object upload (data plane)
+      description: Returns a presigned PUT URL for uploading an object. The caller specifies the desired TTL (default 300 seconds, min 60, max 86400) and optional content type. The returned URL can be used directly to upload an object without further authentication. RBAC-checked against user's grants — requires write permission for the bucket/prefix. Used by end-user Upload screen for single-file uploads.
+      tags:
+        - DataPlane
+      x-basement-since: "1.2"
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          description: Bucket name or ID
+          schema:
+            type: string
+        - name: key+
+          in: path
+          required: true
+          description: Object key (supports splat for nested paths)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignRequest'
+      responses:
+        '200':
+          description: Presigned URL generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedURL'
+        '400':
+          description: Invalid request (e.g., TTL out of range, missing contentType)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User lacks write permission for this bucket/prefix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /shares:
     post:
       operationId: createShare
@@ -6094,6 +6506,120 @@ components:
           format: password
           nullable: true
           description: Optional password to protect the share link.
+
+
+    CreateMultipartRequest:
+      type: object
+      required: [key, contentType]
+      properties:
+        key:
+          type: string
+          description: Object key for the multipart upload.
+        contentType:
+          type: string
+          description: MIME content type of the object being uploaded.
+
+    PresignRequest:
+      type: object
+      required: [ttl]
+      properties:
+        ttl:
+          type: integer
+          format: int64
+          minimum: 60
+          maximum: 86400
+          default: 300
+          description: Time-to-live in seconds (default 300, min 60, max 86400).
+        contentType:
+          type: string
+          nullable: true
+          description: MIME content type (only required for presign-put requests).
+
+    PresignedURL:
+      type: object
+      required: [url, expires, method]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The presigned URL that can be used for direct access.
+        expires:
+          type: string
+          format: date-time
+          description: Timestamp when the URL expires (RFC 3339 date-time).
+        method:
+          type: string
+          enum: [GET, PUT, POST, DELETE]
+          description: HTTP method for which this URL is valid.
+
+    MultipartUpload:
+      type: object
+      required: [uploadId, bucket, key]
+      properties:
+        uploadId:
+          type: string
+          description: Unique multipart upload identifier.
+        bucket:
+          type: string
+          description: Bucket containing the upload.
+        key:
+          type: string
+          description: Object key being uploaded via multipart.
+        contentType:
+          type: string
+          nullable: true
+          description: MIME content type of the object (optional).
+        created:
+          type: string
+          format: date-time
+          description: Upload creation timestamp (RFC 3339 date-time).
+
+    MultipartPartRequest:
+      type: object
+      required: [partNumber]
+      properties:
+        partNumber:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Part number (must be between 1 and 10000, inclusive).
+
+    MultipartPartResponse:
+      type: object
+      required: [url, expires, partNumber]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Presigned PUT URL for uploading this specific part.
+        expires:
+          type: string
+          format: date-time
+          description: Timestamp when the URL expires (RFC 3339 date-time).
+        partNumber:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Part number for which this URL is valid.
+
+    CompleteMultipartRequest:
+      type: object
+      required: [parts]
+      properties:
+        parts:
+          type: array
+          items:
+            type: object
+            required: [partNumber, etag]
+            properties:
+              partNumber:
+                type: integer
+                minimum: 1
+                maximum: 10000
+                description: Part number (must match the uploaded part).
+              etag:
+                type: string
+                description: ETag returned by the storage service after part upload.
 
 security:
   - cookieAuth: []
