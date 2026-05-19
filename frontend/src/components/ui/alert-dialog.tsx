@@ -46,7 +46,7 @@ export function AlertDialogContent({ children, className }: AlertDialogContentPr
     <div
       className={cn(
         "mx-4 w-full max-w-md rounded-lg bg-background p-6 shadow-lg",
-        "flex flex-col gap-4",
+        "flex flex-col gap-5",
         "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
         className
       )}

@@ -36,7 +36,7 @@ export function Dialog({ open, onOpenChange, children, className }: DialogProps)
       <div
         className={cn(
           "mx-4 w-full max-w-lg rounded-lg bg-background p-6 shadow-lg",
-          "flex flex-col gap-4",
+          "flex flex-col gap-5",
           "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
           className
         )}
@@ -63,7 +63,7 @@ interface DialogHeaderProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function DialogHeader({ children, className }: DialogHeaderProps) {
   return (
-    <div className={cn("flex flex-col space-y-1.5 text-center sm:text-left", className)}>
+    <div className={cn("flex flex-col space-y-2 text-center sm:text-left", className)}>
       {children}
     </div>
   );
