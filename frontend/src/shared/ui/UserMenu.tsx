@@ -4,6 +4,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -11,11 +12,22 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 import { useUser } from "@/shared/auth/useUser";
+import { useVersion } from "@/shared/api/queries";
 
+/**
+ * UserMenu is the admin menu in the top bar — avatar trigger,
+ * dropdown contains Cluster, Settings (placeholder), Sign out, and a
+ * tucked-away version tag at the bottom for ops.
+ *
+ * The trigger collapses to icon-only on narrow viewports (<sm) so it
+ * functions as the mobile hamburger equivalent without a separate
+ * affordance.
+ */
 export function UserMenu() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: user } = useUser();
+  const { data: version } = useVersion();
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
@@ -35,13 +47,16 @@ export function UserMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-muted/50 transition-colors">
+      <DropdownMenuTrigger
+        className="flex items-center gap-2 rounded-lg px-1.5 py-1 sm:px-3 sm:py-1.5 text-sm font-medium hover:bg-muted/50 transition-colors"
+        aria-label="Open admin menu"
+      >
         <span className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
           {initial}
         </span>
         <span className="hidden sm:inline">{username}</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuGroup>
           <DropdownMenuLabel>
             <div className="flex flex-col">
@@ -51,7 +66,34 @@ export function UserMenu() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLinkItem href="/admin/cluster">
+            Cluster
+          </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem href="/admin/keys">
+            Access keys
+          </DropdownMenuLinkItem>
+          <DropdownMenuItem disabled>
+            Settings
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout}>Sign out</DropdownMenuItem>
+        {version?.version && (
+          <>
+            <DropdownMenuSeparator />
+            <div
+              className="px-1.5 py-1 text-[10px] font-mono opacity-40 select-text"
+              title={
+                version.commit
+                  ? `commit ${version.commit.slice(0, 7)} · built ${version.builtAt}`
+                  : undefined
+              }
+            >
+              {version.version}
+            </div>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
