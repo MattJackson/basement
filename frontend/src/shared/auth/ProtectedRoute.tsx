@@ -8,16 +8,29 @@ interface ProtectedRouteProps {
   children: ReactNode;
 }
 
+/**
+ * ProtectedRoute redirects to /admin/login if the user isn't
+ * authenticated. Carries the current pathname as `?next=` so the
+ * user lands back where they started after login.
+ *
+ * Guards against the recursive-next bug:
+ *   - never redirect when already on /admin/login (would just stack)
+ *   - uses pathname (path-only), not href (full origin URL), so the
+ *     next value is short and ergonomic
+ *   - rejects `next` values that don't start with /admin (no
+ *     open-redirect to attacker-controlled URLs)
+ */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { data, isLoading } = useUser();
 
   useEffect(() => {
-    if (!isLoading && !data) {
-      const currentPath = location.href.split("#")[0];
-      navigate({ to: "/admin/login", search: { next: currentPath } });
-    }
+    if (isLoading || data) return;
+    // Already on the login route? Nothing to do — don't recurse.
+    if (location.pathname === "/admin/login") return;
+    const next = location.pathname.startsWith("/admin") ? location.pathname : "/admin";
+    navigate({ to: "/admin/login", search: { next } });
   }, [isLoading, data, navigate, location]);
 
   if (isLoading || !data) {

@@ -39,10 +39,16 @@ function Dashboard() {
   };
 
   if (nodesError) {
+    const msg = nodesError instanceof Error ? nodesError.message : String(nodesError);
     return (
-      <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4">
-        <p className="text-sm text-destructive">
-          Couldn't connect to cluster. Retrying automatically...
+      <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
+        <p className="text-sm font-medium text-destructive">
+          Couldn't reach Garage cluster
+        </p>
+        <p className="text-xs text-destructive/80 font-mono break-all">{msg}</p>
+        <p className="text-xs text-muted-foreground">
+          Check the Garage admin URL + token in your basement environment.
+          The driver is responding; Garage is the one returning an error.
         </p>
       </div>
     );

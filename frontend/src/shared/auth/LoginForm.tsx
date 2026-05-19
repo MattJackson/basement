@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { client } from "@/shared/api/client";
+import { useVersion } from "@/shared/api/queries";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,7 @@ export function LoginForm() {
   const navigate = useNavigate();
   const search = useSearch({ from: "/admin/login" });
   const queryClient = useQueryClient();
+  const { data: version } = useVersion();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -122,6 +124,14 @@ export function LoginForm() {
               {isSubmitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+          {version && (
+            <p
+              className="mt-6 text-center text-xs text-muted-foreground/60"
+              title={`commit ${version.commit?.slice(0, 7) ?? "unknown"} · built ${version.builtAt}`}
+            >
+              {version.version}
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
