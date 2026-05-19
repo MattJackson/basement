@@ -140,9 +140,15 @@ type BucketUpdate struct {
 
 // Key represents an access key.
 type Key struct {
-	ID                string            `json:"id"`
-	Name              string            `json:"name"`
-	AccessKeyID       string            `json:"accessKeyId"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	AccessKeyID string `json:"accessKeyId"`
+	// SecretAccessKey is populated only on the CreateKey response.
+	// Backends (Garage included) return the secret exactly once at
+	// creation and never again — drivers MUST pass it through on the
+	// create path so the UI's shown-once dialog can surface it.
+	// ListKeys / GetKey responses leave it nil.
+	SecretAccessKey   *string           `json:"secretAccessKey,omitempty"`
 	Created           time.Time         `json:"created,omitempty"`
 	AllowCreateBucket bool              `json:"allowCreateBucket"`
 	Buckets           []KeyBucketAccess `json:"buckets,omitempty"`

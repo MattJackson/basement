@@ -32,6 +32,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useCreateKey } from "@/shared/api/mutations";
 import { DeleteKeyConfirm } from "@/shared/ui/DeleteKeyConfirm";
 import { useDeleteKey } from "@/shared/api/mutations";
+import { Checkbox } from "@/components/ui/checkbox";
 import type { components } from "@/shared/api/types.gen";
 
 export const Route = createFileRoute("/admin/keys/")({
@@ -48,6 +49,7 @@ function KeysScreen() {
   const [newKeyName, setNewKeyName] = useState("");
   const createKey = useCreateKey();
   const [createdKey, setCreatedKey] = useState<components["schemas"]["Key"] | null>(null);
+  const [savedConfirmed, setSavedConfirmed] = useState(false);
   
   // Delete key dialog state
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -299,10 +301,14 @@ function KeysScreen() {
       </Dialog>
 
       {/* Created Key Secret Display Dialog — Garage returns the
-          secret access key exactly once. If the user closes without
-          saving it, the key is unusable until rotated/recreated. */}
+          secret access key exactly once. dismissible=false so a
+          stray click outside or Escape doesn't lose the only copy. */}
       {createdKey && (
-        <Dialog open={true} onOpenChange={(open) => { if (!open) setCreatedKey(null); }}>
+        <Dialog
+          open={true}
+          dismissible={false}
+          onOpenChange={() => { /* explicit confirm only */ }}
+        >
           <DialogContent className="max-w-xl">
             <DialogHeader>
               <DialogTitle>Save this — it won&apos;t be shown again</DialogTitle>
@@ -353,10 +359,30 @@ function KeysScreen() {
                   </Button>
                 </div>
               </div>
+
+              <label className="flex items-start gap-2 pt-2 cursor-pointer select-none">
+                <Checkbox
+                  checked={savedConfirmed}
+                  onCheckedChange={(c) => setSavedConfirmed(c === true)}
+                  data-testid="saved-confirmed-checkbox"
+                />
+                <span className="text-sm">
+                  I&apos;ve copied the secret access key into a password manager or
+                  S3 client. I understand it will not be shown again.
+                </span>
+              </label>
             </div>
 
             <DialogFooter>
-              <Button onClick={() => setCreatedKey(null)}>I&apos;ve saved it</Button>
+              <Button
+                onClick={() => { setSavedConfirmed(false); setCreatedKey(null); }}
+                disabled={!savedConfirmed}
+                data-testid="saved-confirmed-button"
+                // Stop Enter-key auto-submit
+                type="button"
+              >
+                Done
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

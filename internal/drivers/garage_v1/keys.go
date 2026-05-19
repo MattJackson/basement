@@ -67,7 +67,14 @@ func (d *driver) CreateKey(ctx context.Context, spec driverpkg.KeySpec) (driverp
 		return driverpkg.Key{}, err
 	}
 
-	return keyFromInfo(resp), nil
+	key := keyFromInfo(resp)
+	// Surface the create-only secret. Garage returns it exactly here;
+	// keyFromInfo drops it because GetKey/UpdateKeyPermissions paths
+	// reuse the same converter but don't carry the secret.
+	if resp.SecretAccessKey != nil && *resp.SecretAccessKey != "" {
+		key.SecretAccessKey = resp.SecretAccessKey
+	}
+	return key, nil
 }
 
 // UpdateKeyPermissions sets per-bucket permissions for a key.
