@@ -68,19 +68,18 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reject duplicate names — Garage allows them at the storage layer
-	// (each key has its own GK... id), but operator-facing UX requires
-	// unique names so the list view is unambiguous.
-	if spec.Name != "" {
-		existing, listErr := s.drv.ListKeys(r.Context())
-		if listErr == nil {
-			for _, k := range existing {
-				if k.Name == spec.Name {
-					writeError(w, http.StatusConflict, "DUPLICATE_NAME",
-						"A key with this name already exists. Pick a different name.", nil)
-					return
-				}
-			}
+	// Garage allows empty / duplicate names at the storage layer (each
+	// key has its own GK... id), but operator-facing UX needs both.
+	if ve := validateName("name", spec.Name, nil, ""); ve != nil {
+		writeValidationError(w, ve)
+		return
+	}
+	if existing, listErr := s.drv.ListKeys(r.Context()); listErr == nil {
+		if ve := requireUniqueName("name", spec.Name, existing, func(k driver.Key) []string {
+			return []string{k.Name}
+		}); ve != nil {
+			writeValidationError(w, ve)
+			return
 		}
 	}
 
