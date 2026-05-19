@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="geometricPrecision">
+  <rect width="512" height="512" fill="#F4ECDD"/>
+  <path d="M 55 250 L 55 420 L 175 445 L 175 275 Z"
+        fill="#8A5530" stroke="#2B1810" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M 55 250 L 130 232 L 175 275 Z"
+        fill="#6B3F22" stroke="#2B1810" stroke-width="16" stroke-linejoin="round"/>
+  <rect x="130" y="245" width="300" height="215"
+        fill="#C9874B" stroke="#2B1810" stroke-width="20" stroke-linejoin="round" rx="4"/>
+  <path d="M 130 245 L 60 165 L 240 140 L 280 220 Z"
+        fill="#D89C5E" stroke="#2B1810" stroke-width="20" stroke-linejoin="round"/>
+  <path d="M 430 245 L 500 165 L 320 140 L 280 220 Z"
+        fill="#B8773F" stroke="#2B1810" stroke-width="20" stroke-linejoin="round"/>
+  <circle cx="280" cy="195" r="42" fill="#E8B872" stroke="#2B1810" stroke-width="16"/>
+  <rect x="190" y="340" width="180" height="70" fill="#F4ECDD" stroke="#2B1810" stroke-width="10"/>
+  <line x1="210" y1="368" x2="350" y2="368" stroke="#2B1810" stroke-width="8" stroke-linecap="round"/>
+  <line x1="210" y1="390" x2="320" y2="390" stroke="#2B1810" stroke-width="8" stroke-linecap="round"/>
+</svg>

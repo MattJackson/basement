@@ -24,8 +24,10 @@ func TestHandler_GET_root_returns_index_html(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "frontend") && !strings.Contains(body, "basement backend is running") {
-		t.Errorf("expected body to contain 'frontend' or 'basement', got %q", body)
+	// SPA index has <title>Basement</title>; placeholder fallback has
+	// "basement backend is running".
+	if !strings.Contains(body, "Basement") && !strings.Contains(body, "basement backend is running") {
+		t.Errorf("expected body to contain 'Basement' or placeholder text, got %q", body)
 	}
 }
 
@@ -41,8 +43,10 @@ func TestHandler_GET_any_path_returns_index_html(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "frontend") && !strings.Contains(body, "basement backend is running") {
-		t.Errorf("expected body to contain 'frontend' or 'basement', got %q", body)
+	// SPA index has <title>Basement</title>; placeholder fallback has
+	// "basement backend is running".
+	if !strings.Contains(body, "Basement") && !strings.Contains(body, "basement backend is running") {
+		t.Errorf("expected body to contain 'Basement' or placeholder text, got %q", body)
 	}
 }
 
