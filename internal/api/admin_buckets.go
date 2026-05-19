@@ -4,12 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/driver"
 )
+
+// bucketAliasPattern matches the OpenAPI BucketSpec.alias pattern —
+// lowercase alphanumeric + hyphen, 3–63 chars, no leading/trailing
+// hyphen. Same shape as S3 bucket naming so the alias is usable as
+// an actual S3-client bucket reference.
+var bucketAliasPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
 
 // confirmDeleteTTL bounds how long an armed delete token stays valid.
 // Short enough that an armed-but-not-fired token aging out forces an
@@ -73,6 +80,24 @@ func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID", "invalid request body", nil)
 		return
+	}
+
+	// Garage accepts empty alias and creates an orphan bucket
+	// addressable only by id-hash. Refuse here so the list view
+	// stays meaningful + each bucket has a usable S3 reference.
+	if ve := validateName("alias", spec.Alias, bucketAliasPattern,
+		"3–63 chars, lowercase letters/digits/hyphens, no leading or trailing hyphen"); ve != nil {
+		writeValidationError(w, ve)
+		return
+	}
+
+	if existing, listErr := s.drv.ListBuckets(r.Context()); listErr == nil {
+		if ve := requireUniqueName("alias", spec.Alias, existing, func(b driver.Bucket) []string {
+			return b.Aliases
+		}); ve != nil {
+			writeValidationError(w, ve)
+			return
+		}
 	}
 
 	bucket, err := s.drv.CreateBucket(r.Context(), spec)

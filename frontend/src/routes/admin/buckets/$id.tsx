@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
+import { DangerZone } from "@/shared/ui/DangerZone";
 import { PermissionChips } from "@/shared/ui/PermissionChips";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
@@ -445,17 +446,15 @@ function AdminBucketDetail() {
              <p className="text-xs text-muted-foreground">Created {humanizeTime(bucket.created)}</p>
            )}
 
-           <div className="pt-6 border-t">
-             <h3 className="text-sm font-medium mb-2">Danger zone</h3>
-             <Button 
-               variant="destructive" 
-               size="sm"
+           <DangerZone description="Deleting this bucket removes all its objects, aliases (global + per-key), and revokes any key access. Cannot be undone.">
+             <Button
+               variant="destructive"
                onClick={() => setDeleteDialogOpen(true)}
                disabled={deleteMutation.isPending}
              >
                {deleteMutation.isPending ? "Deleting..." : "Delete bucket"}
              </Button>
-           </div>
+           </DangerZone>
 
            <DeleteBucketConfirm
              open={deleteDialogOpen}

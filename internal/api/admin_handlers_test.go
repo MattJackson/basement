@@ -928,9 +928,12 @@ func TestCreateBucketHandler_HappyPath(t *testing.T) {
 		Created:   time.Now(),
 	}
 
-	body := `{"global_alias": "new-bucket"}`
+	body := `{"alias": "new-bucket"}`
 
 	drv := &testMockDriver{
+		listBucketsFunc: func(_ context.Context) ([]driver.Bucket, error) {
+			return []driver.Bucket{}, nil
+		},
 		createBucketFunc: func(_ context.Context, spec driver.BucketSpec) (driver.Bucket, error) {
 			return bucket, nil
 		},
@@ -972,11 +975,18 @@ func TestCreateBucketHandler_Conflict(t *testing.T) {
 	cfg := newTestConfig()
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
-	body := `{"global_alias": "existing-bucket"}`
+	body := `{"alias": "existing-bucket"}`
 
+	called := false
 	drv := &testMockDriver{
-		createBucketFunc: func(_ context.Context, spec driver.BucketSpec) (driver.Bucket, error) {
-			return driver.Bucket{}, &driver.Error{Op: "CreateBucket", Driver: "test", Err: driver.ErrConflict, Message: "already exists"}
+		listBucketsFunc: func(_ context.Context) ([]driver.Bucket, error) {
+			return []driver.Bucket{
+				{ID: "existing-bucket-id", Aliases: []string{"existing-bucket"}},
+			}, nil
+		},
+		createBucketFunc: func(_ context.Context, _ driver.BucketSpec) (driver.Bucket, error) {
+			called = true
+			return driver.Bucket{}, nil
 		},
 	}
 
@@ -990,6 +1000,35 @@ func TestCreateBucketHandler_Conflict(t *testing.T) {
 
 	if rr.Code != http.StatusConflict {
 		t.Errorf("expected status 409, got %d", rr.Code)
+	}
+	if called {
+		t.Errorf("driver.CreateBucket must NOT run when validation rejects a duplicate alias")
+	}
+}
+
+func TestCreateBucketHandler_EmptyAliasRejected(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	called := false
+	drv := &testMockDriver{
+		createBucketFunc: func(_ context.Context, _ driver.BucketSpec) (driver.Bucket, error) {
+			called = true
+			return driver.Bucket{}, nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets")
+	req.Body = io.NopCloser(strings.NewReader(`{"alias": ""}`))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty alias, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Errorf("driver.CreateBucket must NOT run when alias is empty")
 	}
 }
 

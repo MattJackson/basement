@@ -13,6 +13,7 @@ import { adminPage } from "@/shared/layout/adminPage";
 import { useUpdateKeyPermissions, useDeleteKey } from "@/shared/api/mutations";
 import { useState } from "react";
 import type { components } from "@/shared/api/types.gen";
+import { DangerZone } from "@/shared/ui/DangerZone";
 
 export const Route = createFileRoute("/admin/keys/$id")({
   component: adminPage(KeyDetailScreen),
@@ -346,16 +347,14 @@ function KeyDetailScreen() {
         </CardContent>
       </Card>
 
-      {/* Danger zone */}
-      <div className="pt-6 border-t">
-        <h3 className="text-sm font-medium mb-2">Danger zone</h3>
+      <DangerZone description="Deleting this key revokes all its S3 access immediately. Buckets it was granted on are unaffected.">
         <Button
           variant="destructive"
           onClick={() => setDeleteDialogOpen(true)}
         >
           Delete key
         </Button>
-      </div>
+      </DangerZone>
 
       <DeleteKeyConfirm
         open={deleteDialogOpen}
