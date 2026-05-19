@@ -8,8 +8,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// ErrTokenExpired is returned by ParseToken when the JWT has expired.
 var ErrTokenExpired = errors.New("token has expired")
+
+// ErrInvalidSignature is returned by ParseToken when the JWT signature is invalid.
 var ErrInvalidSignature = errors.New("invalid signature")
+
+// ErrInvalidAlgorithm is returned by ParseToken when the JWT algorithm is unsupported.
 var ErrInvalidAlgorithm = errors.New("unsupported algorithm")
 
 // Claims extends jwt.RegisteredClaims with UserID and Role fields.

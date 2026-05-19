@@ -36,7 +36,7 @@ func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 
 // GetBucket returns details for a specific bucket by ID or globalAlias.
 // Endpoint: GET /v2/GetBucketInfo?id={id}&globalAlias={alias} (docs/garage-admin-api.md lines 224-232)
-func (d *driver) GetBucket(ctx context.Context, id string) (driverpkg.Bucket, error) {
+func (d *driver) GetBucket(ctx context.Context, _ string) (driverpkg.Bucket, error) {
 	var resp getBucketInfoResponse
 	if err := d.client.do(ctx, "GET", "/v2/GetBucketInfo", nil, &resp); err != nil {
 		return driverpkg.Bucket{}, err
@@ -185,9 +185,9 @@ type getBucketInfoResponse struct {
 }
 
 type getBucketInfoKey struct {
-	AccessKeyId string            `json:"accessKeyId"`
-	Name        string            `json:"name"`
-	Permissions []bucketKeyPerm   `json:"permissions"`
+	AccessKeyID      string             `json:"accessKeyId"`
+	Name             string             `json:"name"`
+	Permissions      []bucketKeyPerm    `json:"permissions"`
 	BucketLocalAliases []bucketLocalAlias `json:"bucketLocalAliases"`
 }
 
@@ -199,7 +199,7 @@ type bucketKeyPerm struct {
 }
 
 type bucketLocalAlias struct {
-	AccessKeyId string `json:"accessKeyId"`
+	AccessKeyID string `json:"accessKeyId"`
 	Alias       string `json:"alias"`
 	AllowRead   bool   `json:"allowRead"`
 	AllowWrite  bool   `json:"allowWrite"`
@@ -235,7 +235,7 @@ type createBucketRequest struct {
 }
 
 type createBucketLocalAlias struct {
-	AccessKeyId string `json:"accessKeyId"`
+	AccessKeyID string `json:"accessKeyId"`
 	Alias       string `json:"alias"`
 	Allow       bool   `json:"allow"`
 }

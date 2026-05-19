@@ -103,7 +103,7 @@ func TestAtomicSaveCorruptionRecovery(t *testing.T) {
 	if _, err := f.WriteString("{\"corrupted"); err != nil {
 		t.Fatalf("write corrupted data failed: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	reloaded, err := loadJSON[[]User](usersPath)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestAtomicSaveCorruptionRecovery(t *testing.T) {
 		t.Errorf("expected 2 users after atomic save, got %d", len(reloaded))
 	}
 
-	os.Remove(tmpPath)
+	_ = os.Remove(tmpPath)
 }
 
 func TestConcurrentWrites(t *testing.T) {

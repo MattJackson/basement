@@ -4,7 +4,6 @@ package web
 import (
 	"bytes"
 	"embed"
-	"io/fs"
 	"mime"
 	"net/http"
 	"path"
@@ -140,8 +139,5 @@ func modTime(fullPath string) time.Time {
 	if err != nil {
 		return time.Time{}
 	}
-	if statT, ok := info.(fs.FileInfo); ok {
-		return statT.ModTime()
-	}
-	return time.Time{}
+	return info.ModTime()
 }

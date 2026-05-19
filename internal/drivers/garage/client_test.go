@@ -35,14 +35,14 @@ func TestNewClient(t *testing.T) {
 func TestClientDo_Success(t *testing.T) {
 	want := map[string]string{"message": "ok"}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(want)
+		_ = json.NewEncoder(w).Encode(want)
 	}))
 	defer ts.Close()
 
-	cfg := map[string]string{
+cfg := map[string]string{
 		"admin_url":   ts.URL,
 		"admin_token": "test-token",
 	}
@@ -55,13 +55,13 @@ func TestClientDo_Success(t *testing.T) {
 		t.Fatalf("do() error = %v", err)
 	}
 
-	if len(got) == 0 || got["message"] != "ok" {
+	if got == nil || got["message"] != "ok" {
 		t.Errorf("response = %+v, want %+v", got, want)
 	}
 }
 
 func TestClientDo_401(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer ts.Close()
@@ -91,7 +91,7 @@ func TestClientDo_401(t *testing.T) {
 }
 
 func TestClientDo_403(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 	}))
 	defer ts.Close()
@@ -121,7 +121,7 @@ func TestClientDo_403(t *testing.T) {
 }
 
 func TestClientDo_404(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer ts.Close()
@@ -134,7 +134,7 @@ func TestClientDo_404(t *testing.T) {
 	c := newClient(cfg)
 
 	var got string
-	err := c.do(context.Background(), "TestOp", "/", nil, &got)
+err := c.do(context.Background(), "TestOp", "/", nil, &got)
 
 	if err == nil {
 		t.Fatal("expected error for 404")
@@ -151,7 +151,7 @@ func TestClientDo_404(t *testing.T) {
 }
 
 func TestClientDo_5xx(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer ts.Close()

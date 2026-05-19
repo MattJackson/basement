@@ -24,7 +24,7 @@ type ErrorResponse struct {
 func writeError(w http.ResponseWriter, status int, code string, message string, details map[string]interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(ErrorResponse{
+	_ = json.NewEncoder(w).Encode(ErrorResponse{
 		Error: Error{
 			Code:    code,
 			Message: message,
@@ -39,7 +39,7 @@ func writeErrorSimple(w http.ResponseWriter, status int, code string, message st
 }
 
 // writeDriverError translates driver.Error sentinels to HTTP responses per design.md spec.
-func writeDriverError(w http.ResponseWriter, op string, err error) {
+func writeDriverError(w http.ResponseWriter, _ string, err error) {
 	var de *driver.Error
 	if errors.As(err, &de) {
 		switch {
@@ -65,5 +65,5 @@ func writeDriverError(w http.ResponseWriter, op string, err error) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

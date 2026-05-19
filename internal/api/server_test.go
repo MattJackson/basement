@@ -17,32 +17,32 @@ import (
 // mockDriver is a mock driver implementation for testing.
 type mockDriver struct{}
 
-func (m *mockDriver) Capabilities(ctx context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
-func (m *mockDriver) HealthCheck(ctx context.Context) (driver.HealthReport, error) { return driver.HealthReport{}, nil }
-func (m *mockDriver) ListNodes(ctx context.Context) ([]driver.Node, error) { return nil, nil }
-func (m *mockDriver) GetLayout(ctx context.Context) (driver.Layout, error) { return driver.Layout{}, nil }
-func (m *mockDriver) StageLayout(ctx context.Context, change driver.LayoutChange) (driver.LayoutDiff, error) { return driver.LayoutDiff{}, nil }
-func (m *mockDriver) ApplyLayout(ctx context.Context) error { return nil }
-func (m *mockDriver) RevertLayout(ctx context.Context) error { return nil }
-func (m *mockDriver) ListBuckets(ctx context.Context) ([]driver.Bucket, error) { return nil, nil }
-func (m *mockDriver) GetBucket(ctx context.Context, id string) (driver.Bucket, error) { return driver.Bucket{}, nil }
-func (m *mockDriver) CreateBucket(ctx context.Context, spec driver.BucketSpec) (driver.Bucket, error) { return driver.Bucket{}, nil }
-func (m *mockDriver) UpdateBucket(ctx context.Context, id string, update driver.BucketUpdate) (driver.Bucket, error) { return driver.Bucket{}, nil }
-func (m *mockDriver) DeleteBucket(ctx context.Context, id string) error { return nil }
-func (m *mockDriver) ListKeys(ctx context.Context) ([]driver.Key, error) { return nil, nil }
-func (m *mockDriver) GetKey(ctx context.Context, id string) (driver.Key, error) { return driver.Key{}, nil }
-func (m *mockDriver) CreateKey(ctx context.Context, spec driver.KeySpec) (driver.Key, error) { return driver.Key{}, nil }
-func (m *mockDriver) UpdateKeyPermissions(ctx context.Context, keyID string, perms []driver.BucketPermission) error { return nil }
-func (m *mockDriver) DeleteKey(ctx context.Context, id string) error { return nil }
-func (m *mockDriver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (driver.ObjectPage, error) { return driver.ObjectPage{}, nil }
-func (m *mockDriver) StatObject(ctx context.Context, bucket, key string) (driver.ObjectInfo, error) { return driver.ObjectInfo{}, nil }
-func (m *mockDriver) PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
-func (m *mockDriver) PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
-func (m *mockDriver) DeleteObject(ctx context.Context, bucket, key string) error { return nil }
-func (m *mockDriver) CreateMultipart(ctx context.Context, bucket, key, contentType string) (driver.MultipartUpload, error) { return driver.MultipartUpload{}, nil }
-func (m *mockDriver) PresignUploadPart(ctx context.Context, upload driver.MultipartUpload, partNum int) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
-func (m *mockDriver) CompleteMultipart(ctx context.Context, upload driver.MultipartUpload, parts []driver.CompletedPart) error { return nil }
-func (m *mockDriver) AbortMultipart(ctx context.Context, upload driver.MultipartUpload) error { return nil }
+func (m *mockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
+func (m *mockDriver) HealthCheck(_ context.Context) (driver.HealthReport, error) { return driver.HealthReport{}, nil }
+func (m *mockDriver) ListNodes(_ context.Context) ([]driver.Node, error) { return nil, nil }
+func (m *mockDriver) GetLayout(_ context.Context) (driver.Layout, error) { return driver.Layout{}, nil }
+func (m *mockDriver) StageLayout(_ context.Context, _ driver.LayoutChange) (driver.LayoutDiff, error) { return driver.LayoutDiff{}, nil }
+func (m *mockDriver) ApplyLayout(_ context.Context) error { return nil }
+func (m *mockDriver) RevertLayout(_ context.Context) error { return nil }
+func (m *mockDriver) ListBuckets(_ context.Context) ([]driver.Bucket, error) { return nil, nil }
+func (m *mockDriver) GetBucket(_ context.Context, _ string) (driver.Bucket, error) { return driver.Bucket{}, nil }
+func (m *mockDriver) CreateBucket(_ context.Context, _ driver.BucketSpec) (driver.Bucket, error) { return driver.Bucket{}, nil }
+func (m *mockDriver) UpdateBucket(_ context.Context, _ string, _ driver.BucketUpdate) (driver.Bucket, error) { return driver.Bucket{}, nil }
+func (m *mockDriver) DeleteBucket(_ context.Context, _ string) error { return nil }
+func (m *mockDriver) ListKeys(_ context.Context) ([]driver.Key, error) { return nil, nil }
+func (m *mockDriver) GetKey(_ context.Context, _ string) (driver.Key, error) { return driver.Key{}, nil }
+func (m *mockDriver) CreateKey(_ context.Context, _ driver.KeySpec) (driver.Key, error) { return driver.Key{}, nil }
+func (m *mockDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []driver.BucketPermission) error { return nil }
+func (m *mockDriver) DeleteKey(_ context.Context, _ string) error { return nil }
+func (m *mockDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) { return driver.ObjectPage{}, nil }
+func (m *mockDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) { return driver.ObjectInfo{}, nil }
+func (m *mockDriver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
+func (m *mockDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
+func (m *mockDriver) DeleteObject(_ context.Context, _, _ string) error { return nil }
+func (m *mockDriver) CreateMultipart(_ context.Context, _, _, _ string) (driver.MultipartUpload, error) { return driver.MultipartUpload{}, nil }
+func (m *mockDriver) PresignUploadPart(_ context.Context, _ driver.MultipartUpload, _ int) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
+func (m *mockDriver) CompleteMultipart(_ context.Context, _ driver.MultipartUpload, _ []driver.CompletedPart) error { return nil }
+func (m *mockDriver) AbortMultipart(_ context.Context, _ driver.MultipartUpload) error { return nil }
 
 func TestHealthHandler(t *testing.T) {
 	cfg := &config.Config{Listen: ":8080"}

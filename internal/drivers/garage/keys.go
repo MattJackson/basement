@@ -101,8 +101,8 @@ func (d *driver) UpdateKeyPermissions(ctx context.Context, keyID string, perms [
 	// So to grant read/write/owner, we set those flags to true in AllowBucketKey.
 	for _, p := range perms {
 		permChange := allowBucketKeyRequest{
-			BucketId:    p.BucketID,
-			AccessKeyId: keyID,
+			BucketID:    p.BucketID,
+			AccessKeyID: keyID,
 			Permissions: apiBucketKeyPerm{
 				Read:  p.Read,
 				Write: p.Write,
@@ -145,21 +145,21 @@ type getKeyInfoResponse struct {
 }
 
 type bucketPermissionResp struct {
-	BucketID        string          `json:"bucketId"`
-	Read            bool            `json:"read"`
-	Write           bool            `json:"write"`
-	Owner           bool            `json:"owner"`
+	BucketID         string             `json:"bucketId"`
+	Read             bool               `json:"read"`
+	Write            bool               `json:"write"`
+	Owner            bool               `json:"owner"`
 	BucketLocalAliases []bucketLocalAlias `json:"bucketLocalAliases,omitempty"`
 }
 
 type createKeyRequest struct {
 	Name          string  `json:"name"`
-	AccessKeyId   *string `json:"accessKeyId,omitempty"`
+	AccessKeyID   *string `json:"accessKeyId,omitempty"`
 }
 
 type allowBucketKeyRequest struct {
-	BucketId    string        `json:"bucketId"`
-	AccessKeyId string        `json:"accessKeyId"`
+	BucketID    string         `json:"bucketId"`
+	AccessKeyID string         `json:"accessKeyId"`
 	Permissions apiBucketKeyPerm `json:"permissions"`
 }
 

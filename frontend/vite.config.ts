@@ -25,6 +25,7 @@ export default defineConfig({
     outDir: "../internal/web/dist",
     emptyOutDir: true,
     assetsDir: "assets",
+    sourcemap: true,
   },
   server: {
     proxy: {

@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// CookieName is the session cookie key.
 const CookieName = "__Host-basement_session"
 
 // SetSessionCookie sets a session cookie with __Host- prefix requirements:

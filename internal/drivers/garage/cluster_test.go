@@ -22,8 +22,8 @@ func TestStageLayout(t *testing.T) {
 			t.Fatalf("failed to decode request: %v", err)
 		}
 
-		if req.NodeId != "node-1" {
-			t.Errorf("expected NodeId 'node-1', got '%s'", req.NodeId)
+		if req.NodeID != "node-1" {
+			t.Errorf("expected NodeID 'node-1', got '%s'", req.NodeID)
 		}
 
 		response := getClusterLayoutResponse{
@@ -34,7 +34,7 @@ func TestStageLayout(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -54,15 +54,13 @@ func TestStageLayout(t *testing.T) {
 		t.Fatalf("StageLayout failed: %v", err)
 	}
 
-	if diff.Adds == nil || len(diff.Adds) > 0 || len(diff.Removes) > 0 || len(diff.Modifies) > 0 {
-		// Accept empty diff for now as computeLayoutDiff is simplified
-	}
+	_ = diff
 }
 
 func TestStageLayoutError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "internal error"}`))
+		_, _ = w.Write([]byte(`{"error": "internal error"}`))
 	}))
 	defer server.Close()
 
@@ -91,7 +89,7 @@ func TestApplyLayout(t *testing.T) {
 				Roles:   []layoutNodeRole{},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
 
@@ -115,7 +113,7 @@ func TestApplyLayout(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -136,7 +134,7 @@ func TestApplyLayoutConflict(t *testing.T) {
 		if r.URL.Path == "/v2/GetClusterLayout" && r.Method == "GET" {
 			response := getClusterLayoutResponse{Version: 10}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
 
@@ -145,7 +143,7 @@ func TestApplyLayoutConflict(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(`{"error": "version mismatch"}`))
+		_, _ = w.Write([]byte(`{"error": "version mismatch"}`))
 	}))
 	defer server.Close()
 
@@ -172,7 +170,7 @@ func TestRevertLayout(t *testing.T) {
 				Roles:   []layoutNodeRole{},
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
 
@@ -193,7 +191,7 @@ func TestRevertLayout(t *testing.T) {
 		response := revertClusterLayoutResponse{}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -214,7 +212,7 @@ func TestRevertLayoutConflict(t *testing.T) {
 		if r.URL.Path == "/v2/GetClusterLayout" && r.Method == "GET" {
 			response := getClusterLayoutResponse{Version: 15}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 			return
 		}
 
@@ -223,7 +221,7 @@ func TestRevertLayoutConflict(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusConflict)
-		w.Write([]byte(`{"error": "version mismatch"}`))
+		_, _ = w.Write([]byte(`{"error": "version mismatch"}`))
 	}))
 	defer server.Close()
 
@@ -238,4 +236,3 @@ func TestRevertLayoutConflict(t *testing.T) {
 		t.Errorf("expected ErrConflict, got %v", err)
 	}
 }
-
