@@ -11,20 +11,20 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/mattjackson/basement/internal/auth"
-	"github.com/mattjackson/basement/internal/web"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
+	"github.com/mattjackson/basement/internal/web"
 )
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	cfg    *config.Config
-	store  *store.Store
-	drv    driver.Driver
-	router chi.Router
+	cfg        *config.Config
+	store      *store.Store
+	drv        driver.Driver
+	router     chi.Router
 	httpServer *http.Server
-	logger *slog.Logger
+	logger     *slog.Logger
 }
 
 // New creates a new Server instance.
@@ -83,31 +83,47 @@ func (s *Server) routes() {
 	r.Use(middleware.AllowContentType("application/json"))
 
 	r.Route("/api/v1", func(apiR chi.Router) {
-			// Public routes (no auth required) - /health, /version, /auth/login
-			apiR.Get("/health", s.healthHandler)
-			apiR.Get("/version", s.versionHandler)
-			apiR.Post("/auth/login", s.loginHandler)
+		// Public routes — no auth required.
+		apiR.Get("/health", s.healthHandler)
+		apiR.Get("/version", s.versionHandler)
+		apiR.Post("/auth/login", s.loginHandler)
 
-			// Authenticated group with middleware for protected routes
-			apiR.Group(func(authG chi.Router) {
-				authG.Use(auth.Middleware(s.cfg.JWT.Secret))
+		// Authenticated routes — JWT cookie required.
+		apiR.Group(func(authG chi.Router) {
+			authG.Use(auth.Middleware(s.cfg.JWT.Secret))
 
-				authG.Post("/auth/logout", s.logoutHandler)
-				authG.Get("/auth/me", s.meHandler)
-				authG.Get("/capabilities", s.capabilitiesHandler)
-			})
-
-			// Admin routes - require admin role
-			apiR.Group(func(adminG chi.Router) {
-				adminG.Use(auth.Middleware(s.cfg.JWT.Secret))
-				adminG.Use(auth.RequireRole("admin"))
-
-				adminG.Get("/admin/nodes", s.listNodesHandler)
-				adminG.Get("/admin/layout", s.getLayoutHandler)
-				adminG.Get("/admin/buckets", s.listBucketsHandler)
-				adminG.Get("/admin/keys", s.listKeysHandler)
-			})
+			authG.Post("/auth/logout", s.logoutHandler)
+			authG.Get("/auth/me", s.meHandler)
+			authG.Get("/capabilities", s.capabilitiesHandler)
 		})
+
+		// Admin routes — admin role required.
+		// Flat registration; do NOT use chi.Router.Route("/admin/buckets", …)
+		// because it would replace the prior list+create handlers on the
+		// same path.
+		apiR.Group(func(adminG chi.Router) {
+			adminG.Use(auth.Middleware(s.cfg.JWT.Secret))
+			adminG.Use(auth.RequireRole("admin"))
+
+			adminG.Get("/admin/nodes", s.listNodesHandler)
+			adminG.Get("/admin/layout", s.getLayoutHandler)
+			adminG.Post("/admin/layout/stage", s.stageLayoutHandler)
+			adminG.Post("/admin/layout/apply", s.applyLayoutHandler)
+			adminG.Post("/admin/layout/revert", s.revertLayoutHandler)
+
+			adminG.Get("/admin/buckets", s.listBucketsHandler)
+			adminG.Post("/admin/buckets", s.createBucketHandler)
+			adminG.Get("/admin/buckets/{id}", s.getBucketHandler)
+			adminG.Patch("/admin/buckets/{id}", s.updateBucketHandler)
+			adminG.Delete("/admin/buckets/{id}", s.deleteBucketHandler)
+
+			adminG.Get("/admin/keys", s.listKeysHandler)
+			adminG.Post("/admin/keys", s.createKeyHandler)
+			adminG.Get("/admin/keys/{id}", s.getKeyHandler)
+			adminG.Patch("/admin/keys/{id}", s.updateKeyHandler)
+			adminG.Delete("/admin/keys/{id}", s.deleteKeyHandler)
+		})
+	})
 
 	r.Handle("/*", web.Handler())
 }

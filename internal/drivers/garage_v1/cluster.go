@@ -59,49 +59,91 @@ func (d *driver) HealthCheck(ctx context.Context) (driverpkg.HealthReport, error
 // (knownNodes[]) with layout roles (layout.roles[]).
 // Endpoint: GET /v1/status (garage-admin-v1.yml:62-135).
 //
-// Node assignment lookup: layout.roles[] (garage-admin-v1.yml:1191-1206) is
-// indexed by node id; for any knownNode whose id matches a role, we copy
-// zone/capacity/tags onto the Node. Nodes without a layout role show empty
-// zone/capacity and Role="" (they're known to the cluster but unassigned).
+// ListNodes returns one entry per cluster member: it MERGES layout.roles
+// (the source of truth for "who's in the cluster" with role + zone +
+// capacity + tags) with knownNodes (network state — isUp, addr, hostname).
+//
+// Why layout.roles is the source of truth: knownNodes is the *network
+// discovery* list, populated by ongoing peer gossip. On a settled
+// single-node cluster, Garage v1.0.1 returns knownNodes=[] (the local node
+// doesn't gossip with itself), but layout.roles still contains the local
+// node with its assignment. Iterating knownNodes alone produces an empty
+// dashboard.
+//
+// We start from layout.roles (cluster members), enrich each with
+// network state from knownNodes when present. Any knownNode NOT in the
+// layout (newly-connected, unassigned) is appended at the end.
 func (d *driver) ListNodes(ctx context.Context) ([]driverpkg.Node, error) {
 	var resp getStatusResponseV1
 	if err := d.client.do(ctx, "GET", "/v1/status", nil, &resp); err != nil {
 		return nil, err
 	}
 
-	// Index layout roles by node id for O(1) lookup.
-	roles := make(map[string]nodeClusterInfoV1, len(resp.Layout.Roles))
-	for _, r := range resp.Layout.Roles {
-		roles[r.ID] = r
+	// Index knownNodes by id for O(1) enrichment.
+	known := make(map[string]nodeNetworkInfoV1, len(resp.KnownNodes))
+	for _, kn := range resp.KnownNodes {
+		known[kn.ID] = kn
 	}
 
-	nodes := make([]driverpkg.Node, 0, len(resp.KnownNodes))
-	for _, kn := range resp.KnownNodes {
+	nodes := make([]driverpkg.Node, 0, len(resp.Layout.Roles))
+	seen := make(map[string]struct{}, len(resp.Layout.Roles))
+
+	// Cluster members from layout.roles. Each is in the cluster regardless
+	// of whether knownNodes reports it (single-node clusters omit self).
+	for _, r := range resp.Layout.Roles {
+		seen[r.ID] = struct{}{}
 		node := driverpkg.Node{
-			ID:       kn.ID,
-			Hostname: kn.Hostname,
-			Address:  kn.Addr,
-			Status:   "connected",
-			Version:  resp.GarageVersion,
+			ID:      r.ID,
+			Zone:    r.Zone,
+			Tags:    r.Tags,
+			Version: resp.GarageVersion,
 		}
-		if !kn.IsUp {
-			node.Status = "unreachable"
+		if r.Capacity != nil {
+			node.Capacity = *r.Capacity
+			node.Role = "storage"
+		} else {
+			// "Setting the capacity to `null` will configure the node as a
+			// gateway." -- garage-admin-v1.yml:222
+			node.Role = "gateway"
 		}
 
-		if role, ok := roles[kn.ID]; ok {
-			node.Zone = role.Zone
-			node.Tags = role.Tags
-			if role.Capacity != nil {
-				node.Capacity = *role.Capacity
-				node.Role = "storage"
+		if kn, ok := known[r.ID]; ok {
+			node.Hostname = kn.Hostname
+			node.Address = kn.Addr
+			if kn.IsUp {
+				node.Status = "connected"
 			} else {
-				// "Setting the capacity to `null` will configure the node
-				// as a gateway." -- garage-admin-v1.yml:222
-				node.Role = "gateway"
+				node.Status = "unreachable"
 			}
+		} else if r.ID == resp.Node {
+			// The local node (resp.Node) reports through Garage's own admin
+			// API; if we got a response, it's reachable.
+			node.Status = "connected"
+		} else {
+			node.Status = "unknown"
 		}
 
 		nodes = append(nodes, node)
+	}
+
+	// Surface knownNodes that aren't in the layout yet (e.g. newly
+	// connected, awaiting role assignment).
+	for _, kn := range resp.KnownNodes {
+		if _, ok := seen[kn.ID]; ok {
+			continue
+		}
+		status := "connected"
+		if !kn.IsUp {
+			status = "unreachable"
+		}
+		nodes = append(nodes, driverpkg.Node{
+			ID:       kn.ID,
+			Hostname: kn.Hostname,
+			Address:  kn.Addr,
+			Status:   status,
+			Version:  resp.GarageVersion,
+			Role:     "unassigned",
+		})
 	}
 
 	return nodes, nil

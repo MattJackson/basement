@@ -115,7 +115,10 @@ func TestListNodes(t *testing.T) {
 		t.Fatalf("got %d nodes, want 3", len(nodes))
 	}
 
-	// n1: in layout, has capacity -> storage
+	// New order: layout.roles first (n1, n3), then unseen knownNodes (n2).
+	// This matches Garage's actual "layout = cluster membership" semantics.
+
+	// n1: in layout, has capacity -> storage; knownNode says isUp -> connected
 	if nodes[0].ID != "n1" || nodes[0].Zone != "dc1" || nodes[0].Capacity != 1000000 || nodes[0].Role != "storage" {
 		t.Errorf("n1 = %+v", nodes[0])
 	}
@@ -123,17 +126,61 @@ func TestListNodes(t *testing.T) {
 		t.Errorf("n1 status = %q, want connected", nodes[0].Status)
 	}
 
-	// n2: not in layout, isUp=false
-	if nodes[1].ID != "n2" || nodes[1].Status != "unreachable" {
-		t.Errorf("n2 = %+v", nodes[1])
+	// n3: in layout with nil capacity -> gateway; knownNode isUp -> connected
+	if nodes[1].ID != "n3" || nodes[1].Role != "gateway" {
+		t.Errorf("n3 = %+v (expected role=gateway)", nodes[1])
 	}
-	if nodes[1].Zone != "" || nodes[1].Role != "" {
-		t.Errorf("n2 should have no role assignment, got Zone=%q Role=%q", nodes[1].Zone, nodes[1].Role)
+	if nodes[1].Status != "connected" {
+		t.Errorf("n3 status = %q, want connected", nodes[1].Status)
 	}
 
-	// n3: in layout with nil capacity -> gateway
-	if nodes[2].ID != "n3" || nodes[2].Role != "gateway" {
-		t.Errorf("n3 = %+v (expected role=gateway)", nodes[2])
+	// n2: knownNode but NOT in layout — surfaced at the end as unassigned
+	if nodes[2].ID != "n2" || nodes[2].Status != "unreachable" {
+		t.Errorf("n2 = %+v", nodes[2])
+	}
+	if nodes[2].Role != "unassigned" {
+		t.Errorf("n2 role = %q, want unassigned (knownNode not in layout)", nodes[2].Role)
+	}
+}
+
+// TestListNodes_singleNodeCluster covers the case that bit us in
+// production: Garage v1.0.1 returns knownNodes=[] on a settled
+// single-node cluster, but the local node IS still in layout.roles.
+// Iterating knownNodes alone (the previous behavior) produced an empty
+// dashboard despite a healthy cluster.
+func TestListNodes_singleNodeCluster(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		resp := getStatusResponseV1{
+			Node:          "self-id",
+			GarageVersion: "v1.0.1",
+			KnownNodes:    []nodeNetworkInfoV1{}, // empty — single-node, no gossip peers
+			Layout: clusterLayoutV1{
+				Version: 1,
+				Roles: []nodeClusterInfoV1{
+					{ID: "self-id", Zone: "dc1", Capacity: int64Ptr(1000000000000), Tags: []string{}},
+				},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer ts.Close()
+
+	d := newTestDriver(ts.URL)
+	nodes, err := d.ListNodes(context.Background())
+	if err != nil {
+		t.Fatalf("ListNodes: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("got %d nodes, want 1 (the local node from layout.roles)", len(nodes))
+	}
+	if nodes[0].ID != "self-id" {
+		t.Errorf("node id = %q, want %q", nodes[0].ID, "self-id")
+	}
+	if nodes[0].Role != "storage" {
+		t.Errorf("node role = %q, want storage", nodes[0].Role)
+	}
+	if nodes[0].Status != "connected" {
+		t.Errorf("local node status = %q, want connected (admin API responded so it's up)", nodes[0].Status)
 	}
 }
 
