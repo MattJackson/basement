@@ -1802,22 +1802,22 @@ components:
       type: object
       required:
       - id
-      - address
-      - zone
-      - capacity
       properties:
         id:
           type: string
           description: Unique node identifier.
+        hostname:
+          type: string
+          description: Hostname (empty if not advertised by the cluster).
         address:
           type: string
-          format: uri
-          description: Network address for connecting to this node.
+          description: Network address (empty if not advertised).
         role:
           type: string
           enum:
           - storage
           - gateway
+          - unassigned
           description: Node role in the cluster.
         zone:
           type: string
@@ -1826,13 +1826,22 @@ components:
           type: integer
           format: int64
           minimum: 0
-          nullable: true
-          description: Capacity in bytes; null configures gateway role.
+          description: Capacity in bytes; absent for gateway nodes.
         tags:
-          type: object
-          additionalProperties:
+          type: array
+          items:
             type: string
-          description: Freeform key-value tags for node organization.
+          description: Freeform tags for node organization.
+        status:
+          type: string
+          enum:
+          - connected
+          - unreachable
+          - unknown
+          description: Live network status of the node.
+        version:
+          type: string
+          description: Backend daemon version (e.g. "v1.0.1").
     Layout:
       type: object
       required:

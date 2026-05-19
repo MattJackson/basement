@@ -150,15 +150,20 @@ function NodesScreen() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {node.address ? (
+                    {node.status === "connected" ? (
                       <span className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full bg-green-500" />
                         <span className="text-sm opacity-80">Connected</span>
                       </span>
-                    ) : (
+                    ) : node.status === "unreachable" ? (
                       <span className="flex items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full bg-red-500" />
                         <span className="text-sm opacity-60">Unreachable</span>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                        <span className="text-sm opacity-60 capitalize">{node.status || "unknown"}</span>
                       </span>
                     )}
                   </TableCell>
