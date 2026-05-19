@@ -36,8 +36,11 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Embedded SPA: dist/ is build output; only .gitkeep is tracked
-# (keeps the dir present for //go:embed all:dist to compile).
+# Embedded SPA: dist/ is build output; only .gitkeep is tracked (Vite's
+# postbuild hook restores it after each build, so //go:embed all:dist
+# always compiles on a fresh clone). The embed also has a
+# internal/web/placeholder.html fallback used by web.Handler when
+# dist/index.html doesn't exist yet.
 internal/web/dist/*
 !internal/web/dist/.gitkeep
 
