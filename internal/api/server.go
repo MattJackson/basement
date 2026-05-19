@@ -95,6 +95,17 @@ func (s *Server) routes() {
 				authG.Get("/auth/me", s.meHandler)
 				authG.Get("/capabilities", s.capabilitiesHandler)
 			})
+
+			// Admin routes - require admin role
+			apiR.Group(func(adminG chi.Router) {
+				adminG.Use(auth.Middleware(s.cfg.JWT.Secret))
+				adminG.Use(auth.RequireRole("admin"))
+
+				adminG.Get("/admin/nodes", s.listNodesHandler)
+				adminG.Get("/admin/layout", s.getLayoutHandler)
+				adminG.Get("/admin/buckets", s.listBucketsHandler)
+				adminG.Get("/admin/keys", s.listKeysHandler)
+			})
 		})
 
 	r.Handle("/*", web.Handler())
