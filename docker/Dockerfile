@@ -5,7 +5,10 @@ FROM node:22-alpine AS frontend
 WORKDIR /src
 RUN corepack enable && corepack prepare pnpm@latest --activate
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# --ignore-scripts: don't run msw's build scripts (not needed for production
+# Vite build); avoids pnpm v11's ERR_PNPM_IGNORED_BUILDS fatal under
+# --frozen-lockfile.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 # Vite's prebuild reads ../openapi/basement.yaml; mirror that layout.
 COPY openapi /openapi
 COPY frontend/ ./
