@@ -36,8 +36,12 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
-# Embedded SPA assets (built artifacts only)
+# Embedded SPA build artifacts (the placeholder index.html stays tracked
+# so `go build` works on a fresh clone; pnpm build overwrites it).
 internal/web/dist/assets/
+internal/web/dist/favicon.svg
+internal/web/dist/icons.svg
+internal/web/dist/index.html
 
 # JSON store runtime data (for local dev)
 data/
