@@ -26,14 +26,14 @@ func TestGetKey(t *testing.T) {
 			},
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}))
+defer server.Close()
 
-	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
 
-	key, err := d.GetKey(context.Background(), "access-key-id")
+key, err := d.GetKey(context.Background(), "access-key-id")
 	if err != nil {
 		t.Fatalf("GetKey failed: %v", err)
 	}
@@ -48,9 +48,9 @@ func TestGetKey(t *testing.T) {
 }
 
 func TestGetKeyNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error": "key not found"}`))
+		_, _ = w.Write([]byte(`{"error": "key not found"}`))
 	}))
 	defer server.Close()
 
@@ -86,7 +86,7 @@ func TestCreateKey(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		_ = json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
 
@@ -107,9 +107,9 @@ func TestCreateKey(t *testing.T) {
 }
 
 func TestCreateKeyError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "internal error"}`))
+		_, _ = w.Write([]byte(`{"error": "internal error"}`))
 	}))
 	defer server.Close()
 
@@ -132,8 +132,8 @@ func TestUpdateKeyPermissions(t *testing.T) {
 			t.Fatalf("failed to decode request: %v", err)
 		}
 
-		if req.AccessKeyId != "test-key-id" {
-			t.Errorf("expected AccessKeyId 'test-key-id', got '%s'", req.AccessKeyId)
+		if req.AccessKeyID != "test-key-id" {
+			t.Errorf("expected AccessKeyID 'test-key-id', got '%s'", req.AccessKeyID)
 		}
 
 		if !req.Permissions.Read || !req.Permissions.Write || !req.Permissions.Owner {
@@ -142,7 +142,7 @@ func TestUpdateKeyPermissions(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -174,7 +174,7 @@ func TestUpdateKeyPermissionsMultipleBuckets(t *testing.T) {
 		callCount++
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -202,7 +202,7 @@ func TestDeleteKey(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -215,9 +215,9 @@ func TestDeleteKey(t *testing.T) {
 }
 
 func TestDeleteKeyError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error": "key not found"}`))
+		_, _ = w.Write([]byte(`{"error": "key not found"}`))
 	}))
 	defer server.Close()
 

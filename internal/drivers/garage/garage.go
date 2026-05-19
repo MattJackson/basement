@@ -59,7 +59,7 @@ func (d *driver) StageLayout(ctx context.Context, change driverpkg.LayoutChange)
 	}
 
 	updateReq := updateClusterLayoutRequest{
-		NodeId:  change.NodeID,
+		NodeID:  change.NodeID,
 		NewRole: newRole,
 		Remove:  false,
 	}
@@ -123,42 +123,42 @@ func (d *driver) RevertLayout(ctx context.Context) error {
 
 // computeLayoutDiff computes the diff between current and a given layout.
 // NOTE: This is a simplified placeholder - actual implementation should compare current vs staged roles.
-func computeLayoutDiff(version int64, roles []layoutNodeRole) driverpkg.LayoutDiff {
+func computeLayoutDiff(_ int64, _ []layoutNodeRole) driverpkg.LayoutDiff {
 	return driverpkg.LayoutDiff{}
 }
 
-func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (driverpkg.ObjectPage, error) {
+func (d *driver) ListObjects(_ context.Context, _, _, _ string, _ int) (driverpkg.ObjectPage, error) {
 	return driverpkg.ObjectPage{}, d.unsupported("ListObjects")
 }
 
-func (d *driver) StatObject(ctx context.Context, bucket, key string) (driverpkg.ObjectInfo, error) {
+func (d *driver) StatObject(_ context.Context, _, _ string) (driverpkg.ObjectInfo, error) {
 	return driverpkg.ObjectInfo{}, d.unsupported("StatObject")
 }
 
-func (d *driver) PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (driverpkg.PresignedURL, error) {
+func (d *driver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (driverpkg.PresignedURL, error) {
 	return driverpkg.PresignedURL{}, d.unsupported("PresignGet")
 }
 
-func (d *driver) PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driverpkg.PresignedURL, error) {
+func (d *driver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driverpkg.PresignedURL, error) {
 	return driverpkg.PresignedURL{}, d.unsupported("PresignPut")
 }
 
-func (d *driver) DeleteObject(ctx context.Context, bucket, key string) error {
+func (d *driver) DeleteObject(_ context.Context, _, _ string) error {
 	return d.unsupported("DeleteObject")
 }
 
-func (d *driver) CreateMultipart(ctx context.Context, bucket, key, contentType string) (driverpkg.MultipartUpload, error) {
+func (d *driver) CreateMultipart(_ context.Context, _, _, _ string) (driverpkg.MultipartUpload, error) {
 	return driverpkg.MultipartUpload{}, d.unsupported("CreateMultipart")
 }
 
-func (d *driver) PresignUploadPart(ctx context.Context, upload driverpkg.MultipartUpload, partNum int) (driverpkg.PresignedURL, error) {
+func (d *driver) PresignUploadPart(_ context.Context, _ driverpkg.MultipartUpload, _ int) (driverpkg.PresignedURL, error) {
 	return driverpkg.PresignedURL{}, d.unsupported("PresignUploadPart")
 }
 
-func (d *driver) CompleteMultipart(ctx context.Context, upload driverpkg.MultipartUpload, parts []driverpkg.CompletedPart) error {
+func (d *driver) CompleteMultipart(_ context.Context, _ driverpkg.MultipartUpload, _ []driverpkg.CompletedPart) error {
 	return d.unsupported("CompleteMultipart")
 }
 
-func (d *driver) AbortMultipart(ctx context.Context, upload driverpkg.MultipartUpload) error {
+func (d *driver) AbortMultipart(_ context.Context, _ driverpkg.MultipartUpload) error {
 	return d.unsupported("AbortMultipart")
 }

@@ -140,7 +140,7 @@ func TestJwtInvalidAlgorithm(t *testing.T) {
 }
 
 func TestMiddlewareNoCookie(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -158,7 +158,7 @@ func TestMiddlewareNoCookie(t *testing.T) {
 }
 
 func TestMiddlewareBadSignature(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -222,7 +222,7 @@ func TestRequireRoleAdmin(t *testing.T) {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -251,7 +251,7 @@ func TestRequireRoleForbidden(t *testing.T) {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -291,7 +291,7 @@ func TestCookieFlags(t *testing.T) {
 
 	expectedPrefix := "__Host-basement_session=" + token
 	if !strings.HasPrefix(cookie, expectedPrefix) {
-		t.Errorf("Expected cookie to start with %s, got: %s", expectedPrefix[:50], cookie[:min(50, len(cookie))])
+		t.Errorf("Expected cookie to start with %s, got: %s", expectedPrefix[:50], cookie[:lo(50, len(cookie))])
 	}
 
 	flags := []string{"HttpOnly", "Secure", "SameSite=Strict", "Path=/"}
@@ -337,7 +337,7 @@ func TestCookieClear(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
+func lo(a, b int) int {
 	if a < b {
 		return a
 	}

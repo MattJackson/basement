@@ -22,18 +22,24 @@ type Caps struct {
 type LayoutCapability string
 
 const (
+	// LayoutApplyRevert indicates the driver supports stage-apply-revert workflow.
 	LayoutApplyRevert LayoutCapability = "stage-apply-revert"
-	LayoutAtomic      LayoutCapability = "atomic"
-	LayoutReadonly    LayoutCapability = "readonly"
+	// LayoutAtomic indicates the driver supports atomic layout application.
+	LayoutAtomic LayoutCapability = "atomic"
+	// LayoutReadonly indicates the driver only supports reading layout.
+	LayoutReadonly LayoutCapability = "readonly"
 )
 
 // KeyModel is the key management model supported by the driver.
 type KeyModel string
 
 const (
+	// KeyModelGarage indicates the driver uses Garage's key management model.
 	KeyModelGarage KeyModel = "garage"
-	KeyModelIAM    KeyModel = "iam"
-	KeyModelNone   KeyModel = "none"
+	// KeyModelIAM indicates the driver uses IAM-style key management.
+	KeyModelIAM KeyModel = "iam"
+	// KeyModelNone indicates the driver has no key management.
+	KeyModelNone KeyModel = "none"
 )
 
 // HealthReport represents health check status.

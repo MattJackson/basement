@@ -3,12 +3,18 @@ package driver
 import "errors"
 
 var (
-	ErrUnsupported      = errors.New("driver: operation not supported by this driver")
-	ErrNotFound         = errors.New("driver: not found")
+	// ErrUnsupported is returned when a driver does not support the requested operation.
+	ErrUnsupported = errors.New("driver: operation not supported by this driver")
+	// ErrNotFound is returned when the requested resource does not exist.
+	ErrNotFound = errors.New("driver: not found")
+	// ErrPermissionDenied is returned when the caller lacks permission for the operation.
 	ErrPermissionDenied = errors.New("driver: permission denied")
-	ErrConflict         = errors.New("driver: conflict")
-	ErrInvalid          = errors.New("driver: invalid input")
-	ErrUnauthenticated  = errors.New("driver: not authenticated")
+	// ErrConflict is returned when the operation conflicts with existing state.
+	ErrConflict = errors.New("driver: conflict")
+	// ErrInvalid is returned when the input is invalid.
+	ErrInvalid = errors.New("driver: invalid input")
+	// ErrUnauthenticated is returned when the caller is not authenticated.
+	ErrUnauthenticated = errors.New("driver: not authenticated")
 )
 
 // Error wraps a sentinel error with backend-specific context.

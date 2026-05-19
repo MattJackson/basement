@@ -39,7 +39,7 @@ func (s *Store) AppendAudit(entry AuditEntry) error {
 	if err != nil {
 		return fmt.Errorf("opening audit log: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	data, err := json.Marshal(entry)
 	if err != nil {

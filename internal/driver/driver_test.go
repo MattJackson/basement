@@ -30,7 +30,7 @@ func TestRegistry(t *testing.T) {
 		{
 			name: "open valid registered driver",
 			setup: func() {
-				Register("testdriver", func(cfg Config) (Driver, error) {
+				Register("testdriver", func(_ Config) (Driver, error) {
 					return &mockDriver{}, nil
 				})
 			},
@@ -47,7 +47,7 @@ func TestRegistry(t *testing.T) {
 						t.Errorf("Register(\"\") did not panic")
 					}
 				}()
-				Register("", func(cfg Config) (Driver, error) {
+				Register("", func(_ Config) (Driver, error) {
 					return &mockDriver{}, nil
 				})
 			},
@@ -59,7 +59,7 @@ func TestRegistry(t *testing.T) {
 		{
 			name: "register duplicate panics",
 			setup: func() {
-				Register("dupdriver", func(cfg Config) (Driver, error) {
+				Register("dupdriver", func(_ Config) (Driver, error) {
 					return &mockDriver{}, nil
 				})
 				defer func() {
@@ -67,7 +67,7 @@ func TestRegistry(t *testing.T) {
 						t.Errorf("Register(\"dupdriver\") a second time did not panic")
 					}
 				}()
-				Register("dupdriver", func(cfg Config) (Driver, error) {
+				Register("dupdriver", func(_ Config) (Driver, error) {
 					return &mockDriver{}, nil
 				})
 			},
@@ -131,9 +131,9 @@ func TestRegistryRegistered(t *testing.T) {
 		{
 			name: "registered drivers returned sorted",
 			setup: func() {
-				Register("zebra", func(cfg Config) (Driver, error) { return &mockDriver{}, nil })
-				Register("alpha", func(cfg Config) (Driver, error) { return &mockDriver{}, nil })
-				Register("middle", func(cfg Config) (Driver, error) { return &mockDriver{}, nil })
+				Register("zebra", func(_ Config) (Driver, error) { return &mockDriver{}, nil })
+				Register("alpha", func(_ Config) (Driver, error) { return &mockDriver{}, nil })
+				Register("middle", func(_ Config) (Driver, error) { return &mockDriver{}, nil })
 			},
 			expectLen:  3,
 			expectSorted: true,
@@ -247,29 +247,29 @@ func TestErrorFormat(t *testing.T) {
 // mockDriver implements Driver for testing purposes.
 type mockDriver struct{}
 
-func (m *mockDriver) Capabilities(ctx context.Context) (Caps, error) { return Caps{}, nil }
-func (m *mockDriver) HealthCheck(ctx context.Context) (HealthReport, error) { return HealthReport{}, nil }
-func (m *mockDriver) ListNodes(ctx context.Context) ([]Node, error) { return nil, nil }
-func (m *mockDriver) GetLayout(ctx context.Context) (Layout, error) { return Layout{}, nil }
-func (m *mockDriver) StageLayout(ctx context.Context, change LayoutChange) (LayoutDiff, error) { return LayoutDiff{}, nil }
-func (m *mockDriver) ApplyLayout(ctx context.Context) error { return nil }
-func (m *mockDriver) RevertLayout(ctx context.Context) error { return nil }
-func (m *mockDriver) ListBuckets(ctx context.Context) ([]Bucket, error) { return nil, nil }
-func (m *mockDriver) GetBucket(ctx context.Context, id string) (Bucket, error) { return Bucket{}, nil }
-func (m *mockDriver) CreateBucket(ctx context.Context, spec BucketSpec) (Bucket, error) { return Bucket{}, nil }
-func (m *mockDriver) UpdateBucket(ctx context.Context, id string, update BucketUpdate) (Bucket, error) { return Bucket{}, nil }
-func (m *mockDriver) DeleteBucket(ctx context.Context, id string) error { return nil }
-func (m *mockDriver) ListKeys(ctx context.Context) ([]Key, error) { return nil, nil }
-func (m *mockDriver) GetKey(ctx context.Context, id string) (Key, error) { return Key{}, nil }
-func (m *mockDriver) CreateKey(ctx context.Context, spec KeySpec) (Key, error) { return Key{}, nil }
-func (m *mockDriver) UpdateKeyPermissions(ctx context.Context, keyID string, perms []BucketPermission) error { return nil }
-func (m *mockDriver) DeleteKey(ctx context.Context, id string) error { return nil }
-func (m *mockDriver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (ObjectPage, error) { return ObjectPage{}, nil }
-func (m *mockDriver) StatObject(ctx context.Context, bucket, key string) (ObjectInfo, error) { return ObjectInfo{}, nil }
-func (m *mockDriver) PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (PresignedURL, error) { return PresignedURL{}, nil }
-func (m *mockDriver) PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (PresignedURL, error) { return PresignedURL{}, nil }
-func (m *mockDriver) DeleteObject(ctx context.Context, bucket, key string) error { return nil }
-func (m *mockDriver) CreateMultipart(ctx context.Context, bucket, key, contentType string) (MultipartUpload, error) { return MultipartUpload{}, nil }
-func (m *mockDriver) PresignUploadPart(ctx context.Context, upload MultipartUpload, partNum int) (PresignedURL, error) { return PresignedURL{}, nil }
-func (m *mockDriver) CompleteMultipart(ctx context.Context, upload MultipartUpload, parts []CompletedPart) error { return nil }
-func (m *mockDriver) AbortMultipart(ctx context.Context, upload MultipartUpload) error { return nil }
+func (m *mockDriver) Capabilities(_ context.Context) (Caps, error) { return Caps{}, nil }
+func (m *mockDriver) HealthCheck(_ context.Context) (HealthReport, error) { return HealthReport{}, nil }
+func (m *mockDriver) ListNodes(_ context.Context) ([]Node, error) { return nil, nil }
+func (m *mockDriver) GetLayout(_ context.Context) (Layout, error) { return Layout{}, nil }
+func (m *mockDriver) StageLayout(_ context.Context, _ LayoutChange) (LayoutDiff, error) { return LayoutDiff{}, nil }
+func (m *mockDriver) ApplyLayout(_ context.Context) error { return nil }
+func (m *mockDriver) RevertLayout(_ context.Context) error { return nil }
+func (m *mockDriver) ListBuckets(_ context.Context) ([]Bucket, error) { return nil, nil }
+func (m *mockDriver) GetBucket(_ context.Context, _ string) (Bucket, error) { return Bucket{}, nil }
+func (m *mockDriver) CreateBucket(_ context.Context, _ BucketSpec) (Bucket, error) { return Bucket{}, nil }
+func (m *mockDriver) UpdateBucket(_ context.Context, _ string, _ BucketUpdate) (Bucket, error) { return Bucket{}, nil }
+func (m *mockDriver) DeleteBucket(_ context.Context, _ string) error { return nil }
+func (m *mockDriver) ListKeys(_ context.Context) ([]Key, error) { return nil, nil }
+func (m *mockDriver) GetKey(_ context.Context, _ string) (Key, error) { return Key{}, nil }
+func (m *mockDriver) CreateKey(_ context.Context, _ KeySpec) (Key, error) { return Key{}, nil }
+func (m *mockDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []BucketPermission) error { return nil }
+func (m *mockDriver) DeleteKey(_ context.Context, _ string) error { return nil }
+func (m *mockDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (ObjectPage, error) { return ObjectPage{}, nil }
+func (m *mockDriver) StatObject(_ context.Context, _, _ string) (ObjectInfo, error) { return ObjectInfo{}, nil }
+func (m *mockDriver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (PresignedURL, error) { return PresignedURL{}, nil }
+func (m *mockDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (PresignedURL, error) { return PresignedURL{}, nil }
+func (m *mockDriver) DeleteObject(_ context.Context, _, _ string) error { return nil }
+func (m *mockDriver) CreateMultipart(_ context.Context, _, _, _ string) (MultipartUpload, error) { return MultipartUpload{}, nil }
+func (m *mockDriver) PresignUploadPart(_ context.Context, _ MultipartUpload, _ int) (PresignedURL, error) { return PresignedURL{}, nil }
+func (m *mockDriver) CompleteMultipart(_ context.Context, _ MultipartUpload, _ []CompletedPart) error { return nil }
+func (m *mockDriver) AbortMultipart(_ context.Context, _ MultipartUpload) error { return nil }

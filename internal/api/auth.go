@@ -94,7 +94,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // logoutHandler handles POST /api/v1/auth/logout.
@@ -132,7 +132,7 @@ func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // subtleConstantTimeString compares two strings in constant time.
@@ -178,5 +178,5 @@ func (s *Server) capabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(caps)
+	_ = json.NewEncoder(w).Encode(caps)
 }

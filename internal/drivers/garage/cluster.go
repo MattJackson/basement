@@ -9,7 +9,7 @@ import (
 
 // Capabilities returns Garage v2 driver capabilities.
 // Citation: docs/garage-admin-api.md lines 65-72, design.md § The driver interface
-func (d *driver) Capabilities(ctx context.Context) (driverpkg.Caps, error) {
+func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
 	return driverpkg.Caps{
 		Driver:        "garage",
 		Layout:        driverpkg.LayoutApplyRevert,
@@ -222,7 +222,7 @@ type stagedRoleChange struct {
 // Request/Response types for StageLayout, ApplyLayout, RevertLayout
 
 type updateClusterLayoutRequest struct {
-	NodeId  string            `json:"nodeId"`
+	NodeID  string            `json:"nodeId"`
 	NewRole *layoutNodeRole   `json:"storageNode,omitempty"`
 	Gateway *bool             `json:"gateway,omitempty"`
 	Remove  bool              `json:"remove,omitempty"`

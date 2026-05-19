@@ -28,9 +28,9 @@ func TestGetBucket(t *testing.T) {
 			Quotas:          &apiBucketQuotas{MaxSize: int64Ptr(1000000), MaxObjects: int64Ptr(100)},
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
+w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}))
 	defer server.Close()
 
 	client := &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}
@@ -59,9 +59,9 @@ func TestGetBucket(t *testing.T) {
 }
 
 func TestGetBucketNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error": "bucket not found"}`))
+		_, _ = w.Write([]byte(`{"error": "bucket not found"}`))
 	}))
 	defer server.Close()
 
@@ -101,9 +101,9 @@ func TestCreateBucket(t *testing.T) {
 			Bytes:           0,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
+w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}))
 	defer server.Close()
 
 	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
@@ -123,9 +123,9 @@ func TestCreateBucket(t *testing.T) {
 }
 
 func TestCreateBucketError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "internal error"}`))
+		_, _ = w.Write([]byte(`{"error": "internal error"}`))
 	}))
 	defer server.Close()
 
@@ -158,9 +158,9 @@ func TestUpdateBucket(t *testing.T) {
 			Quotas:          &apiBucketQuotas{MaxSize: int64Ptr(2000000), MaxObjects: nil},
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
+w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(response)
+}))
 	defer server.Close()
 
 	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
@@ -186,9 +186,9 @@ func TestUpdateBucket(t *testing.T) {
 }
 
 func TestUpdateBucketNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error": "bucket not found"}`))
+		_, _ = w.Write([]byte(`{"error": "bucket not found"}`))
 	}))
 	defer server.Close()
 
@@ -207,7 +207,7 @@ func TestDeleteBucket(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -220,9 +220,9 @@ func TestDeleteBucket(t *testing.T) {
 }
 
 func TestDeleteBucketNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"error": "bucket not found"}`))
+		_, _ = w.Write([]byte(`{"error": "bucket not found"}`))
 	}))
 	defer server.Close()
 

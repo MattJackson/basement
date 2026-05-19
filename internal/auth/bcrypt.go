@@ -24,4 +24,5 @@ func VerifyPassword(hash, plaintext string) bool {
 	return err == nil
 }
 
+// ErrInvalidHash is returned by VerifyPassword when the stored hash is malformed.
 var ErrInvalidHash = errors.New("invalid hash")

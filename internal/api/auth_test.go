@@ -359,107 +359,107 @@ func generateTestToken(userID, role string) string {
 // stubDriver implements driver.Driver for testing.
 type stubDriver struct{}
 
-func (s *stubDriver) Capabilities(ctx context.Context) (driver.Caps, error) {
+func (s *stubDriver) Capabilities(_ context.Context) (driver.Caps, error) {
 	return driver.Caps{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) HealthCheck(ctx context.Context) (driver.HealthReport, error) {
-	return driver.HealthReport{}, driver.ErrUnsupported
+func (s *stubDriver) HealthCheck(_ context.Context) (driver.HealthReport, error) {
+	return driver.HealthReport{}, nil
 }
 
-func (s *stubDriver) ListNodes(ctx context.Context) ([]driver.Node, error) {
-	return nil, driver.ErrUnsupported
+func (s *stubDriver) ListNodes(_ context.Context) ([]driver.Node, error) {
+	return []driver.Node{{ID: "n1", Hostname: "h1", Address: "a1", Zone: "z1", Role: "storage", Capacity: 1000, Tags: nil, Status: "connected", Version: "v1"}}, nil
 }
 
-func (s *stubDriver) GetLayout(ctx context.Context) (driver.Layout, error) {
-	return driver.Layout{}, driver.ErrUnsupported
+func (s *stubDriver) GetLayout(_ context.Context) (driver.Layout, error) {
+	return driver.Layout{Nodes: []driver.Node{{ID: "n1"}}}, nil
 }
 
-func (s *stubDriver) StageLayout(ctx context.Context, change driver.LayoutChange) (driver.LayoutDiff, error) {
+func (s *stubDriver) StageLayout(_ context.Context, _ driver.LayoutChange) (driver.LayoutDiff, error) {
 	return driver.LayoutDiff{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) ApplyLayout(ctx context.Context) error {
+func (s *stubDriver) ApplyLayout(_ context.Context) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) RevertLayout(ctx context.Context) error {
+func (s *stubDriver) RevertLayout(_ context.Context) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) ListBuckets(ctx context.Context) ([]driver.Bucket, error) {
+func (s *stubDriver) ListBuckets(_ context.Context) ([]driver.Bucket, error) {
 	return nil, driver.ErrUnsupported
 }
 
-func (s *stubDriver) GetBucket(ctx context.Context, id string) (driver.Bucket, error) {
+func (s *stubDriver) GetBucket(_ context.Context, _ string) (driver.Bucket, error) {
 	return driver.Bucket{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) CreateBucket(ctx context.Context, spec driver.BucketSpec) (driver.Bucket, error) {
+func (s *stubDriver) CreateBucket(_ context.Context, _ driver.BucketSpec) (driver.Bucket, error) {
 	return driver.Bucket{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) UpdateBucket(ctx context.Context, id string, update driver.BucketUpdate) (driver.Bucket, error) {
+func (s *stubDriver) UpdateBucket(_ context.Context, _ string, _ driver.BucketUpdate) (driver.Bucket, error) {
 	return driver.Bucket{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) DeleteBucket(ctx context.Context, id string) error {
+func (s *stubDriver) DeleteBucket(_ context.Context, _ string) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) ListKeys(ctx context.Context) ([]driver.Key, error) {
+func (s *stubDriver) ListKeys(_ context.Context) ([]driver.Key, error) {
 	return nil, driver.ErrUnsupported
 }
 
-func (s *stubDriver) GetKey(ctx context.Context, id string) (driver.Key, error) {
+func (s *stubDriver) GetKey(_ context.Context, _ string) (driver.Key, error) {
 	return driver.Key{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) CreateKey(ctx context.Context, spec driver.KeySpec) (driver.Key, error) {
+func (s *stubDriver) CreateKey(_ context.Context, _ driver.KeySpec) (driver.Key, error) {
 	return driver.Key{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) UpdateKeyPermissions(ctx context.Context, keyID string, perms []driver.BucketPermission) error {
+func (s *stubDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []driver.BucketPermission) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) DeleteKey(ctx context.Context, id string) error {
+func (s *stubDriver) DeleteKey(_ context.Context, _ string) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (driver.ObjectPage, error) {
+func (s *stubDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
 	return driver.ObjectPage{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) StatObject(ctx context.Context, bucket, key string) (driver.ObjectInfo, error) {
+func (s *stubDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) {
 	return driver.ObjectInfo{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (driver.PresignedURL, error) {
+func (s *stubDriver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (driver.PresignedURL, error) {
 	return driver.PresignedURL{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driver.PresignedURL, error) {
+func (s *stubDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driver.PresignedURL, error) {
 	return driver.PresignedURL{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) DeleteObject(ctx context.Context, bucket, key string) error {
+func (s *stubDriver) DeleteObject(_ context.Context, _, _ string) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) CreateMultipart(ctx context.Context, bucket, key, contentType string) (driver.MultipartUpload, error) {
+func (s *stubDriver) CreateMultipart(_ context.Context, _, _, _ string) (driver.MultipartUpload, error) {
 	return driver.MultipartUpload{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) PresignUploadPart(ctx context.Context, upload driver.MultipartUpload, partNum int) (driver.PresignedURL, error) {
+func (s *stubDriver) PresignUploadPart(_ context.Context, _ driver.MultipartUpload, _ int) (driver.PresignedURL, error) {
 	return driver.PresignedURL{}, driver.ErrUnsupported
 }
 
-func (s *stubDriver) CompleteMultipart(ctx context.Context, upload driver.MultipartUpload, parts []driver.CompletedPart) error {
+func (s *stubDriver) CompleteMultipart(_ context.Context, _ driver.MultipartUpload, _ []driver.CompletedPart) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) AbortMultipart(ctx context.Context, upload driver.MultipartUpload) error {
+func (s *stubDriver) AbortMultipart(_ context.Context, _ driver.MultipartUpload) error {
 	return driver.ErrUnsupported
 }
 

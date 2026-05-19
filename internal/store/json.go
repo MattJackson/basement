@@ -53,23 +53,23 @@ func saveJSON(path string, v any) error {
 
 	f, err := os.OpenFile(tmpPath, os.O_RDONLY|os.O_SYNC, 0644)
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("opening tmp for fsync: %w", err)
 	}
 
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("fsyncing tmp file: %w", err)
 	}
 
 	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("closing tmp after fsync: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("renaming tmp to final path: %w", err)
 	}
 
