@@ -148,12 +148,12 @@ func Load() (*Config, error) {
 	// Validate driver name (required)
 	if cfg.Driver.Name == "" {
 		errs = append(errs, errors.New("BASEMENT_DRIVER is required"))
-	} else if cfg.Driver.Name != "garage" {
-		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: only \"garage\" supported in v1.0", cfg.Driver.Name))
+	} else if cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" {
+		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: supported values are \"garage\" (v2 admin API) or \"garage-v1\" (v1 admin API)", cfg.Driver.Name))
 	}
 
-	// Validate Garage driver config (required if Driver=garage)
-	if cfg.Driver.Name == "garage" {
+	// Validate Garage driver config (required if Driver=garage*)
+	if cfg.Driver.Name == "garage" || cfg.Driver.Name == "garage-v1" {
 		if cfg.Driver.Garage.AdminURL == "" {
 			errs = append(errs, errors.New("BASEMENT_DRIVER_GARAGE_ADMIN_URL is required when DRIVER=garage"))
 		}
