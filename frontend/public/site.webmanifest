@@ -1,0 +1,29 @@
+{
+  "name": "Basement",
+  "short_name": "Basement",
+  "description": "Toss your stuff here. Forget about it. A friendly UI for Garage S3.",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "theme_color": "#C9874B",
+  "background_color": "#F4ECDD",
+  "display": "standalone",
+  "start_url": "/"
+}

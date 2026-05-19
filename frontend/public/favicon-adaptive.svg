@@ -1,5 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" shape-rendering="geometricPrecision">
-  <rect width="512" height="512" rx="96" fill="#F4ECDD"/>
+  <style>
+    .bg { fill: #F4ECDD; }
+    .label-bg { fill: #F4ECDD; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1A1410; }
+      .label-bg { fill: #1A1410; }
+    }
+  </style>
+  <rect class="bg" width="512" height="512" rx="96"/>
   <path d="M 55 250 L 55 420 L 175 445 L 175 275 Z"
         fill="#8A5530" stroke="#2B1810" stroke-width="22" stroke-linejoin="round"/>
   <path d="M 55 250 L 130 232 L 175 275 Z"
