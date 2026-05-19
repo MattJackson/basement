@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-//go:embed all:dist
+//go:embed all:dist placeholder.html
 var distFS embed.FS
 
 func Handler() http.Handler {
@@ -41,10 +41,16 @@ func Handler() http.Handler {
 			return
 		}
 
+		// Prefer the built SPA's index.html; fall back to the placeholder
+		// so a clean checkout (or "go build" without "pnpm build") still
+		// serves something useful.
 		indexHTML, err := distFS.ReadFile("dist/index.html")
 		if err != nil {
-			http.Error(w, "index.html not found", http.StatusInternalServerError)
-			return
+			indexHTML, err = distFS.ReadFile("placeholder.html")
+			if err != nil {
+				http.Error(w, "no SPA assets available", http.StatusInternalServerError)
+				return
+			}
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

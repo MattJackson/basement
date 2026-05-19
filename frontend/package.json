@@ -9,6 +9,7 @@
     "predev": "pnpm run gen:api",
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node -e \"require('fs').closeSync(require('fs').openSync('../internal/web/dist/.gitkeep','a'))\"",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
