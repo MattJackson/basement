@@ -170,7 +170,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := api.New(cfg, st, defaultDrv, reg)
+	srv := api.New(cfg, st, connStore, defaultDrv, reg)
 
 	ctxSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -29,7 +29,8 @@ const (
 	DriverAWSS3     = "aws-s3"
 )
 
-var supportedDrivers = map[string]bool{
+// SupportedDrivers is the set of drivers that can be used in connections.
+var SupportedDrivers = map[string]bool{
 	DriverGarage:  true,
 	DriverGarageV1: true,
 	DriverAWSS3:    true,
@@ -139,7 +140,7 @@ func (s *store) Create(ctx context.Context, c Connection) (Connection, error) {
 	defer s.connsMu.Unlock()
 
 	// Validate driver
-	if !supportedDrivers[c.Driver] {
+	if !SupportedDrivers[c.Driver] {
 		return Connection{}, fmt.Errorf("unsupported driver: %q", c.Driver)
 	}
 
@@ -210,9 +211,9 @@ func (s *store) Update(ctx context.Context, id string, patch Connection) (Connec
 				conn.Label = patch.Label
 			}
 
-			if patch.Driver != "" && supportedDrivers[patch.Driver] {
+			if patch.Driver != "" && SupportedDrivers[patch.Driver] {
 				conn.Driver = patch.Driver
-			} else if patch.Driver != "" && !supportedDrivers[patch.Driver] {
+			} else if patch.Driver != "" && !SupportedDrivers[patch.Driver] {
 				return Connection{}, fmt.Errorf("unsupported driver: %q", patch.Driver)
 			}
 
