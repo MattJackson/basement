@@ -8,14 +8,14 @@ import (
 
 // Caps represents driver capability flags.
 type Caps struct {
-	Driver        string         // human-readable: "Garage 1.0.1"
-	Layout        LayoutCapability // "stage-apply-revert" | "atomic" | "readonly"
-	Quotas        bool
-	BucketAliases bool
-	KeyModel      KeyModel       // "garage" | "iam" | "none"
-	Presign       bool
-	Multipart     bool
-	Versioning    bool
+	Driver        string           `json:"driver"`
+	Layout        LayoutCapability `json:"layout"`
+	Quotas        bool             `json:"quotas"`
+	BucketAliases bool             `json:"bucketAliases"`
+	KeyModel      KeyModel         `json:"keyModel"`
+	Presign       bool             `json:"presign"`
+	Multipart     bool             `json:"multipart"`
+	Versioning    bool             `json:"versioning"`
 }
 
 // LayoutCapability is the layout management mode supported by the driver.
@@ -44,130 +44,130 @@ const (
 
 // HealthReport represents health check status.
 type HealthReport struct {
-	Status  string            // e.g., "healthy", "degraded", "unavailable"
-	Details map[string]any    // backend-specific details
+	Status  string         `json:"status"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // Node represents a cluster node.
 type Node struct {
-	ID       string   // unique node identifier
-	Hostname string   // hostname
-	Address  string   // network address
-	Zone     string   // availability zone
-	Role     string   // current role in layout
-	Capacity int64    // capacity in bytes
-	Tags     []string // tags/labels
-	Status   string   // "connected" | "unreachable"
-	Version  string   // Garage version
+	ID       string   `json:"id"`
+	Hostname string   `json:"hostname,omitempty"`
+	Address  string   `json:"address,omitempty"`
+	Zone     string   `json:"zone,omitempty"`
+	Role     string   `json:"role,omitempty"`
+	Capacity int64    `json:"capacity,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Status   string   `json:"status,omitempty"`
+	Version  string   `json:"version,omitempty"`
 }
 
 // Layout represents the cluster layout.
 type Layout struct {
-	Version int     // layout version number
-	Nodes   []Node  // nodes in this layout
-	Staged  *Layout // staged but not yet applied layout (if any)
+	Version int     `json:"version"`
+	Nodes   []Node  `json:"nodes"`
+	Staged  *Layout `json:"staged,omitempty"`
 }
 
 // LayoutChange represents a single node change for staging.
 type LayoutChange struct {
-	NodeID string   // node ID to modify
-	Role   *string  // new role (nil = don't change)
-	Zone   *string  // new zone (nil = don't change)
-	Capacity *int64 // new capacity in bytes (nil = don't change)
-	Tags   []string // replace tags with this list
+	NodeID   string   `json:"nodeId"`
+	Role     *string  `json:"role,omitempty"`
+	Zone     *string  `json:"zone,omitempty"`
+	Capacity *int64   `json:"capacity,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 // LayoutDiff represents the diff between current and staged layout.
 type LayoutDiff struct {
-	Adds      []Node // nodes to add
-	Removes   []Node // nodes to remove
-	Modifies  []Node // nodes to modify (by ID)
+	Adds     []Node `json:"adds"`
+	Removes  []Node `json:"removes"`
+	Modifies []Node `json:"modifies"`
 }
 
 // Bucket represents a storage bucket.
 type Bucket struct {
-	ID        string    // unique bucket identifier
-	Aliases   []string  // alias names
-	Quotas    *Quotas   // quota settings (nil if unlimited)
-	Created   time.Time // creation timestamp
+	ID      string    `json:"id"`
+	Aliases []string  `json:"aliases"`
+	Quotas  *Quotas   `json:"quotas,omitempty"`
+	Created time.Time `json:"created,omitempty"`
 }
 
 // Quotas represents bucket quota limits.
 type Quotas struct {
-	MaxSize    *int64 // max size in bytes (nil = unlimited)
-	MaxObjects *int64 // max object count (nil = unlimited)
+	MaxSize    *int64 `json:"maxSize,omitempty"`
+	MaxObjects *int64 `json:"maxObjects,omitempty"`
 }
 
 // BucketSpec is the specification for creating a bucket.
 type BucketSpec struct {
-	Alias string // alias name
+	Alias string `json:"alias"`
 }
 
 // BucketUpdate represents fields to update on a bucket.
 type BucketUpdate struct {
-	Aliases *[]string // new aliases list (nil = don't change)
-	Quotas  *Quotas   // new quotas (nil = don't change)
+	Aliases *[]string `json:"aliases,omitempty"`
+	Quotas  *Quotas   `json:"quotas,omitempty"`
 }
 
 // Key represents an access key.
 type Key struct {
-	ID                string    // unique key identifier
-	Name              string    // human-readable name
-	AccessKeyID       string    // the actual access key ID
-	Created           time.Time // creation timestamp
-	AllowCreateBucket bool      // whether this key can create buckets
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	AccessKeyID       string    `json:"accessKeyId"`
+	Created           time.Time `json:"created,omitempty"`
+	AllowCreateBucket bool      `json:"allowCreateBucket"`
 }
 
 // KeySpec is the specification for creating a key.
 type KeySpec struct {
-	Name string // human-readable name
+	Name string `json:"name"`
 }
 
 // BucketPermission represents permissions granted to a key on a bucket.
 type BucketPermission struct {
-	BucketID string // bucket ID
-	Read     bool   // read permission
-	Write    bool   // write permission
-	Owner    bool   // owner permission (full access)
+	BucketID string `json:"bucketId"`
+	Read     bool   `json:"read"`
+	Write    bool   `json:"write"`
+	Owner    bool   `json:"owner"`
 }
 
 // ObjectPage represents a page of objects in a bucket.
 type ObjectPage struct {
-	Objects        []ObjectInfo // objects on this page
-	NextContinuation string      // token for next page (empty if last page)
-	IsTruncated    bool         // whether results were truncated
-	Prefixes       []string     // common prefixes (for prefix grouping)
+	Objects          []ObjectInfo `json:"objects"`
+	NextContinuation string       `json:"nextContinuation,omitempty"`
+	IsTruncated      bool         `json:"isTruncated"`
+	Prefixes         []string     `json:"prefixes,omitempty"`
 }
 
 // ObjectInfo represents metadata about an object.
 type ObjectInfo struct {
-	Key          string    // object key/name
-	Size         int64     // size in bytes
-	LastModified time.Time // last modification timestamp
-	ETag         string    // entity tag (MD5 for simple uploads)
-	ContentType  string    // MIME content type
-	IsDir        bool      // true if this is a marker for a "directory"
+	Key          string    `json:"key"`
+	Size         int64     `json:"size"`
+	LastModified time.Time `json:"lastModified,omitempty"`
+	ETag         string    `json:"etag,omitempty"`
+	ContentType  string    `json:"contentType,omitempty"`
+	IsDir        bool      `json:"isDir,omitempty"`
 }
 
 // PresignedURL represents a presigned URL.
 type PresignedURL struct {
-	URL     string    // the presigned URL
-	Expires time.Time // expiration timestamp
-	Method  string    // HTTP method (GET, PUT, etc.)
+	URL     string    `json:"url"`
+	Expires time.Time `json:"expires"`
+	Method  string    `json:"method"`
 }
 
 // MultipartUpload represents an in-progress multipart upload.
 type MultipartUpload struct {
-	UploadID    string // multipart upload ID
-	Bucket      string // bucket name
-	Key         string // object key
-	ContentType string // content type for the final object
+	UploadID    string `json:"uploadId"`
+	Bucket      string `json:"bucket"`
+	Key         string `json:"key"`
+	ContentType string `json:"contentType,omitempty"`
 }
 
 // CompletedPart represents a completed part in a multipart upload.
 type CompletedPart struct {
-	PartNumber int    // part number (1-based)
-	ETag       string // entity tag from the put-part response
+	PartNumber int    `json:"partNumber"`
+	ETag       string `json:"etag"`
 }
 
 // Driver is the interface that all backend drivers must implement.
