@@ -1,5 +1,57 @@
 @import "tailwindcss";
 
-/* dark mode default */
-:root { color-scheme: dark; }
-html { background: #0a0a0a; color: #f5f5f5; }
+/*
+ * basement theme — dark-mode default (light mode deferred to v1.x).
+ * Tailwind v4 + shadcn convention: the tokens below are exposed to
+ * utility classes (bg-background, text-foreground, border-border, …)
+ * via `@theme`. Token names match shadcn's standard so primitives
+ * pasted from shadcn work without modification.
+ */
+
+@theme {
+  --color-background: hsl(240 10% 3.9%);
+  --color-foreground: hsl(0 0% 98%);
+
+  --color-card: hsl(240 6% 8%);
+  --color-card-foreground: hsl(0 0% 98%);
+
+  --color-popover: hsl(240 6% 8%);
+  --color-popover-foreground: hsl(0 0% 98%);
+
+  --color-primary: hsl(0 0% 98%);
+  --color-primary-foreground: hsl(240 5.9% 10%);
+
+  --color-secondary: hsl(240 3.7% 15.9%);
+  --color-secondary-foreground: hsl(0 0% 98%);
+
+  --color-muted: hsl(240 3.7% 15.9%);
+  --color-muted-foreground: hsl(240 5% 64.9%);
+
+  --color-accent: hsl(240 3.7% 15.9%);
+  --color-accent-foreground: hsl(0 0% 98%);
+
+  --color-destructive: hsl(0 62.8% 50%);
+  --color-destructive-foreground: hsl(0 0% 98%);
+
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-input: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(240 4.9% 60%);
+
+  --radius: 0.5rem;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+* {
+  border-color: var(--color-border);
+}
