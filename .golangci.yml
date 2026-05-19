@@ -1,0 +1,10 @@
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - revive
+
+skip-dirs:
+  - internal/web/dist/
+  - frontend/
