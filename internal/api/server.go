@@ -19,28 +19,30 @@ import (
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	cfg        *config.Config
-	store      *store.Store
-	drv        driver.Driver
-	reg        *driver.Registry
-	router     chi.Router
-	httpServer *http.Server
-	logger     *slog.Logger
+	cfg         *config.Config
+	store       *store.Store
+	conns       store.Connections
+	drv         driver.Driver
+	reg         *driver.Registry
+	router      chi.Router
+	httpServer  *http.Server
+	logger      *slog.Logger
 }
 
 // New creates a new Server instance with both legacy single-driver (for back-compat) and registry.
-func New(cfg *config.Config, store *store.Store, drv driver.Driver, reg *driver.Registry) *Server {
+func New(cfg *config.Config, store *store.Store, conns store.Connections, drv driver.Driver, reg *driver.Registry) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
 	srv := &Server{
-		cfg:    cfg,
-		store:  store,
-		drv:    drv,
-		reg:    reg,
-		router: chi.NewRouter(),
-		logger: logger,
+		cfg:     cfg,
+		store:   store,
+		conns:   conns,
+		drv:     drv,
+		reg:     reg,
+		router:  chi.NewRouter(),
+		logger:  logger,
 	}
 
 	srv.routes()
@@ -100,9 +102,6 @@ func (s *Server) routes() {
 		})
 
 		// Admin routes — admin role required.
-		// Flat registration; do NOT use chi.Router.Route("/admin/buckets", …)
-		// because it would replace the prior list+create handlers on the
-		// same path.
 		apiR.Group(func(adminG chi.Router) {
 			adminG.Use(auth.Middleware(s.cfg.JWT.Secret))
 			adminG.Use(auth.RequireRole("admin"))
@@ -113,19 +112,34 @@ func (s *Server) routes() {
 			adminG.Post("/admin/layout/apply", s.applyLayoutHandler)
 			adminG.Post("/admin/layout/revert", s.revertLayoutHandler)
 
-			adminG.Get("/admin/buckets", s.listBucketsHandler)
-			adminG.Post("/admin/buckets", s.createBucketHandler)
-			adminG.Get("/admin/buckets/{id}", s.getBucketHandler)
-			adminG.Patch("/admin/buckets/{id}", s.updateBucketHandler)
-			adminG.Delete("/admin/buckets/{id}", s.deleteBucketHandler)
-			adminG.Post("/admin/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
+			// Connection CRUD
+			adminG.Get("/admin/clusters", s.listClustersHandler)
+			adminG.Post("/admin/clusters", s.createClusterHandler)
+			adminG.Get("/admin/clusters/{cid}", s.getClusterHandler)
+			adminG.Patch("/admin/clusters/{cid}", s.updateClusterHandler)
+			adminG.Delete("/admin/clusters/{cid}", s.deleteClusterHandler)
+			adminG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
+			adminG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
 
-			adminG.Get("/admin/keys", s.listKeysHandler)
-			adminG.Post("/admin/keys", s.createKeyHandler)
-			adminG.Get("/admin/keys/{id}", s.getKeyHandler)
-			adminG.Patch("/admin/keys/{id}", s.updateKeyHandler)
-			adminG.Delete("/admin/keys/{id}", s.deleteKeyHandler)
-			adminG.Post("/admin/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
+			// Connection-scoped bucket operations
+			adminG.Get("/admin/clusters/{cid}/buckets", s.listBucketsByClusterHandler)
+			adminG.Post("/admin/clusters/{cid}/buckets", s.createBucketHandler)
+			adminG.Get("/admin/clusters/{cid}/buckets/{id}", s.getBucketHandler)
+			adminG.Patch("/admin/clusters/{cid}/buckets/{id}", s.updateBucketHandler)
+			adminG.Delete("/admin/clusters/{cid}/buckets/{id}", s.deleteBucketHandler)
+			adminG.Post("/admin/clusters/{cid}/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
+
+			// Connection-scoped key operations
+			adminG.Get("/admin/clusters/{cid}/keys", s.listKeysByClusterHandler)
+			adminG.Post("/admin/clusters/{cid}/keys", s.createKeyHandler)
+			adminG.Get("/admin/clusters/{cid}/keys/{id}", s.getKeyHandler)
+			adminG.Patch("/admin/clusters/{cid}/keys/{id}", s.updateKeyHandler)
+			adminG.Delete("/admin/clusters/{cid}/keys/{id}", s.deleteKeyHandler)
+			adminG.Post("/admin/clusters/{cid}/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
+
+			// Cross-cluster aggregated reads (legacy paths, now return wrapped responses)
+			adminG.Get("/admin/buckets", s.listAllBucketsHandler)
+			adminG.Get("/admin/keys", s.listAllKeysHandler)
 		})
 	})
 

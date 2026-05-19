@@ -724,6 +724,985 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters:
+    get:
+      operationId: listClusters
+      summary: List all connections
+      description: Returns all storage backend connections configured in the system. Each connection represents a distinct Garage or S3 cluster with its own driver instance. Used by Admin — Connections screen list view.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: List of connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Connection'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: createCluster
+      summary: Create a new connection
+      description: Creates a new storage backend connection (Garage cluster or S3 bucket). Requires label, driver type, and configuration map. Used by Admin — Connections screen "Create connection" action.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionSpec'
+      responses:
+        '201':
+          description: Connection created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+        '400':
+          description: Invalid connection specification (e.g., unsupported driver, empty config)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Connection with this label already exists (case-insensitive)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}:
+    get:
+      operationId: getCluster
+      summary: Get connection details
+      description: Returns exhaustive information about a specific connection including its driver type, configuration, and creation timestamp. Used by Admin — Connections screen detail view.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Connection details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      operationId: updateCluster
+      summary: Update connection configuration
+      description: Updates optional fields on an existing connection including label, driver type, config map, and color. All fields are optional; absent values are treated as null. Used by Admin — Connections screen edit form.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID to update
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectionUpdate'
+      responses:
+        '200':
+          description: Connection updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+        '400':
+          description: Invalid update specification (e.g., unsupported driver)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: deleteCluster
+      summary: Delete a connection (token-confirmed)
+      description: |
+        Deletes a storage backend connection. All buckets and keys within that
+        cluster remain but become inaccessible until reassigned to another
+        connection.
+
+        **Two-phase confirmation:** the client must first POST to
+        `/admin/clusters/{cid}/_arm-delete` to receive a short-lived
+        (60s) HMAC-bound token, then send the token as the
+        `X-Confirm-Delete` request header on this DELETE. The token
+        is bound to the (connection id, requesting user) pair, so a token
+        armed for one connection cannot be used to delete another, and a
+        leaked URL alone cannot destroy.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID to delete
+        schema:
+          type: string
+      - name: X-Confirm-Delete
+        in: header
+        required: true
+        description: HMAC-bound confirmation token obtained from POST /admin/clusters/{cid}/_arm-delete.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Connection deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Cluster deleted
+        '400':
+          description: |
+            X-Confirm-Delete header missing (`CONFIRMATION_REQUIRED`),
+            malformed/expired (`CONFIRMATION_INVALID`), or bound to a
+            different connection/user (`CONFIRMATION_MISMATCH`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/_arm-delete:
+    post:
+      operationId: armDeleteCluster
+      summary: Arm a connection deletion (returns short-lived confirm token)
+      description: |
+        First phase of basement's two-phase delete pattern. Returns
+        a 60-second HMAC token bound to the (connection id, requesting
+        user) pair. The client passes this token as the
+        `X-Confirm-Delete` request header on the matching DELETE.
+
+        Verifies the connection exists; returns 404 otherwise. Token is
+        stateless (server stores nothing); revocation = expiry only.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID to arm for deletion
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Arm token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - token
+                - expiresInSeconds
+                properties:
+                  token:
+                    type: string
+                    description: Opaque token to pass via X-Confirm-Delete header on the matching DELETE.
+                  expiresInSeconds:
+                    type: integer
+                    description: Seconds remaining before token expires (typically 60).
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/_test:
+    post:
+      operationId: testCluster
+      summary: Test connection health
+      description: |
+        Performs a health check against the specified connection's backend.
+        Returns status, latency, and error message if available. Used by
+        Admin — Connections screen "Test" button on existing connections.
+      tags:
+      - Clusters
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID to test
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Health check result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionTestResult'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/buckets:
+    get:
+      operationId: listAllBuckets
+      summary: List all buckets across connections (cross-cluster aggregate)
+      description: |
+        Fans out to all configured connections and aggregates bucket listings.
+        Each bucket in the response includes its originating connectionId.
+        Errors from individual connections are collected separately in the
+        errors array, allowing the UI to show partial results with error
+        indicators for failed connections.
+
+        **Breaking change:** Response shape changed from flat []Bucket to
+        { buckets: [...], errors: [...] } wrapper object.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: Aggregated bucket list with connection tags and error details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregatedBucketsResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/keys:
+    get:
+      operationId: listAllKeys
+      summary: List all keys across connections (cross-cluster aggregate)
+      description: |
+        Fans out to all configured connections and aggregates key listings.
+        Each key in the response includes its originating connectionId.
+        Errors from individual connections are collected separately in the
+        errors array, allowing the UI to show partial results with error
+        indicators for failed connections.
+
+        **Breaking change:** Response shape changed from flat []Key to
+        { keys: [...], errors: [...] } wrapper object.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: Aggregated key list with connection tags and error details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregatedKeysResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/buckets:
+    get:
+      operationId: listBucketsByCluster
+      summary: List buckets for a specific connection
+      description: Returns all storage buckets in the specified connection. Used by Buckets — list screen within a cluster context.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: List of buckets for this connection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bucket'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: createBucketByCluster
+      summary: Create bucket in a specific connection
+      description: Creates a new storage bucket within the specified connection. Used by Buckets — list screen "Create bucket" action within cluster context.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BucketSpec'
+      responses:
+        '201':
+          description: Bucket created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+        '400':
+          description: Invalid bucket specification (e.g., alias format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Bucket with this global alias already exists in this connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/buckets/{id}:
+    get:
+      operationId: getBucketByCluster
+      summary: Get bucket details for a specific connection
+      description: Returns exhaustive information about a specific bucket including aliases, key permissions grid, statistics (objects, size), quotas, and multipart upload state. Used by Buckets — detail screen tabs (Overview, Keys & Permissions).
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Bucket ID or global alias
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Bucket details with permissions and statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      operationId: updateBucketByCluster
+      summary: Update bucket configuration for a specific connection
+      description: Updates optional fields on an existing bucket including quotas (maxSize, maxObjects) and website access configuration. All fields are optional; absent values are treated as null. Used by Buckets — detail screen Settings tab.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Bucket ID or global alias
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BucketUpdate'
+      responses:
+        '200':
+          description: Bucket updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+        '400':
+          description: Invalid update specification (e.g., quota format)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: deleteBucketByCluster
+      summary: Delete a bucket (token-confirmed) within a specific connection
+      description: |
+        Deletes a storage bucket and all its associated data. Fails
+        if the bucket is not empty (zero objects). Also deletes all
+        aliases (global and per-key) associated with the bucket.
+
+        **Two-phase confirmation:** the client must first POST to
+        `/admin/clusters/{cid}/buckets/{id}/_arm-delete` to receive a short-lived
+        (60s) HMAC-bound token, then send the token as the
+        `X-Confirm-Delete` request header on this DELETE. The token
+        is bound to the (bucket id, requesting user) pair, so a token
+        armed for one bucket cannot be used to delete another, and a
+        leaked URL alone cannot destroy.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Bucket ID or global alias to delete
+        schema:
+          type: string
+      - name: X-Confirm-Delete
+        in: header
+        required: true
+        description: HMAC-bound confirmation token obtained from POST /admin/clusters/{cid}/buckets/{id}/_arm-delete.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Bucket deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Bucket deleted
+        '400':
+          description: |
+            X-Confirm-Delete header missing (`CONFIRMATION_REQUIRED`),
+            malformed/expired (`CONFIRMATION_INVALID`), or bound to a
+            different bucket/user (`CONFIRMATION_MISMATCH`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/buckets/{id}/_arm-delete:
+    post:
+      operationId: armDeleteBucketByCluster
+      summary: Arm a bucket deletion (returns short-lived confirm token) within a specific connection
+      description: |
+        First phase of basement's two-phase delete pattern. Returns
+        a 60-second HMAC token bound to the (bucket id, requesting
+        user) pair. The client passes this token as the
+        `X-Confirm-Delete` request header on the matching DELETE.
+
+        Verifies the bucket exists; returns 404 otherwise. Token is
+        stateless (server stores nothing); revocation = expiry only.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Bucket ID or global alias to arm for deletion
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Arm token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - token
+                - expiresInSeconds
+                properties:
+                  token:
+                    type: string
+                    description: Opaque token to pass via X-Confirm-Delete header on the matching DELETE.
+                  expiresInSeconds:
+                    type: integer
+                    description: Seconds remaining before token expires (typically 60).
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/keys:
+    get:
+      operationId: listKeysByCluster
+      summary: List keys for a specific connection
+      description: Returns all API access keys in the specified connection with their ID, human-friendly name, and bucket permissions summary. Used by Keys — list screen within a cluster context.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: List of API access keys for this connection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Key'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      operationId: createKeyByCluster
+      summary: Create a new access key within a specific connection
+      description: Creates a new API access key with an optional name. Returns the newly created key including its secretAccessKey (shown ONCE only — UI must provide copy/download UX). Used by Keys — list screen "Create key" action within cluster context.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeySpec'
+      responses:
+        '201':
+          description: Key created successfully with secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Key'
+        '400':
+          description: Invalid key specification
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/keys/{id}:
+    get:
+      operationId: getKeyByCluster
+      summary: Get access key details for a specific connection
+      description: Returns detailed information about an API access key including its ID, name, and full bucket permissions grid. Secret key is NOT returned by default; requires showSecretKey query parameter for security. Used by Keys — detail screen Overview tab.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Access key ID
+        schema:
+          type: string
+      - name: showSecretKey
+        in: query
+        description: Whether to include the secret access key (requires confirmation)
+        required: false
+        schema:
+          type: boolean
+          default: false
+      responses:
+        '200':
+          description: Key details with optional secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Key'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Key not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      operationId: updateKeyByCluster
+      summary: Update access key metadata within a specific connection
+      description: Updates the human-friendly name of an API access key. Secret key rotation is not supported via this endpoint — delete and recreate to rotate. Used by Keys — detail screen Overview tab inline edit.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID to update
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Access key ID to update
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KeyUpdate'
+      responses:
+        '200':
+          description: Key metadata updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Key'
+        '400':
+          description: Invalid update specification (e.g., empty name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Key not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      operationId: deleteKeyByCluster
+      summary: Delete an access key (token-confirmed) within a specific connection
+      description: |
+        Deletes an API access key from the cluster. Access is removed from all buckets; those
+        bucket permissions become dangling (user must manually clean up). Used by Keys — detail screen
+        Danger zone.
+
+        **Two-phase confirmation:** the client must first POST to
+        `/admin/clusters/{cid}/keys/{id}/_arm-delete` to receive a short-lived
+        (60s) HMAC-bound token, then send the token as the
+        `X-Confirm-Delete` request header on this DELETE. The token
+        is bound to the (key id, requesting user) pair, so a token
+        armed for one key cannot be used to delete another, and a
+        leaked URL alone cannot destroy.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Access key ID to delete
+        schema:
+          type: string
+      - name: X-Confirm-Delete
+        in: header
+        required: true
+        description: HMAC-bound confirmation token obtained from POST /admin/clusters/{cid}/keys/{id}/_arm-delete.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Key deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Access key deleted
+        '400':
+          description: |
+            X-Confirm-Delete header missing (`CONFIRMATION_REQUIRED`),
+            malformed/expired (`CONFIRMATION_INVALID`), or bound to a
+            different key/user (`CONFIRMATION_MISMATCH`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Key not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/keys/{id}/_arm-delete:
+    post:
+      operationId: armDeleteKeyByCluster
+      summary: Arm a key deletion (returns short-lived confirm token) within a specific connection
+      description: |
+        First phase of basement's two-phase delete pattern. Returns
+        a 60-second HMAC token bound to the (key id, requesting
+        user) pair. The client passes this token as the
+        `X-Confirm-Delete` request header on the matching DELETE.
+
+        Verifies the key exists; returns 404 otherwise. Token is
+        stateless (server stores nothing); revocation = expiry only.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: id
+        in: path
+        required: true
+        description: Access key ID to arm for deletion
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Arm token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - token
+                - expiresInSeconds
+                properties:
+                  token:
+                    type: string
+                    description: Opaque token to pass via X-Confirm-Delete header on the matching DELETE.
+                  expiresInSeconds:
+                    type: integer
+                    description: Seconds remaining before token expires (typically 60).
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Key not found or connection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/users:
     get:
       operationId: listUsers
@@ -1848,6 +2827,173 @@ components:
             details:
               type: object
               additionalProperties: true
+    Connection:
+      type: object
+      required:
+      - id
+      - label
+      - driver
+      - config
+      - owner
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique connection identifier.
+        label:
+          type: string
+          description: Operator-set human-friendly name, unique case-insensitive.
+        driver:
+          type: string
+          enum:
+          - garage
+          - garage-v1
+          - aws-s3
+          description: Backend driver type.
+        config:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-driver configuration map (adminUrl, adminToken, region, etc.).
+        color:
+          type: string
+          description: Hex color for UI display; defaults to #C9874B.
+        owner:
+          type: string
+          description: Owner of the connection (currently always "org").
+        createdAt:
+          type: string
+          format: date-time
+          description: Connection creation timestamp.
+    ConnectionSpec:
+      type: object
+      required:
+      - label
+      - driver
+      - config
+      properties:
+        label:
+          type: string
+          description: Operator-set human-friendly name, unique case-insensitive.
+        driver:
+          type: string
+          enum:
+          - garage
+          - garage-v1
+          - aws-s3
+          description: Backend driver type.
+        config:
+          type: object
+          additionalProperties:
+            type: string
+          description: Per-driver configuration map; must be non-empty.
+        color:
+          type: string
+          description: Hex color for UI display (optional).
+    ConnectionUpdate:
+      type: object
+      properties:
+        label:
+          type: string
+          nullable: true
+          description: New label (optional, replaces existing if provided).
+        driver:
+          type: string
+          nullable: true
+          enum:
+          - garage
+          - garage-v1
+          - aws-s3
+          description: New driver type (optional).
+        config:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+          description: New config map (optional, replaces existing if provided).
+        color:
+          type: string
+          nullable: true
+          description: New hex color (optional).
+    ConnectionTestResult:
+      type: object
+      required:
+      - ok
+      properties:
+        ok:
+          type: boolean
+          description: Whether the health check passed.
+        latencyMs:
+          type: integer
+          description: Health check latency in milliseconds (optional).
+        message:
+          type: string
+          description: Human-readable status message.
+    AggregatedBucketsResponse:
+      type: object
+      required:
+      - buckets
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/BucketWithConnectionId'
+          description: Buckets from all connections, tagged with connectionId.
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FanOutError'
+          description: Errors encountered during fan-out across connections.
+    AggregatedKeysResponse:
+      type: object
+      required:
+      - keys
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/KeyWithConnectionId'
+          description: Keys from all connections, tagged with connectionId.
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FanOutError'
+          description: Errors encountered during fan-out across connections.
+    BucketWithConnectionId:
+      type: object
+      required:
+      - id
+      - connectionId
+      allOf:
+      - $ref: '#/components/schemas/Bucket'
+      properties:
+        connectionId:
+          type: string
+          description: Connection ID this bucket belongs to.
+    KeyWithConnectionId:
+      type: object
+      required:
+      - id
+      - connectionId
+      allOf:
+      - $ref: '#/components/schemas/Key'
+      properties:
+        connectionId:
+          type: string
+          description: Connection ID this key belongs to.
+    FanOutError:
+      type: object
+      required:
+      - connectionId
+      - message
+      properties:
+        connectionId:
+          type: string
+          description: Connection that produced the error.
+        message:
+          type: string
+          description: Error message from that connection.
     HealthReport:
       type: object
       description: Liveness probe response from basement health check.
@@ -2080,10 +3226,14 @@ components:
       type: object
       required:
       - id
+      - connectionId
       properties:
         id:
           type: string
           description: Unique bucket identifier (UUID or backend-native).
+        connectionId:
+          type: string
+          description: Connection ID this bucket belongs to.
         aliases:
           type: array
           items:
@@ -2226,10 +3376,14 @@ components:
       type: object
       required:
       - id
+      - connectionId
       properties:
         id:
           type: string
           description: Access key ID.
+        connectionId:
+          type: string
+          description: Connection ID this key belongs to.
         name:
           type: string
           description: Human-friendly name for the key.
