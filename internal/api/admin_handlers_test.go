@@ -1173,6 +1173,11 @@ func TestUpdateBucketHandler_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// mintAdminDeleteToken returns a valid X-Confirm-Delete token for admin user.
+func mintAdminDeleteToken(bucketID string) string {
+	return auth.MintConfirmToken(testSecret, "delete:bucket", bucketID, "admin", 60*time.Second)
+}
+
 func TestDeleteBucketHandler_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
@@ -1186,6 +1191,7 @@ func TestDeleteBucketHandler_HappyPath(t *testing.T) {
 	srv := New(cfg, st, drv)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
+	req.Header.Set("X-Confirm-Delete", mintAdminDeleteToken("bucket-123"))
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -1198,6 +1204,84 @@ func TestDeleteBucketHandler_HappyPath(t *testing.T) {
 	json.NewDecoder(rr.Body).Decode(&resp)
 	if resp["message"] != "Bucket deleted" {
 		t.Errorf("expected message 'Bucket deleted', got %v", resp)
+	}
+}
+
+func TestDeleteBucketHandler_NoConfirmHeader(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	called := false
+	drv := &testMockDriver{
+		deleteBucketFunc: func(_ context.Context, id string) error {
+			called = true
+			return nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when X-Confirm-Delete absent, got %d", rr.Code)
+	}
+	if called {
+		t.Fatal("driver.DeleteBucket must NOT run when confirm header is missing")
+	}
+}
+
+func TestDeleteBucketHandler_BadConfirmToken(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	called := false
+	drv := &testMockDriver{
+		deleteBucketFunc: func(_ context.Context, id string) error {
+			called = true
+			return nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-123")
+	req.Header.Set("X-Confirm-Delete", "not-a-real-token")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed token, got %d", rr.Code)
+	}
+	if called {
+		t.Fatal("driver.DeleteBucket must NOT run when confirm token is malformed")
+	}
+}
+
+func TestDeleteBucketHandler_TokenForWrongBucket(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	called := false
+	drv := &testMockDriver{
+		deleteBucketFunc: func(_ context.Context, id string) error {
+			called = true
+			return nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	// Token armed for bucket-A; request DELETEs bucket-B.
+	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/bucket-B")
+	req.Header.Set("X-Confirm-Delete", mintAdminDeleteToken("bucket-A"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for token-bucket mismatch, got %d", rr.Code)
+	}
+	if called {
+		t.Fatal("driver.DeleteBucket must NOT run when token bound to different bucket")
 	}
 }
 
@@ -1214,12 +1298,83 @@ func TestDeleteBucketHandler_BucketNotFound(t *testing.T) {
 	srv := New(cfg, st, drv)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/buckets/nonexistent")
+	req.Header.Set("X-Confirm-Delete", mintAdminDeleteToken("nonexistent"))
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusNotFound {
 		t.Errorf("expected status 404, got %d", rr.Code)
+	}
+}
+
+func TestArmDeleteBucketHandler_HappyPath(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	drv := &testMockDriver{
+		getBucketFunc: func(_ context.Context, id string) (driver.Bucket, error) {
+			return driver.Bucket{ID: id, Aliases: []string{"some-alias"}}, nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123/_arm-delete")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Token            string `json:"token"`
+		ExpiresInSeconds int    `json:"expiresInSeconds"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatal("expected non-empty token")
+	}
+	if resp.ExpiresInSeconds <= 0 || resp.ExpiresInSeconds > 120 {
+		t.Errorf("expected expiry in (0, 120]s, got %d", resp.ExpiresInSeconds)
+	}
+
+	// Returned token must verify cleanly against the bucket.
+	if err := auth.VerifyConfirmToken(testSecret, resp.Token, "delete:bucket", "bucket-123", "admin"); err != nil {
+		t.Fatalf("returned token failed verify: %v", err)
+	}
+}
+
+func TestArmDeleteBucketHandler_BucketNotFound(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	drv := &testMockDriver{
+		getBucketFunc: func(_ context.Context, id string) (driver.Bucket, error) {
+			return driver.Bucket{}, &driver.Error{Op: "GetBucket", Driver: "test", Err: driver.ErrNotFound, Message: "not found"}
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodPost, "/api/v1/admin/buckets/nonexistent/_arm-delete")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rr.Code)
+	}
+}
+
+func TestArmDeleteBucketHandler_NoAuth(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	srv := New(cfg, st, &testMockDriver{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/buckets/bucket-123/_arm-delete", nil)
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rr.Code)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,11 +39,20 @@ export function DeleteBucketConfirm({
   onConfirm,
   onCancel,
 }: DeleteBucketConfirmProps) {
+  // Reset the typed input whenever the dialog (re)opens for a
+  // (possibly different) bucket. Done inline rather than via
+  // useEffect to avoid the cascading-render lint and to make the
+  // reset semantics — "open or alias changed" — fully visible.
   const [typed, setTyped] = useState("");
-
-  useEffect(() => {
-    if (open) setTyped("");
-  }, [open, bucketAlias]);
+  const [lastSeenKey, setLastSeenKey] = useState<string | null>(null);
+  const key = open ? `${bucketAlias}::open` : null;
+  if (key !== null && key !== lastSeenKey) {
+    setLastSeenKey(key);
+    if (typed !== "") setTyped("");
+  }
+  if (key === null && lastSeenKey !== null) {
+    setLastSeenKey(null);
+  }
 
   const matches = typed.trim() === bucketAlias;
 

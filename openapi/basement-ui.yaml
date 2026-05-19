@@ -192,10 +192,19 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
       operationId: deleteBucket
-      summary: Delete a bucket
-      description: Deletes a storage bucket and all its associated data. Fails if the bucket is not empty
-        (zero objects). Also deletes all aliases (global and per-key) associated with the bucket. Used
-        by Buckets — detail screen Danger zone.
+      summary: Delete a bucket (token-confirmed)
+      description: |
+        Deletes a storage bucket and all its associated data. Fails
+        if the bucket is not empty (zero objects). Also deletes all
+        aliases (global and per-key) associated with the bucket.
+
+        **Two-phase confirmation:** the client must first POST to
+        `/admin/buckets/{id}/_arm-delete` to receive a short-lived
+        (60s) HMAC-bound token, then send the token as the
+        `X-Confirm-Delete` request header on this DELETE. The token
+        is bound to the (bucket id, requesting user) pair, so a token
+        armed for one bucket cannot be used to delete another, and a
+        leaked URL alone cannot destroy.
       tags:
       - AdminBuckets
       security:
@@ -205,6 +214,12 @@ paths:
         in: path
         required: true
         description: Bucket ID or global alias to delete
+        schema:
+          type: string
+      - name: X-Confirm-Delete
+        in: header
+        required: true
+        description: HMAC-bound confirmation token obtained from POST /admin/buckets/{id}/_arm-delete.
         schema:
           type: string
       responses:
@@ -218,6 +233,67 @@ paths:
                   message:
                     type: string
                     example: Bucket deleted
+        '400':
+          description: |
+            X-Confirm-Delete header missing (`CONFIRMATION_REQUIRED`),
+            malformed/expired (`CONFIRMATION_INVALID`), or bound to a
+            different bucket/user (`CONFIRMATION_MISMATCH`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/buckets/{id}/_arm-delete:
+    post:
+      operationId: armDeleteBucket
+      summary: Arm a bucket deletion (returns short-lived confirm token)
+      description: |
+        First phase of basement's two-phase delete pattern. Returns
+        a 60-second HMAC token bound to the (bucket id, requesting
+        user) pair. The client passes this token as the
+        `X-Confirm-Delete` request header on the matching DELETE.
+
+        Verifies the bucket exists; returns 404 otherwise. Token is
+        stateless (server stores nothing); revocation = expiry only.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Bucket ID or global alias to arm for deletion
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Arm token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - token
+                - expiresInSeconds
+                properties:
+                  token:
+                    type: string
+                    description: Opaque token to pass via X-Confirm-Delete header on the matching DELETE.
+                  expiresInSeconds:
+                    type: integer
+                    description: Seconds remaining before token expires (typically 60).
         '401':
           description: No active session or insufficient role
           content:
