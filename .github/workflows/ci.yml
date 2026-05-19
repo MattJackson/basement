@@ -18,13 +18,15 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # v1.65+ is built with Go 1.25, required because go.mod
+          # declares go 1.25.
+          version: v1.65.0
 
       - name: Run tests
         run: go test -race ./...
@@ -40,6 +42,9 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
+        # Version comes from frontend/package.json "packageManager"
+        with:
+          package_json_file: frontend/package.json
 
       - name: Setup Node
         uses: actions/setup-node@v4

@@ -5,6 +5,8 @@ import type { components } from "@/shared/api/types.gen";
 type Node = components["schemas"]["Node"];
 type Layout = components["schemas"]["Layout"];
 type Caps = components["schemas"]["Caps"];
+type Bucket = components["schemas"]["Bucket"];
+type Key = components["schemas"]["Key"];
 
 export function useCapabilities() {
   return useQuery<Caps>({
@@ -55,5 +57,41 @@ export function useLayout() {
     },
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
+  });
+}
+
+export function useBuckets() {
+  return useQuery<Bucket[]>({
+    queryKey: ["admin", "buckets"],
+    queryFn: async () => {
+      const { data, response } = await client.GET("/admin/buckets");
+      if (response.status === 401) {
+        throw new Error("Unauthorized");
+      }
+      if (!response.ok || !data) {
+        throw new Error(`Failed to fetch buckets (status ${response.status})`);
+      }
+      return data as Bucket[];
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+export function useKeys() {
+  return useQuery<Key[]>({
+    queryKey: ["admin", "keys"],
+    queryFn: async () => {
+      const { data, response } = await client.GET("/admin/keys");
+      if (response.status === 401) {
+        throw new Error("Unauthorized");
+      }
+      if (!response.ok || !data) {
+        throw new Error(`Failed to fetch keys (status ${response.status})`);
+      }
+      return data as Key[];
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
   });
 }
