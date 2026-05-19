@@ -110,3 +110,87 @@ export function useDeleteBucket() {
     },
   });
 }
+
+/**
+ * Create a new access key. Returns the key with its secretAccessKey
+ * (shown ONCE only). Invalidates [admin, keys].
+ */
+export function useCreateKey() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation<components["schemas"]["Key"], Error, { name: string }>({
+    mutationFn: async (spec) => {
+      const { data, error, response } = await client.POST("/admin/keys", {
+        body: spec,
+      });
+      if (!response.ok || !data) throw apiError("createKey", response.status, error);
+      return data;
+    },
+    onSuccess: (key) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
+      navigate({ to: "/admin/keys/$id", params: { id: key.id } });
+    },
+  });
+}
+
+/**
+ * Update a key's per-bucket permissions. Invalidates [admin, keys] and [admin, keys, id].
+ */
+export function useUpdateKeyPermissions() {
+  const queryClient = useQueryClient();
+
+  return useMutation<components["schemas"]["Key"], Error, { id: string; permissions: components["schemas"]["BucketPermission"][] }>({
+    mutationFn: async ({ id, permissions }) => {
+      const { data, error, response } = await client.PATCH("/admin/keys/{id}", {
+        params: { path: { id } },
+        body: { bucketsPermissions: permissions },
+      });
+      if (!response.ok || !data) throw apiError(`updateKeyPermissions/${id}`, response.status, error);
+      return data;
+    },
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "keys", id] });
+    },
+  });
+}
+
+/**
+ * Two-phase delete for access keys: POST /_arm-delete to mint a short-lived HMAC
+ * token, then DELETE with X-Confirm-Delete header carrying the token.
+ */
+export function useDeleteKey() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      // Phase 1 — arm. Server verifies the key exists and mints a
+      // 60-second HMAC token bound to (key id, current user).
+      const arm = await client.POST("/admin/keys/{id}/_arm-delete", {
+        params: { path: { id } },
+      });
+      if (!arm.response.ok || !arm.data?.token) {
+        throw apiError(`armDeleteKey/${id}`, arm.response.status, arm.error);
+      }
+      // Phase 2 — fire. Token goes in X-Confirm-Delete; server
+      // re-verifies it matches the requested key + user before
+      // calling the backend delete.
+      const del = await client.DELETE("/admin/keys/{id}", {
+        params: {
+          path: { id },
+          header: { "X-Confirm-Delete": arm.data.token },
+        },
+        headers: { "X-Confirm-Delete": arm.data.token },
+      });
+      if (!del.response.ok) {
+        throw apiError(`deleteKey/${id}`, del.response.status, del.error);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
+      navigate({ to: "/admin/keys" });
+    },
+  });
+}

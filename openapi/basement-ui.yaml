@@ -460,10 +460,19 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
       operationId: deleteKey
-      summary: Delete an access key
-      description: Deletes an API access key from the cluster. Access is removed from all buckets; those
+      summary: Delete an access key (token-confirmed)
+      description: |
+        Deletes an API access key from the cluster. Access is removed from all buckets; those
         bucket permissions become dangling (user must manually clean up). Used by Keys — detail screen
         Danger zone.
+
+        **Two-phase confirmation:** the client must first POST to
+        `/admin/keys/{id}/_arm-delete` to receive a short-lived
+        (60s) HMAC-bound token, then send the token as the
+        `X-Confirm-Delete` request header on this DELETE. The token
+        is bound to the (key id, requesting user) pair, so a token
+        armed for one key cannot be used to delete another, and a
+        leaked URL alone cannot destroy.
       tags:
       - AdminKeys
       security:
@@ -473,6 +482,12 @@ paths:
         in: path
         required: true
         description: Access key ID to delete
+        schema:
+          type: string
+      - name: X-Confirm-Delete
+        in: header
+        required: true
+        description: HMAC-bound confirmation token obtained from POST /admin/keys/{id}/_arm-delete.
         schema:
           type: string
       responses:
@@ -486,6 +501,67 @@ paths:
                   message:
                     type: string
                     example: Access key deleted
+        '400':
+          description: |
+            X-Confirm-Delete header missing (`CONFIRMATION_REQUIRED`),
+            malformed/expired (`CONFIRMATION_INVALID`), or bound to a
+            different key/user (`CONFIRMATION_MISMATCH`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Key not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/keys/{id}/_arm-delete:
+    post:
+      operationId: armDeleteKey
+      summary: Arm a key deletion (returns short-lived confirm token)
+      description: |
+        First phase of basement's two-phase delete pattern. Returns
+        a 60-second HMAC token bound to the (key id, requesting
+        user) pair. The client passes this token as the
+        `X-Confirm-Delete` request header on the matching DELETE.
+
+        Verifies the key exists; returns 404 otherwise. Token is
+        stateless (server stores nothing); revocation = expiry only.
+      tags:
+      - AdminKeys
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: Access key ID to arm for deletion
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Arm token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - token
+                - expiresInSeconds
+                properties:
+                  token:
+                    type: string
+                    description: Opaque token to pass via X-Confirm-Delete header on the matching DELETE.
+                  expiresInSeconds:
+                    type: integer
+                    description: Seconds remaining before token expires (typically 60).
         '401':
           description: No active session or insufficient role
           content:
@@ -2193,7 +2269,12 @@ components:
       properties:
         name:
           type: string
-          description: New human-friendly name for the key.
+          description: New human-friendly name for the key (optional).
+        bucketsPermissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/BucketPermission'
+          description: Replace the key's per-bucket permissions wholesale (optional).
     BucketPermission:
       type: object
       required:

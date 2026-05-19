@@ -123,6 +123,7 @@ func (s *Server) routes() {
 			adminG.Get("/admin/keys/{id}", s.getKeyHandler)
 			adminG.Patch("/admin/keys/{id}", s.updateKeyHandler)
 			adminG.Delete("/admin/keys/{id}", s.deleteKeyHandler)
+			adminG.Post("/admin/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
 		})
 	})
 

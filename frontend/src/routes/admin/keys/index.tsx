@@ -28,6 +28,11 @@ import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
 import { useKeys } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useCreateKey } from "@/shared/api/mutations";
+import { DeleteKeyConfirm } from "@/shared/ui/DeleteKeyConfirm";
+import { useDeleteKey } from "@/shared/api/mutations";
+import type { components } from "@/shared/api/types.gen";
 
 export const Route = createFileRoute("/admin/keys/")({
   component: adminPage(KeysScreen),
@@ -37,6 +42,17 @@ function KeysScreen() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const { data: keys, isLoading, error } = useKeys();
+  
+  // Create key dialog state
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const createKey = useCreateKey();
+  const [createdKey, setCreatedKey] = useState<components["schemas"]["Key"] | null>(null);
+  
+  // Delete key dialog state
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [keyToDelete, setKeyToDelete] = useState<{ id: string; name?: string } | null>(null);
+  const deleteKey = useDeleteKey();
 
   const filteredKeys = keys?.filter((key) => {
     const nameMatch = key.name?.toLowerCase().includes(search.toLowerCase()) ?? false;
@@ -58,7 +74,7 @@ function KeysScreen() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 sm:w-64"
         />
-       <Button variant="outline" onClick={() => {}}>
+        <Button variant="outline" onClick={() => { setCreateOpen(true); setNewKeyName(""); }}>
           New
         </Button>
       </div>
@@ -73,6 +89,23 @@ function KeysScreen() {
       </div>
     );
   }
+
+  const handleCreateKey = () => {
+    if (!newKeyName.trim()) return;
+    createKey.mutate({ name: newKeyName.trim() });
+  };
+
+  const handleDeleteClick = (id: string, name?: string) => {
+    setKeyToDelete({ id, name });
+    setDeleteOpen(true);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (!keyToDelete) return;
+    deleteKey.mutate(keyToDelete.id);
+    setDeleteOpen(false);
+    setKeyToDelete(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -208,8 +241,13 @@ function KeysScreen() {
                          >
                            View
                          </DropdownMenuItem>
-                         {/* TODO(T2.38b) — delete key */}
-                         <DropdownMenuItem variant="destructive" onClick={() => {}}>
+                         <DropdownMenuItem 
+                           variant="destructive" 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             handleDeleteClick(key.id, key.name);
+                           }}
+                         >
                            Delete
                          </DropdownMenuItem>
                        </DropdownMenuContent>
@@ -221,6 +259,73 @@ function KeysScreen() {
           </Table>
         </div>
       )}
+
+      {/* Create Key Dialog */}
+      <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) setNewKeyName(""); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create access key</DialogTitle>
+            <DialogDescription>
+              Create a new API access key with per-bucket permissions. You&apos;ll see the secret key only once — save it securely.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            placeholder="Key name (required)"
+            value={newKeyName}
+            onChange={(e) => setNewKeyName(e.target.value)}
+            disabled={createKey.isPending}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createKey.isPending}>Cancel</Button>
+            <Button onClick={handleCreateKey} disabled={!newKeyName.trim() || createKey.isPending}>
+              {createKey.isPending ? "Creating…" : "Create key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Created Key Secret Display Dialog */}
+      {createdKey && (
+        <Dialog open={true} onOpenChange={(open) => { if (!open) setCreatedKey(null); }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Access key created</DialogTitle>
+              <DialogDescription>
+                Save the secret access key below. It will not be shown again.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-4">
+              <div className="text-sm font-medium">Access Key ID:</div>
+              <div className="font-mono text-sm break-all">{createdKey.accessKeyId}</div>
+              <div className="text-sm font-medium pt-2">Secret Access Key:</div>
+              <div className="flex gap-2">
+                <code className="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm break-all">
+                  {createdKey.secretAccessKey}
+                </code>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => navigator.clipboard.writeText(createdKey.secretAccessKey ?? "")}
+                >
+                  Copy
+                </Button>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setCreatedKey(null)}>Got it, save it</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <DeleteKeyConfirm
+        open={deleteOpen}
+        keyName={keyToDelete?.name}
+        isDeleting={deleteKey.isPending}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => { setDeleteOpen(false); setKeyToDelete(null); }}
+      />
     </div>
   );
 }

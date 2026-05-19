@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -1707,7 +1708,7 @@ func TestUpdateKeyHandler_HappyPath(t *testing.T) {
 		AllowCreateBucket: true,
 	}
 
-	body := `[{"bucket_id": "bucket-1", "read": true, "write": false, "owner": false}]`
+	body := `{"bucketsPermissions":[{"bucketId":"bucket-1","read":true,"write":false,"owner":false}]}`
 
 	drv := &testMockDriver{
 		updateKeyPermissionsFunc: func(_ context.Context, keyID string, perms []driver.BucketPermission) error {
@@ -1722,6 +1723,7 @@ func TestUpdateKeyHandler_HappyPath(t *testing.T) {
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/key-123")
 	req.Body = io.NopCloser(strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -1736,7 +1738,7 @@ func TestUpdateKeyHandler_KeyNotFound(t *testing.T) {
 	cfg := newTestConfig()
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
-	body := `[{"bucket_id": "bucket-1", "read": true, "write": false, "owner": false}]`
+	body := `{"bucketsPermissions":[{"bucketId":"bucket-1","read":true,"write":false,"owner":false}]}`
 
 	drv := &testMockDriver{
 		updateKeyPermissionsFunc: func(_ context.Context, keyID string, perms []driver.BucketPermission) error {
@@ -1748,6 +1750,7 @@ func TestUpdateKeyHandler_KeyNotFound(t *testing.T) {
 
 	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/nonexistent")
 	req.Body = io.NopCloser(strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -1851,8 +1854,16 @@ func TestDeleteKeyHandler_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
 	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
 
+	token := auth.MintConfirmToken(testSecret, opDeleteKey, "key-123", "admin", confirmDeleteTTL)
+
 	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
 		deleteKeyFunc: func(_ context.Context, id string) error {
+			if id != "key-123" {
+				t.Errorf("expected deleteKey called with key-123, got %s", id)
+			}
 			return nil
 		},
 	}
@@ -1860,12 +1871,13 @@ func TestDeleteKeyHandler_HappyPath(t *testing.T) {
 	srv := New(cfg, st, drv)
 
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
+	req.Header.Set("X-Confirm-Delete", token)
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rr.Code)
+		t.Errorf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
 	var resp map[string]string
@@ -1887,7 +1899,9 @@ func TestDeleteKeyHandler_KeyNotFound(t *testing.T) {
 
 	srv := New(cfg, st, drv)
 
+	token := auth.MintConfirmToken(testSecret, opDeleteKey, "nonexistent", "admin", confirmDeleteTTL)
 	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/nonexistent")
+	req.Header.Set("X-Confirm-Delete", token)
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -2235,5 +2249,275 @@ func TestRevertLayoutHandler_MethodNotAllowed(t *testing.T) {
 
 	if rr.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status 405, got %d", rr.Code)
+	}
+}
+
+// TestArmDeleteKeyHandler_HappyPath verifies that POST /admin/keys/{id}/_arm-delete
+// returns a valid token when the key exists and the user is authenticated.
+func TestArmDeleteKeyHandler_HappyPath(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodPost, "/api/v1/admin/keys/key-123/_arm-delete")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Token            string `json:"token"`
+		ExpiresInSeconds int    `json:"expiresInSeconds"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Token == "" {
+		t.Fatal("expected non-empty token")
+	}
+	if resp.ExpiresInSeconds <= 0 || resp.ExpiresInSeconds > 120 {
+		t.Errorf("expected expiry in (0, 120]s, got %d", resp.ExpiresInSeconds)
+	}
+
+	// Returned token must verify cleanly against the key.
+	if err := auth.VerifyConfirmToken(testSecret, resp.Token, "delete:key", "key-123", "admin"); err != nil {
+		t.Fatalf("returned token failed verify: %v", err)
+	}
+}
+
+func TestArmDeleteKeyHandler_KeyNotFound(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{}, &driver.Error{Op: "GetKey", Driver: "test", Err: driver.ErrNotFound, Message: "not found"}
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodPost, "/api/v1/admin/keys/nonexistent/_arm-delete")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", rr.Code)
+	}
+}
+
+func TestArmDeleteKeyHandler_NoAuth(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	srv := New(cfg, st, &testMockDriver{})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/keys/key-123/_arm-delete", nil)
+	rr := httptest.NewRecorder()
+
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rr.Code)
+	}
+}
+
+// TestDeleteKeyHandler_NoConfirmHeader verifies that DELETE /admin/keys/{id}
+// without X-Confirm-Delete header returns CONFIRMATION_REQUIRED error.
+func TestDeleteKeyHandler_NoConfirmHeader(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
+		deleteKeyFunc: func(_ context.Context, id string) error {
+			t.Error("deleteKey should not be called without confirmation header")
+			return nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Error.Code != "CONFIRMATION_REQUIRED" {
+		t.Errorf("expected CONFIRMATION_REQUIRED, got %s", errResp.Error.Code)
+	}
+}
+
+// TestDeleteKeyHandler_BadConfirmToken verifies that DELETE /admin/keys/{id}
+// with an invalid token returns CONFIRMATION_INVALID error.
+func TestDeleteKeyHandler_BadConfirmToken(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
+		deleteKeyFunc: func(_ context.Context, id string) error {
+			t.Error("deleteKey should not be called with bad token")
+			return nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
+	req.Header.Set("X-Confirm-Delete", "invalid-token-here")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Error.Code != "CONFIRMATION_INVALID" {
+		t.Errorf("expected CONFIRMATION_INVALID, got %s", errResp.Error.Code)
+	}
+}
+
+// TestDeleteKeyHandler_TokenForWrongKey verifies that DELETE /admin/keys/{id}
+// with a token armed for a different key returns CONFIRMATION_MISMATCH error.
+func TestDeleteKeyHandler_TokenForWrongKey(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	// Arm token for "wrong-key" but try to delete "key-123"
+	token := auth.MintConfirmToken(testSecret, opDeleteKey, "wrong-key", "admin", confirmDeleteTTL)
+
+	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
+		deleteKeyFunc: func(_ context.Context, id string) error {
+			t.Error("deleteKey should not be called with token for wrong key")
+			return nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/keys/key-123")
+	req.Header.Set("X-Confirm-Delete", token)
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Error.Code != "CONFIRMATION_MISMATCH" {
+		t.Errorf("expected CONFIRMATION_MISMATCH, got %s", errResp.Error.Code)
+	}
+}
+
+// TestUpdateKeyHandler_PermissionsOnly verifies that PATCH /admin/keys/{id}
+// with only bucketsPermissions succeeds and updates permissions via driver.
+func TestUpdateKeyHandler_PermissionsOnly(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	perms := []driver.BucketPermission{
+		{BucketID: "bucket-1", Read: true, Write: false, Owner: false},
+	}
+	drv := &testMockDriver{
+		updateKeyPermissionsFunc: func(_ context.Context, keyID string, p []driver.BucketPermission) error {
+			if keyID != "key-123" {
+				t.Errorf("expected keyID key-123, got %s", keyID)
+			}
+			if len(p) != 1 || p[0].BucketID != "bucket-1" {
+				t.Errorf("unexpected permissions: %+v", p)
+			}
+			return nil
+		},
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	body := map[string]interface{}{
+		"bucketsPermissions": perms,
+	}
+	jsonBody, _ := json.Marshal(body)
+	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/key-123")
+	req.Body = io.NopCloser(bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestUpdateKeyHandler_NameOnly verifies that PATCH /admin/keys/{id}
+// with only name returns 501 RENAME_NOT_SUPPORTED.
+func TestUpdateKeyHandler_NameOnly(t *testing.T) {
+	cfg := newTestConfig()
+	st, _ := store.Open("/tmp/test-store", 90*24*time.Hour)
+
+	drv := &testMockDriver{
+		getKeyFunc: func(_ context.Context, id string) (driver.Key, error) {
+			return driver.Key{ID: id, Name: "test-key"}, nil
+		},
+	}
+	srv := New(cfg, st, drv)
+
+	body := map[string]interface{}{
+		"name": "new-name",
+	}
+	jsonBody, _ := json.Marshal(body)
+	req := createAuthRequest(http.MethodPatch, "/api/v1/admin/keys/key-123")
+	req.Body = io.NopCloser(bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotImplemented {
+		t.Fatalf("expected 501, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var errResp struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errResp.Error.Code != "RENAME_NOT_SUPPORTED" {
+		t.Errorf("expected RENAME_NOT_SUPPORTED, got %s", errResp.Error.Code)
 	}
 }
