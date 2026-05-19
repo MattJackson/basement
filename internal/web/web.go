@@ -102,8 +102,17 @@ func serveAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", contentType)
 
-	// Long cache for hashed bundles; SPA index is served separately.
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	// /assets/* are content-hashed by Vite and safe to immutable-cache
+	// for a year. Root-level assets (favicon.svg, site.webmanifest,
+	// og-image.png, apple-touch-icon.png, etc.) are stable paths whose
+	// CONTENT changes between releases — caching them immutable wedges
+	// stale icons on users for a year. Cache them short with
+	// revalidation instead. See the 2026-05-19 favicon incident.
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=3600, must-revalidate")
+	}
 
 	// http.ServeContent handles Range, If-Modified-Since, HEAD properly.
 	http.ServeContent(w, r, urlPath, modTime(fullPath), bytes.NewReader(data))
