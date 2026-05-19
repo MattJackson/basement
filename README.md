@@ -48,6 +48,18 @@ MIT. See [LICENSE](LICENSE).
 Once v0.1 lands. For now, design discussion welcome in GitHub Discussions
 when they're opened.
 
+## Install
+
+Pull the latest image from GHCR:
+
+```bash
+docker pull ghcr.io/mattjackson/basement:latest
+```
+
+See [Releases](https://github.com/MattJackson/basement/releases)
+for tagged versions. All releases are multi-arch (linux/amd64 +
+linux/arm64).
+
 ## Build locally
 
 Multi-arch image build (requires Docker Buildx + QEMU for cross-arch):
