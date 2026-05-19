@@ -61,6 +61,20 @@ func TestGetKey(t *testing.T) {
 			Name:        "test-key",
 			AccessKeyID: "GK1",
 			Permissions: keyInfoPermsV1{CreateBucket: true},
+			Buckets: []keyInfoBucketV1{
+				{
+					ID:            "b-1",
+					GlobalAliases: []string{"my-bucket"},
+					LocalAliases:  []string{"local-alias"},
+					Permissions: bucketKeyPermV1{Read: true, Write: false, Owner: false},
+				},
+				{
+					ID:            "b-2",
+					GlobalAliases: nil,
+					LocalAliases:  nil,
+					Permissions:   bucketKeyPermV1{Read: true, Write: true, Owner: true},
+				},
+			},
 		})
 	}))
 	defer ts.Close()
@@ -72,6 +86,15 @@ func TestGetKey(t *testing.T) {
 	}
 	if k.ID != "GK1" || k.Name != "test-key" || !k.AllowCreateBucket {
 		t.Errorf("Key = %+v", k)
+	}
+	if len(k.Buckets) != 2 {
+		t.Fatalf("got %d buckets, want 2", len(k.Buckets))
+	}
+	if k.Buckets[0].BucketID != "b-1" || !k.Buckets[0].Read || k.Buckets[0].Write || k.Buckets[0].Owner {
+		t.Errorf("bucket[0] = %+v, want b-1 with read=true, write=false, owner=false", k.Buckets[0])
+	}
+	if !k.Buckets[1].Read || !k.Buckets[1].Write || !k.Buckets[1].Owner {
+		t.Errorf("bucket[1] = %+v, want all permissions true", k.Buckets[1])
 	}
 }
 

@@ -125,3 +125,18 @@ export function useKeys() {
     retry: 1,
   });
 }
+
+export function useKey(id: string) {
+  return useQuery<Key>({
+    queryKey: ["admin", "keys", id],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/admin/keys/{id}", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/keys/${id}`, response.status, error);
+      return data as Key;
+    },
+    enabled: !!id,
+    staleTime: 30_000,
+  });
+}

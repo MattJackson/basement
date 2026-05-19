@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
@@ -57,7 +57,7 @@ function MyBuckets() {
   const handleCreateSubmit = async (values: CreateBucketFormValues) => {
     try {
       createMutation.mutate(
-        { global_alias: values.alias },
+        { alias: values.alias },
         {
           onError: () => {
             // Error stays in dialog, don't close
@@ -283,34 +283,17 @@ function MyBuckets() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog 
-        open={deleteDialogId !== null} 
-        onOpenChange={(open) => {
-          if (!open) setDeleteDialogId(null);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete bucket?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {deleteDialogId && (() => {
-                const bucket = buckets?.find((b) => b.id === deleteDialogId);
-                const alias = bucket?.aliases?.[0] ?? deleteDialogId.slice(0, 8);
-                return `Delete bucket "${alias}"? This cannot be undone.`;
-              })()}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteDialogId(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={confirmDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteBucketConfirm
+        open={deleteDialogId !== null}
+        bucketAlias={(() => {
+          if (!deleteDialogId) return "";
+          const bucket = buckets?.find((b) => b.id === deleteDialogId);
+          return bucket?.aliases?.[0] ?? deleteDialogId.slice(0, 12);
+        })()}
+        isDeleting={deleteMutation.isPending}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteDialogId(null)}
+      />
     </div>
   );
 }

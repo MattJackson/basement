@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from "react";
 import {
   Table,
@@ -34,6 +34,7 @@ export const Route = createFileRoute("/admin/keys/")({
 });
 
 function KeysScreen() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const { data: keys, isLoading, error } = useKeys();
 
@@ -57,8 +58,7 @@ function KeysScreen() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 sm:w-64"
         />
-        {/* TODO(v0.2) — create key */}
-        <Button variant="outline" onClick={() => {}}>
+       <Button variant="outline" onClick={() => {}}>
           New
         </Button>
       </div>
@@ -129,8 +129,8 @@ function KeysScreen() {
               {filteredKeys?.map((key) => (
                 <TableRow
                   key={key.id}
-                  onClick={() => {}}
                   className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => navigate({ to: "/admin/keys/$id", params: { id: key.id } })}
                 >
                   <TableCell className="font-medium">{key.name ?? "-"}</TableCell>
                   <TableCell>
@@ -179,38 +179,44 @@ function KeysScreen() {
                   </TableCell>
                   <TableCell>{humanizeTime(key.created)}</TableCell>
                   <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" className="h-8 w-8 p-0">
-                          <span className="sr-only">Open menu</span>
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-4 w-4"
-                          >
-                            <circle cx="12" cy="12" r="1" />
-                            <circle cx="19" cy="12" r="1" />
-                            <circle cx="5" cy="12" r="1" />
-                          </svg>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {/* TODO(v0.2) — view key details */}
-                        <DropdownMenuItem onClick={() => {}}>View</DropdownMenuItem>
-                        {/* TODO(v0.2) — delete key */}
-                        <DropdownMenuItem variant="destructive" onClick={() => {}}>
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
+                     <DropdownMenu>
+                       <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
+                         <Button variant="ghost" className="h-8 w-8 p-0">
+                           <span className="sr-only">Open menu</span>
+                           <svg
+                             xmlns="http://www.w3.org/2000/svg"
+                             viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             strokeWidth="2"
+                             strokeLinecap="round"
+                             strokeLinejoin="round"
+                             className="h-4 w-4"
+                           >
+                             <circle cx="12" cy="12" r="1" />
+                             <circle cx="19" cy="12" r="1" />
+                             <circle cx="5" cy="12" r="1" />
+                           </svg>
+                         </Button>
+                       </DropdownMenuTrigger>
+                       <DropdownMenuContent align="end">
+                         <DropdownMenuItem
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             navigate({ to: "/admin/keys/$id", params: { id: key.id } });
+                           }}
+                         >
+                           View
+                         </DropdownMenuItem>
+                         {/* TODO(T2.38b) — delete key */}
+                         <DropdownMenuItem variant="destructive" onClick={() => {}}>
+                           Delete
+                         </DropdownMenuItem>
+                       </DropdownMenuContent>
+                     </DropdownMenu>
+                   </TableCell>
+                 </TableRow>
+               ))}
             </TableBody>
           </Table>
         </div>
