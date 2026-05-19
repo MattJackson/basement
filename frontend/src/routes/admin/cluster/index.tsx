@@ -1,8 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { HealthPill } from "@/shared/ui/HealthPill";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes } from "@/shared/lib/format";
@@ -26,7 +35,9 @@ function ClusterOverview() {
   const capsResult = useCapabilities();
 
   const totalNodes = nodes?.length ?? 0;
-  const healthyNodes = nodes?.filter(n => n.address).length ?? 0;
+  // Single-node Garage clusters report empty `address` on the local
+  // node — use `status` instead (matches the Nodes screen check).
+  const healthyNodes = nodes?.filter((n) => n.status === "connected").length ?? 0;
   const totalCapacity = nodes?.reduce((sum, node) => sum + (node.capacity ?? 0), 0) ?? 0;
 
   let healthStatus: "healthy" | "degraded" | "unavailable" = "unavailable";
@@ -163,23 +174,96 @@ function ClusterOverview() {
               )}
 
               <div className="flex flex-wrap gap-2 pt-2">
-                <Button variant="outline" render={<a href="/admin/cluster/nodes">View nodes</a>} />
                 <Button variant="outline" render={<a href="/admin/cluster/layout">Edit layout</a>} />
               </div>
+            </CardContent>
+          </Card>
 
-              {layout?.nodes.length ? (
-                <div>
-                  <p className="text-sm font-medium mb-2">Nodes</p>
-                  <ul className="space-y-1 text-sm">
-                    {layout.nodes.map((node) => (
-                      <li key={node.id} className="flex justify-between opacity-80">
-                        <span className="font-mono">{node.id.slice(0, 12)}</span>
-                        <span className="opacity-60">{node.zone}</span>
-                      </li>
+          <Card>
+            <CardHeader>
+              <CardTitle>Nodes</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 sm:p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>ID</TableHead>
+                      <TableHead>Hostname</TableHead>
+                      <TableHead>Address</TableHead>
+                      <TableHead>Zone</TableHead>
+                      <TableHead>Role</TableHead>
+                      <TableHead>Capacity</TableHead>
+                      <TableHead>Tags</TableHead>
+                      <TableHead>Version</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {nodes?.map((node) => (
+                      <TableRow key={node.id}>
+                        <TableCell className="font-mono text-sm">
+                          {node.id.slice(0, 8)}
+                        </TableCell>
+                        <TableCell>{node.hostname ?? "—"}</TableCell>
+                        <TableCell>{node.address ?? "—"}</TableCell>
+                        <TableCell>{node.zone ?? "—"}</TableCell>
+                        <TableCell>
+                          {node.role ? (
+                            <Badge variant="secondary" className="capitalize">
+                              {node.role}
+                            </Badge>
+                          ) : (
+                            <span className="opacity-60">Unassigned</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {node.capacity ? humanizeBytes(node.capacity) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          {node.tags && Object.keys(node.tags).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(node.tags).map(([k, v]) => (
+                                <span
+                                  key={k}
+                                  className="px-2 py-0.5 bg-muted rounded text-xs font-mono"
+                                >
+                                  {k}={v}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs opacity-80">
+                          {node.version ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          {node.status === "connected" ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-green-500" />
+                              <span className="text-sm opacity-80">Connected</span>
+                            </span>
+                          ) : node.status === "unreachable" ? (
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-red-500" />
+                              <span className="text-sm opacity-60">Unreachable</span>
+                            </span>
+                          ) : (
+                            <span className="flex items-center gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                              <span className="text-sm opacity-60 capitalize">
+                                {node.status || "unknown"}
+                              </span>
+                            </span>
+                          )}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </ul>
-                </div>
-              ) : null}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         </>
