@@ -128,7 +128,7 @@ func bucketFromInfo(resp bucketInfoV1) driverpkg.Bucket {
 		// BucketInfo (garage-admin-v1.yml:1277-1328) has no "created" field.
 		Created: time.Time{},
 	}
-	if resp.Quotas != nil {
+	if resp.Quotas != nil && (resp.Quotas.MaxSize != nil || resp.Quotas.MaxObjects != nil) {
 		bucket.Quotas = &driverpkg.Quotas{
 			MaxSize:    resp.Quotas.MaxSize,
 			MaxObjects: resp.Quotas.MaxObjects,
