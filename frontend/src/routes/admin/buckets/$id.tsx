@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
+import { PermissionChips } from "@/shared/ui/PermissionChips";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
@@ -425,23 +426,11 @@ function AdminBucketDetail() {
                         </TableCell>
                         <TableCell>{keyAccess.name ?? "—"}</TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-1.5">
-                            {keyAccess.read ? (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-green-50 text-green-700 border-green-200">R</Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground opacity-30">R</span>
-                            )}
-                            {keyAccess.write ? (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">W</Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground opacity-30">W</span>
-                            )}
-                            {keyAccess.owner ? (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-amber-50 text-amber-700 border-amber-200">O</Badge>
-                            ) : (
-                              <span className="text-xs text-muted-foreground opacity-30">O</span>
-                            )}
-                          </div>
+                          <PermissionChips
+                            read={!!keyAccess.read}
+                            write={!!keyAccess.write}
+                            owner={!!keyAccess.owner}
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
