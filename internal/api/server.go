@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
@@ -81,8 +82,19 @@ func (s *Server) routes() {
 	r.Use(middleware.AllowContentType("application/json"))
 
 	r.Group(func(r chi.Router) {
-		r.Route("/api/v1", func(r chi.Router) {
-			r.Get("/health", s.healthHandler)
+		r.Route("/api/v1", func(apiR chi.Router) {
+			// Public routes (no auth required) - /health and /auth/login
+			apiR.Get("/health", s.healthHandler)
+			apiR.Post("/auth/login", s.loginHandler)
+
+			// Authenticated group with middleware for protected routes
+			apiR.Group(func(authG chi.Router) {
+				authG.Use(auth.Middleware(s.cfg.JWT.Secret))
+
+				authG.Post("/auth/logout", s.logoutHandler)
+				authG.Get("/auth/me", s.meHandler)
+				authG.Get("/capabilities", s.capabilitiesHandler)
+			})
 		})
 	})
 }
