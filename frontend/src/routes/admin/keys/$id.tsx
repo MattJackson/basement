@@ -2,12 +2,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
 import { useKey } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
+import { useUpdateKeyPermissions, useDeleteKey } from "@/shared/api/mutations";
+import { useState } from "react";
+import type { components } from "@/shared/api/types.gen";
 
 export const Route = createFileRoute("/admin/keys/$id")({
   component: adminPage(KeyDetailScreen),
@@ -21,10 +26,8 @@ function BackLink() {
   );
 }
 
-// PermissionChips is the shared R/W/O badge component with tooltips —
-// re-exported under the same local name so the rest of the file keeps
-// working without a rename pass.
 import { PermissionChips } from "@/shared/ui/PermissionChips";
+import { DeleteKeyConfirm } from "@/shared/ui/DeleteKeyConfirm";
 
 function BucketName({ globalAliases, localAliases, bucketId }: { globalAliases?: string[]; localAliases?: string[]; bucketId: string }) {
   const primaryAlias = globalAliases?.[0] ?? (localAliases && localAliases.length > 0 ? localAliases[0] : null);
@@ -43,6 +46,13 @@ function BucketName({ globalAliases, localAliases, bucketId }: { globalAliases?:
 function KeyDetailScreen() {
   const { id } = Route.useParams();
   const { data: key, isLoading, error } = useKey(id);
+  
+  const updatePermissions = useUpdateKeyPermissions();
+  const deleteKey = useDeleteKey();
+  
+  // Edit mode state
+  const [isEditing, setIsEditing] = useState(false);
+  const [editPermissions, setEditPermissions] = useState<components["schemas"]["BucketPermission"][]>([]);
 
   if (error) {
     return (
@@ -114,6 +124,41 @@ function KeyDetailScreen() {
     );
   }
 
+  const handleEditToggle = () => {
+    if (!isEditing) {
+      setEditPermissions(key.buckets?.map(b => ({
+        bucketId: b.bucketId,
+        read: b.read,
+        write: b.write,
+        owner: b.owner,
+      })) ?? []);
+    }
+    setIsEditing(!isEditing);
+  };
+
+  const handleSave = () => {
+    updatePermissions.mutate({ id, permissions: editPermissions });
+    setIsEditing(false);
+  };
+
+  const handleCancel = () => {
+    setEditPermissions([]);
+    setIsEditing(false);
+  };
+
+  const handlePermissionChange = (bucketId: string, field: "read" | "write" | "owner") => {
+    setEditPermissions(prev => 
+      prev.map(p => {
+        if (p.bucketId !== bucketId) return p;
+        // If owner is true, clear read/write
+        const newOwner = !p.owner && field === "owner";
+        const newRead = field === "read" ? !p.read : (newOwner ? false : p.read);
+        const newWrite = field === "write" ? !p.write : (newOwner ? false : p.write);
+        return { ...p, read: newRead, write: newWrite, owner: newOwner };
+      })
+    );
+  };
+
   return (
     <div className="space-y-6">
       <BackLink />
@@ -173,37 +218,115 @@ function KeyDetailScreen() {
 
       {/* Bucket access table */}
       <Card>
-        <CardHeader>Bucket access</CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <span>Bucket access</span>
+          {!isEditing && key.buckets && key.buckets.length > 0 && (
+            <Button variant="outline" size="sm" onClick={handleEditToggle}>
+              Edit permissions
+            </Button>
+          )}
+        </CardHeader>
         <CardContent className="pt-6">
           {key.buckets && key.buckets.length > 0 ? (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Bucket</TableHead>
-                  <TableHead className="w-48">Bucket ID</TableHead>
-                  <TableHead className="w-40">Permissions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {key.buckets.map((bucket) => (
-                  <TableRow key={bucket.bucketId}>
-                    <TableCell>
-                      <BucketName 
-                        globalAliases={bucket.globalAliases} 
-                        localAliases={bucket.localAliases} 
-                        bucketId={bucket.bucketId} 
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">
-                      {bucket.bucketId.slice(0, 12)}...{bucket.bucketId.slice(-4)}
-                    </TableCell>
-                    <TableCell>
-                      <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <>
+              {isEditing ? (
+                // Edit mode with checkboxes
+                <div className="space-y-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Bucket</TableHead>
+                        <TableHead className="w-48">Bucket ID</TableHead>
+                        <TableHead className="w-40 text-center">Permissions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {editPermissions.map((perm) => (
+                        <TableRow key={perm.bucketId}>
+                          <TableCell>
+                            <BucketName 
+                              globalAliases={key.buckets?.find(b => b.bucketId === perm.bucketId)?.globalAliases}
+                              localAliases={key.buckets?.find(b => b.bucketId === perm.bucketId)?.localAliases}
+                              bucketId={perm.bucketId}
+                            />
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {perm.bucketId.slice(0, 12)}...{perm.bucketId.slice(-4)}
+                          </TableCell>
+                          <TableCell className="text-center space-x-2">
+                            <div className="flex items-center gap-2 justify-center">
+                              <Checkbox
+                                id={`read-${perm.bucketId}`}
+                                checked={perm.read}
+                                onCheckedChange={() => handlePermissionChange(perm.bucketId, "read")}
+                                disabled={updatePermissions.isPending}
+                              />
+                              <label htmlFor={`read-${perm.bucketId}`} className="text-sm">Read</label>
+                            </div>
+                            <div className="flex items-center gap-2 justify-center mt-1">
+                              <Checkbox
+                                id={`write-${perm.bucketId}`}
+                                checked={perm.write}
+                                onCheckedChange={() => handlePermissionChange(perm.bucketId, "write")}
+                                disabled={updatePermissions.isPending}
+                              />
+                              <label htmlFor={`write-${perm.bucketId}`} className="text-sm">Write</label>
+                            </div>
+                            <div className="flex items-center gap-2 justify-center mt-1">
+                              <Checkbox
+                                id={`owner-${perm.bucketId}`}
+                                checked={perm.owner}
+                                onCheckedChange={() => handlePermissionChange(perm.bucketId, "owner")}
+                                disabled={updatePermissions.isPending}
+                              />
+                              <label htmlFor={`owner-${perm.bucketId}`} className="text-sm">Owner</label>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <div className="flex gap-2 pt-4">
+                    <Button onClick={handleSave} disabled={updatePermissions.isPending}>
+                      {updatePermissions.isPending ? "Saving…" : "Save"}
+                    </Button>
+                    <Button variant="outline" onClick={handleCancel} disabled={updatePermissions.isPending}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                // Read mode with PermissionChips
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Bucket</TableHead>
+                      <TableHead className="w-48">Bucket ID</TableHead>
+                      <TableHead className="w-40">Permissions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {key.buckets.map((bucket) => (
+                      <TableRow key={bucket.bucketId}>
+                        <TableCell>
+                          <BucketName 
+                            globalAliases={bucket.globalAliases} 
+                            localAliases={bucket.localAliases} 
+                            bucketId={bucket.bucketId} 
+                          />
+                        </TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {bucket.bucketId.slice(0, 12)}...{bucket.bucketId.slice(-4)}
+                        </TableCell>
+                        <TableCell>
+                          <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </>
           ) : (
             <EmptyState
               icon="database"
@@ -213,6 +336,36 @@ function KeyDetailScreen() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete section */}
+      <div className="pt-4">
+        <Button 
+          variant="destructive" 
+          onClick={() => setIsEditing(true)} // Reuse edit state to trigger delete dialog
+        >
+          Delete key
+        </Button>
+      </div>
+
+      {/* Delete confirmation dialog (reuse isEditing as open state) */}
+      {isEditing && updatePermissions.isSuccess && (
+        <DeleteKeyConfirm
+          open={true}
+          keyName={key.name}
+          onConfirm={() => {
+            deleteKey.mutate(id);
+            setIsEditing(false);
+          }}
+          onCancel={() => setIsEditing(false)}
+        />
+      )}
+
+      {/* Show error if permission update fails */}
+      {updatePermissions.isError && (
+        <div className="rounded bg-destructive/10 p-4 text-destructive">
+          Failed to save permissions. Please try again.
+        </div>
+      )}
     </div>
   );
 }
