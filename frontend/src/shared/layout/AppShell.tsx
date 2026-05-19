@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Outlet } from "@tanstack/react-router";
 import { HealthPill } from "@/shared/ui/HealthPill";
 import { UserMenu } from "@/shared/ui/UserMenu";
+import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { useNodes } from "@/shared/api/queries";
 
 interface AppShellProps {}
@@ -86,8 +87,11 @@ export function AppShell(_props: AppShellProps): ReactNode {
       <main className="flex-1 ml-60 flex flex-col min-h-screen">
         <header className="fixed right-0 top-0 h-14 w-full border-b bg-card z-30 px-6 flex items-center justify-between">
           <div />
-          <HealthPill status={healthStatus} />
-          <UserMenu />
+          <div className="flex items-center gap-2">
+            <HealthPill status={healthStatus} />
+            <ThemeToggle />
+            <UserMenu />
+          </div>
         </header>
 
         <div className="flex-1 pt-14 p-8 max-w-[1280px] mx-auto w-full">
