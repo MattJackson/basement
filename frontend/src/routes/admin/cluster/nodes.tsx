@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
@@ -29,18 +30,22 @@ function NodesScreen() {
     queryClient.invalidateQueries({ queryKey: ["admin", "nodes"] });
   };
 
+  const header = (
+    <header className="flex items-center justify-between gap-4">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Nodes</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Storage and gateway nodes in this cluster.
+        </p>
+      </div>
+      <Button variant="outline" onClick={handleRefresh}>Refresh</Button>
+    </header>
+  );
+
   if (error) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold tracking-tight">Nodes</h1>
-          <button
-            onClick={handleRefresh}
-            className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Refresh
-          </button>
-        </div>
+        {header}
         <ErrorBanner message="Couldn't connect to cluster. Retrying automatically..." />
       </div>
     );
@@ -48,15 +53,7 @@ function NodesScreen() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Nodes</h1>
-        <button
-          onClick={handleRefresh}
-          className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          Refresh
-        </button>
-      </div>
+      {header}
 
       {isLoading ? (
         <div className="rounded-lg border bg-card">
@@ -95,12 +92,9 @@ function NodesScreen() {
           title="No nodes configured"
           description="Configure your cluster layout to add storage and gateway nodes."
           action={
-            <button
-              onClick={() => navigate({ to: "/admin/cluster/layout" })}
-              className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
+            <Button onClick={() => navigate({ to: "/admin/cluster/layout" })}>
               Go to Layout Editor
-            </button>
+            </Button>
           }
         />
       ) : (

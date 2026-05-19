@@ -1,186 +1,217 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { HealthPill } from "@/shared/ui/HealthPill";
-import { humanizeBytes } from "@/shared/lib/format";
-import { useNodes, useLayout, useCapabilities } from "@/shared/api/queries";
+import { EmptyState } from "@/shared/ui/EmptyState";
+import { ErrorBanner } from "@/shared/ui/ErrorBanner";
+import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
+import { useBuckets } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/")({
-  component: adminPage(Dashboard),
+  component: adminPage(MyBuckets),
 });
 
-function Dashboard() {
+/**
+ * MyBuckets is the new landing — the primary admin surface. Each row
+ * is a satisfying primary object: bucket name as the lead, aliases as
+ * secondary, then size · objects · created on the right.
+ *
+ * Backend-agnostic note: when N>1 backend connections exist we'll
+ * suffix each row with `· backend·label`; today (N=1) we drop it so
+ * the user sees just the bucket name. The `Bucket` schema already
+ * carries identity — we just don't surface it yet.
+ */
+function MyBuckets() {
   const queryClient = useQueryClient();
-  const { data: nodes, isLoading: loadingNodes, error: nodesError } = useNodes();
-  const { data: layout, isLoading: loadingLayout } = useLayout();
-  const capsResult = useCapabilities();
-
-  const totalNodes = nodes?.length ?? 0;
-  const healthyNodes = nodes?.filter(n => n.address).length ?? 0;
-  const totalCapacity = nodes?.reduce((sum, node) => sum + (node.capacity ?? 0), 0) ?? 0;
-  
-  let healthStatus: "healthy" | "degraded" | "unavailable" = "unavailable";
-  if (!loadingNodes && !loadingLayout) {
-    if (totalNodes === 0) {
-      healthStatus = "unavailable";
-    } else if (healthyNodes === totalNodes) {
-      healthStatus = "healthy";
-    } else {
-      healthStatus = "degraded";
-    }
-  }
+  const [search, setSearch] = useState("");
+  const { data: buckets, isLoading, error } = useBuckets();
 
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["admin", "nodes"] });
-    queryClient.invalidateQueries({ queryKey: ["admin", "layout"] });
-    queryClient.invalidateQueries({ queryKey: ["capabilities"] });
+    queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
   };
 
-  if (nodesError) {
-    const msg = nodesError instanceof Error ? nodesError.message : String(nodesError);
+  const filteredBuckets = buckets?.filter((bucket) => {
+    if (!search) return true;
+    const needle = search.toLowerCase();
+    return bucket.global_aliases?.some((a) => a.toLowerCase().includes(needle)) ?? false;
+  });
+
+  if (error) {
     return (
-      <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 space-y-2">
-        <p className="text-sm font-medium text-destructive">
-          Couldn't reach Garage cluster
-        </p>
-        <p className="text-xs text-destructive/80 font-mono break-all">{msg}</p>
-        <p className="text-xs text-muted-foreground">
-          Check the Garage admin URL + token in your basement environment.
-          The driver is responding; Garage is the one returning an error.
-        </p>
+      <div className="space-y-6">
+        <PageHeader
+          title="My Buckets"
+          description="Storage buckets you own or have access to."
+          actions={<Button variant="outline" onClick={handleRefresh}>Refresh</Button>}
+        />
+        <ErrorBanner message="Couldn't connect to cluster. Retrying automatically..." />
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <button
-          onClick={handleRefresh}
-          className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          Refresh
-        </button>
-      </div>
-
-      {loadingNodes || loadingLayout ? (
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i}>
-              <CardHeader>
-                <Skeleton className="h-4 w-32" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-8 w-full" />
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      ) : totalNodes === 0 ? (
-        <div className="rounded-lg border bg-muted/50 p-12 text-center">
-          <p className="text-lg font-medium">Cluster has no nodes yet</p>
-          <p className="mt-2 text-sm opacity-60">
-            Configure your cluster layout to get started.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium opacity-60">Status</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <HealthPill status={healthStatus} />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium opacity-60">Storage Nodes</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{healthyNodes}/{totalNodes}</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium opacity-60">Partitions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{layout?.version ?? 0}/{layout?.version ?? 0}</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium opacity-60">Total Capacity</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{humanizeBytes(totalCapacity)}</p>
-              </CardContent>
-            </Card>
+      <PageHeader
+        title="My Buckets"
+        description="Storage buckets you own or have access to."
+        actions={
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Input
+              placeholder="Search buckets..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 sm:w-64"
+            />
+            {/* TODO(v0.2) — create bucket */}
+            <Button variant="outline" onClick={() => {}}>
+              New
+            </Button>
           </div>
+        }
+      />
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Cluster Summary</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm opacity-60">Layout Version</p>
-                  <p className="font-medium">{layout?.version}</p>
-                </div>
-                {capsResult.data && (
-                  <div>
-                    <p className="text-sm opacity-60">Driver</p>
-                    <p className="font-medium">{capsResult.data.driver ?? "-"}</p>
+      {isLoading ? (
+        <BucketListSkeleton />
+      ) : filteredBuckets?.length === 0 ? (
+        <EmptyState
+          icon="database"
+          title={search ? "No buckets match your search" : "No buckets yet"}
+          description={
+            search
+              ? "Try a different search term."
+              : "Create your first bucket to start storing files."
+          }
+        />
+      ) : (
+        <ul className="rounded-lg border bg-card divide-y divide-border">
+          {filteredBuckets?.map((bucket) => {
+            const aliases = bucket.global_aliases ?? [];
+            const [primary, ...rest] = aliases;
+            const name = primary ?? bucket.id.slice(0, 8);
+
+            return (
+              <li
+                key={bucket.id}
+                className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 sm:px-6 py-4 hover:bg-muted/40 transition-colors group has-focus-visible:bg-muted/50"
+              >
+                {/* TODO(v0.2) — link to /admin/buckets/$id */}
+                <button
+                  type="button"
+                  onClick={() => {}}
+                  className="flex-1 min-w-0 text-left focus-visible:outline-none"
+                  aria-label={`Open bucket ${name}`}
+                >
+                  <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="font-medium text-base truncate">{name}</span>
+                    {rest.length > 0 && (
+                      <span className="text-xs text-muted-foreground truncate">
+                        also: {rest.join(", ")}
+                      </span>
+                    )}
                   </div>
-                )}
-              </div>
+                  {bucket.created_at && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Created {humanizeTime(bucket.created_at)}
+                    </p>
+                  )}
+                </button>
 
-              {capsResult.data && (
-                <div>
-                  <p className="text-sm font-medium mb-2">Features</p>
-                  <div className="flex flex-wrap gap-2">
-                    {capsResult.data.presign && (
-                      <span className="px-2 py-1 bg-muted rounded text-xs">presigned URLs</span>
-                    )}
-                    {capsResult.data.multipart && (
-                      <span className="px-2 py-1 bg-muted rounded text-xs">multipart uploads</span>
-                    )}
-                    {capsResult.data.quotas && (
-                      <span className="px-2 py-1 bg-muted rounded text-xs">bucket quotas</span>
-                    )}
-                    {capsResult.data.bucket_aliases && (
-                      <span className="px-2 py-1 bg-muted rounded text-xs">bucket aliases</span>
-                    )}
+                <div className="flex items-center gap-6 text-sm">
+                  <div className="text-right">
+                    <div className="font-medium tabular-nums">
+                      {humanizeBytes(bucket.bytes)}
+                    </div>
+                    <div className="text-xs text-muted-foreground tabular-nums">
+                      {bucket.objects.toLocaleString()} {bucket.objects === 1 ? "object" : "objects"}
+                    </div>
                   </div>
-                </div>
-              )}
 
-              {layout?.nodes.length ? (
-                <div>
-                  <p className="text-sm font-medium mb-2">Nodes</p>
-                  <ul className="space-y-1 text-sm">
-                    {layout.nodes.map((node) => (
-                      <li key={node.id} className="flex justify-between opacity-80">
-                        <span>{node.id}</span>
-                        <span className="opacity-60">{node.zone}</span>
-                      </li>
-                    ))}
-                  </ul>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      className="rounded-md p-1.5 hover:bg-muted opacity-60 sm:opacity-0 sm:group-hover:opacity-100 sm:focus:opacity-100 transition-opacity"
+                      aria-label={`Actions for ${name}`}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-4 w-4"
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="12" r="1" />
+                        <circle cx="19" cy="12" r="1" />
+                        <circle cx="5" cy="12" r="1" />
+                      </svg>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {/* TODO(v0.2) — view bucket details */}
+                      <DropdownMenuItem onClick={() => {}}>View</DropdownMenuItem>
+                      {/* TODO(v0.2) — delete bucket */}
+                      <DropdownMenuItem variant="destructive" onClick={() => {}}>
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
-        </>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
+  );
+}
+
+interface PageHeaderProps {
+  title: string;
+  description?: string;
+  actions?: React.ReactNode;
+}
+
+function PageHeader({ title, description, actions }: PageHeaderProps) {
+  return (
+    <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+          {title}
+        </h1>
+        {description && (
+          <p className="text-sm text-muted-foreground mt-1">{description}</p>
+        )}
+      </div>
+      {actions && <div className="flex items-center gap-2">{actions}</div>}
+    </header>
+  );
+}
+
+function BucketListSkeleton() {
+  return (
+    <ul className="rounded-lg border bg-card divide-y divide-border">
+      {[...Array(5)].map((_, i) => (
+        <li key={i} className="px-4 sm:px-6 py-4 flex items-center gap-4">
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-4 w-48" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <div className="space-y-2 text-right">
+            <Skeleton className="h-4 w-20 ml-auto" />
+            <Skeleton className="h-3 w-16 ml-auto" />
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

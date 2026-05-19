@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   Table,
   TableBody,
@@ -35,26 +34,41 @@ export const Route = createFileRoute("/admin/keys/")({
 });
 
 function KeysScreen() {
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const { data: keys, isLoading, error } = useKeys();
-
-  const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
-  };
 
   const filteredKeys = keys?.filter((key) => {
     const nameMatch = key.name?.toLowerCase().includes(search.toLowerCase()) ?? false;
     return nameMatch;
   });
 
+  const header = (
+    <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Access keys</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          S3 credentials with per-bucket permissions.
+        </p>
+      </div>
+      <div className="flex items-center gap-2 w-full sm:w-auto">
+        <Input
+          placeholder="Search by name..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 sm:w-64"
+        />
+        {/* TODO(v0.2) — create key */}
+        <Button variant="outline" onClick={() => {}}>
+          New
+        </Button>
+      </div>
+    </header>
+  );
+
   if (error) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold tracking-tight">Keys</h1>
-          <Button onClick={handleRefresh}>Refresh</Button>
-        </div>
+        {header}
         <ErrorBanner message="Couldn't connect to cluster. Retrying automatically..." />
       </div>
     );
@@ -62,21 +76,7 @@ function KeysScreen() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold tracking-tight">Keys</h1>
-        <div className="flex items-center gap-2">
-          <Input
-            placeholder="Search by name..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-64"
-          />
-          // TODO(v0.2) - Implement key creation
-          <Button variant="outline" onClick={() => {}}>
-            Create key
-          </Button>
-        </div>
-      </div>
+      {header}
 
       {isLoading ? (
         <div className="rounded-lg border bg-card">
@@ -220,10 +220,10 @@ function KeysScreen() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        // TODO(v0.2) - Implement view key details
+                        {/* TODO(v0.2) — view key details */}
                         <DropdownMenuItem onClick={() => {}}>View</DropdownMenuItem>
-                        // TODO(v0.2) - Implement delete key
-                        <DropdownMenuItem className="text-destructive" onClick={() => {}}>
+                        {/* TODO(v0.2) — delete key */}
+                        <DropdownMenuItem variant="destructive" onClick={() => {}}>
                           Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
