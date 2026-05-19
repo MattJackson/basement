@@ -5,6 +5,11 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 
 import "./index.css";
 import { routeTree } from "./routeTree.gen";
+import { applyCookieThemeEarly } from "./shared/theme/useTheme";
+
+// Apply the cookie-stored theme before React paints so users with a
+// non-system preference don't see a flash of the wrong palette.
+applyCookieThemeEarly();
 
 const queryClient = new QueryClient({
   defaultOptions: {
