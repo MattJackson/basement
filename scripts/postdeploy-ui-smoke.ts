@@ -1459,13 +1459,6 @@ section("[16] version label under Logo (Fix 7)");
       await shot(page!, "12-logo-with-version");
     });
 
-      if (!hasVersion) {
-        throw new Error("Could not find version label (vX.Y.Z pattern) near Basement wordmark");
-      }
-
-      await shot(page!, "12-logo-with-version");
-    });
-
     // ============================================================
     // [NN] Syncs route (v0.8.0c SYNC.ENGINE.PULL) — read-only smoke
     // ============================================================
