@@ -7,13 +7,15 @@ export const Route = createFileRoute("/files/clusters/new")({
   component: AddClusterPage,
 });
 
+type DriverName = "garage" | "garage-v1" | "aws-s3" | "minio";
+
 function AddClusterPage() {
   const { data: caps, isLoading: loadingCaps } = useOrgCapabilities();
   const createUserCluster = useCreateUserCluster();
   const testUserCluster = useTestUserCluster();
 
   const [label, setLabel] = useState("");
-  const [driver, setDriver] = useState(caps?.userBackendDrivers[0] || "");
+  const [driver, setDriver] = useState<DriverName | "">((caps?.userBackendDrivers?.[0] as DriverName) || "");
   const [config, setConfig] = useState<Record<string, string>>({});
   const [color, setColor] = useState("#123456");
   const [testResult, setTestResult] = useState<"idle" | "testing" | "success" | "error">("idle");
@@ -41,12 +43,13 @@ function AddClusterPage() {
     );
   }
 
-  const availableDrivers = caps.userBackendDrivers;
+  const availableDrivers: string[] = caps.userBackendDrivers ?? [];
 
   const handleTestConnection = async () => {
+    if (!driver) return;
     setTestResult("testing");
     try {
-      await testUserCluster.mutateAsync({ driver, config });
+      await testUserCluster.mutateAsync({ driver: driver as DriverName, config });
       setTestResult("success");
       setTestMessage("Connection successful!");
     } catch (err: any) {
@@ -60,7 +63,7 @@ function AddClusterPage() {
     if (!label || !driver || Object.keys(config).length === 0) return;
 
     try {
-      await createUserCluster.mutateAsync({ label, driver, config, color });
+      await createUserCluster.mutateAsync({ label, driver: driver as DriverName, config, color });
     } catch (err) {
       console.error("Failed to create cluster:", err);
     }
@@ -115,7 +118,7 @@ function AddClusterPage() {
             <select
               id="driver"
               value={driver}
-              onChange={(e) => setDriver(e.target.value)}
+              onChange={(e) => setDriver(e.target.value as DriverName)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
             >
               {availableDrivers.map((d: string) => (

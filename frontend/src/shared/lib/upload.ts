@@ -39,13 +39,21 @@ export type UploadOptions = {
   onProgress?: (event: UploadProgressEvent) => void;
 };
 
-export async function uploadFile(_options: UploadOptions): Promise<void> {
-  // Single-shot and multipart logic moved to sub-functions that use the hooks properly
-  throw new Error("uploadFile must call uploadFileSingleShot or uploadFileMultipart directly");
+const MULTIPART_THRESHOLD_BYTES = 5 * 1024 * 1024;
+
+export async function uploadFile(options: UploadOptions & { fileId: string }): Promise<void> {
+  if (options.file.size <= MULTIPART_THRESHOLD_BYTES) {
+    return uploadFileSingleShot(options);
+  }
+  return uploadFileMultipart(options);
 }
 
 async function uploadFileSingleShot(options: UploadOptions & { fileId: string }): Promise<void> {
-  const { file, hooks, cid, bid, key, contentType = "application/octet-stream", ttl = 3600, onProgress } = options;
+  // Single-shot path uses direct fetch — `hooks` (the React-Query mutation
+  // adapters) is consumed only by the multipart path. Destructure with
+  // an alias so the unused-variable lint stays clean.
+  const { file, hooks: _hooks, cid, bid, key, contentType = "application/octet-stream", ttl = 3600, onProgress } = options;
+  void _hooks;
   const { fileId } = options;
 
   const emit = (event: UploadProgressEvent) => {

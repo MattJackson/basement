@@ -199,11 +199,11 @@ export function UploadDialog({ open, onOpenChange, cid, bid, prefix, onSuccess }
   const handleFiles = useCallback((newFiles: File[]) => {
     setFiles(prev => [
       ...prev,
-      ...newFiles.map(file => ({
+      ...newFiles.map<FileUpload>(file => ({
         file,
         fileId: `${file.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         key: generateFileKey(file),
-        status: "pending",
+        status: "pending" as const,
         progress: 0,
       })),
     ]);
