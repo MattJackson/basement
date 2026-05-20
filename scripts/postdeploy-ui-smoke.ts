@@ -1287,6 +1287,39 @@ section("[15b] USER.SHARES — /files/shares renders shares list and empty state
     });
 
 
+section("[NN] /share/{fake-token} shows not-found state (v0.7.0h SHARE.PUBLIC smoke)");
+    await check("/share/notarealtoken shows not-found message without auth", async () => {
+      // Navigate directly to a fake share token — no login required
+      await page!.goto(`${BASE_URL}/share/notarealtoken`, { waitUntil: "networkidle" });
+
+      // Should see Basement UI branding but no user nav (no-chrome shell)
+      const hasBasementBranding = await page!.locator('text=Delivered by Basement UI').count() > 0;
+      if (!hasBasementBranding) {
+        throw new Error("Share route should show 'Delivered by Basement UI' branding");
+      }
+
+      // Should see not-found state, not a generic error or loading spinner
+      const hasNotFoundMessage = await page!.locator('h3').filter({ hasText: /not found/i }).count() > 0;
+      if (!hasNotFoundMessage) {
+        throw new Error("Share route should show 'Share not found' heading");
+      }
+
+      // Should NOT show login prompt or auth form (public route)
+      const hasLoginForm = await page!.locator('input[type="password"]').count();
+      if (hasLoginForm > 0) {
+        throw new Error("Share route for non-existent share should not show password form");
+      }
+
+      // Should NOT have user nav items (no-chrome shell)
+      const hasUserNav = await page!.locator('text=Clusters|Files|Keys').count();
+      if (hasUserNav > 0) {
+        throw new Error("Share route should not show user navigation");
+      }
+
+      await shot(page!, "nn-share-not-found");
+    });
+
+
 section("[16] version label under Logo (Fix 7)");
     await check("version label renders under Basement wordmark", async () => {
       // Navigate to any admin page - /admin/clusters works
