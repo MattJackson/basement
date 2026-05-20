@@ -1,6 +1,10 @@
 package api
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +13,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
@@ -19,6 +22,23 @@ const (
 	shareAuthCookieNamePrefix = "__Host-share_"
 	shareAuthCookieTTL        = time.Hour
 )
+
+// shareCookieValue returns a deterministic HMAC-SHA256 over the
+// (token, passwordHash) pair signed with the server's JWT secret.
+// Storing this in the cookie instead of the raw password means even
+// XSS / extension access can't recover the password. The HMAC
+// auto-invalidates if the share's password is rotated (new hash
+// → new HMAC). Constant-time compared on verify.
+func (s *Server) shareCookieValue(token, passwordHash string) string {
+	h := hmac.New(sha256.New, s.cfg.JWT.Secret)
+	h.Write([]byte(token + ":" + passwordHash))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func (s *Server) verifyShareCookie(token, passwordHash, cookieValue string) bool {
+	expected := s.shareCookieValue(token, passwordHash)
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(cookieValue)) == 1
+}
 
 // shareInfoResponse is the response for /api/v1/share/{token}/info.
 type shareInfoResponse struct {
@@ -173,10 +193,13 @@ func (s *Server) shareAuthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set scoped cookie
+	// Set scoped cookie — HMAC over (token, passwordHash) signed with
+	// the server's JWT secret. Never store the raw password in the
+	// cookie (security: XSS / extension reading the cookie would
+	// otherwise recover the password).
 	http.SetCookie(w, &http.Cookie{
 		Name:     shareAuthCookieNamePrefix + token,
-		Value:    req.Password, // Store password hash session in real implementation
+		Value:    s.shareCookieValue(token, sh.PasswordHash),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
@@ -234,8 +257,8 @@ func (s *Server) shareListHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Verify the password in cookie matches
-		if err := bcrypt.CompareHashAndPassword([]byte(sh.PasswordHash), []byte(cookie.Value)); err != nil {
+		// Verify HMAC cookie signature (see shareCookieValue).
+		if !s.verifyShareCookie(token, sh.PasswordHash, cookie.Value) {
 			writeErrorSimple(w, http.StatusUnauthorized, "INVALID_PASSWORD", "Invalid password")
 			return
 		}
@@ -350,8 +373,8 @@ func (s *Server) shareGetHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Verify the password in cookie matches
-		if err := bcrypt.CompareHashAndPassword([]byte(sh.PasswordHash), []byte(cookie.Value)); err != nil {
+		// Verify HMAC cookie signature (see shareCookieValue).
+		if !s.verifyShareCookie(token, sh.PasswordHash, cookie.Value) {
 			writeErrorSimple(w, http.StatusUnauthorized, "INVALID_PASSWORD", "Invalid password")
 			return
 		}

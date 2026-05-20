@@ -439,13 +439,23 @@ func TestShareListHandler(t *testing.T) {
 			}
 
 			req := httptest.NewRequest(http.MethodGet, url, nil)
-			
-			// Add password cookie if required
+
+			// Two-step auth: POST /auth with the password, capture
+			// the server's signed cookie, attach to the GET. The
+			// raw-password-in-cookie pattern was replaced by HMAC
+			// signature in v0.8.0d.11; tests now exercise the real
+			// flow rather than constructing a fake cookie value.
 			if tt.addCookie && tt.password != "" {
-				req.AddCookie(&http.Cookie{
-					Name:  shareAuthCookieNamePrefix + token,
-					Value: tt.password,
-				})
+				authBody, _ := json.Marshal(map[string]string{"password": tt.password})
+				authReq := httptest.NewRequest(http.MethodPost, "/api/v1/share/"+token+"/auth", bytes.NewReader(authBody))
+				authReq.Header.Set("Content-Type", "application/json")
+				authW := httptest.NewRecorder()
+				srv.router.ServeHTTP(authW, authReq)
+				for _, c := range authW.Result().Cookies() {
+					if c.Name == shareAuthCookieNamePrefix+token {
+						req.AddCookie(c)
+					}
+				}
 			}
 
 			w := httptest.NewRecorder()
@@ -607,14 +617,20 @@ func TestShareGetHandler(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodGet, url, nil)
 
-			// Add password cookie if test marks addCookie + password
-			// (matches LIST handler test pattern at the equivalent
-			// site in TestShareListHandler).
+			// Two-step auth: POST /auth to get the server's signed
+			// HMAC cookie (v0.8.0d.11 replaced the raw-password
+			// cookie pattern). Attach the returned cookie to the GET.
 			if tt.addCookie && tt.password != "" {
-				req.AddCookie(&http.Cookie{
-					Name:  shareAuthCookieNamePrefix + token,
-					Value: tt.password,
-				})
+				authBody, _ := json.Marshal(map[string]string{"password": tt.password})
+				authReq := httptest.NewRequest(http.MethodPost, "/api/v1/share/"+token+"/auth", bytes.NewReader(authBody))
+				authReq.Header.Set("Content-Type", "application/json")
+				authW := httptest.NewRecorder()
+				srv.router.ServeHTTP(authW, authReq)
+				for _, c := range authW.Result().Cookies() {
+					if c.Name == shareAuthCookieNamePrefix+token {
+						req.AddCookie(c)
+					}
+				}
 			}
 
 			w := httptest.NewRecorder()
