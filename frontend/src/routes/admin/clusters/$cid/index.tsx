@@ -91,6 +91,15 @@ function ClusterDetailScreen() {
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{cluster.label}</h1>
           <DriverBadge driver={cluster.driver} />
           <HealthPill status={status} message={testResult?.message} />
+          <div className="flex-1" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setEditDialogOpen(true)}
+            title="Edit label, color, admin token, S3 endpoint…"
+          >
+            Edit cluster
+          </Button>
         </div>
       </div>
 
