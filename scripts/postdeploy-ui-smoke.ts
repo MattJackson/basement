@@ -615,9 +615,9 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 10. User endpoints (v0.5.2 USER.BACKEND)
+    // 11. User endpoints (v0.5.2 USER.BACKEND)
     // ============================================================
-    section("[10] user endpoints (v0.5.2 USER.BACKEND)");
+    section("[11] user endpoints (v0.5.2 USER.BACKEND)");
     
     await check("[NN] /api/v1/user/clusters returns admin's clusters", async () => {
       const resp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
@@ -677,9 +677,138 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 10. Fix 3, 1, 4: cluster detail buckets section and bucket detail
+    // [NN] /files/{first-cid} renders bucket list (v0.5.2 USER.MYBUCKETS-IN-CLUSTER)
     // ============================================================
-    section("[11] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
+    section("[14] user bucket list under cluster (/files/{cid})");
+    
+    await check("discover first cluster via /api/v1/user/clusters and navigate to /files/{cid}", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
+      if (!resp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${resp.status()}`);
+      const clusters = await resp.json();
+      
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        skipLine("/files/{cid} test", "no user-visible clusters");
+        return;
+      }
+      
+      discoveredCid = clusters[0].id;
+    });
+
+    if (discoveredCid) {
+      await check("[NN] /files/{first-cid} renders bucket list", async () => {
+        if (!discoveredCid) throw new Error("No cluster cid discovered");
+        
+        // Navigate to the user bucket list page for this cluster
+        await page!.goto(`${BASE_URL}/files/${discoveredCid}`, { waitUntil: "networkidle" });
+        await page!.waitForURL(new RegExp(`/files/${discoveredCid}$`), { timeout: 15_000 });
+
+        // Assert cluster label is present in the header (from useUserClusterBuckets hydration)
+        const headerText = await page!.locator('h1').textContent();
+        if (!headerText || !headerText.trim()) {
+          throw new Error("Cluster header not found on /files/{cid}");
+        }
+
+        // Get the cluster driver for badge check (from discovered cluster data)
+        const firstCluster = await page!.evaluate(async (cid: string) => {
+          // Try to get from cached query data or localStorage
+          try {
+            const cacheKey = `react-query-${JSON.stringify(["user", "clusters"])}`;
+            const stored = localStorage.getItem(cacheKey);
+            if (stored) {
+              const parsed = JSON.parse(stored);
+              const clusterData = parsed?.state?.data?.find((c: any) => c.id === cid);
+              return clusterData?.driver || null;
+            }
+          } catch {}
+          return null;
+        }, discoveredCid);
+
+        // Check for driver badge in header area (ClusterBadge component)
+        const hasDriverBadge = await page!.evaluate((cid: string) => {
+          const bodyText = document.body.innerText || "";
+          // The ClusterBadge shows the driver name somewhere on the page
+          return bodyText.includes("garage") || 
+                 bodyText.includes("aws-s3") || 
+                 bodyText.includes("minio");
+        }, discoveredCid);
+
+        if (!hasDriverBadge) {
+          warnLine("driver badge not found in header - may be cached from admin session");
+        }
+
+        // Assert at least one bucket row OR empty-state message (both are valid)
+        const hasBucketsOrEmpty = await page!.evaluate(() => {
+          const rows = document.querySelectorAll('tbody tr');
+          const emptyState = document.body.innerText.includes("No buckets yet") || 
+                            document.body.innerText.includes("No buckets accessible");
+          return rows.length > 0 || emptyState;
+        });
+
+        if (!hasBucketsOrEmpty) {
+          throw new Error("/files/{cid} shows neither bucket rows nor empty state");
+        }
+
+        // If there are bucket rows, verify structure (name, size, objects columns)
+        const rowCount = await page!.locator('tbody tr').count();
+        if (rowCount > 0) {
+          const firstRowCells = await page!.locator('tbody tr').first().locator('td');
+          const cellCount = await firstRowCells.count();
+          
+          // Should have at least name column, optionally size/objects/actions
+          if (cellCount < 1) {
+            throw new Error(`Bucket row has too few columns: ${cellCount}`);
+          }
+
+          // Check that bucket names don't show raw IDs prominently
+          const firstCellText = await firstRowCells.first().textContent();
+          if (firstCellText && discoveredCid.startsWith(firstCellText)) {
+            warnLine("bucket row may be showing cluster ID instead of bucket name");
+          }
+        }
+
+        // Check for empty state message if no buckets
+        const hasEmptyState = await page!.evaluate(() => {
+          return document.body.innerText.includes("No buckets accessible") || 
+                 document.body.innerText.includes("Contact your administrator");
+        });
+
+        if (rowCount === 0 && !hasEmptyState) {
+          throw new Error("Empty state should show when no buckets are available");
+        }
+
+        await shot(page!, "14-files-cid-bucket-list");
+      });
+
+      // Check that clicking a bucket row navigates to /files/{cid}/b/{bid}
+      if (await page!.locator('tbody tr').count() > 0) {
+        await check("[NN] click bucket row → navigate to /files/{cid}/b/{bid}", async () => {
+          const firstRow = page!.locator('tbody tr').first();
+          
+          // Click on the bucket name cell (first column)
+          const bucketNameCell = firstRow.locator('td').first();
+          await bucketNameCell.click();
+
+          // Wait for navigation to happen
+          try {
+            await page!.waitForURL(new RegExp(`/files/${discoveredCid}/b/[^/?#]+`), { timeout: 15_000 });
+            // This is expected - the route exists but may not be implemented yet (404s)
+            // Just verify navigation happened correctly
+          } catch {
+            // If navigation didn't happen or URL doesn't match, that's a failure
+            throw new Error(`Navigation to /files/${discoveredCid}/b/{bid} did not occur`);
+          }
+
+          await shot(page!, "15-files-cid-bucket-navigation");
+        });
+      } else {
+        skipLine("bucket row navigation", "no buckets available to click");
+      }
+    }
+
+    // ============================================================
+    // 12. Fix 3, 1, 4: cluster detail buckets section and bucket detail
+    // ============================================================
+    section("[15] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
     
     if (!discoveredCid) {
       skipLine("bucket/cluster detail checks", "cluster cid not discovered in prior steps");
@@ -807,9 +936,9 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
-    // 10. Fix 7: version label under Logo wordmark
+    // 13. Fix 7: version label under Logo wordmark
     // ============================================================
-    section("[12] version label under Logo (Fix 7)");
+    section("[16] version label under Logo (Fix 7)");
     await check("version label renders under Basement wordmark", async () => {
       // Navigate to any admin page - /admin/clusters works
       await page!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
@@ -846,9 +975,9 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 11. Console / pageerror gate
+    // 14. Console / pageerror gate
     // ============================================================
-    section("[13] console + pageerror gate");
+    section("[17] console + pageerror gate");
     await check("no console errors or page errors across the run", async () => {
       if (consoleWarnings.length > 0) {
         // Surface but don't fail.
