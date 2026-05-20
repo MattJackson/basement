@@ -23,7 +23,9 @@ describe("StartSyncDialog", () => {
       />
     );
 
-    expect(screen.getByText(/sync/i)).toBeInTheDocument();
+    // Multiple elements have "sync" text (header, button, etc.) —
+    // assert at least one is present rather than exactly one.
+    expect(screen.getAllByText(/sync/i).length).toBeGreaterThan(0);
   });
 
   it("renders with direction='push' and pre-fills source", async () => {
@@ -37,7 +39,9 @@ describe("StartSyncDialog", () => {
       />
     );
 
-    expect(screen.getByText(/sync/i)).toBeInTheDocument();
+    // Multiple elements have "sync" text (header, button, etc.) —
+    // assert at least one is present rather than exactly one.
+    expect(screen.getAllByText(/sync/i).length).toBeGreaterThan(0);
     
     const srcClusterSelect = screen.getByLabelText(/source cluster/i);
     expect(srcClusterSelect).toBeDisabled();
