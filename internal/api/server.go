@@ -198,6 +198,11 @@ func (s *Server) routes() {
 			userG.Get("/user/clusters/{cid}/buckets", s.userListClusterBucketsHandler)
 			userG.Get("/user/clusters/{cid}/buckets/{bid}", s.userGetClusterBucketHandler)
 			userG.Get("/user/keys", s.userListKeysHandler)
+
+			// User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
+			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)
+			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat", s.userStatClusterBucketObjectHandler)
+			userG.Post("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/presign-get", s.userPresignGetClusterBucketObjectHandler)
 		})
 	})
 

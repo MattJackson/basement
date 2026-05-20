@@ -31,6 +31,11 @@ type testMockDriver struct {
 	createKeyFunc    func(ctx context.Context, spec driver.KeySpec) (driver.Key, error)
 	updateKeyPermissionsFunc func(ctx context.Context, keyID string, perms []driver.BucketPermission) error
 	deleteKeyFunc    func(ctx context.Context, id string) error
+	listObjectsFunc  func(ctx context.Context, bucket, prefix, token string, limit int) (driver.ObjectPage, error)
+	statObjectFunc   func(ctx context.Context, bucket, key string) (driver.ObjectInfo, error)
+	presignGetFunc   func(ctx context.Context, bucket, key string, ttl time.Duration) (driver.PresignedURL, error)
+	presignPutFunc   func(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driver.PresignedURL, error)
+	deleteObjectFunc func(ctx context.Context, bucket, key string) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -125,9 +130,24 @@ func (m *testMockDriver) DeleteKey(ctx context.Context, id string) error {
 	}
 	return nil
 }
-func (m *testMockDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) { return driver.ObjectPage{}, nil }
-func (m *testMockDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) { return driver.ObjectInfo{}, nil }
-func (m *testMockDriver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
+func (m *testMockDriver) ListObjects(ctx context.Context, bucket, prefix, token string, limit int) (driver.ObjectPage, error) {
+	if m.listObjectsFunc != nil {
+		return m.listObjectsFunc(ctx, bucket, prefix, token, limit)
+	}
+	return driver.ObjectPage{}, nil
+}
+func (m *testMockDriver) StatObject(ctx context.Context, bucket, key string) (driver.ObjectInfo, error) {
+	if m.statObjectFunc != nil {
+		return m.statObjectFunc(ctx, bucket, key)
+	}
+	return driver.ObjectInfo{}, nil
+}
+func (m *testMockDriver) PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (driver.PresignedURL, error) {
+	if m.presignGetFunc != nil {
+		return m.presignGetFunc(ctx, bucket, key, ttl)
+	}
+	return driver.PresignedURL{}, nil
+}
 func (m *testMockDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
 func (m *testMockDriver) DeleteObject(_ context.Context, _, _ string) error { return nil }
 func (m *testMockDriver) CreateMultipart(_ context.Context, _, _, _ string) (driver.MultipartUpload, error) { return driver.MultipartUpload{}, nil }
