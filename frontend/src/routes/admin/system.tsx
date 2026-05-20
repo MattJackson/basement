@@ -3,9 +3,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { client } from "@/shared/api/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { adminPage } from "@/shared/layout/adminPage";
 
 export const Route = createFileRoute("/admin/system")({
-  component: OrgCapabilitiesPage,
+  component: adminPage(OrgCapabilitiesPage),
 });
 
 type OrgCapabilities = {
