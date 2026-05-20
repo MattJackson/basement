@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/admin/clusters/$cid/")({
 
 function ClusterDetailScreen() {
   const { cid } = Route.useParams();
+  const navigate = useNavigate();
 
   const { data: cluster, isLoading, error } = useGetCluster(cid);
   const { data: nodes } = useNodes(cid);
@@ -95,7 +96,7 @@ function ClusterDetailScreen() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setEditDialogOpen(true)}
+            onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
             title="Edit label, color, admin token, S3 endpoint…"
           >
             Edit cluster
