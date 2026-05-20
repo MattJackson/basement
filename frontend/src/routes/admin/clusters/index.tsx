@@ -213,8 +213,14 @@ function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
   // Manual test only — Garage /v1/health is 10-20s round-trip, so we
   // never auto-poll. User clicks "Test" on the detail page when they
   // want a fresh status.
-  const { data: testResult, isFetching, refetch } = useTestClusterQuery(cluster.id);
-  const status = testResult ? getStatusFromResult(testResult) : "unknown";
+  // Auto-test on mount + 60s staleTime — operator wants status
+  // visible without clicking. React Query shares cache with the
+  // detail page so visiting both doesn't double-fire.
+  const { data: testResult, isFetching } = useTestClusterQuery(cluster.id, { auto: true });
+  const status: "healthy" | "degraded" | "unavailable" | "checking" =
+    testResult ? getStatusFromResult(testResult)
+    : isFetching ? "checking"
+    : "unavailable";
 
   return (
     <TableRow
@@ -225,26 +231,12 @@ function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
       <TableCell className="font-medium">{cluster.label}</TableCell>
       <TableCell><DriverBadge driver={cluster.driver} /></TableCell>
       <TableCell>
-        {isFetching ? (
-          <span className="text-xs text-muted-foreground">Testing…</span>
-        ) : !testResult ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              refetch();
-            }}
-          >
-            Test
-          </Button>
-        ) : status === "unavailable" && testResult?.message ? (
+        {status === "unavailable" && testResult?.message ? (
           <TooltipWrapper message={testResult.message}>
-            <span className="text-xs text-destructive">Unavailable</span>
+            <HealthPill status="unavailable" />
           </TooltipWrapper>
         ) : (
-          <HealthPill status={status as "healthy" | "degraded" | "unavailable"} />
+          <HealthPill status={status} />
         )}
       </TableCell>
       <TableCell>
@@ -301,17 +293,19 @@ function TooltipWrapper({ message, children }: { message: string; children: Reac
   );
 }
 
-function HealthPill({ status }: { status: "healthy" | "degraded" | "unavailable" }) {
+function HealthPill({ status }: { status: "healthy" | "degraded" | "unavailable" | "checking" }) {
   const variants = {
     healthy: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
     degraded: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
     unavailable: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
+    checking: "bg-muted/50 text-muted-foreground border-border",
   } as const;
 
   const labels = {
     healthy: "Healthy",
     degraded: "Degraded",
     unavailable: "Unavailable",
+    checking: "Checking…",
   } as const;
 
   return (
