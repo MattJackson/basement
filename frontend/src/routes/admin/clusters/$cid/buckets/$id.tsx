@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,58 +21,6 @@ import { adminPage } from "@/shared/layout/adminPage";
 export const Route = createFileRoute("/admin/clusters/$cid/buckets/$id")({
   component: adminPage(AdminBucketDetail),
 });
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (copied) {
-      const timer = setTimeout(() => setCopied(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [copied]);
-
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-      }}
-      className="rounded-md p-1.5 hover:bg-muted opacity-60 hover:opacity-100 transition-opacity"
-      aria-label="Copy to clipboard"
-    >
-      {copied ? (
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-3 w-3 text-green-600"
-        >
-          <polyline points="20 6 9 17 4 12" />
-        </svg>
-      ) : (
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-3 w-3"
-        >
-          <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v1" />
-        </svg>
-      )}
-    </button>
-  );
-}
 
 function AdminBucketDetail() {
   const { cid, id } = Route.useParams();
@@ -238,17 +186,15 @@ function AdminBucketDetail() {
                 >
                   {bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
                 </button>
-                <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-                  <span>{bucket.id}</span>
-                  <CopyButton text={bucket.id} />
-                  {bucket.aliases && bucket.aliases.length > 1 ? (
-                    bucket.aliases.slice(1).map((alias) => (
+                {bucket.aliases && bucket.aliases.length > 1 ? (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {bucket.aliases.slice(1).map((alias) => (
                       <Badge key={alias} variant="secondary" className="text-xs">
                         {alias}
                       </Badge>
-                    ))
-                  ) : null}
-                </div>
+                    ))}
+                  </div>
+                ) : null}
               </>
             )}
           </div>
@@ -281,47 +227,35 @@ function AdminBucketDetail() {
             </CardContent>
           </Card>
 
-         {/* Quotas card */}
-           <Card>
-             <CardHeader className="flex flex-row items-center justify-between">
-               <span>Quotas</span>
-               <Button 
-                 size="sm" 
-                 variant="outline"
-                 onClick={() => setQuotaDialogOpen(true)}
-               >
-                 Edit quotas
-               </Button>
-             </CardHeader>
-             <CardContent className="pt-6">
-               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
-                 <div>
-                   <dt className="text-sm text-muted-foreground">Max size</dt>
-                   <dd className="font-medium tabular-nums mt-1">
-                     {bucket.quotas?.maxSize != null ? (
-                       humanizeBytes(bucket.quotas.maxSize)
-                     ) : bucket.quotas == null ? (
-                       "Unlimited"
-                     ) : (
-                       "—"
-                     )}
-                   </dd>
-                 </div>
-                 <div>
-                   <dt className="text-sm text-muted-foreground">Max objects</dt>
-                   <dd className="font-medium tabular-nums mt-1">
-                     {bucket.quotas?.maxObjects != null ? (
-                       bucket.quotas.maxObjects.toLocaleString()
-                     ) : bucket.quotas == null ? (
-                       "Unlimited"
-                     ) : (
-                       "—"
-                     )}
-                   </dd>
-                 </div>
-               </dl>
-             </CardContent>
-           </Card>
+          {/* Quotas — compact single row, no oversized card */}
+          <div className="flex items-center justify-between gap-4 rounded-lg border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm">
+              <span className="text-muted-foreground">Quotas</span>
+              <span>
+                <span className="text-xs text-muted-foreground mr-1.5">Max size</span>
+                <span className="font-medium tabular-nums">
+                  {bucket.quotas?.maxSize != null
+                    ? humanizeBytes(bucket.quotas.maxSize)
+                    : "Unlimited"}
+                </span>
+              </span>
+              <span>
+                <span className="text-xs text-muted-foreground mr-1.5">Max objects</span>
+                <span className="font-medium tabular-nums">
+                  {bucket.quotas?.maxObjects != null
+                    ? bucket.quotas.maxObjects.toLocaleString()
+                    : "Unlimited"}
+                </span>
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setQuotaDialogOpen(true)}
+            >
+              Edit
+            </Button>
+          </div>
 
            <Dialog open={quotaDialogOpen} onOpenChange={(open) => {
              if (!open) setQuotaDialogOpen(false);
@@ -400,34 +334,39 @@ function AdminBucketDetail() {
              </DialogContent>
            </Dialog>
 
-          {/* Attached keys table */}
-          <Card>
-            <CardHeader>Attached keys</CardHeader>
-            <CardContent className="pt-6">
-              {bucket.keys == null || bucket.keys.length === 0 ? (
+          {/* Attached keys */}
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              Attached keys
+              {bucket.keys && bucket.keys.length > 0 ? (
+                <span className="ml-1.5 text-muted-foreground/60">({bucket.keys.length})</span>
+              ) : null}
+            </h2>
+            {bucket.keys == null || bucket.keys.length === 0 ? (
+              <div className="rounded-lg border bg-card p-6">
                 <EmptyState
                   icon="key"
                   title="No keys attached"
                   description="Grant a key access to this bucket from the Keys page."
                 />
-              ) : (
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-card overflow-hidden">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-1/3">Key ID</TableHead>
-                      <TableHead className="w-1/3">Name</TableHead>
-                      <TableHead className="w-1/3">Permissions</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="w-[260px]">Access Key ID</TableHead>
+                      <TableHead className="w-[140px]">Permissions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {bucket.keys.map((keyAccess) => (
                       <TableRow key={keyAccess.keyId}>
-                        <TableCell>
-                          <span className="font-mono text-xs">
-                            {keyAccess.keyId.slice(0, 12)}…{keyAccess.keyId.slice(-4)}
-                          </span>
+                        <TableCell className="font-medium">{keyAccess.name ?? "—"}</TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {keyAccess.keyId}
                         </TableCell>
-                        <TableCell>{keyAccess.name ?? "—"}</TableCell>
                         <TableCell>
                           <PermissionChips
                             read={!!keyAccess.read}
@@ -439,9 +378,9 @@ function AdminBucketDetail() {
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-          </Card>
+              </div>
+            )}
+          </section>
 
         {/* Created */}
            {bucket.created && humanizeTime(bucket.created) !== "—" && (
