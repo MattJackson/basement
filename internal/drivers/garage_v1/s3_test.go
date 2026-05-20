@@ -181,3 +181,90 @@ func TestGarageV1_PresignPut_ValidEndpoint_NoContentType(t *testing.T) {
 		t.Errorf("URL does not contain test server endpoint")
 	}
 }
+
+// TestGarageV1_CreateMultipart_EmptyEndpoint ensures CreateMultipart returns ErrUnsupported.
+func TestGarageV1_CreateMultipart_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	_, err := d.CreateMultipart(context.Background(), "bucket", "key", "text/plain")
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+	if !strings.Contains(driverErr.Message, "S3 endpoint not configured") {
+		t.Errorf("unexpected error message: %q", driverErr.Message)
+	}
+}
+
+// TestGarageV1_PresignUploadPart_EmptyEndpoint ensures PresignUploadPart returns ErrUnsupported.
+func TestGarageV1_PresignUploadPart_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	_, err := d.PresignUploadPart(context.Background(), driverpkg.MultipartUpload{UploadID: "test-id"}, 1)
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+}
+
+// TestGarageV1_CompleteMultipart_EmptyEndpoint ensures CompleteMultipart returns ErrUnsupported.
+func TestGarageV1_CompleteMultipart_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	err := d.CompleteMultipart(context.Background(), driverpkg.MultipartUpload{UploadID: "test-id"}, nil)
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+}
+
+// TestGarageV1_AbortMultipart_EmptyEndpoint ensures AbortMultipart returns ErrUnsupported.
+func TestGarageV1_AbortMultipart_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	err := d.AbortMultipart(context.Background(), driverpkg.MultipartUpload{UploadID: "test-id"})
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+}
