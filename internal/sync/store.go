@@ -23,13 +23,13 @@ type fileStore struct {
 	mu   sync.RWMutex
 }
 
-// NewFileStore creates a new file-based store.
+// NewFileStore creates a new file-based store. The sync subdirectory
+// is created lazily on first write (via Save's MkdirAll of the
+// job-level subdir, which is recursive). Panicking at construction
+// would crash the whole server if the data dir isn't writable at
+// startup time — sync ops then fail gracefully when called.
 func NewFileStore(dataDir string) Store {
-	syncDir := filepath.Join(dataDir, "syncs")
-	if err := os.MkdirAll(syncDir, 0755); err != nil {
-		panic(fmt.Errorf("creating sync directory: %w", err))
-	}
-	return &fileStore{dir: syncDir}
+	return &fileStore{dir: filepath.Join(dataDir, "syncs")}
 }
 
 // GenerateID creates a new unique job ID.
