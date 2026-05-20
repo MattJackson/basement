@@ -528,9 +528,71 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 9. Fix 3, 1, 4: cluster detail buckets section and bucket detail
+    // 10. User endpoints (v0.5.2 USER.BACKEND)
     // ============================================================
-    section("[9] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
+    section("[10] user endpoints (v0.5.2 USER.BACKEND)");
+    
+    await check("[NN] /api/v1/user/clusters returns admin's clusters", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
+      if (!resp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${resp.status()} ${await resp.text()}`);
+      const clusters = await resp.json();
+      
+      if (!Array.isArray(clusters)) {
+        throw new Error("Expected array response from /api/v1/user/clusters");
+      }
+      
+      if (clusters.length === 0) {
+        warnLine("/api/v1/user/clusters is empty — may be expected on fresh deploy");
+      } else {
+        // Verify at least one cluster has required fields
+        const first = clusters[0] as any;
+        if (!first.id || !first.label || !first.driver) {
+          throw new Error("Cluster missing required fields (id, label, driver)");
+        }
+      }
+    });
+
+    await check("[NN] /api/v1/user/keys returns key list", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/keys`);
+      if (!resp.ok()) throw new Error(`GET /api/v1/user/keys failed: ${resp.status()} ${await resp.text()}`);
+      const data = await resp.json();
+      
+      // Response should have keys array and optional errors array
+      if (!data || typeof data !== "object") {
+        throw new Error("Expected object response from /api/v1/user/keys");
+      }
+      
+      if (!Array.isArray(data.keys)) {
+        throw new Error("Response missing 'keys' array");
+      }
+    });
+
+    await check("[NN] /api/v1/user/clusters/{cid} returns cluster detail", async () => {
+      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
+      if (!clustersResp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${clustersResp.status()}`);
+      const clusters = await clustersResp.json();
+      
+      if (clusters.length === 0) {
+        skipLine("user cluster detail check", "no user-visible clusters");
+        return;
+      }
+      
+      const firstClusterId = Array.isArray(clusters) ? clusters[0].id : null;
+      if (!firstClusterId) throw new Error("No cluster id found in /api/v1/user/clusters response");
+      
+      const detailResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters/${firstClusterId}`);
+      if (!detailResp.ok()) throw new Error(`GET /api/v1/user/clusters/${firstClusterId} failed: ${detailResp.status()}`);
+      
+      const clusterDetail = await detailResp.json();
+      if (!clusterDetail.id || !clusterDetail.label) {
+        throw new Error("Cluster detail missing required fields");
+      }
+    });
+
+    // ============================================================
+    // 10. Fix 3, 1, 4: cluster detail buckets section and bucket detail
+    // ============================================================
+    section("[11] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
     
     if (!discoveredCid) {
       skipLine("bucket/cluster detail checks", "cluster cid not discovered in prior steps");
@@ -660,7 +722,7 @@ async function main(): Promise<number> {
     // ============================================================
     // 10. Fix 7: version label under Logo wordmark
     // ============================================================
-    section("[10] version label under Logo (Fix 7)");
+    section("[12] version label under Logo (Fix 7)");
     await check("version label renders under Basement wordmark", async () => {
       // Navigate to any admin page - /admin/clusters works
       await page!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
@@ -699,7 +761,7 @@ async function main(): Promise<number> {
     // ============================================================
     // 11. Console / pageerror gate
     // ============================================================
-    section("[9] console + pageerror gate");
+    section("[13] console + pageerror gate");
     await check("no console errors or page errors across the run", async () => {
       if (consoleWarnings.length > 0) {
         // Surface but don't fail.
