@@ -2095,6 +2095,119 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+    post:
+        operationId: createUserCluster
+        summary: Create a user-owned cluster
+        description: Creates a new Connection record with ownerScope = <userID>. Requires AllowUserBackends capability and driver in UserBackendDrivers. Tests connection via HealthCheck before saving. Used by User — Add cluster dialog.
+        tags:
+          - User
+        security:
+          - cookieAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - label
+                  - driver
+                  - config
+                properties:
+                  label:
+                    type: string
+                    description: Human-friendly name for the cluster
+                  driver:
+                    type: string
+                    enum: [garage, garage-v1, aws-s3, minio]
+                    description: Backend driver type
+                  config:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: Per-driver configuration map
+                  color:
+                    type: string
+                    format: color
+                    description: Hex color for cluster card (optional)
+        responses:
+          '201':
+            description: Cluster created successfully
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Connection'
+          '400':
+            description: Invalid request or connection test failed
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: User backends disabled or driver not enabled for users
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
+  /user/clusters/_test:
+    post:
+      operationId: testUserCluster
+      summary: Dry-run connection test for user cluster
+      description: Tests a connection without saving. Useful for "Test connection" button in add cluster dialog. Returns health report on success or error details on failure.
+      tags:
+        - User
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - driver
+                - config
+              properties:
+                driver:
+                  type: string
+                  enum: [garage, garage-v1, aws-s3, minio]
+                  description: Backend driver type
+                config:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Per-driver configuration map
+      responses:
+        '200':
+          description: Connection test successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  healthy:
+                    type: boolean
+                  details:
+                    $ref: '#/components/schemas/HealthReport'
+        '400':
+          description: Invalid request or connection test failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /user/clusters/{cid}:
     get:

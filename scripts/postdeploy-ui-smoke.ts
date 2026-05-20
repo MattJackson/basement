@@ -1196,7 +1196,45 @@ async function main(): Promise<number> {
     // ============================================================
     // 13. Fix 7: version label under Logo wordmark
     // ============================================================
-    section("[16] version label under Logo (Fix 7)");
+    // ============================================================
+    // USER.ADDCLUSTER — v0.7.0f: /files/clusters/new respects OrgCapabilities
+    // ============================================================
+    section("[15a] USER.ADDCLUSTER — /files/clusters/new respects OrgCapabilities (v0.7.0f)");
+    await check("navigate to /files/clusters/new and verify gate behavior", async () => {
+      await page!.goto(`${BASE_URL}/files/clusters/new`, { waitUntil: "networkidle" });
+      
+      // Check that we're not on login or admin pages
+      const url = page!.url();
+      if (/\/admin/.test(url)) {
+        throw new Error("redirected to /admin — should stay in user shell");
+      }
+
+      // Look for "Add cluster" heading
+      const hasHeading = await page!.locator('h1').filter({ hasText: /Add cluster/ }).count() > 0;
+      
+      if (!hasHeading) {
+        throw new Error("Could not find 'Add cluster' heading on /files/clusters/new");
+      }
+
+      // Since AllowUserBackends is false by default, we should see the disabled message
+      const hasDisabledMessage = await page!.locator('p').filter({ 
+        hasText: /disabled|administrator|contact/i 
+      }).count() > 0;
+
+      if (!hasDisabledMessage) {
+        // If no disabled message, check for form elements (means AllowUserBackends might be true in test env)
+        const hasFormLabel = await page!.locator('label').filter({ hasText: /Label|Driver/i }).count() > 0;
+        if (!hasFormLabel) {
+          throw new Error("Neither disabled message nor form elements found on /files/clusters/new");
+        }
+      }
+
+      // Take a screenshot for visual verification
+      await shot(page!, "15a-add-cluster-page");
+    });
+
+
+section("[16] version label under Logo (Fix 7)");
     await check("version label renders under Basement wordmark", async () => {
       // Navigate to any admin page - /admin/clusters works
       await page!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });

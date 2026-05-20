@@ -40,10 +40,16 @@ type testMockDriver struct {
 	presignUploadPartFunc func(ctx context.Context, upload driver.MultipartUpload, partNum int) (driver.PresignedURL, error)
 	completeMultipartFunc func(ctx context.Context, upload driver.MultipartUpload, parts []driver.CompletedPart) error
 	abortMultipartFunc func(ctx context.Context, upload driver.MultipartUpload) error
+	healthCheckErr     error  // custom HealthCheck error for tests
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
-func (m *testMockDriver) HealthCheck(_ context.Context) (driver.HealthReport, error) { return driver.HealthReport{}, nil }
+func (m *testMockDriver) HealthCheck(_ context.Context) (driver.HealthReport, error) { 
+	if m.healthCheckErr != nil {
+		return driver.HealthReport{}, m.healthCheckErr
+	}
+	return driver.HealthReport{}, nil
+}
 func (m *testMockDriver) ListNodes(ctx context.Context) ([]driver.Node, error) {
 	if m.listNodesFunc != nil {
 		return m.listNodesFunc(ctx)

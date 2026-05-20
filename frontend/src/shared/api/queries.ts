@@ -463,3 +463,16 @@ export function useUserMultipartAbort(cid: string | null, bid: string | null) {
     },
   });
 }
+
+// Org capabilities visible to current user.
+export function useOrgCapabilities() {
+  return useQuery<components["schemas"]["OrgCapabilities"]>({
+    queryKey: ["org-capabilities"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/auth/org-capabilities");
+      if (!res.ok) throw new Error(`org-capabilities ${res.status}`);
+      return res.json();
+    },
+  });
+}
+

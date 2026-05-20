@@ -183,3 +183,20 @@ func (s *Server) capabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(caps)
 }
+
+// getOrgCapabilitiesHandler handles GET /api/v1/auth/org-capabilities.
+// Returns user-visible subset of OrgCapabilities: allowUserBackends, userBackendDrivers.
+func (s *Server) getCurrentOrgCapabilities(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
+		return
+	}
+
+	caps := s.store.OrgCapabilities().Get()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"allowUserBackends":  caps.AllowUserBackends,
+		"userBackendDrivers": caps.UserBackendDrivers,
+	})
+}

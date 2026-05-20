@@ -130,6 +130,7 @@ func (s *Server) routes() {
 
 			authG.Post("/auth/logout", s.logoutHandler)
 			authG.Get("/auth/me", s.meHandler)
+			authG.Get("/auth/org-capabilities", s.getCurrentOrgCapabilities)
 			authG.Get("/capabilities", s.capabilitiesHandler)
 		})
 
@@ -194,6 +195,8 @@ func (s *Server) routes() {
 			userG.Use(auth.Middleware(s.cfg.JWT.Secret))
 
 			userG.Get("/user/clusters", s.userListClustersHandler)
+			userG.Post("/user/clusters", s.createUserClusterHandler)
+			userG.Post("/user/clusters/_test", s.testUserClusterHandler)
 			userG.Get("/user/clusters/{cid}", s.userGetClusterHandler)
 			userG.Get("/user/clusters/{cid}/buckets", s.userListClusterBucketsHandler)
 			userG.Get("/user/clusters/{cid}/buckets/{bid}", s.userGetClusterBucketHandler)
