@@ -25,6 +25,7 @@ import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
 import { Route as AdminBucketsIndexRouteImport } from "./routes/admin/buckets/index"
 import { Route as FilesClustersNewRouteImport } from "./routes/files/clusters/new"
+import { Route as AdminClustersNewRouteImport } from "./routes/admin/clusters/new"
 import { Route as AdminClustersCidIndexRouteImport } from "./routes/admin/clusters/$cid/index"
 import { Route as FilesCidBBidRouteImport } from "./routes/files/$cid/b/$bid"
 import { Route as AdminClustersCidLayoutRouteImport } from "./routes/admin/clusters/$cid/layout"
@@ -112,6 +113,11 @@ const FilesClustersNewRoute = FilesClustersNewRouteImport.update({
   path: "/files/clusters/new",
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminClustersNewRoute = AdminClustersNewRouteImport.update({
+  id: "/admin/clusters/new",
+  path: "/admin/clusters/new",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminClustersCidIndexRoute = AdminClustersCidIndexRouteImport.update({
   id: "/admin/clusters/$cid/",
   path: "/admin/clusters/$cid/",
@@ -156,6 +162,7 @@ export interface FileRoutesByFullPath {
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
+  "/admin/clusters/new": typeof AdminClustersNewRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
@@ -179,6 +186,7 @@ export interface FileRoutesByTo {
   "/share/$token": typeof ShareTokenRoute
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
+  "/admin/clusters/new": typeof AdminClustersNewRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
   "/admin/buckets": typeof AdminBucketsIndexRoute
   "/admin/clusters": typeof AdminClustersIndexRoute
@@ -204,6 +212,7 @@ export interface FileRoutesById {
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
+  "/admin/clusters/new": typeof AdminClustersNewRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
@@ -230,6 +239,7 @@ export interface FileRouteTypes {
     | "/share/$token"
     | "/admin/"
     | "/files/"
+    | "/admin/clusters/new"
     | "/files/clusters/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
@@ -253,6 +263,7 @@ export interface FileRouteTypes {
     | "/share/$token"
     | "/admin"
     | "/files"
+    | "/admin/clusters/new"
     | "/files/clusters/new"
     | "/admin/buckets"
     | "/admin/clusters"
@@ -277,6 +288,7 @@ export interface FileRouteTypes {
     | "/share/$token"
     | "/admin/"
     | "/files/"
+    | "/admin/clusters/new"
     | "/files/clusters/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
@@ -302,6 +314,7 @@ export interface RootRouteChildren {
   ShareTokenRoute: typeof ShareTokenRoute
   AdminIndexRoute: typeof AdminIndexRoute
   FilesIndexRoute: typeof FilesIndexRoute
+  AdminClustersNewRoute: typeof AdminClustersNewRoute
   FilesClustersNewRoute: typeof FilesClustersNewRoute
   AdminBucketsIndexRoute: typeof AdminBucketsIndexRoute
   AdminClustersIndexRoute: typeof AdminClustersIndexRoute
@@ -427,6 +440,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof FilesClustersNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/admin/clusters/new": {
+      id: "/admin/clusters/new"
+      path: "/admin/clusters/new"
+      fullPath: "/admin/clusters/new"
+      preLoaderRoute: typeof AdminClustersNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/admin/clusters/$cid/": {
       id: "/admin/clusters/$cid/"
       path: "/admin/clusters/$cid"
@@ -498,6 +518,7 @@ const rootRouteChildren: RootRouteChildren = {
   ShareTokenRoute: ShareTokenRoute,
   AdminIndexRoute: AdminIndexRoute,
   FilesIndexRoute: FilesIndexRoute,
+  AdminClustersNewRoute: AdminClustersNewRoute,
   FilesClustersNewRoute: FilesClustersNewRoute,
   AdminBucketsIndexRoute: AdminBucketsIndexRoute,
   AdminClustersIndexRoute: AdminClustersIndexRoute,
