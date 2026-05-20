@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { userPage } from "@/shared/layout/userPage";
-import { useUserClusters } from "@/shared/api/queries";
+import { useUserClusters, useOrgCapabilities } from "@/shared/api/queries";
 import { UserClusterCard } from "@/components/clusters/UserClusterCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
@@ -12,7 +12,9 @@ export const Route = createFileRoute("/files/")({
 
 function FilesHome() {
   const { data: clustersData, isLoading, error } = useUserClusters();
+  const { data: caps } = useOrgCapabilities();
   const clusters = clustersData ?? [];
+  const canAddCluster = caps?.allowUserBackends && clusters.length === 0;
 
   if (error) {
     return (
@@ -51,11 +53,24 @@ function FilesHome() {
           ))}
         </div>
       ) : clusters.length === 0 ? (
-        <EmptyState
-          icon="server"
-          title="No clusters yet"
-          description="Contact your administrator to get access."
-        />
+        canAddCluster ? (
+          <EmptyState
+            icon="server"
+            title="No clusters yet"
+            description="Add your own storage backend to get started."
+            action={
+              <a href="/files/clusters/new" className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                Add cluster →
+              </a>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon="server"
+            title="No clusters yet"
+            description="Contact your administrator to get access."
+          />
+        )
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {clusters.map((cluster) => (
