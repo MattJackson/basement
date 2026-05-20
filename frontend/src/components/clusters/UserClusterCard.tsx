@@ -15,8 +15,8 @@ export function UserClusterCard({ id, label, driver, color }: UserClusterCardPro
   const bucketCount = buckets?.length ?? 0;
 
   return (
-    <Link to="/files/$cid" params={{ cid: id }}>
-      <Card 
+    <Link to="/files/$cid" params={{ cid: id }} data-testid="user-cluster-card-link">
+      <Card
         className="group/card cursor-pointer hover:shadow-md transition-shadow"
         data-testid="user-cluster-card"
       >

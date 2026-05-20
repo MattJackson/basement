@@ -27,6 +27,7 @@ export function Logo({ href = "/", iconOnly = false, className = "" }: LogoProps
       href={href}
       className={`flex items-center gap-2.5 font-medium hover:opacity-80 transition-opacity ${className}`}
       aria-label="Basement — home"
+      data-testid="logo"
     >
       <img
         src="/favicon.svg"

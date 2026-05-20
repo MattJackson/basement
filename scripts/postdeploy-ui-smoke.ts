@@ -306,8 +306,10 @@ async function main(): Promise<number> {
       await page!.waitForSelector('h1:has-text("My Clusters")', { timeout: 10_000 });
       await page!.waitForSelector('p:has-text("Storage you have access to")', { timeout: 10_000 });
       
-      // Wait for either cluster cards or empty state
-      const hasCards = await page!.locator('[data-testid="user-cluster-card"]').count();
+      // Wait for either cluster cards or empty state. Use the
+      // Link wrapper testid (-link suffix) so getAttribute('href')
+      // resolves against the <a> element, not the Card inside.
+      const hasCards = await page!.locator('[data-testid="user-cluster-card-link"]').count();
       if (hasCards === 0) {
         // Empty state is acceptable on fresh deploy
         const hasEmptyState = await page!.locator('text="No clusters yet"').count();
@@ -316,21 +318,21 @@ async function main(): Promise<number> {
           return;
         }
       }
-      
+
       // Assert at least one card is visible if not empty
-      const cardCount = await page!.locator('[data-testid="user-cluster-card"]').count();
+      const cardCount = await page!.locator('[data-testid="user-cluster-card-link"]').count();
       if (cardCount > 0) {
         // Each card should have a driver badge
         for (let i = 0; i < cardCount; i++) {
-          const card = page!.locator('[data-testid="user-cluster-card"]').nth(i);
-          await card.locator('text=/Garage|AWS S3|MinIO/').first().waitFor({ 
-            state: 'visible', 
-            timeout: 10_000 
+          const card = page!.locator('[data-testid="user-cluster-card-link"]').nth(i);
+          await card.locator('text=/Garage|AWS S3|MinIO/').first().waitFor({
+            state: 'visible',
+            timeout: 10_000
           });
         }
-        
+
         // Click the first card and verify navigation to /files/{cid}
-        const firstCard = page!.locator('[data-testid="user-cluster-card"]').first();
+        const firstCard = page!.locator('[data-testid="user-cluster-card-link"]').first();
         const href = await firstCard.getAttribute('href');
         
         if (!href || !href.match(/^\/files\/[^/]+$/)) {
@@ -967,6 +969,40 @@ async function main(): Promise<number> {
         process.stdout.write(`${C.dim}empty state shown (no user keys yet)${C.reset}\n`);
         await shot(page!, "nn-keys-empty-state");
       }
+    });
+
+    // ============================================================
+    // 16.x AUTH.RBAC (v0.5.7) — admin-only pages render for UIAdmin
+    // ============================================================
+    section("[16a] AUTH.RBAC — /admin/system + /admin/users (v0.5.7)");
+
+    await check("/admin/system renders OrgCapabilities (UIAdmin: matthew)", async () => {
+      await page!.goto(`${BASE_URL}/admin/system`, { waitUntil: "networkidle" });
+      // Page must NOT redirect to login (would indicate auth lost)
+      // and NOT redirect to / (would indicate non-UIAdmin gate).
+      const url = page!.url();
+      if (/\/admin\/login/.test(url)) {
+        throw new Error("/admin/system bounced to /admin/login — auth lost");
+      }
+      if (url === `${BASE_URL}/` || url.endsWith("/files")) {
+        throw new Error("/admin/system bounced to user shell — matthew should be UIAdmin");
+      }
+      // Page should have some content. Permissive — exact UI shape is
+      // still settling. Just confirm the page rendered an authoritative
+      // marker like a header.
+      await page!.waitForSelector('h1', { timeout: 10_000 });
+    });
+
+    await check("/admin/users renders user list (UIAdmin: matthew)", async () => {
+      await page!.goto(`${BASE_URL}/admin/users`, { waitUntil: "networkidle" });
+      const url = page!.url();
+      if (/\/admin\/login/.test(url)) {
+        throw new Error("/admin/users bounced to /admin/login — auth lost");
+      }
+      if (url === `${BASE_URL}/` || url.endsWith("/files")) {
+        throw new Error("/admin/users bounced to user shell — matthew should be UIAdmin");
+      }
+      await page!.waitForSelector('h1', { timeout: 10_000 });
     });
 
     // ============================================================
