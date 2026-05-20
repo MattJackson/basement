@@ -1,10 +1,13 @@
 package aws_s3
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -826,5 +829,197 @@ func TestDriver_UnsupportedHelper(t *testing.T) {
 	}
 	if !errors.Is(err, driverpkg.ErrUnsupported) {
 		t.Errorf("not ErrUnsupported: %v", err)
+	}
+}
+
+// TestRealDriver_StreamObject_Happy tests streaming a known object.
+func TestRealDriver_StreamObject_Happy(t *testing.T) {
+	if os.Getenv("DRIVER_INTEGRATION") == "" {
+		t.Skip("DRIVER_INTEGRATION not set")
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "HEAD" && strings.Contains(r.URL.Path, "/test-bucket/test-key") {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Length", "12")
+			w.Header().Set("ETag", "\"abc123\"")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/test-bucket/test-key") {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Length", "12")
+			w.Header().Set("ETag", "\"abc123\"")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("hello world!"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	ctx := context.Background()
+
+	result, err := d.StreamObject(ctx, "test-bucket", "test-key", "")
+	if err != nil {
+		t.Fatalf("StreamObject: %v", err)
+	}
+	defer result.Body.Close()
+
+	data, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if string(data) != "hello world!" {
+		t.Errorf("body=%q, want hello world!", data)
+	}
+	if result.ContentType != "text/plain" {
+		t.Errorf("contentType=%q, want text/plain", result.ContentType)
+	}
+	if result.ETag != "\"abc123\"" {
+		t.Errorf("etag=%q, want \"abc123\"", result.ETag)
+	}
+}
+
+// TestRealDriver_StreamObject_Range tests streaming with range header.
+func TestRealDriver_StreamObject_Range(t *testing.T) {
+	if os.Getenv("DRIVER_INTEGRATION") == "" {
+		t.Skip("DRIVER_INTEGRATION not set")
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.Contains(r.URL.Path, "/test-bucket/test-key") {
+			w.Header().Set("Content-Type", "text/plain")
+			w.Header().Set("Content-Range", "bytes 5-9/12")
+			w.Header().Set("Content-Length", "5")
+			w.Header().Set("ETag", "\"abc123\"")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("world"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	ctx := context.Background()
+
+	result, err := d.StreamObject(ctx, "test-bucket", "test-key", "bytes=5-9")
+	if err != nil {
+		t.Fatalf("StreamObject: %v", err)
+	}
+	defer result.Body.Close()
+
+	data, err := io.ReadAll(result.Body)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+
+	if string(data) != "world" {
+		t.Errorf("body=%q, want world", data)
+	}
+}
+
+// TestRealDriver_PutObjectStream_Happy tests streaming upload.
+func TestRealDriver_PutObjectStream_Happy(t *testing.T) {
+	if os.Getenv("DRIVER_INTEGRATION") == "" {
+		t.Skip("DRIVER_INTEGRATION not set")
+	}
+
+	var receivedBody []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/test-bucket/test-key") {
+			receivedBody, _ = io.ReadAll(r.Body)
+			w.Header().Set("ETag", "\"put-etag-123\"")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><PutObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"put-etag-123"</ETag></PutObjectResult>`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	ctx := context.Background()
+
+	testData := []byte("test data for streaming upload")
+	result, err := d.PutObjectStream(ctx, "test-bucket", "test-key", bytes.NewReader(testData), "text/plain", int64(len(testData)))
+	if err != nil {
+		t.Fatalf("PutObjectStream: %v", err)
+	}
+
+	if result.ETag != "\"put-etag-123\"" {
+		t.Errorf("etag=%q, want \"put-etag-123\"", result.ETag)
+	}
+	if !bytes.Equal(receivedBody, testData) {
+		t.Errorf("received body mismatch")
+	}
+}
+
+// TestRealDriver_PutObjectStream_WithContentType tests streaming upload with content type.
+func TestRealDriver_PutObjectStream_WithContentType(t *testing.T) {
+	if os.Getenv("DRIVER_INTEGRATION") == "" {
+		t.Skip("DRIVER_INTEGRATION not set")
+	}
+
+	var contentType string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/test-bucket/test-key") {
+			contentType = r.Header.Get("Content-Type")
+			w.Header().Set("ETag", "\"content-type-etag\"")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><PutObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"content-type-etag"</ETag></PutObjectResult>`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	ctx := context.Background()
+
+	testData := []byte("binary data")
+	result, err := d.PutObjectStream(ctx, "test-bucket", "test-key", bytes.NewReader(testData), "application/octet-stream", int64(len(testData)))
+	if err != nil {
+		t.Fatalf("PutObjectStream: %v", err)
+	}
+
+	if contentType != "application/octet-stream" {
+		t.Errorf("contentType=%q, want application/octet-stream", contentType)
+	}
+	if result.ETag != "\"content-type-etag\"" {
+		t.Errorf("etag=%q, want \"content-type-etag\"", result.ETag)
+	}
+}
+
+// TestRealDriver_PutObjectStream_WithSizeZero tests streaming upload with size 0.
+func TestRealDriver_PutObjectStream_WithSizeZero(t *testing.T) {
+	if os.Getenv("DRIVER_INTEGRATION") == "" {
+		t.Skip("DRIVER_INTEGRATION not set")
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" && strings.Contains(r.URL.Path, "/test-bucket/test-key") {
+			w.Header().Set("ETag", "\"zero-size-etag\"")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><PutObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"zero-size-etag"</ETag></PutObjectResult>`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	ctx := context.Background()
+
+	result, err := d.PutObjectStream(ctx, "test-bucket", "test-key", strings.NewReader(""), "", 0)
+	if err != nil {
+		t.Fatalf("PutObjectStream: %v", err)
+	}
+
+	if result.ETag != "\"zero-size-etag\"" {
+		t.Errorf("etag=%q, want \"zero-size-etag\"", result.ETag)
 	}
 }
