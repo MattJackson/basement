@@ -31,8 +31,15 @@ func newClient(cfg driverpkg.Config) *client {
 	return &client{
 		baseURL: cfg["admin_url"],
 		token:   cfg["admin_token"],
+		// 10s ceiling: any single Garage v1 admin call that takes
+		// longer than this is something we should fail fast on. The
+		// admin endpoints typically respond in <100ms. /v1/health is
+		// the slowest because it pings the whole cluster, but 10s is
+		// plenty even for a slow multi-node setup. Was 30s — held
+		// the request goroutine too long when /v1/health stalled,
+		// blocking the server under concurrent _test polls.
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 10 * time.Second,
 		},
 	}
 }
