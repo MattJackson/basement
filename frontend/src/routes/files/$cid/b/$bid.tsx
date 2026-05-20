@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,6 +8,7 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { useUserClusterBuckets, useUserObjects, useUserPresignGet } from "@/shared/api/queries";
 import { ObjectRow } from "@/components/objects/ObjectRow";
+import { UploadDialog } from "@/components/upload/UploadDialog";
 
 export const Route = createFileRoute("/files/$cid/b/$bid")({
   component: UserBucketObjects,
@@ -56,6 +58,13 @@ function UserBucketObjects() {
     navigate({ to: "/files/$cid", params: { cid } });
   };
 
+  const [uploadOpen, setUploadOpen] = useState(false);
+
+  const handleUploadSuccess = () => {
+    setUploadOpen(false);
+    refetch(); // Invalidate and refresh object list
+  };
+
   if (bucketsLoading) {
     return (
       <div className="space-y-6">
@@ -90,6 +99,14 @@ function UserBucketObjects() {
             </Button>
             <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={objectsLoading}>
               Refresh
+            </Button>
+            <Button 
+              variant="default" 
+              size="sm" 
+              onClick={() => setUploadOpen(true)}
+              disabled={objectsLoading}
+            >
+              Upload
             </Button>
           </div>
         }
@@ -158,6 +175,15 @@ function UserBucketObjects() {
       {presignMutation.isError && (
         <ErrorBanner message="Failed to generate download link. Try again." />
       )}
+
+      <UploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        cid={cid}
+        bid={bid}
+        prefix={prefix}
+        onSuccess={handleUploadSuccess}
+      />
     </div>
   );
 }

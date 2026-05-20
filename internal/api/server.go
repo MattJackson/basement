@@ -203,6 +203,12 @@ func (s *Server) routes() {
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat", s.userStatClusterBucketObjectHandler)
 			userG.Post("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/presign-get", s.userPresignGetClusterBucketObjectHandler)
+
+			// User upload endpoints (v0.7.0e USER.UPLOAD).
+			userG.Post("/user/clusters/{cid}/buckets/{bid}/multipart/init", s.userInitMultipartUploadHandler)
+			userG.Post("/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/part/{partNum}/presign", s.userPresignUploadPartHandler)
+			userG.Post("/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/complete", s.userCompleteMultipartUploadHandler)
+			userG.Delete("/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}", s.userAbortMultipartUploadHandler)
 		})
 	})
 
