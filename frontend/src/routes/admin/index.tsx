@@ -17,7 +17,7 @@ import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
-import { useBuckets } from "@/shared/api/queries";
+import { useBuckets, useListClusters } from "@/shared/api/queries";
 import { useCreateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import { ClusterBadge } from "@/components/ClusterBadge";
@@ -43,6 +43,16 @@ function MyBuckets() {
   const createMutation = useCreateBucket();
   const deleteMutation = useDeleteBucket();
   const { data: bucketsData, isLoading, error } = useBuckets();
+  const { data: clusters, isLoading: clustersLoading } = useListClusters();
+
+  // First-run gate: if the operator has no clusters configured (either
+  // env auto-seed didn't fire OR they deleted them all), there's no
+  // useful bucket list to show. Bounce to /admin/clusters which has
+  // the "Welcome — add your first cluster" empty state.
+  const noClusters = !clustersLoading && (clusters?.length ?? 0) === 0;
+  if (noClusters) {
+    navigate({ to: "/admin/clusters", replace: true });
+  }
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });

@@ -121,14 +121,18 @@ if (error) {
           </Table>
         </div>
       ) : clusters.length === 0 ? (
-        <EmptyState
-          icon="server"
-          title="No clusters yet"
-          description="Add a cluster to get started."
-          action={
-            <Button onClick={() => setCreateOpen(true)}>Add cluster</Button>
-          }
-        />
+        <div className="rounded-lg border bg-card p-8 sm:p-12">
+          <EmptyState
+            icon="server"
+            title="Welcome to basement"
+            description="One pane of glass for Garage, MinIO, OpenMaxIO, and AWS S3. Add your first cluster to get started — basement talks to its admin API and surfaces buckets, keys, and layout from here."
+            action={
+              <Button onClick={() => setCreateOpen(true)} size="lg">
+                + Add your first cluster
+              </Button>
+            }
+          />
+        </div>
       ) : (
         <div className="rounded-lg border bg-card overflow-x-auto">
           <Table>
