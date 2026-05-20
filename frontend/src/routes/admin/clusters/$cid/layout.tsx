@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,17 +57,15 @@ function ClusterLayoutScreen() {
     return (
       <div className="space-y-6">
         <BackLink cid={cid} clusterLabel={cluster?.label} />
-        <Card>
-          <CardHeader>Layout not supported</CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground max-w-prose">
-              basement only exposes layout editing for backends that
-              own their own cluster topology (Garage). The{" "}
-              <Badge variant="secondary">{driver}</Badge> driver manages
-              its layout internally — there&apos;s nothing to edit here.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border bg-card p-6 space-y-2">
+          <h2 className="text-sm font-medium">Layout not supported</h2>
+          <p className="text-sm text-muted-foreground max-w-prose">
+            basement only exposes layout editing for backends that
+            own their own cluster topology (Garage). The{" "}
+            <Badge variant="secondary">{driver}</Badge> driver manages
+            its layout internally — there&apos;s nothing to edit here.
+          </p>
+        </div>
       </div>
     );
   }
@@ -87,11 +84,9 @@ function ClusterLayoutScreen() {
       <div className="space-y-6">
         <BackLink cid={cid} clusterLabel={cluster?.label} />
         <Skeleton className="h-8 w-48" />
-        <Card>
-          <CardContent className="pt-6">
-            <Skeleton className="h-32 w-full" />
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border bg-card p-4">
+          <Skeleton className="h-32 w-full" />
+        </div>
       </div>
     );
   }
@@ -152,11 +147,10 @@ function ClusterLayoutScreen() {
         <div className="text-sm text-muted-foreground">Version {layout.version}</div>
       </header>
 
-      <Card>
-        <CardHeader>Nodes</CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Nodes</h2>
+        <div className="rounded-lg border bg-card overflow-x-auto">
+          <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Node</TableHead>
@@ -243,31 +237,31 @@ function ClusterLayoutScreen() {
                 )}
               </TableBody>
             </Table>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
       {staged && staged.nodes && staged.nodes.length > 0 ? (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <span>
-              Staged layout (target version {staged.version ?? "?"})
-            </span>
+        <section className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-muted-foreground">
+              Staged layout <span className="text-muted-foreground/60">(target version {staged.version ?? "?"})</span>
+            </h2>
             <div className="flex gap-2">
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => setRevertDialogOpen(true)}
                 disabled={revertLayout.isPending}
               >
                 Revert
               </Button>
-              <Button onClick={handleApply} disabled={applyLayout.isPending}>
+              <Button size="sm" onClick={handleApply} disabled={applyLayout.isPending}>
                 {applyLayout.isPending ? "Applying…" : "Apply"}
               </Button>
             </div>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-1 text-sm">
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <ul className="space-y-1.5 text-sm">
               {staged.nodes.map((n) => (
                 <li key={n.id} className="flex items-center gap-2 text-muted-foreground">
                   <span className="font-mono text-xs">{n.id.slice(0, 12)}</span>
@@ -278,8 +272,8 @@ function ClusterLayoutScreen() {
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       ) : null}
 
       <AlertDialog open={revertDialogOpen} onOpenChange={(o) => !o && setRevertDialogOpen(false)}>
