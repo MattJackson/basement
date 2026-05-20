@@ -30,7 +30,7 @@ func TestGetBucket(t *testing.T) {
 				{
 					AccessKeyID: "key-abc",
 					Name:        "Test Key",
-					Permissions: []bucketKeyPerm{{BucketID: "test-bucket-123", Read: true, Write: false, Owner: false}},
+					Permissions: apiBucketKeyPerm{Read: true, Write: false, Owner: false},
 				},
 			},
 			Quotas: &apiBucketQuotas{MaxSize: int64Ptr(1000000), MaxObjects: int64Ptr(100)},
@@ -104,12 +104,12 @@ func TestGetBucket_Fields(t *testing.T) {
 				{
 					AccessKeyID: "k-1",
 					Name:        "Admin Key",
-					Permissions: []bucketKeyPerm{{BucketID: "bucket-stats-456", Read: true, Write: true, Owner: true}},
+					Permissions: apiBucketKeyPerm{Read: true, Write: true, Owner: true},
 				},
 				{
 					AccessKeyID: "k-2",
 					Name:        "Reader Key",
-					Permissions: []bucketKeyPerm{{BucketID: "bucket-stats-456", Read: true, Write: false, Owner: false}},
+					Permissions: apiBucketKeyPerm{Read: true, Write: false, Owner: false},
 				},
 			},
 		}
@@ -158,8 +158,8 @@ func TestListBuckets_NoStatsOnList(t *testing.T) {
 		}
 
 		response := []listBucketsResponseItem{
-			{ID: "bucket-a", Created: time.Now().Format(time.RFC3339), GlobalAliases: []string{"docs"}},
-			{ID: "bucket-b", Created: time.Now().Format(time.RFC3339), GlobalAliases: []string{"site.com"}},
+			{ID: "bucket-a", Created: time.Now(), GlobalAliases: []string{"docs"}},
+			{ID: "bucket-b", Created: time.Now(), GlobalAliases: []string{"site.com"}},
 		}
 
 w.Header().Set("Content-Type", "application/json")

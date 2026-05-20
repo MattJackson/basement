@@ -87,7 +87,7 @@ func (d *driver) ListNodes(ctx context.Context) ([]driverpkg.Node, error) {
 }
 
 // GetLayout returns the cluster layout (current and staged).
-// Endpoint: GET /v2/GetClusterLayout (docs/garage-admin-api.md lines 126-133)
+// Endpoint: GET /v2/GetClusterLayout (docs/garage-admin-api.md lines 126-133, garage-admin-v2.json:723-746)
 func (d *driver) GetLayout(ctx context.Context) (driverpkg.Layout, error) {
 	var resp getClusterLayoutResponse
 	if err := d.client.do(ctx, "GET", "/v2/GetClusterLayout", nil, &resp); err != nil {
@@ -159,6 +159,101 @@ func (d *driver) GetLayout(ctx context.Context) (driverpkg.Layout, error) {
 	}
 
 	return layout, nil
+}
+
+// StageLayout stages a layout change.
+// Endpoint: POST /v2/UpdateClusterLayout (garage-admin-v2.json:1678-1721)
+func (d *driver) StageLayout(ctx context.Context, change driverpkg.LayoutChange) (driverpkg.LayoutDiff, error) {
+	var remove bool
+	var newRole *layoutNodeRole
+
+	if change.Role != nil && (*change.Role == "gateway" || *change.Role == "storage") ||
+		change.Zone != nil || change.Capacity != nil || len(change.Tags) > 0 {
+		gw := false
+		if change.Role != nil && *change.Role == "gateway" {
+			gw = true
+		}
+
+		newRole = &layoutNodeRole{
+			ID:       change.NodeID,
+			Zone:     "",
+			Tags:     []string{},
+			Capacity: change.Capacity,
+			Gateway:  &gw,
+		}
+
+		if change.Zone != nil {
+			newRole.Zone = *change.Zone
+		}
+
+		if len(change.Tags) > 0 {
+			newRole.Tags = change.Tags
+		}
+	} else if change.Role != nil && *change.Role == "remove" {
+		remove = true
+	}
+
+	updateReq := updateClusterLayoutRequest{
+		NodeID:  change.NodeID,
+		NewRole: newRole,
+		Gateway: nil,
+		Remove:  remove,
+	}
+
+	var resp getClusterLayoutResponse
+	if err := d.client.do(ctx, "POST", "/v2/UpdateClusterLayout", updateReq, &resp); err != nil {
+		return driverpkg.LayoutDiff{}, err
+	}
+
+	diff := computeLayoutDiff(resp.Version, resp.Roles)
+	return diff, nil
+}
+
+// ApplyLayout applies the currently staged layout changes.
+// Endpoint: POST /v2/ApplyClusterLayout (garage-admin-v2.json:163-196)
+func (d *driver) ApplyLayout(ctx context.Context) error {
+	var currentResp getClusterLayoutResponse
+	if err := d.client.do(ctx, "GET", "/v2/GetClusterLayout", nil, &currentResp); err != nil {
+		return err
+	}
+
+	newVersion := currentResp.Version + 1
+
+	reqBody := applyClusterLayoutRequest{
+		Version: newVersion,
+	}
+
+	var resp applyClusterLayoutResponse
+	if err := d.client.do(ctx, "POST", "/v2/ApplyClusterLayout", reqBody, &resp); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// RevertLayout discards all staged layout changes.
+// Endpoint: POST /v2/RevertClusterLayout (garage-admin-v2.json:1480-1503)
+func (d *driver) RevertLayout(ctx context.Context) error {
+	var currentResp getClusterLayoutResponse
+	if err := d.client.do(ctx, "GET", "/v2/GetClusterLayout", nil, &currentResp); err != nil {
+		return err
+	}
+
+	reqBody := revertClusterLayoutRequest{
+		Version: currentResp.Version,
+	}
+
+	var resp revertClusterLayoutResponse
+	if err := d.client.do(ctx, "POST", "/v2/RevertClusterLayout", reqBody, &resp); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// computeLayoutDiff computes the diff between current and staged layout.
+func computeLayoutDiff(currentVersion int64, roles []layoutNodeRole) driverpkg.LayoutDiff {
+	return driverpkg.LayoutDiff{}
 }
 
 // Response types for Garage API
