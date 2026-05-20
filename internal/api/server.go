@@ -202,6 +202,11 @@ func (s *Server) routes() {
 			userG.Get("/user/clusters/{cid}/buckets/{bid}", s.userGetClusterBucketHandler)
 			userG.Get("/user/keys", s.userListKeysHandler)
 
+			// User shares endpoints (v0.7.0g USER.SHARES).
+			userG.Post("/user/shares", s.userCreateShareHandler)
+			userG.Get("/user/shares", s.userListSharesHandler)
+			userG.Delete("/user/shares/{token}", s.userRevokeShareHandler)
+
 			// User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat", s.userStatClusterBucketObjectHandler)

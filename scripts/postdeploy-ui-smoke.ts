@@ -1234,12 +1234,65 @@ async function main(): Promise<number> {
     });
 
 
+section("[15b] USER.SHARES — /files/shares renders shares list and empty state (v0.7.0g)");
+    await check("navigate to /files/shares and verify header + table/empty", async () => {
+      // First navigate to the shares page
+      await page!.goto(`${BASE_URL}/files/shares`, { waitUntil: "networkidle" });
+      
+      const url = page!.url();
+      if (/\/admin/.test(url)) {
+        throw new Error("redirected to /admin — should stay in user shell");
+      }
+
+      // Check that we're on the shares page - look for header
+      const hasHeader = await page!.locator('h1').filter({ hasText: /Shares/i }).count() > 0;
+      
+      if (!hasHeader) {
+        throw new Error("Could not find 'Shares' heading on /files/shares");
+      }
+
+      // Check for subheader
+      const hasSubhead = await page!.locator('p').filter({ hasText: /links you.*ve created/i }).count() > 0;
+      
+      if (!hasSubhead) {
+        throw new Error("Could not find shares subheading");
+      }
+
+      // Check for either empty state or table
+      const hasEmptyState = await page!.locator('h3').filter({ hasText: /no shares/i }).count() > 0;
+      const hasTable = await page!.locator('table').count() > 0;
+      
+      if (!hasEmptyState && !hasTable) {
+        throw new Error("Could not find empty state or table on /files/shares");
+      }
+
+      // If there are shares, verify table structure
+      if (hasTable) {
+        const hasTableHeaders = await page!.locator('th').filter({ hasText: /bucket|path|created/i }).count() > 0;
+        
+        if (!hasTableHeaders) {
+          throw new Error("Share table missing expected headers");
+        }
+
+        // Verify action buttons exist
+        const hasCopyButton = await page!.locator('button').filter({ hasText: /copy/i }).count() > 0;
+        const hasRevokeButton = await page!.locator('button').filter({ hasText: /revoke/i }).count() > 0;
+
+        if (!hasCopyButton || !hasRevokeButton) {
+          throw new Error("Share table missing copy or revoke action buttons");
+        }
+      }
+
+      await shot(page!, "15b-shares-page");
+    });
+
+
 section("[16] version label under Logo (Fix 7)");
     await check("version label renders under Basement wordmark", async () => {
       // Navigate to any admin page - /admin/clusters works
       await page!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
 
-      // Look for the version pattern near the Basement wordmark
+      // Look for the version pattern near the Logo wordmark
       // The logo should have text matching vX.Y.Z (e.g., v0.4.5)
       const hasVersion = await page!.evaluate(() => {
         // Find the Logo component - it contains "Basement" text and a version span
@@ -1262,6 +1315,13 @@ section("[16] version label under Logo (Fix 7)");
         const titleVersion = document.title.match(/v\d+\.\d+/);
         return !!titleVersion;
       });
+
+      if (!hasVersion) {
+        throw new Error("Could not find version label (vX.Y.Z pattern) near Basement wordmark");
+      }
+
+      await shot(page!, "12-logo-with-version");
+    });
 
       if (!hasVersion) {
         throw new Error("Could not find version label (vX.Y.Z pattern) near Basement wordmark");
