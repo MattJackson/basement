@@ -21,8 +21,9 @@ type LoginRequest struct {
 
 // UserResponse represents a user profile response.
 type UserResponse struct {
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	UIAdmin   bool   `json:"uiAdmin,omitempty"`
 }
 
 var adminCredsOnce sync.Once
@@ -79,7 +80,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 		ttl = 24 * time.Hour
 	}
 
-	token, err := auth.IssueToken(s.cfg.JWT.Secret, adminUser, "admin", ttl)
+	token, err := auth.IssueToken(s.cfg.JWT.Secret, adminUser, "admin", true, ttl)
 	if err != nil {
 		writeErrorSimple(w, http.StatusInternalServerError, "TOKEN_ISSUE", "Failed to issue session token")
 		return
@@ -90,6 +91,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 	resp := UserResponse{
 		Username: adminUser,
 		Role:     "admin",
+		UIAdmin:  true,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -110,7 +112,7 @@ func (s *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // meHandler handles GET /api/v1/auth/me.
-// Returns current claims as {username, role} from auth.FromContext.
+// Returns current claims as {username, role, uiAdmin} from auth.FromContext.
 // 401 if no claims (middleware should have caught this — meHandler treats
 // missing claims as a programming error and 500s).
 func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +131,7 @@ func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
 	resp := UserResponse{
 		Username: claims.UserID,
 		Role:     claims.Role,
+		UIAdmin:  claims.UIAdmin,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

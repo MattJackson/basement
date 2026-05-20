@@ -22,10 +22,12 @@ type Store struct {
 	grantsPath  string
 	sharesPath  string
 	auditDir    string
+	orgCapsPath string
 
 	usersCache     []User
 	grantsCache    map[string][]Grant // userID -> grants
 	sharesCache    []Share
+	orgCaps        *OrgCapabilitiesStore
 }
 
 // Open opens or creates the store at dataDir with the given retention period.
@@ -41,6 +43,7 @@ func Open(dataDir string, retention time.Duration) (*Store, error) {
 		usersPath: filepath.Join(dataDir, "users.json"),
 		grantsPath: filepath.Join(dataDir, "grants.json"),
 		sharesPath: filepath.Join(dataDir, "shares.json"),
+		orgCapsPath: filepath.Join(dataDir, "org_capabilities.json"),
 		auditDir: filepath.Join(dataDir, "audit"),
 	}
 
@@ -84,4 +87,24 @@ func (s *Store) loadAll() error {
 	}
 
 	return nil
+}
+
+// OrgCapabilities returns the org capabilities store.
+func (s *Store) OrgCapabilities() *OrgCapabilitiesStore {
+	return s.orgCaps
+}
+
+// MigrateLegacyUsers sets uiAdmin=true for existing admin users.
+// This is a one-time migration on first boot after upgrade.
+func (s *Store) MigrateLegacyUsers() error {
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+
+	for i := range s.usersCache {
+		if s.usersCache[i].Role == "admin" && !s.usersCache[i].UIAdmin {
+			s.usersCache[i].UIAdmin = true
+		}
+	}
+
+	return saveJSON(s.usersPath, s.usersCache)
 }

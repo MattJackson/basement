@@ -176,6 +176,7 @@ func (s *Server) oidcCallbackHandler(w http.ResponseWriter, r *http.Request) {
 			ID:       uuid.New().String(),
 			Username: usernameFromClaims(claims),
 			Role:     "user",
+			UIAdmin:  false,
 			Provider: claims.Provider,
 			Subject:  claims.Subject,
 			Email:    claims.Email,
@@ -192,7 +193,7 @@ func (s *Server) oidcCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		ttl = 24 * time.Hour
 	}
 
-	token, err := auth.IssueToken(s.cfg.JWT.Secret, user.ID, user.Role, ttl)
+	token, err := auth.IssueToken(s.cfg.JWT.Secret, user.ID, user.Role, user.UIAdmin, ttl)
 	if err != nil {
 		writeErrorSimple(w, http.StatusInternalServerError, "TOKEN_ISSUE", "Failed to issue session token")
 		return

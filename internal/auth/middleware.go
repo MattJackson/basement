@@ -7,7 +7,12 @@ import (
 
 type contextKey string
 
-const claimsKey = contextKey("claims")
+const (
+	claimsKey    = contextKey("claims")
+	uiAdminKey   = contextKey("uiAdmin")
+	clusterAdmin = contextKey("clusterAdmin")
+	bucketGrant  = contextKey("bucketGrant")
+)
 
 // Middleware returns an HTTP middleware that validates the session JWT cookie.
 // On success, it stores *Claims in the request context. On failure, it writes a 401 error.
@@ -27,6 +32,7 @@ func Middleware(secret []byte) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), claimsKey, claims)
+			ctx = context.WithValue(ctx, uiAdminKey, claims.UIAdmin)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -39,6 +45,30 @@ func FromContext(ctx context.Context) (*Claims, bool) {
 		return nil, false
 	}
 	return claims, true
+}
+
+// IsUIAdmin returns whether the current user is a UI Admin.
+func IsUIAdmin(ctx context.Context) bool {
+	val := ctx.Value(uiAdminKey)
+	if val == nil {
+		return false
+	}
+	b, ok := val.(bool)
+	return ok && b
+}
+
+// RequireUIAdmin returns an HTTP middleware that requires UI Admin status.
+func RequireUIAdmin() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !IsUIAdmin(r.Context()) {
+				writeError(w, http.StatusForbidden, "INSUFFICIENT_ROLE", "Insufficient permissions")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // RequireRole returns an HTTP middleware that requires a specific role.
