@@ -297,6 +297,24 @@ export function useUserClusterBuckets(cid: string) {
     },
     enabled: !!cid,
     staleTime: 30 * 1000,
+  });
+}
+
+// Single-bucket detail (user persona). Garage v1's ListBuckets
+// doesn't include bytes/objects, so the list view hydrates each row
+// with its own GetBucket call — same pattern as the admin side.
+export function useUserBucket(cid: string, bid: string) {
+  return useQuery<Bucket>({
+    queryKey: ["user", "clusters", cid, "buckets", bid],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/clusters/{cid}/buckets/{bid}", {
+        params: { path: { cid, bid } },
+      });
+      if (!response.ok || !data) throw apiError(`user/buckets/${bid}`, response.status, error);
+      return data as Bucket;
+    },
+    enabled: !!cid && !!bid,
+    staleTime: 30_000,
     retry: 1,
   });
 }
