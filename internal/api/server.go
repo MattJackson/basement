@@ -116,6 +116,7 @@ func (s *Server) routes() {
 		// Public routes — no auth required.
 		apiR.Get("/health", s.healthHandler)
 		apiR.Get("/version", s.versionHandler)
+		apiR.Get("/auth/methods", s.authMethodsHandler)
 		apiR.Post("/auth/login", s.loginHandler)
 		apiR.Get("/auth/oidc/start", s.oidcStartHandler)
 		apiR.Get("/auth/oidc/callback", s.oidcCallbackHandler)

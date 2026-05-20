@@ -86,13 +86,14 @@ describe("LoginForm — OIDC SSO integration", () => {
     if (restore) restore();
   });
 
-  it("hides the SSO button when /auth/oidc/start returns 501", async () => {
+  it("hides the SSO button when /auth/methods reports oidc not configured", async () => {
     vi.spyOn(window, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/oidc/start")) {
-        return new Response(JSON.stringify({ error: { code: "OIDC_NOT_CONFIGURED", message: "" } }), {
-          status: 501,
-        });
+      if (url.endsWith("/auth/methods")) {
+        return new Response(
+          JSON.stringify({ password: true, oidc: { configured: false } }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -108,15 +109,14 @@ describe("LoginForm — OIDC SSO integration", () => {
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
   });
 
-  it("shows the SSO button when /auth/oidc/start does not return 501", async () => {
+  it("shows the SSO button when /auth/methods reports oidc configured", async () => {
     vi.spyOn(window, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/oidc/start")) {
-        // redirect: "manual" surfaces a 3xx as an opaque-redirect with
-        // status 0 in browsers; jsdom doesn't honor that, so we return a
-        // plain 302 — the hook's only "false" branch is status===501, so
-        // anything else flips it to "available".
-        return new Response("", { status: 302 });
+      if (url.endsWith("/auth/methods")) {
+        return new Response(
+          JSON.stringify({ password: true, oidc: { configured: true } }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -131,8 +131,11 @@ describe("LoginForm — OIDC SSO integration", () => {
   it("clicking the SSO button navigates the browser to /api/v1/auth/oidc/start", async () => {
     vi.spyOn(window, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/oidc/start")) {
-        return new Response("", { status: 302 });
+      if (url.endsWith("/auth/methods")) {
+        return new Response(
+          JSON.stringify({ password: true, oidc: { configured: true } }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -151,10 +154,11 @@ describe("LoginForm — OIDC SSO integration", () => {
 
     vi.spyOn(window, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/oidc/start")) {
-        return new Response(JSON.stringify({ error: { code: "OIDC_NOT_CONFIGURED", message: "" } }), {
-          status: 501,
-        });
+      if (url.endsWith("/auth/methods")) {
+        return new Response(
+          JSON.stringify({ password: true, oidc: { configured: false } }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -170,10 +174,11 @@ describe("LoginForm — OIDC SSO integration", () => {
 
     vi.spyOn(window, "fetch").mockImplementation(async (input) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/oidc/start")) {
-        return new Response(JSON.stringify({ error: { code: "OIDC_NOT_CONFIGURED", message: "" } }), {
-          status: 501,
-        });
+      if (url.endsWith("/auth/methods")) {
+        return new Response(
+          JSON.stringify({ password: true, oidc: { configured: false } }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
