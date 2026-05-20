@@ -10,8 +10,8 @@ import { DeleteClusterConfirm } from "@/shared/ui/DeleteClusterConfirm";
 import { DangerZone } from "@/shared/ui/DangerZone";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
-import { humanizeTime } from "@/shared/lib/format";
-import { useGetCluster, useNodes, useCapabilities, useTestClusterQuery, useClusterBuckets, useClusterKeys } from "@/shared/api/queries";
+import { humanizeTime, humanizeBytes } from "@/shared/lib/format";
+import { useGetCluster, useNodes, useCapabilities, useTestClusterQuery, useClusterBuckets, useClusterKeys, useBucket, useKey } from "@/shared/api/queries";
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
@@ -138,92 +138,100 @@ function ClusterDetailScreen() {
         </CardContent>
       </Card>
 
-      {/* Buckets section */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <span>Buckets {buckets && <span className="text-muted-foreground font-normal">({buckets.length})</span>}</span>
-          <a
-            href="/admin"
-            className="text-sm font-medium hover:underline text-muted-foreground"
-          >
+      {/* Buckets section — admin-grade columns */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Buckets
+            {buckets ? <span className="ml-1.5 text-muted-foreground/60">({buckets.length})</span> : null}
+          </h2>
+          <a href="/admin" className="text-xs font-medium hover:underline text-muted-foreground">
             View all →
           </a>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {bucketsLoading ? (
-            <Skeleton className="h-12 w-full" />
-          ) : !buckets || buckets.length === 0 ? (
+        </div>
+        {bucketsLoading ? (
+          <Skeleton className="h-24 w-full rounded-lg" />
+        ) : !buckets || buckets.length === 0 ? (
+          <div className="rounded-lg border bg-card p-6">
             <EmptyState
               icon="database"
               title="No buckets yet"
               description="Buckets in this cluster will appear here."
             />
-          ) : (
-            <ul className="divide-y divide-border">
-              {buckets.slice(0, 8).map((b) => {
-                const name = b.aliases?.[0] ?? b.id.slice(0, 12);
-                return (
-                  <li key={b.id} className="py-2">
-                    <Link
-                      to="/admin/clusters/$cid/buckets/$id"
-                      params={{ cid, id: b.id }}
-                      className="flex items-center justify-between hover:bg-muted/40 -mx-2 px-2 py-1 rounded transition-colors"
-                    >
-                      <span className="font-medium text-sm">{name}</span>
-                      <span className="font-mono text-xs text-muted-foreground">{b.id.slice(0, 12)}</span>
-                    </Link>
-                  </li>
-                );
-              })}
-              {buckets.length > 8 && (
-                <li className="py-2 text-sm text-muted-foreground">+ {buckets.length - 8} more</li>
-              )}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        ) : (
+          <div className="rounded-lg border bg-card overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="text-right w-[120px]">Size</TableHead>
+                  <TableHead className="text-right w-[100px]">Objects</TableHead>
+                  <TableHead className="w-[140px]">Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {buckets.slice(0, 8).map((b) => (
+                  <ClusterBucketRow key={b.id} cid={cid} bucketId={b.id} fallbackAlias={b.aliases?.[0]} />
+                ))}
+              </TableBody>
+            </Table>
+            {buckets.length > 8 && (
+              <div className="px-4 py-2 text-xs text-muted-foreground border-t">
+                + {buckets.length - 8} more —{" "}
+                <a href="/admin" className="hover:underline font-medium">view all</a>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
-      {/* Keys section */}
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <span>Keys {keys && <span className="text-muted-foreground font-normal">({keys.length})</span>}</span>
-          <a
-            href="/admin/keys"
-            className="text-sm font-medium hover:underline text-muted-foreground"
-          >
+      {/* Keys section — admin-grade columns */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Keys
+            {keys ? <span className="ml-1.5 text-muted-foreground/60">({keys.length})</span> : null}
+          </h2>
+          <a href="/admin/keys" className="text-xs font-medium hover:underline text-muted-foreground">
             View all →
           </a>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {keysLoading ? (
-            <Skeleton className="h-12 w-full" />
-          ) : !keys || keys.length === 0 ? (
+        </div>
+        {keysLoading ? (
+          <Skeleton className="h-24 w-full rounded-lg" />
+        ) : !keys || keys.length === 0 ? (
+          <div className="rounded-lg border bg-card p-6">
             <EmptyState
               icon="key"
               title="No keys yet"
               description="Access keys for this cluster will appear here."
             />
-          ) : (
-            <ul className="divide-y divide-border">
-              {keys.slice(0, 8).map((k) => (
-                <li key={k.id} className="py-2">
-                  <Link
-                    to="/admin/clusters/$cid/keys/$id"
-                    params={{ cid, id: k.id }}
-                    className="flex items-center justify-between hover:bg-muted/40 -mx-2 px-2 py-1 rounded transition-colors"
-                  >
-                    <span className="font-medium text-sm">{k.name || "Unnamed"}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{k.id.slice(0, 12)}</span>
-                  </Link>
-                </li>
-              ))}
-              {keys.length > 8 && (
-                <li className="py-2 text-sm text-muted-foreground">+ {keys.length - 8} more</li>
-              )}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+          </div>
+        ) : (
+          <div className="rounded-lg border bg-card overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="w-[280px]">Access Key ID</TableHead>
+                  <TableHead className="w-[140px]">Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {keys.slice(0, 8).map((k) => (
+                  <ClusterKeyRow key={k.id} cid={cid} keyId={k.id} fallbackName={k.name} />
+                ))}
+              </TableBody>
+            </Table>
+            {keys.length > 8 && (
+              <div className="px-4 py-2 text-xs text-muted-foreground border-t">
+                + {keys.length - 8} more —{" "}
+                <a href="/admin/keys" className="hover:underline font-medium">view all</a>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* Nodes section - gated by capability */}
       {capabilities?.layout !== "readonly" && (
@@ -338,6 +346,76 @@ function ClusterDetailScreen() {
         onCancel={() => setDeleteDialogOpen(false)}
       />
     </div>
+  );
+}
+
+/** Cluster-detail bucket row. Fires its own useBucket() so we get
+ *  size/objects/created (the cluster-scoped list endpoint only
+ *  returns id + aliases on Garage v1). Eight max per cluster-detail
+ *  page so the parallel fetch fan-out is bounded. */
+function ClusterBucketRow({ cid, bucketId, fallbackAlias }: { cid: string; bucketId: string; fallbackAlias?: string }) {
+  const { data: detail } = useBucket(cid, bucketId);
+  const name = detail?.aliases?.[0] ?? fallbackAlias ?? bucketId.slice(0, 12);
+  return (
+    <TableRow
+      className="cursor-pointer hover:bg-muted/40"
+      onClick={(e) => {
+        const navTarget = (e.currentTarget.querySelector("a[data-row-link]") as HTMLAnchorElement | null);
+        if (navTarget) navTarget.click();
+      }}
+    >
+      <TableCell className="font-medium">
+        <Link
+          to="/admin/clusters/$cid/buckets/$id"
+          params={{ cid, id: bucketId }}
+          data-row-link
+          className="hover:underline"
+        >
+          {name}
+        </Link>
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {detail ? humanizeBytes(detail.bytes) : <Skeleton className="h-3 w-12 ml-auto" />}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {detail ? (detail.objects ?? 0).toLocaleString() : <Skeleton className="h-3 w-8 ml-auto" />}
+      </TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {detail ? humanizeTime(detail.created) : <Skeleton className="h-3 w-20" />}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/** Cluster-detail key row. Mirror of ClusterBucketRow — fires useKey()
+ *  to pull access-key-ID + created. */
+function ClusterKeyRow({ cid, keyId, fallbackName }: { cid: string; keyId: string; fallbackName?: string }) {
+  const { data: detail } = useKey(cid, keyId);
+  const name = detail?.name || fallbackName || "Unnamed";
+  const akid = detail?.accessKeyId ?? keyId;
+  return (
+    <TableRow
+      className="cursor-pointer hover:bg-muted/40"
+      onClick={(e) => {
+        const navTarget = (e.currentTarget.querySelector("a[data-row-link]") as HTMLAnchorElement | null);
+        if (navTarget) navTarget.click();
+      }}
+    >
+      <TableCell className="font-medium">
+        <Link
+          to="/admin/clusters/$cid/keys/$id"
+          params={{ cid, id: keyId }}
+          data-row-link
+          className="hover:underline"
+        >
+          {name}
+        </Link>
+      </TableCell>
+      <TableCell className="font-mono text-xs text-muted-foreground">{akid}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">
+        {detail ? humanizeTime(detail.created) : <Skeleton className="h-3 w-20" />}
+      </TableCell>
+    </TableRow>
   );
 }
 
