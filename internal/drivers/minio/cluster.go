@@ -7,24 +7,22 @@ import (
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
-// Capabilities returns the AWS S3 driver's capability flags.
+// Capabilities returns the MinIO driver's capability flags.
 //
-// AWS S3 is a managed service with no cluster management API, hence:
-//   - LayoutReadonly: no layout staging/apply/revert
-//   - Quotas=false: bucket quotas not exposed via this driver layer
-//   - BucketAliases=false: buckets are globally unique by name
-//   - KeyModelIAM: keys are IAM-managed (not in S3 service)
-//   - Presign=true, Multipart=true, Versioning=true: native S3 features
+// MinIO is an S3-compatible object storage service with cluster management
+// APIs for node operations, but basement treats it as a managed service
+// without exposing layout staging/apply/revert at this layer.
 func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
 	return driverpkg.Caps{
-		Driver:        driverName,
-		Layout:        driverpkg.LayoutReadonly,
-		Quotas:        false,
-		BucketAliases: false,
-		KeyModel:      driverpkg.KeyModelIAM,
-		Presign:       true,
-		Multipart:     true,
-		Versioning:    true,
+		Driver:         driverName,
+		Layout:         driverpkg.LayoutReadonly,
+		Quotas:         false,
+		BucketAliases:  false,
+		KeyModel:       driverpkg.KeyModelIAM,
+		Presign:        true,
+		Multipart:      true,
+		Versioning:     true,
+		ObjectBrowse:   true,
 	}, nil
 }
 
