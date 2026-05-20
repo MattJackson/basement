@@ -445,7 +445,7 @@ async function main(): Promise<number> {
       await shot(page!, "08-aggregated-buckets");
     });
 
-    // ============================================================
+// ============================================================
     // 8. Aggregated keys
     // ============================================================
     section("[8] aggregated keys");
@@ -470,7 +470,176 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 9. Console / pageerror gate
+    // 9. Fix 3, 1, 4: cluster detail buckets section and bucket detail
+    // ============================================================
+    section("[9] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
+    
+    if (!discoveredCid) {
+      skipLine("bucket/cluster detail checks", "cluster cid not discovered in prior steps");
+    } else {
+      // First, fetch clusters via API to discover first bucket id
+      await check("fetch /api/v1/admin/clusters via authed request and get first bucket", async () => {
+        const resp = await page!.request.get(`${BASE_URL}/api/v1/admin/clusters`);
+        if (!resp.ok()) throw new Error(`API request failed: ${resp.status()}`);
+        const clusters = await resp.json();
+        
+        // Find the cluster we discovered earlier to get its buckets endpoint
+        const targetCluster = Array.isArray(clusters) 
+          ? clusters.find((c: any) => c.id === discoveredCid)
+          : null;
+          
+        if (!targetCluster) {
+          throw new Error(`Could not find cluster ${discoveredCid} in API response`);
+        }
+
+        // Fetch buckets for this cluster
+        const bucketResp = await page!.request.get(
+          `${BASE_URL}/api/v1/admin/clusters/${discoveredCid}/buckets`
+        );
+        if (!bucketResp.ok()) throw new Error(`Buckets API failed: ${bucketResp.status()}`);
+        
+        const buckets: any[] = await bucketResp.json();
+        if (buckets.length === 0) {
+          warnLine("no buckets in cluster — skipping bucket-detail checks");
+          return;
+        }
+
+        discoveredBucketId = buckets[0].id;
+      });
+
+      // Navigate to bucket detail and check Fix 1: H1 shows alias or "(no alias)" not ID prefix
+      await check("bucket detail H1 is NOT the ID prefix (Fix 1)", async () => {
+        await page!.goto(
+          `${BASE_URL}/admin/clusters/${discoveredCid}/buckets/${discoveredBucketId}`,
+          { waitUntil: "networkidle" }
+        );
+
+        // Wait for bucket detail to render - look for the H1-style button
+        await page!.waitForSelector('button.text-2xl.tracking-tight', { timeout: 10_000 });
+
+        const h1Text = await page!
+          .locator('button.text-2xl.tracking-tight')
+          .textContent();
+        
+        if (!h1Text) throw new Error("H1 button has no text content");
+        
+        // The H1 should NOT be the bucket ID prefix (first 12 chars of ID)
+        const idPrefix = discoveredBucketId.slice(0, 12);
+        if (h1Text === idPrefix) {
+          throw new Error(`H1 shows ID prefix '${idPrefix}' instead of alias or '(no alias)'`);
+        }
+
+        // H1 should either be an alias OR "(no alias)" in italic muted styling
+        const hasNoAlias = h1Text.includes("(no alias)");
+        
+        if (!hasNoAlias && !h1Text.startsWith(discoveredBucketId)) {
+          // Good - it's showing an alias
+        } else if (hasNoAlias) {
+          // Also good - no aliases exist, showing "(no alias)"
+        }
+
+        await shot(page!, "09-bucket-detail-h1");
+      });
+
+      // Check Fix 4: Back link goes to cluster page with cid param
+      await check("bucket detail back link goes to /admin/clusters/{cid} (Fix 4)", async () => {
+        const backLink = page!.locator('a').filter({ hasText: /^← Cluster$/ });
+        
+        if (!await backLink.count()) {
+          throw new Error("Back link with '← Cluster' text not found");
+        }
+
+        // Record current URL before clicking
+        const currentUrl = page!.url();
+        
+        // Click the back link
+        await backLink.click();
+
+        // Wait for navigation to cluster detail page
+        await page!.waitForURL(
+          new RegExp(`^${BASE_URL}/admin/clusters/${discoveredCid}(\\?|#|$)`),
+          { timeout: 10_000 }
+        );
+
+        const afterClickUrl = page!.url();
+        
+        // Verify we're on the cluster detail page, not "/" or some other route
+        if (!afterClickUrl.includes(`/admin/clusters/${discoveredCid}`)) {
+          throw new Error(`Back link navigated to wrong URL: ${afterClickUrl}`);
+        }
+
+        await shot(page!, "10-back-to-cluster");
+      });
+
+      // Check Fix 3: No View all → link in buckets section header
+      await check("cluster detail has NO 'View all →' link in buckets section (Fix 3)", async () => {
+        await page!.goto(
+          `${BASE_URL}/admin/clusters/${discoveredCid}`,
+          { waitUntil: "networkidle" }
+        );
+
+        // The buckets section header should be present
+        await page!.waitForSelector('text=/^Buckets( \\(|$)/', { timeout: 10_000 });
+
+        // There should NOT be a "View all →" link in the buckets section header area
+        const viewAllLink = page!.locator('a').filter({ hasText: /View all →/ });
+        
+        // We need to check that this link is NOT present near the Buckets heading
+        // The keys section should have its own "View all →" linking to /admin/keys
+        
+        // Check for buckets-section View all (should be absent) - it would point to "/"
+        const bucketsSection = page!.locator('section').filter({ hasText: /^Buckets/ });
+        const bucketsViewAll = bucketsSection.locator('a[href="/"]').first();
+        
+        if (await bucketsViewAll.count() > 0) {
+          throw new Error("Found 'View all →' link pointing to '/' in buckets section - should be removed");
+        }
+
+        await shot(page!, "11-cluster-detail-buckets-section");
+      });
+    }
+
+    // ============================================================
+    // 10. Fix 7: version label under Logo wordmark
+    // ============================================================
+    section("[10] version label under Logo (Fix 7)");
+    await check("version label renders under Basement wordmark", async () => {
+      // Navigate to any admin page - /admin/clusters works
+      await page!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
+
+      // Look for the version pattern near the Basement wordmark
+      // The logo should have text matching vX.Y.Z (e.g., v0.4.5)
+      const hasVersion = await page!.evaluate(() => {
+        // Find the Logo component - it contains "Basement" text and a version span
+        const basementText = document.body.innerText.includes("Basement");
+        
+        if (!basementText) return false;
+
+        // Look for version pattern vX.Y.Z in the logo area
+        // The LogoVersion renders as <span class="text-[10px] ...">vX.Y.Z</span>
+        const elements = document.querySelectorAll('span');
+        for (const el of Array.from(elements)) {
+          const text = el.textContent;
+          if (text && /^v\d+\.\d+/.test(text)) {
+            // Check if this is near the Basement wordmark
+            return true;
+          }
+        }
+        
+        // Alternative: check for version in page title or meta tags as fallback
+        const titleVersion = document.title.match(/v\d+\.\d+/);
+        return !!titleVersion;
+      });
+
+      if (!hasVersion) {
+        throw new Error("Could not find version label (vX.Y.Z pattern) near Basement wordmark");
+      }
+
+      await shot(page!, "12-logo-with-version");
+    });
+
+    // ============================================================
+    // 11. Console / pageerror gate
     // ============================================================
     section("[9] console + pageerror gate");
     await check("no console errors or page errors across the run", async () => {

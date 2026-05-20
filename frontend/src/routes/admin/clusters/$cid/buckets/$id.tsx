@@ -35,7 +35,7 @@ function AdminBucketDetail() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink cid={cid} />
         <ErrorBanner message="Couldn't load bucket details." />
       </div>
     );
@@ -44,7 +44,7 @@ function AdminBucketDetail() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-          <BackLink />
+          <BackLink cid={cid} />
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-4 w-96" />
           <Card>
@@ -94,7 +94,7 @@ function AdminBucketDetail() {
   if (!bucket) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink cid={cid} />
         <EmptyState
           icon="database"
           title="Bucket not found"
@@ -143,7 +143,7 @@ function AdminBucketDetail() {
 
   return (
     <div className="space-y-6">
-          <BackLink />
+          <BackLink cid={cid} />
 
           {/* Header */}
           <div className="space-y-2">
@@ -184,7 +184,11 @@ function AdminBucketDetail() {
                   }}
                   className="text-2xl sm:text-3xl font-semibold tracking-tight hover:underline underline-offset-4 text-left"
                 >
-                  {bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
+                  {bucket.aliases?.[0] ? (
+                    bucket.aliases[0]
+                  ) : (
+                    <span className="italic text-muted-foreground/70">(no alias)</span>
+                  )}
                 </button>
                 {bucket.aliases && bucket.aliases.length > 1 ? (
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -406,13 +410,14 @@ function AdminBucketDetail() {
    );
  }
 
-function BackLink() {
+function BackLink({ cid }: { cid: string }) {
   return (
     <Link
-      to="/"
+      to="/admin/clusters/$cid"
+      params={{ cid }}
       className="inline-flex items-center gap-1 text-sm font-medium hover:underline text-muted-foreground"
     >
-      ← Buckets
+      ← Cluster
     </Link>
   );
 }
