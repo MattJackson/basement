@@ -14,6 +14,7 @@ import (
 	_ "github.com/mattjackson/basement/internal/drivers/aws_s3"
 	_ "github.com/mattjackson/basement/internal/drivers/garage"
 	_ "github.com/mattjackson/basement/internal/drivers/garage_v1"
+	_ "github.com/mattjackson/basement/internal/drivers/minio"
 	"github.com/mattjackson/basement/internal/store"
 )
 

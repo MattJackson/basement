@@ -163,8 +163,8 @@ func Load() (*Config, error) {
 	// Validate driver name (required)
 	if cfg.Driver.Name == "" {
 		errs = append(errs, errors.New("BASEMENT_DRIVER is required"))
-	} else if cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" && cfg.Driver.Name != "aws-s3" {
-		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: supported values are \"garage\" (v2 admin API), \"garage-v1\" (v1 admin API), or \"aws-s3\"", cfg.Driver.Name))
+	} else if cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" && cfg.Driver.Name != "aws-s3" && cfg.Driver.Name != "minio" {
+		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: supported values are \"garage\" (v2 admin API), \"garage-v1\" (v1 admin API), \"aws-s3\", or \"minio\"", cfg.Driver.Name))
 	}
 
 	// Validate Garage driver config (required if Driver=garage*)

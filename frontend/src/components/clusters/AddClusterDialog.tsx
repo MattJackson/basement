@@ -7,13 +7,13 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useCreateCluster } from "@/shared/api/mutations";
 import type { components } from "@/shared/api/types.gen";
 
-type Driver = "garage-v1" | "garage" | "aws-s3";
+type Driver = "garage-v1" | "garage" | "aws-s3" | "minio";
 
 const DRIVER_OPTIONS: { value: Driver; label: string }[] = [
   { value: "garage-v1", label: "Garage v1" },
   { value: "garage", label: "Garage" },
   { value: "aws-s3", label: "AWS S3" },
-  // { value: "minio", label: "MinIO" }, // lands with DRV.MINIO.A in v0.3.0
+  { value: "minio", label: "MinIO / OpenMaxIO" },
 ];
 
 const COLOR_SWATCHES = ["#C9874B", "#10B981", "#3B82F6", "#EF4444", "#8B5CF6", "#F59E0B", "#EC4899", "#06B6D4"];
@@ -53,8 +53,14 @@ export function AddClusterDialog({ open, onOpenChange }: AddClusterDialogProps) 
       config.accessKey = s3AccessKey;
       config.secretKey = s3SecretKey;
       if (adminUrl) config.endpoint = adminUrl;
+    } else if (driver === "minio") {
+      // MinIO uses the S3-compatible plane via aws-sdk-go-v2; the
+      // driver requires endpoint + access_key + secret_key + region.
+      config.endpoint = adminUrl;
+      config.access_key = s3AccessKey;
+      config.secret_key = s3SecretKey;
+      config.region = s3Region || "us-east-1";
     }
-    // MinIO branch lands with DRV.MINIO.A in v0.3.0.
 
     const spec: components["schemas"]["ConnectionSpec"] = {
       label: label.trim(),
@@ -270,7 +276,54 @@ export function AddClusterDialog({ open, onOpenChange }: AddClusterDialogProps) 
             </div>
           )}
 
-          {/* MinIO form section lands with DRV.MINIO.A in v0.3.0. */}
+          {driver === "minio" && (
+            <div className="space-y-4 rounded-lg border p-4 bg-muted/30">
+              <h4 className="text-sm font-medium">MinIO / OpenMaxIO Configuration</h4>
+              <div className="grid gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="minioEndpoint">Endpoint *</Label>
+                  <Input
+                    id="minioEndpoint"
+                    placeholder="https://minio.example.com:9000"
+                    value={adminUrl}
+                    onChange={(e) => setAdminUrl(e.target.value)}
+                    disabled={createCluster.isPending}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="minioAccessKey">Access Key *</Label>
+                  <Input
+                    id="minioAccessKey"
+                    placeholder="minioadmin"
+                    value={s3AccessKey}
+                    onChange={(e) => setS3AccessKey(e.target.value)}
+                    disabled={createCluster.isPending}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="minioSecretKey">Secret Key *</Label>
+                  <Input
+                    id="minioSecretKey"
+                    type="password"
+                    placeholder="minioadmin"
+                    value={s3SecretKey}
+                    onChange={(e) => setS3SecretKey(e.target.value)}
+                    disabled={createCluster.isPending}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="minioRegion">Region (optional)</Label>
+                  <Input
+                    id="minioRegion"
+                    placeholder="us-east-1"
+                    value={s3Region}
+                    onChange={(e) => setS3Region(e.target.value)}
+                    disabled={createCluster.isPending}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             Note: Test connection is only available after saving the cluster. Use the detail page to test connectivity.
