@@ -43,14 +43,18 @@ function MyBuckets() {
   const createMutation = useCreateBucket();
   const deleteMutation = useDeleteBucket();
   const { data: bucketsData, isLoading, error } = useBuckets();
-  const { data: clusters, isLoading: clustersLoading } = useListClusters();
+  const { data: clusters } = useListClusters();
 
-  // First-run gate: if the operator has no clusters configured (either
-  // env auto-seed didn't fire OR they deleted them all), there's no
-  // useful bucket list to show. Bounce to /admin/clusters which has
-  // the "Welcome — add your first cluster" empty state.
-  const noClusters = !clustersLoading && (clusters?.length ?? 0) === 0;
+  // First-run gate: if the operator has zero clusters, bounce to
+  // /admin/clusters' welcome empty state. Strict "data has resolved
+  // AND length is 0" check so a brief undefined window during a
+  // refetch doesn't yank the user off this page (which was racing
+  // against bucket-row navigation and stealing clicks).
+  const noClusters = clusters !== undefined && clusters.length === 0;
   if (noClusters) {
+    // Render-time navigate is technically a side-effect violation
+    // but TanStack Router handles it. The strict guard above means
+    // it fires once per genuine first-run state, not on every render.
     navigate({ to: "/admin/clusters", replace: true });
   }
 
