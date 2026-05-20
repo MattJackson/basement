@@ -22,14 +22,66 @@ func (d *driver) StatObject(_ context.Context, _, _ string) (driverpkg.ObjectInf
 	return driverpkg.ObjectInfo{}, d.unsupported("StatObject")
 }
 
-// PresignGet is not yet implemented.
-func (d *driver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (driverpkg.PresignedURL, error) {
-	return driverpkg.PresignedURL{}, d.unsupported("PresignGet")
+// PresignGet returns a presigned GET URL for an object.
+func (d *driver) PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (driverpkg.PresignedURL, error) {
+	if d.s3Client == nil {
+		return driverpkg.PresignedURL{}, &driverpkg.Error{
+			Op:      "PresignGet",
+			Driver:  driverName,
+			Err:     driverpkg.ErrUnsupported,
+			Message: "S3 endpoint not configured — set s3_endpoint in connection config",
+		}
+	}
+
+	url, err := d.s3Client.presignGetObject(ctx, bucket, key, ttl)
+	if err != nil {
+		return driverpkg.PresignedURL{}, &driverpkg.Error{
+			Op:      "PresignGet",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	now := time.Now()
+	expires := now.Add(ttl)
+
+	return driverpkg.PresignedURL{
+		URL:     url,
+		Expires: expires,
+		Method:  "GET",
+	}, nil
 }
 
-// PresignPut is not yet implemented.
-func (d *driver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driverpkg.PresignedURL, error) {
-	return driverpkg.PresignedURL{}, d.unsupported("PresignPut")
+// PresignPut returns a presigned PUT URL for an object.
+func (d *driver) PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driverpkg.PresignedURL, error) {
+	if d.s3Client == nil {
+		return driverpkg.PresignedURL{}, &driverpkg.Error{
+			Op:      "PresignPut",
+			Driver:  driverName,
+			Err:     driverpkg.ErrUnsupported,
+			Message: "S3 endpoint not configured — set s3_endpoint in connection config",
+		}
+	}
+
+	url, err := d.s3Client.presignPutObject(ctx, bucket, key, ttl, contentType)
+	if err != nil {
+		return driverpkg.PresignedURL{}, &driverpkg.Error{
+			Op:      "PresignPut",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	now := time.Now()
+	expires := now.Add(ttl)
+
+	return driverpkg.PresignedURL{
+		URL:     url,
+		Expires: expires,
+		Method:  "PUT",
+	}, nil
 }
 
 // DeleteObject is not yet implemented.
