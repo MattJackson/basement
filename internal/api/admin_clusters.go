@@ -198,6 +198,15 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Invalidate cached driver instance — the registry caches a
+	// built driver per connection ID; without this, the cached
+	// instance keeps its old config (e.g. missing s3_endpoint) and
+	// every subsequent call uses stale credentials. Operator hit
+	// this immediately after Edit Cluster save in v0.8.0d.25.
+	if s.reg != nil {
+		s.reg.Invalidate(cid)
+	}
+
 	writeJSON(w, http.StatusOK, conn)
 }
 
