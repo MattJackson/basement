@@ -331,17 +331,21 @@ export function useUserObjects(cid: string | null, bid: string | null, prefix: s
   return useQuery<components["schemas"]["ObjectPage"]>({
     queryKey: ["user", "objects", cid, bid, prefix, token],
     queryFn: async () => {
+      // Use native fetch — `client.GET(url as any, ...)` (the
+      // openapi-fetch path) silently 404s when the URL isn't a
+      // registered OpenAPI template path. The OpenAPI codegen
+      // hasn't picked up the user-objects endpoint yet, so we go
+      // around it. Switch back to client.GET once gen:api covers it.
       const params: Record<string, string> = {};
       if (prefix) params.prefix = prefix;
       if (token) params.token = token;
-
-      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects`;
       const qs = new URLSearchParams(params).toString();
-      if (qs) url += `?${qs}`;
+      const url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects${qs ? `?${qs}` : ""}`;
 
-      const { data, error, response } = await client.GET(url as any, { params: { query: params } });
-      if (!response.ok || !data) throw apiError(`user/objects/${cid}/${bid}`, response.status, error);
-      return data as components["schemas"]["ObjectPage"];
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/objects/${cid}/${bid}`, res.status, body);
+      return body as components["schemas"]["ObjectPage"];
     },
     enabled: !!cid && !!bid,
     staleTime: 30 * 1000,

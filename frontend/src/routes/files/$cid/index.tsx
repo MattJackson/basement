@@ -81,8 +81,8 @@ function ClusterBuckets() {
             <TableBody>
               {buckets.map((bucket) => (
                 <BucketRow
-                  key={`${bucket.connectionId}:${bucket.id}`}
-                  cid={bucket.connectionId}
+                  key={`${cid}:${bucket.id}`}
+                  cid={cid}
                   bucketId={bucket.id}
                   fallbackAliases={bucket.aliases ?? []}
                   onNavigate={() => {
