@@ -1,11 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { userPage } from "@/shared/layout/userPage";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { useUserSyncs, useDeleteUserSync, usePauseUserSync, useResumeUserSync } from "@/shared/api/queries";
-import { StartSyncDialog } from "@/components/sync/StartSyncDialog";
 
 function Progress({ value }: { value: number }) {
   return (
@@ -23,7 +21,7 @@ export const Route = createFileRoute("/files/syncs")({
 });
 
 function SyncsPage() {
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const navigate = useNavigate();
   const deleteMutation = useDeleteUserSync();
   const pauseMutation = usePauseUserSync();
   const resumeMutation = useResumeUserSync();
@@ -75,7 +73,7 @@ function SyncsPage() {
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Syncs</h1>
           <p className="text-sm text-muted-foreground mt-1">Cross-cluster copy jobs</p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>Start sync</Button>
+        <Button onClick={() => navigate({ to: "/files/syncs/new" })}>Start sync</Button>
       </div>
 
       {jobs.length === 0 ? (
@@ -84,7 +82,7 @@ function SyncsPage() {
           title="No sync jobs yet"
           description="Create your first cross-cluster sync job to copy objects from one bucket to another."
           action={
-            <Button onClick={() => setDialogOpen(true)}>Start sync</Button>
+            <Button onClick={() => navigate({ to: "/files/syncs/new" })}>Start sync</Button>
           }
         />
       ) : (
@@ -169,10 +167,6 @@ function SyncsPage() {
         </div>
       )}
 
-      <StartSyncDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-      />
     </div>
   );
 }

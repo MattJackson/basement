@@ -9,7 +9,6 @@ import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { useUserClusterBuckets, useUserObjects, useUserPresignGet } from "@/shared/api/queries";
 import { ObjectRow } from "@/components/objects/ObjectRow";
 import { UploadDialog } from "@/components/upload/UploadDialog";
-import { StartSyncDialog } from "@/components/sync/StartSyncDialog";
 
 export const Route = createFileRoute("/files/$cid/b/$bid")({
   component: UserBucketObjects,
@@ -63,8 +62,6 @@ function UserBucketObjects() {
   };
 
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
-  const [pushDialogOpen, setPushDialogOpen] = useState(false);
 
   const handleUploadSuccess = () => {
     setUploadOpen(false);
@@ -114,18 +111,18 @@ function UserBucketObjects() {
             >
               Upload
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setSyncDialogOpen(true)}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate({ to: "/files/syncs/new", search: { mode: "pull" } })}
               disabled={objectsLoading}
             >
               Sync in…
             </Button>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setPushDialogOpen(true)}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate({ to: "/files/syncs/new", search: { mode: "push", srcCid: cid, srcBid: bid } })}
               disabled={objectsLoading}
             >
               Sync out…
@@ -221,20 +218,6 @@ function UserBucketObjects() {
         onSuccess={handleUploadSuccess}
       />
 
-      <StartSyncDialog
-        open={syncDialogOpen}
-        onOpenChange={setSyncDialogOpen}
-      />
-
-      {bucket && (
-        <StartSyncDialog
-          open={pushDialogOpen}
-          onOpenChange={setPushDialogOpen}
-          direction="push"
-          defaultSrcConnectionId={cid}
-          defaultSrcBucket={bid}
-        />
-      )}
     </div>
   );
 }
