@@ -217,9 +217,7 @@ function AdminBucketDetail() {
                 </div>
                 <div className="text-center p-4 rounded-lg bg-muted/50">
                   <div className="text-xl font-semibold tabular-nums">
-                    {bucket.unfinishedUploads && bucket.unfinishedUploads > 0
-                      ? bucket.unfinishedUploads.toLocaleString()
-                      : "—"}
+                    {(bucket.unfinishedUploads ?? 0).toLocaleString()}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">Unfinished uploads</div>
                 </div>
