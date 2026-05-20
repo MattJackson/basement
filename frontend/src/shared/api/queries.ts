@@ -109,17 +109,17 @@ export function useBucketsFlat() {
   return query;
 }
 
-export function useBucket(id: string) {
+export function useBucket(cid: string, id: string) {
   return useQuery<Bucket>({
-    queryKey: ["admin", "buckets", id],
+    queryKey: ["admin", "clusters", cid, "buckets", id],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/admin/buckets/{id}", {
-        params: { path: { id } },
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}/buckets/{id}", {
+        params: { path: { cid, id } },
       });
       if (!response.ok || !data) throw apiError(`admin/buckets/${id}`, response.status, error);
       return data as Bucket;
     },
-    enabled: !!id,
+    enabled: !!cid && !!id,
     staleTime: 30_000,
   });
 }
@@ -149,17 +149,17 @@ export function useKeysFlat() {
   return query;
 }
 
-export function useKey(id: string) {
+export function useKey(cid: string, id: string) {
   return useQuery<Key>({
-    queryKey: ["admin", "keys", id],
+    queryKey: ["admin", "clusters", cid, "keys", id],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/admin/keys/{id}", {
-        params: { path: { id } },
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}/keys/{id}", {
+        params: { path: { cid, id } },
       });
       if (!response.ok || !data) throw apiError(`admin/keys/${id}`, response.status, error);
       return data as Key;
     },
-    enabled: !!id,
+    enabled: !!cid && !!id,
     staleTime: 30_000,
   });
 }

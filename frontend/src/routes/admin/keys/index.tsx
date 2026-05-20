@@ -26,7 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
-import { useKeys } from "@/shared/api/queries";
+import { useKeys, useListClusters } from "@/shared/api/queries";
 import type { components } from "@/shared/api/types.gen";
 import { adminPage } from "@/shared/layout/adminPage";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -56,8 +56,10 @@ function KeysScreen() {
   
   // Delete key dialog state
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [keyToDelete, setKeyToDelete] = useState<{ id: string; name?: string } | null>(null);
+  const [keyToDelete, setKeyToDelete] = useState<{ cid: string; id: string; name?: string } | null>(null);
   const deleteKey = useDeleteKey();
+  const { data: clusters } = useListClusters();
+  const targetCid = clusterFilter ?? clusters?.[0]?.id ?? null;
 
   const keys = keysData?.keys ?? [];
   const errors = keysData?.errors ?? [];
@@ -123,15 +125,11 @@ function KeysScreen() {
   }
 
   const handleCreateKey = () => {
-    if (!newKeyName.trim()) return;
+    if (!newKeyName.trim() || !targetCid) return;
     createKey.mutate(
-      { name: newKeyName.trim() },
+      { cid: targetCid, name: newKeyName.trim() },
       {
         onSuccess: (key) => {
-          // Close the create dialog and surface the secret in the
-          // one-shot display dialog. Do NOT navigate — Garage gives
-          // us secretAccessKey exactly once; losing it makes the key
-          // unusable.
           setCreateOpen(false);
           setNewKeyName("");
           setCreatedKey(key);
@@ -140,14 +138,14 @@ function KeysScreen() {
     );
   };
 
-  const handleDeleteClick = (id: string, name?: string) => {
-    setKeyToDelete({ id, name });
+  const handleDeleteClick = (cid: string, id: string, name?: string) => {
+    setKeyToDelete({ cid, id, name });
     setDeleteOpen(true);
   };
 
   const handleDeleteConfirm = () => {
     if (!keyToDelete) return;
-    deleteKey.mutate(keyToDelete.id);
+    deleteKey.mutate({ cid: keyToDelete.cid, id: keyToDelete.id });
     setDeleteOpen(false);
     setKeyToDelete(null);
   };
@@ -213,10 +211,8 @@ function KeysScreen() {
                   key={key.id}
                   className="cursor-pointer hover:bg-muted/50"
                   onClick={() => {
-                      // PLANNED: /admin/clusters/{cid}/keys/{id} route (CLUSTER.RESOURCE-DETAIL)
-                      // @ts-expect-error route not yet defined
-                      navigate({ to: "/admin/clusters/$cid/keys/$id", params: { cid: key.connectionId, id: key.id } });
-                    }}
+                    navigate({ to: "/admin/clusters/$cid/keys/$id", params: { cid: key.connectionId, id: key.id } });
+                  }}
                 >
                   <TableCell>
                     <ClusterBadge connectionId={key.connectionId} />
@@ -291,19 +287,17 @@ function KeysScreen() {
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             onClick={(e) => {
-                                e.stopPropagation();
-                                // PLANNED: /admin/clusters/{cid}/keys/{id} route (CLUSTER.RESOURCE-DETAIL)
-                                // @ts-expect-error route not yet defined
-                                navigate({ to: "/admin/clusters/$cid/keys/$id", params: { cid: key.connectionId, id: key.id } });
-                              }}
+                              e.stopPropagation();
+                              navigate({ to: "/admin/clusters/$cid/keys/$id", params: { cid: key.connectionId, id: key.id } });
+                            }}
                           >
                             View
                           </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            variant="destructive" 
+                          <DropdownMenuItem
+                            variant="destructive"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDeleteClick(key.id, key.name);
+                              handleDeleteClick(key.connectionId, key.id, key.name);
                             }}
                           >
                             Delete
