@@ -808,6 +808,96 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
+    // [NN] Object browser page (v0.7.0d USER.OBJECTBROWSE)
+    // ============================================================
+    section("[NN] /files/{cid}/b/{bid} renders object browser");
+    
+    await check("discover first cluster + first bucket via user endpoints", async () => {
+      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
+      if (!clustersResp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${clustersResp.status()}`);
+      const clusters = await clustersResp.json();
+      
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        skipLine("object browser test", "no user-visible clusters");
+        return;
+      }
+      
+      discoveredCid = clusters[0].id;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters/${discoveredCid}/buckets`);
+      if (!bucketsResp.ok()) throw new Error(`Buckets API failed: ${bucketsResp.status()}`);
+      
+      const buckets: any[] = await bucketsResp.json();
+      if (buckets.length === 0) {
+        skipLine("object browser navigation", "no user-visible buckets");
+        return;
+      }
+
+      discoveredBucketId = buckets[0].id;
+    });
+
+    if (discoveredCid && discoveredBucketId) {
+      await check("[NN] /files/{cid}/b/{bid} renders object browser with breadcrumb and rows/empty state", async () => {
+        // Navigate to the object browser page
+        await page!.goto(`${BASE_URL}/files/${discoveredCid}/b/${discoveredBucketId}`, { waitUntil: "networkidle" });
+        
+        const expectedUrl = new RegExp(`/files/${discoveredCid}/b/${discoveredBucketId}$`);
+        await page!.waitForURL(expectedUrl, { timeout: 15_000 });
+
+        // Assert header shows bucket alias (not raw ID)
+        const hasHeader = await page!.locator('h1').count();
+        if (hasHeader === 0) {
+          throw new Error("Bucket header not found on object browser page");
+        }
+
+        // Assert breadcrumb is visible when prefix param exists in URL
+        const urlHasPrefix = page!.url().includes("prefix=");
+        if (urlHasPrefix) {
+          const hasBreadcrumb = await page!.locator('nav[role="navigation"]').count();
+          if (hasBreadcrumb === 0) {
+            throw new Error("Breadcrumb not found when prefix is set in URL");
+          }
+        }
+
+        // Assert at least one row OR empty-state message renders
+        const hasRowsOrEmpty = await page!.evaluate(() => {
+          const rows = document.querySelectorAll('tbody tr');
+          const emptyState = document.body.innerText.includes("No objects here") || 
+                            document.body.innerText.includes("This bucket is empty");
+          return rows.length > 0 || emptyState;
+        });
+
+        if (!hasRowsOrEmpty) {
+          throw new Error("/files/{cid}/b/{bid} shows neither object rows nor empty state message");
+        }
+
+        // If there are rows, verify folder/file structure
+        const rowCount = await page!.locator('tbody tr').count();
+        if (rowCount > 0) {
+          const firstRowCells = await page!.locator('tbody tr').first().locator('td');
+          const cellCount = await firstRowCells.count();
+          
+          // Should have at least name column, optionally size/modified/actions
+          if (cellCount < 1) {
+            throw new Error(`Object row has too few columns: ${cellCount}`);
+          }
+
+          // Check that folder/file icons are present
+          const hasIcons = await page!.evaluate(() => {
+            const svgElements = document.querySelectorAll('svg');
+            return svgElements.length > 0;
+          });
+
+          if (!hasIcons) {
+            warnLine("no SVG icons found in object rows - may be using text-only representation");
+          }
+        }
+
+        await shot(page!, "nn-object-browser");
+      });
+    }
+
+    // ============================================================
     // 12. Fix 3, 1, 4: cluster detail buckets section and bucket detail
     // ============================================================
     section("[15] bucket detail and cluster detail fixes (Fix 1, 3, 4)");

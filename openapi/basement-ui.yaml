@@ -38,6 +38,8 @@ tags:
   description: S3 object data plane operations
 - name: Shares
   description: Share link creation and management (v1.2+)
+- name: User
+  description: User persona endpoints — clusters, buckets, keys, objects
 paths:
   /admin/buckets:
     get:
@@ -2222,6 +2224,191 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+   # User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
+  /user/clusters/{cid}/buckets/{bid}/objects:
+    get:
+      operationId: userListClusterBucketObjects
+      summary: List objects in a bucket (filtered by user grants)
+      description: Returns objects and prefixes within a bucket for the given prefix. Supports pagination via continuation token. Admin users see all objects; non-admin users see only granted buckets. Used by Object browser page.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: bid
+        in: path
+        required: true
+        description: Bucket ID
+        schema:
+          type: string
+      - name: prefix
+        in: query
+        required: false
+        description: Object key prefix (folder path)
+        schema:
+          type: string
+          default: ""
+      - name: token
+        in: query
+        required: false
+        description: Continuation token for pagination
+        schema:
+          type: string
+          default: ""
+      - name: limit
+        in: query
+        required: false
+        description: Maximum number of objects to return (default 100)
+        schema:
+          type: integer
+          default: 100
+      responses:
+        '200':
+          description: Object page with objects and prefixes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectPage'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User does not have access to this bucket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket or cluster not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat:
+    get:
+      operationId: userStatClusterBucketObject
+      summary: Get object metadata (user-visible)
+      description: Returns metadata for a specific object in the bucket. Used by Object browser page stat checks.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: bid
+        in: path
+        required: true
+        description: Bucket ID
+        schema:
+          type: string
+      - name: key
+        in: path
+        required: true
+        description: Object key (path)
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Object metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectInfo'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User does not have access to this bucket or object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/clusters/{cid}/buckets/{bid}/objects/{key+}/presign-get:
+    post:
+      operationId: userPresignGetClusterBucketObject
+      summary: Generate presigned URL for object download (user-visible)
+      description: Returns a presigned GET URL for downloading the specified object. TTL defaults to 3600s, max 86400s. Used by Object browser page download action.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: bid
+        in: path
+        required: true
+        description: Bucket ID
+        schema:
+          type: string
+      - name: key
+        in: path
+        required: true
+        description: Object key (path)
+        schema:
+          type: string
+      - name: ttl
+        in: query
+        required: false
+        description: URL validity duration in seconds (default 3600, max 86400)
+        schema:
+          type: integer
+          default: 3600
+      responses:
+        '200':
+          description: Presigned URL with expiry and method
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedURL'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User does not have access to this bucket or object
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /user/keys:
     get:
       operationId: userListKeys
@@ -3759,15 +3946,9 @@ components:
     ObjectInfo:
       type: object
       required:
-      - bucket
       - key
       - size
-      - content_type
-      - last_modified
       properties:
-        bucket:
-          type: string
-          description: Bucket name containing this object.
         key:
           type: string
           description: Object key within the bucket.
@@ -3776,13 +3957,19 @@ components:
           format: int64
           minimum: 0
           description: Size of the object in bytes.
-        content_type:
-          type: string
-          description: MIME content type of the object.
         last_modified:
           type: string
           format: date-time
           description: Object last modified timestamp.
+        etag:
+          type: string
+          description: Entity tag for the object.
+        content_type:
+          type: string
+          description: MIME content type of the object.
+        is_dir:
+          type: boolean
+          description: Whether this key represents a folder (prefix).
     ObjectPage:
       type: object
       required:
@@ -3793,10 +3980,18 @@ components:
           items:
             $ref: '#/components/schemas/ObjectInfo'
           description: List of objects matching the request.
-        continuation_token:
+        nextContinuation:
           type: string
           nullable: true
           description: Token for fetching the next page of results (null if last page).
+        isTruncated:
+          type: boolean
+          description: Whether there are more results available.
+        prefixes:
+          type: array
+          items:
+            type: string
+          description: List of folder prefixes (for hierarchical navigation).
     Grant:
       type: object
       required:

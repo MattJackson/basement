@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 import type { components } from "@/shared/api/types.gen";
 
@@ -324,4 +324,46 @@ export function useUserKeysFlat() {
     };
   }
   return query;
+}
+
+// v0.7.0d USER.OBJECTBROWSE — object browser hooks.
+export function useUserObjects(cid: string | null, bid: string | null, prefix: string = "", token: string = "") {
+  return useQuery<components["schemas"]["ObjectPage"]>({
+    queryKey: ["user", "objects", cid, bid, prefix, token],
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (prefix) params.prefix = prefix;
+      if (token) params.token = token;
+
+      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects`;
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += `?${qs}`;
+
+      const { data, error, response } = await client.GET(url as any, { params: { query: params } });
+      if (!response.ok || !data) throw apiError(`user/objects/${cid}/${bid}`, response.status, error);
+      return data as components["schemas"]["ObjectPage"];
+    },
+    enabled: !!cid && !!bid,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+export function useUserPresignGet(cid: string | null, bid: string | null) {
+  return useMutation({
+    mutationFn: async ({ key, ttl }: { key: string; ttl: number }) => {
+      if (!cid || !bid || !key) throw new Error("Missing required parameters");
+
+      const params: Record<string, string> = {};
+      params.ttl = String(ttl);
+
+      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects/${encodeURIComponent(key)}/presign-get`;
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += `?${qs}`;
+
+      const { data, error, response } = await client.POST(url as any, { params: { query: params } });
+      if (!response.ok || !data) throw apiError(`user/presign-get/${cid}/${bid}/${key}`, response.status, error);
+      return data as components["schemas"]["PresignedURL"];
+    },
+  });
 }
