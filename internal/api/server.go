@@ -15,6 +15,7 @@ import (
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
+	"github.com/mattjackson/basement/internal/sync"
 	"github.com/mattjackson/basement/internal/web"
 )
 
@@ -35,6 +36,7 @@ type Server struct {
 	conns      store.Connections
 	drv        driver.Driver
 	reg        *driver.Registry
+	syncStore  sync.Store
 	oidc       oidcProvider
 	router     chi.Router
 	httpServer *http.Server
@@ -52,14 +54,17 @@ func New(cfg *config.Config, store *store.Store, conns store.Connections, drv dr
 		Level: slog.LevelInfo,
 	}))
 
+	syncStore := sync.NewFileStore(cfg.DataDir)
+
 	srv := &Server{
-		cfg:    cfg,
-		store:  store,
-		conns:  conns,
-		drv:    drv,
-		reg:    reg,
-		router: chi.NewRouter(),
-		logger: logger,
+		cfg:       cfg,
+		store:     store,
+		conns:     conns,
+		drv:       drv,
+		reg:       reg,
+		syncStore: syncStore,
+		router:    chi.NewRouter(),
+		logger:    logger,
 	}
 
 	srv.routes()
@@ -212,6 +217,14 @@ func (s *Server) routes() {
 			userG.Post("/user/shares", s.userCreateShareHandler)
 			userG.Get("/user/shares", s.userListSharesHandler)
 			userG.Delete("/user/shares/{token}", s.userRevokeShareHandler)
+
+			// User sync endpoints (v0.8.0c SYNC.ENGINE.PULL).
+			userG.Post("/user/syncs", s.userCreateSyncHandler)
+			userG.Get("/user/syncs", s.userListSyncsHandler)
+			userG.Get("/user/syncs/{id}", s.userGetSyncHandler)
+			userG.Delete("/user/syncs/{id}", s.userDeleteSyncHandler)
+			userG.Post("/user/syncs/{id}/pause", s.userPauseSyncHandler)
+			userG.Post("/user/syncs/{id}/resume", s.userResumeSyncHandler)
 
 			// User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)

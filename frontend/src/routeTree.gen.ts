@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from "./routes/index"
 import { Route as FilesIndexRouteImport } from "./routes/files/index"
 import { Route as AdminIndexRouteImport } from "./routes/admin/index"
 import { Route as ShareTokenRouteImport } from "./routes/share/$token"
+import { Route as FilesSyncsRouteImport } from "./routes/files/syncs"
 import { Route as FilesSharesRouteImport } from "./routes/files/shares"
 import { Route as FilesKeysRouteImport } from "./routes/files/keys"
 import { Route as FilesCidRouteImport } from "./routes/files/$cid"
@@ -47,6 +48,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
 const ShareTokenRoute = ShareTokenRouteImport.update({
   id: "/share/$token",
   path: "/share/$token",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FilesSyncsRoute = FilesSyncsRouteImport.update({
+  id: "/files/syncs",
+  path: "/files/syncs",
   getParentRoute: () => rootRouteImport,
 } as any)
 const FilesSharesRoute = FilesSharesRouteImport.update({
@@ -134,6 +140,7 @@ export interface FileRoutesByFullPath {
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
+  "/files/syncs": typeof FilesSyncsRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
@@ -155,6 +162,7 @@ export interface FileRoutesByTo {
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
+  "/files/syncs": typeof FilesSyncsRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
@@ -177,6 +185,7 @@ export interface FileRoutesById {
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
+  "/files/syncs": typeof FilesSyncsRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
@@ -200,6 +209,7 @@ export interface FileRouteTypes {
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
+    | "/files/syncs"
     | "/share/$token"
     | "/admin/"
     | "/files/"
@@ -221,6 +231,7 @@ export interface FileRouteTypes {
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
+    | "/files/syncs"
     | "/share/$token"
     | "/admin"
     | "/files"
@@ -242,6 +253,7 @@ export interface FileRouteTypes {
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
+    | "/files/syncs"
     | "/share/$token"
     | "/admin/"
     | "/files/"
@@ -264,6 +276,7 @@ export interface RootRouteChildren {
   FilesCidRoute: typeof FilesCidRouteWithChildren
   FilesKeysRoute: typeof FilesKeysRoute
   FilesSharesRoute: typeof FilesSharesRoute
+  FilesSyncsRoute: typeof FilesSyncsRoute
   ShareTokenRoute: typeof ShareTokenRoute
   AdminIndexRoute: typeof AdminIndexRoute
   FilesIndexRoute: typeof FilesIndexRoute
@@ -305,6 +318,13 @@ declare module "@tanstack/react-router" {
       path: "/share/$token"
       fullPath: "/share/$token"
       preLoaderRoute: typeof ShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/files/syncs": {
+      id: "/files/syncs"
+      path: "/files/syncs"
+      fullPath: "/files/syncs"
+      preLoaderRoute: typeof FilesSyncsRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/files/shares": {
@@ -435,6 +455,7 @@ const rootRouteChildren: RootRouteChildren = {
   FilesCidRoute: FilesCidRouteWithChildren,
   FilesKeysRoute: FilesKeysRoute,
   FilesSharesRoute: FilesSharesRoute,
+  FilesSyncsRoute: FilesSyncsRoute,
   ShareTokenRoute: ShareTokenRoute,
   AdminIndexRoute: AdminIndexRoute,
   FilesIndexRoute: FilesIndexRoute,

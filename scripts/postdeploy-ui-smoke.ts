@@ -1364,9 +1364,50 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [NN] Syncs route (v0.8.0c SYNC.ENGINE.PULL) — read-only smoke
+    // ============================================================
+    section("[NN] /files/syncs renders (read-only, v0.8.0c)");
+    
+    await check("[NN] /files/syncs renders header + empty state or list", async () => {
+      await page!.goto(`${BASE_URL}/files/syncs`, { waitUntil: "networkidle" });
+      
+      // Assert header is present
+      const hasHeader = await page!.locator('h1:has-text("Syncs")').count();
+      if (hasHeader === 0) {
+        throw new Error("/files/syncs missing 'Syncs' header");
+      }
+      
+      // Assert subhead is present
+      const hasSubhead = await page!.locator('p:has-text(/Cross-cluster copy jobs/)').count();
+      if (hasSubhead === 0) {
+        throw new Error("/files/syncs missing cross-cluster description");
+      }
+      
+      // Either empty state with "Start sync" button OR list of jobs
+      const hasEmptyState = await page!.locator('text="No sync jobs yet"').count();
+      const hasJobCards = await page!.locator('[data-testid="sync-job-card"]').count();
+      
+      if (hasEmptyState === 0 && hasJobCards === 0) {
+        // Check for "Start sync" button on empty state OR any job card content
+        const hasStartButton = await page!.locator('button:has-text(/Start sync/i)').count();
+        if (hasStartButton === 0) {
+          throw new Error("/files/syncs shows neither empty state nor job cards");
+        }
+      }
+      
+      // Assert "Start sync" button is present (for empty state or to create new jobs)
+      const startButton = page!.locator('button:has-text(/Start sync/i)').first();
+      if (await startButton.count() === 0) {
+        throw new Error("'Start sync' button not found on /files/syncs");
+      }
+      
+      await shot(page!, "nn-syncs-route");
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
-    section("[17] console + pageerror gate");
+    section("[NN] console + pageerror gate (v0.8.0c)");
     await check("no console errors or page errors across the run", async () => {
       if (consoleWarnings.length > 0) {
         // Surface but don't fail.
