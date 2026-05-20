@@ -15,17 +15,10 @@ type User = {
   uiAdmin?: boolean;
 };
 
-type Invite = {
-  token: string;
-  expiresAt: string;
-};
-
 function UsersPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
-  const [showModal, setShowModal] = useState(false);
-  const [inviteResult, setInviteResult] = useState<Invite | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -42,33 +35,6 @@ function UsersPage() {
       navigate({ to: "/files" });
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function handleCreateUser(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    const username = formData.get("username") as string;
-    const password = formData.get("password") as string;
-    const inviteOnly = formData.get("inviteOnly") === "on";
-
-    try {
-      // @ts-ignore - API types not generated yet
-      const { data: result } = await client.POST("/admin/users", {
-        body: { username, password, inviteOnly } as any,
-      });
-
-      if (result && "invite" in result) {
-        setInviteResult(result.invite as Invite);
-        setShowModal(true);
-      } else {
-        toast.success("User created successfully");
-        fetchUsers();
-      }
-    } catch (error) {
-      toast.error("Failed to create user");
-    } finally {
-      setShowModal(false);
     }
   }
 
@@ -96,7 +62,7 @@ function UsersPage() {
           <h1 className="text-2xl font-bold tracking-tight">User Management</h1>
           <p className="text-muted-foreground mt-1">Create and manage users.</p>
         </div>
-        <Button onClick={() => setShowModal(true)}>+ New User</Button>
+        <Button onClick={() => navigate({ to: "/admin/users/new" })}>+ New User</Button>
       </div>
 
       <table className="min-w-full divide-y divide-border">
@@ -130,36 +96,6 @@ function UsersPage() {
         </tbody>
       </table>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-card p-6 rounded-lg w-full max-w-md space-y-4">
-            <h2 className="text-xl font-bold">Create New User</h2>
-
-            {inviteResult ? (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">Invite link:</p>
-                <code className="block p-3 bg-muted rounded-md text-sm break-all">
-                  {window.location.origin}/auth/oidc/redeem/{inviteResult.token}
-                </code>
-                <Button onClick={() => setShowModal(false)}>Close</Button>
-              </div>
-            ) : (
-              <form onSubmit={handleCreateUser} className="space-y-4">
-                <input name="username" placeholder="Username" required className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
-                <input name="password" type="password" placeholder="Password" required className="w-full rounded-md border bg-background px-3 py-2 text-sm" />
-                <label className="flex items-center gap-2">
-                  <input name="inviteOnly" type="checkbox" className="h-4 w-4" />
-                  Create invite token instead of direct account
-                </label>
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-                  <Button type="submit">Create</Button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
