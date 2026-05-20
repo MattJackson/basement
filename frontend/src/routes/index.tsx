@@ -16,8 +16,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DeleteBucketConfirm } from "@/shared/ui/DeleteBucketConfirm";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
-import { humanizeTime } from "@/shared/lib/format";
-import { useBuckets, useListClusters } from "@/shared/api/queries";
+import { humanizeBytes } from "@/shared/lib/format";
+import { useBuckets, useListClusters, useBucket } from "@/shared/api/queries";
 import { useCreateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import { ClusterBadge } from "@/components/ClusterBadge";
@@ -180,79 +180,23 @@ function MyBuckets() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-48">Cluster</TableHead>
-                <TableHead>Bucket Name</TableHead>
-                <TableHead>Aliases</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>Bucket</TableHead>
+                <TableHead className="text-right w-[140px]">Size</TableHead>
+                <TableHead className="text-right w-[120px]">Objects</TableHead>
                 <TableHead className="w-16">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredBuckets?.map((bucket) => {
-                const aliases = bucket.aliases ?? [];
-                const [primary, ...rest] = aliases;
-                const name = primary ?? bucket.id.slice(0, 8);
-
-                return (
-                  <TableRow
-                    key={bucket.id}
-                    className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => {
-                      navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
-                    }}
-                  >
-                    <TableCell>
-                      <ClusterBadge connectionId={bucket.connectionId} />
-                    </TableCell>
-                    <TableCell className="font-medium">{name}</TableCell>
-                    <TableCell>
-                      {rest.length > 0 ? rest.join(", ") : "—"}
-                    </TableCell>
-                    <TableCell>{bucket.created ? humanizeTime(bucket.created) : "—"}</TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="h-4 w-4"
-                            >
-                              <circle cx="12" cy="12" r="1" />
-                              <circle cx="19" cy="12" r="1" />
-                              <circle cx="5" cy="12" r="1" />
-                            </svg>
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
-                            }}
-                          >
-                            View
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteClick(bucket.id);
-                            }}
-                          >
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {filteredBuckets?.map((bucket) => (
+                <MyBucketRow
+                  key={`${bucket.connectionId}:${bucket.id}`}
+                  cid={bucket.connectionId}
+                  bucketId={bucket.id}
+                  fallbackAliases={bucket.aliases ?? []}
+                  onNavigate={() => navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } })}
+                  onDelete={() => handleDeleteClick(bucket.id)}
+                />
+              ))}
             </TableBody>
           </Table>
         </div>
@@ -334,6 +278,92 @@ function MyBuckets() {
   );
 }
 
+/** My Buckets row. Garage v1's aggregate /admin/buckets list only
+ *  carries id + aliases per item — size and object counts come from
+ *  the per-bucket GetBucket. We fire useBucket here so each row
+ *  hydrates independently with admin-grade columns. React Query
+ *  caches across navigations into the bucket detail page. */
+function MyBucketRow({
+  cid,
+  bucketId,
+  fallbackAliases,
+  onNavigate,
+  onDelete,
+}: {
+  cid: string;
+  bucketId: string;
+  fallbackAliases: string[];
+  onNavigate: () => void;
+  onDelete: () => void;
+}) {
+  const { data: detail } = useBucket(cid, bucketId);
+  const aliases = detail?.aliases ?? fallbackAliases;
+  const [primary, ...rest] = aliases;
+  const name = primary ?? bucketId.slice(0, 8);
+
+  return (
+    <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onNavigate}>
+      <TableCell>
+        <ClusterBadge connectionId={cid} />
+      </TableCell>
+      <TableCell>
+        <span className="font-medium">{name}</span>
+        {rest.length > 0 ? (
+          <span className="ml-2 text-xs text-muted-foreground">{rest.join(", ")}</span>
+        ) : null}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {detail ? humanizeBytes(detail.bytes) : <Skeleton className="h-3 w-12 ml-auto" />}
+      </TableCell>
+      <TableCell className="text-right tabular-nums">
+        {detail ? (detail.objects ?? 0).toLocaleString() : <Skeleton className="h-3 w-8 ml-auto" />}
+      </TableCell>
+      <TableCell>
+        <DropdownMenu>
+          <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
+            <Button variant="ghost" className="h-8 w-8 p-0">
+              <span className="sr-only">Open menu</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+              >
+                <circle cx="12" cy="12" r="1" />
+                <circle cx="19" cy="12" r="1" />
+                <circle cx="5" cy="12" r="1" />
+              </svg>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate();
+              }}
+            >
+              View
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+            >
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
+  );
+}
+
 interface PageHeaderProps {
   title: string;
   description?: string;
@@ -363,9 +393,9 @@ function BucketListSkeleton() {
         <TableHeader>
           <TableRow>
             <TableHead className="w-48">Cluster</TableHead>
-            <TableHead>Bucket Name</TableHead>
-            <TableHead>Aliases</TableHead>
-            <TableHead>Created</TableHead>
+            <TableHead>Bucket</TableHead>
+            <TableHead className="text-right w-[140px]">Size</TableHead>
+            <TableHead className="text-right w-[120px]">Objects</TableHead>
             <TableHead className="w-16">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -374,8 +404,8 @@ function BucketListSkeleton() {
             <TableRow key={i}>
               <TableCell><Skeleton className="h-4 w-32" /></TableCell>
               <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+              <TableCell><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
+              <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
               <TableCell><Skeleton className="h-8 w-8 rounded" /></TableCell>
             </TableRow>
           ))}

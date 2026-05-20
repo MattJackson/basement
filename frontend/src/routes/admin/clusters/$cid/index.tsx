@@ -99,15 +99,19 @@ function ClusterDetailScreen() {
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <div className="text-xl font-semibold tabular-nums">—</div>
+              <div className="text-xl font-semibold tabular-nums">
+                {bucketsLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (buckets?.length ?? 0)}
+              </div>
               <div className="text-xs text-muted-foreground mt-1">Buckets</div>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <div className="text-xl font-semibold tabular-nums">—</div>
+              <div className="text-xl font-semibold tabular-nums">
+                {keysLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (keys?.length ?? 0)}
+              </div>
               <div className="text-xs text-muted-foreground mt-1">Keys</div>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
-              <div className="text-xl font-semibold tabular-nums">{nodes?.length ?? "—"}</div>
+              <div className="text-xl font-semibold tabular-nums">{nodes?.length ?? 0}</div>
               <div className="text-xs text-muted-foreground mt-1">Nodes</div>
             </div>
           </div>
@@ -165,9 +169,8 @@ function ClusterDetailScreen() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead className="text-right w-[120px]">Size</TableHead>
-                  <TableHead className="text-right w-[100px]">Objects</TableHead>
-                  <TableHead className="w-[140px]">Created</TableHead>
+                  <TableHead className="text-right w-[140px]">Size</TableHead>
+                  <TableHead className="text-right w-[120px]">Objects</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -213,8 +216,7 @@ function ClusterDetailScreen() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead className="w-[280px]">Access Key ID</TableHead>
-                  <TableHead className="w-[140px]">Created</TableHead>
+                  <TableHead>Access Key ID</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -380,15 +382,14 @@ function ClusterBucketRow({ cid, bucketId, fallbackAlias }: { cid: string; bucke
       <TableCell className="text-right tabular-nums">
         {detail ? (detail.objects ?? 0).toLocaleString() : <Skeleton className="h-3 w-8 ml-auto" />}
       </TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {detail ? humanizeTime(detail.created) : <Skeleton className="h-3 w-20" />}
-      </TableCell>
     </TableRow>
   );
 }
 
-/** Cluster-detail key row. Mirror of ClusterBucketRow — fires useKey()
- *  to pull access-key-ID + created. */
+/** Cluster-detail key row. Fires useKey() to pull the canonical
+ *  access-key-ID (Garage stores ID-as-access-key but the field on
+ *  the list response is just `id`; the detail response carries the
+ *  separate accessKeyId field if it differs). */
 function ClusterKeyRow({ cid, keyId, fallbackName }: { cid: string; keyId: string; fallbackName?: string }) {
   const { data: detail } = useKey(cid, keyId);
   const name = detail?.name || fallbackName || "Unnamed";
@@ -412,9 +413,6 @@ function ClusterKeyRow({ cid, keyId, fallbackName }: { cid: string; keyId: strin
         </Link>
       </TableCell>
       <TableCell className="font-mono text-xs text-muted-foreground">{akid}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">
-        {detail ? humanizeTime(detail.created) : <Skeleton className="h-3 w-20" />}
-      </TableCell>
     </TableRow>
   );
 }
