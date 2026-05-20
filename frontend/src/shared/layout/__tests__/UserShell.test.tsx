@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -15,7 +15,7 @@ vi.mock("@/shared/api/queries", () => ({
 }));
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
