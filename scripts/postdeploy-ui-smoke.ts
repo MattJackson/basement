@@ -295,6 +295,61 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
+    // 1.7 My Clusters card grid (v0.6.0d USER.MYCLUSTERS)
+    // ============================================================
+    section("[1.7] My Clusters card grid (v0.6.0d)");
+    
+    await check("/files renders cluster cards with driver badges", async () => {
+      await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
+      
+      // Assert header is present
+      await page!.waitForSelector('h1:has-text("My Clusters")', { timeout: 10_000 });
+      await page!.waitForSelector('p:has-text("Storage you have access to")', { timeout: 10_000 });
+      
+      // Wait for either cluster cards or empty state
+      const hasCards = await page!.locator('[data-testid="user-cluster-card"]').count();
+      if (hasCards === 0) {
+        // Empty state is acceptable on fresh deploy
+        const hasEmptyState = await page!.locator('text="No clusters yet"').count();
+        if (hasEmptyState > 0) {
+          warnLine("/files shows empty state — may be expected on fresh deploy");
+          return;
+        }
+      }
+      
+      // Assert at least one card is visible if not empty
+      const cardCount = await page!.locator('[data-testid="user-cluster-card"]').count();
+      if (cardCount > 0) {
+        // Each card should have a driver badge
+        for (let i = 0; i < cardCount; i++) {
+          const card = page!.locator('[data-testid="user-cluster-card"]').nth(i);
+          await card.locator('text=/Garage|AWS S3|MinIO/').first().waitFor({ 
+            state: 'visible', 
+            timeout: 10_000 
+          });
+        }
+        
+        // Click the first card and verify navigation to /files/{cid}
+        const firstCard = page!.locator('[data-testid="user-cluster-card"]').first();
+        const href = await firstCard.getAttribute('href');
+        
+        if (!href || !href.match(/^\/files\/[^/]+$/)) {
+          throw new Error(`First card has invalid href: ${href}`);
+        }
+        
+        // Click the card and verify navigation
+        await firstCard.click({ waitUntil: 'networkidle' });
+        const currentUrl = page!.url();
+        
+        if (!currentUrl.match(/\/files\/[^/]+$/)) {
+          throw new Error(`Navigation did not go to /files/{cid}: ${currentUrl}`);
+        }
+      }
+
+      await shot(page!, "14-files-clusters");
+    });
+
+    // ============================================================
     // 2. Clusters list
     // ============================================================
     section("[2] clusters list");
