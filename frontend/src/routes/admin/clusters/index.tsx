@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import {
   Table,
@@ -204,14 +204,18 @@ interface ClusterRowProps {
 }
 
 function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
+  const navigate = useNavigate();
   const { data: testResult, isLoading: testing } = useTestClusterQuery(cluster.id);
-  
+
   const status = testResult
     ? getStatusFromResult(testResult)
     : "unavailable"; // Default to unavailable until first test
 
   return (
-    <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onEdit}>
+    <TableRow
+      className="cursor-pointer hover:bg-muted/50"
+      onClick={() => navigate({ to: "/admin/clusters/$cid", params: { cid: cluster.id } })}
+    >
       <TableCell>{colorDot(cluster.color)}</TableCell>
       <TableCell className="font-medium">{cluster.label}</TableCell>
       <TableCell><DriverBadge driver={cluster.driver} /></TableCell>
