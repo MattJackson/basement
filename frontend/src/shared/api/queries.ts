@@ -465,8 +465,18 @@ export function useUserMultipartAbort(cid: string | null, bid: string | null) {
 }
 
 // Org capabilities visible to current user.
+// Inlined type until OrgCapabilities schema lands in basement.yaml +
+// types.gen.ts; the user-facing surface is intentionally narrow.
+export interface UserVisibleOrgCapabilities {
+  signupMode?: "closed" | "invite" | "open";
+  enabledDrivers?: string[];
+  allowUserBackends?: boolean;
+  userBackendDrivers?: string[];
+  oidcOnly?: boolean;
+}
+
 export function useOrgCapabilities() {
-  return useQuery<components["schemas"]["OrgCapabilities"]>({
+  return useQuery<UserVisibleOrgCapabilities>({
     queryKey: ["org-capabilities"],
     queryFn: async () => {
       const res = await fetch("/api/v1/auth/org-capabilities");

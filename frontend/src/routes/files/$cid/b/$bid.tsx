@@ -18,10 +18,13 @@ function UserBucketObjects() {
   const { cid, bid } = Route.useParams();
   const navigate = useNavigate();
 
-  type Search = { prefix?: string; token?: string };
-  const search = Route.useSearch<Search>();
-  const prefix = search.prefix ?? "";
-  const token = search.token ?? "";
+  // Use window.location.search directly — TanStack Router's
+  // useSearch generic API has stricter type constraints in newer
+  // versions. URL params are simple here so plain URLSearchParams
+  // works and keeps tsc happy across router-major-version bumps.
+  const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const prefix = urlParams.get("prefix") ?? "";
+  const token = urlParams.get("token") ?? "";
 
   const { data: bucketsData, isLoading: bucketsLoading } = useUserClusterBuckets(cid);
   const bucket = bucketsData?.find((b) => b.id === bid);
