@@ -170,6 +170,17 @@ func (s *Server) routes() {
 			adminG.Get("/admin/buckets", s.listAllBucketsHandler)
 			adminG.Get("/admin/keys", s.listAllKeysHandler)
 		})
+
+		// User routes — authenticated users only. Grants filtered server-side.
+		apiR.Group(func(userG chi.Router) {
+			userG.Use(auth.Middleware(s.cfg.JWT.Secret))
+
+			userG.Get("/user/clusters", s.userListClustersHandler)
+			userG.Get("/user/clusters/{cid}", s.userGetClusterHandler)
+			userG.Get("/user/clusters/{cid}/buckets", s.userListClusterBucketsHandler)
+			userG.Get("/user/clusters/{cid}/buckets/{bid}", s.userGetClusterBucketHandler)
+			userG.Get("/user/keys", s.userListKeysHandler)
+		})
 	})
 
 	r.Handle("/*", web.Handler())

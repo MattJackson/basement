@@ -254,3 +254,74 @@ export function useTestClusterQuery(cid: string) {
     refetchOnReconnect: false,
   });
 }
+
+// User endpoints — filtered by grants (server-side).
+export function useUserClusters() {
+  return useQuery<Connection[]>({
+    queryKey: ["user", "clusters"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/clusters");
+      if (!response.ok || !data) throw apiError("user/clusters", response.status, error);
+      return (data as unknown[]) as Connection[];
+    },
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useUserCluster(cid: string) {
+  return useQuery<Connection>({
+    queryKey: ["user", "clusters", cid],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/clusters/{cid}", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`user/clusters/${cid}`, response.status, error);
+      return data as Connection;
+    },
+    enabled: !!cid,
+    staleTime: 30_000,
+  });
+}
+
+export function useUserClusterBuckets(cid: string) {
+  return useQuery<Bucket[]>({
+    queryKey: ["user", "clusters", cid, "buckets"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/clusters/{cid}/buckets", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`user/clusters/${cid}/buckets`, response.status, error);
+      return data as Bucket[];
+    },
+    enabled: !!cid,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+export function useUserKeys() {
+  return useQuery<components["schemas"]["AggregatedUserKeysResponse"]>({
+    queryKey: ["user", "keys"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/keys");
+      if (!response.ok || !data) throw apiError("user/keys", response.status, error);
+      return (data as unknown) as components["schemas"]["AggregatedUserKeysResponse"];
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useUserKeysFlat() {
+  const query = useUserKeys();
+  if (query.data) {
+    return {
+      ...query,
+      data: query.data.keys,
+    };
+  }
+  return query;
+}

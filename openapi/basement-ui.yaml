@@ -2067,6 +2067,184 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  # User endpoints — authenticated users only. Results filtered by user grants.
+  /user/clusters:
+    get:
+      operationId: userListClusters
+      summary: List clusters visible to the current user
+      description: Returns connections that the current user has any grant on, or owns. Admin users see all connections; non-admin users see only granted clusters. Used by User — My Clusters screen.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: List of visible connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Connection'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/clusters/{cid}:
+    get:
+      operationId: userGetCluster
+      summary: Get cluster details (user-visible)
+      description: Returns connection details for a specific cluster if the user has any grant on it, or owns it. Used by User — Cluster detail view.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Cluster details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connection'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User does not have access to this cluster
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Cluster not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/clusters/{cid}/buckets:
+    get:
+      operationId: userListClusterBuckets
+      summary: List buckets in a cluster (filtered by user grants)
+      description: Returns buckets within a cluster that the current user has any grant on. Admin users see all buckets; non-admin users see only granted buckets. Used by User — Bucket list under cluster view.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: List of visible buckets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bucket'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User does not have access to this cluster's buckets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/clusters/{cid}/buckets/{bid}:
+    get:
+      operationId: userGetClusterBucket
+      summary: Get bucket details (user-visible)
+      description: Returns bucket details if the user has any grant on this bucket, or owns the cluster. Used by User — Bucket detail view.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      parameters:
+      - name: cid
+        in: path
+        required: true
+        description: Connection ID
+        schema:
+          type: string
+      - name: bid
+        in: path
+        required: true
+        description: Bucket ID
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Bucket details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bucket'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User does not have access to this bucket
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Bucket or cluster not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /user/keys:
+    get:
+      operationId: userListKeys
+      summary: List keys visible to the current user
+      description: Returns access keys across all clusters that the user has any grant on. Each key is tagged with its connection ID. Used by User — Keys screen.
+      tags:
+      - User
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: List of visible keys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregatedUserKeysResponse'
+        '401':
+          description: No active session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
   /auth/login:
     post:
       operationId: loginUser
@@ -3110,6 +3288,32 @@ components:
         message:
           type: string
           description: Error message from that connection.
+    AggregatedUserKeysResponse:
+      type: object
+      required:
+      - keys
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserKeyWithConnectionId'
+          description: Keys visible to the user, tagged with connectionId.
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FanOutError'
+          description: Errors encountered during fan-out across connections.
+    UserKeyWithConnectionId:
+      type: object
+      required:
+      - id
+      - connectionId
+      allOf:
+      - $ref: '#/components/schemas/Key'
+      properties:
+        connectionId:
+          type: string
+          description: Connection ID this key belongs to.
     HealthReport:
       type: object
       description: Liveness probe response from basement health check.
