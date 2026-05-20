@@ -29,8 +29,6 @@ import { adminPage } from "@/shared/layout/adminPage";
 import { useListClusters, useTestClusterQuery, useClusterBuckets, useClusterKeys } from "@/shared/api/queries";
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { DeleteClusterConfirm } from "@/shared/ui/DeleteClusterConfirm";
-import { AddClusterDialog } from "@/components/clusters/AddClusterDialog";
-import { EditClusterDialog } from "@/components/clusters/EditClusterDialog";
 import { DriverBadge } from "@/components/clusters/DriverBadge";
 
 export const Route = createFileRoute("/admin/clusters/")({
@@ -38,19 +36,19 @@ export const Route = createFileRoute("/admin/clusters/")({
 });
 
 function ClustersScreen() {
+  const navigate = useNavigate();
   const { data: clustersData, isLoading, error } = useListClusters();
   const deleteCluster = useDeleteCluster();
 
-  // Create/Edit/Delete dialog state
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editCluster, setEditCluster] = useState<components["schemas"]["Connection"] | null>(null);
+  // Delete dialog state (Create + Edit now navigate to dedicated
+  // routes — popups-max-2-fields rule from v0.8.0d.15).
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [clusterToDelete, setClusterToDelete] = useState<{ id: string; label: string } | null>(null);
 
   const clusters = clustersData ?? [];
 
   const handleEditClick = (cluster: components["schemas"]["Connection"]) => {
-    setEditCluster(cluster);
+    navigate({ to: "/admin/clusters/$cid/edit", params: { cid: cluster.id } });
   };
 
   const handleDeleteClick = (id: string, label: string) => {
@@ -74,7 +72,7 @@ const header = (
           Garage and S3-compatible storage backends.
         </p>
       </div>
-      <Button onClick={() => setCreateOpen(true)}>
+      <Button onClick={() => navigate({ to: "/admin/clusters/new" })}>
         + Add cluster
       </Button>
     </header>
@@ -127,7 +125,7 @@ if (error) {
             title="Welcome to basement"
             description="One pane of glass for Garage, MinIO, OpenMaxIO, and AWS S3. Add your first cluster to get started — basement talks to its admin API and surfaces buckets, keys, and layout from here."
             action={
-              <Button onClick={() => setCreateOpen(true)} size="lg">
+              <Button onClick={() => navigate({ to: "/admin/clusters/new" })} size="lg">
                 + Add your first cluster
               </Button>
             }
@@ -158,16 +156,6 @@ if (error) {
             </TableBody>
           </Table>
         </div>
-      )}
-
-      <AddClusterDialog open={createOpen} onOpenChange={setCreateOpen} />
-      
-      {editCluster && (
-        <EditClusterDialog
-          open={!!editCluster}
-          onOpenChange={(open) => !open && setEditCluster(null)}
-          cluster={editCluster}
-        />
       )}
 
       <DeleteClusterConfirm
