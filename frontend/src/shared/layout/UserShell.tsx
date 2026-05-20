@@ -20,6 +20,13 @@ export function UserShell({ children }: UserShellProps): ReactNode {
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
           <div className="flex items-center gap-6">
             <Logo href="/files" />
+            <span
+              className="hidden sm:inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+              title="You are in the user section. Admin section is at /admin (if you have access)."
+              aria-label="User section"
+            >
+              User
+            </span>
             <nav className="flex items-center gap-5" aria-label="Primary">
               <Link
                 to="/files"
