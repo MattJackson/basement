@@ -1,0 +1,520 @@
+#!/usr/bin/env node
+// postdeploy-ui-smoke.ts — black-box UI smoke for a live basement.
+//
+// Sibling of scripts/postdeploy-smoke.sh — the bash script exercises
+// the JSON API directly; this one drives a real headless Chromium
+// through the React app to catch the class of bug that API-level
+// checks miss:
+//
+//   - route configuration regressions (e.g. v0.3.1 fix where
+//     /admin/clusters/$cid was acting as a parent layout without an
+//     <Outlet />, redirecting bucket-row clicks back to the cluster
+//     detail page)
+//   - missing-on-render bugs (counts, badges, section headers)
+//   - silent runtime errors that the API can't see
+//
+// Usage:
+//   node scripts/postdeploy-ui-smoke.ts
+//   BASE_URL=https://basement.example.com \
+//     USERNAME=alice PASSWORD=hunter2 \
+//     node scripts/postdeploy-ui-smoke.ts
+//
+// Requires:
+//   - Node 24+ (native TypeScript stripping via amaro)
+//   - `playwright` installed as a devDep in frontend/
+//   - chromium installed once: `pnpm -C frontend exec playwright install chromium`
+//
+// Exit codes:
+//   0  all checks passed
+//   1  one or more checks failed
+//   2  bad invocation / setup error
+
+// Playwright is installed in frontend/node_modules — the script
+// lives in scripts/, so a bare ESM specifier won't resolve. We
+// compute the absolute path at runtime and import dynamically below.
+// Types come from `playwright` via a type-only import so this stays
+// strictly typed without needing a tsconfig.
+import type { Browser, BrowserContext, ConsoleMessage, Page, chromium as ChromiumApi } from "playwright";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FRONTEND_NODE_MODULES = resolve(__dirname, "..", "frontend", "node_modules");
+const PLAYWRIGHT_INDEX = join(FRONTEND_NODE_MODULES, "playwright", "index.mjs");
+
+if (!existsSync(PLAYWRIGHT_INDEX)) {
+  process.stderr.write(
+    `[FAIL] playwright not found at ${PLAYWRIGHT_INDEX}\n` +
+      `       install with: pnpm -C frontend install\n` +
+      `       and:           pnpm -C frontend exec playwright install chromium\n`,
+  );
+  process.exit(2);
+}
+
+const PLAYWRIGHT_ENTRY = pathToFileURL(PLAYWRIGHT_INDEX).href;
+const { chromium } = (await import(PLAYWRIGHT_ENTRY)) as { chromium: typeof ChromiumApi };
+
+// ---------- config ----------
+const BASE_URL = (process.env.BASE_URL ?? "https://basement.pq.io").replace(/\/$/, "");
+const USERNAME = process.env.USERNAME ?? "matthew";
+const PASSWORD = process.env.PASSWORD ?? "password";
+
+const RUN_TS = new Date().toISOString().replace(/[:.]/g, "-");
+const SHOT_DIR = join("/tmp", "basement-smoke", RUN_TS);
+mkdirSync(SHOT_DIR, { recursive: true });
+
+// ---------- color helpers (no emoji, match bash smoke tone) ----------
+const isTTY = process.stdout.isTTY;
+const C = {
+  green: isTTY ? "\x1b[32m" : "",
+  red: isTTY ? "\x1b[31m" : "",
+  yellow: isTTY ? "\x1b[33m" : "",
+  dim: isTTY ? "\x1b[2m" : "",
+  bold: isTTY ? "\x1b[1m" : "",
+  reset: isTTY ? "\x1b[0m" : "",
+};
+
+function info(msg: string) {
+  process.stdout.write(`${C.dim}${msg}${C.reset}\n`);
+}
+function section(msg: string) {
+  process.stdout.write(`\n${C.bold}${msg}${C.reset}\n`);
+}
+function passLine(name: string, ms: number) {
+  process.stdout.write(`${C.green}[ok]${C.reset} ${name} ${C.dim}(${(ms / 1000).toFixed(2)}s)${C.reset}\n`);
+}
+function failLine(name: string, detail?: string) {
+  process.stderr.write(`${C.red}[FAIL]${C.reset} ${name}\n`);
+  if (detail) process.stderr.write(`  ${C.dim}${detail}${C.reset}\n`);
+}
+function warnLine(msg: string) {
+  process.stderr.write(`${C.yellow}[warn]${C.reset} ${msg}\n`);
+}
+
+// ---------- results ----------
+type Result = { name: string; ok: boolean; ms: number; detail?: string };
+const results: Result[] = [];
+
+async function check(name: string, fn: () => Promise<void>): Promise<boolean> {
+  const start = Date.now();
+  try {
+    await fn();
+    const ms = Date.now() - start;
+    results.push({ name, ok: true, ms });
+    passLine(name, ms);
+    return true;
+  } catch (err) {
+    const ms = Date.now() - start;
+    const detail = err instanceof Error ? err.message : String(err);
+    results.push({ name, ok: false, ms, detail });
+    failLine(name, detail);
+    return false;
+  }
+}
+
+function skipLine(name: string, reason: string) {
+  process.stdout.write(`${C.yellow}[skip]${C.reset} ${name} ${C.dim}(${reason})${C.reset}\n`);
+  results.push({ name, ok: true, ms: 0, detail: `skipped: ${reason}` });
+}
+
+// ---------- console / pageerror tracking ----------
+type LoggedConsole = { type: string; text: string; url: string };
+const consoleErrors: LoggedConsole[] = [];
+const consoleWarnings: LoggedConsole[] = [];
+const pageErrors: { message: string; url: string }[] = [];
+
+function attachListeners(page: Page) {
+  page.on("console", (msg: ConsoleMessage) => {
+    const t = msg.type();
+    const entry = { type: t, text: msg.text(), url: page.url() };
+    if (t === "error") {
+      // Filter out the noisy favicon 404 fallback and other low-signal
+      // browser-level fetch failures we can't act on.
+      if (entry.text.includes("Failed to load resource")) return;
+      consoleErrors.push(entry);
+    } else if (t === "warning") {
+      consoleWarnings.push(entry);
+    }
+  });
+  page.on("pageerror", (err: Error) => {
+    pageErrors.push({ message: `${err.name}: ${err.message}`, url: page.url() });
+  });
+}
+
+async function shot(page: Page, name: string) {
+  try {
+    // Wait briefly for skeleton loaders to resolve so the screenshot
+    // is useful for visual debugging. Best-effort — if the network
+    // never settles we still take the shot.
+    await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+    await page.screenshot({ path: join(SHOT_DIR, `${name}.png`), fullPage: true });
+  } catch {
+    // Screenshots are best-effort — never block a check on them.
+  }
+}
+
+// ---------- main flow ----------
+async function main(): Promise<number> {
+  info("basement post-deploy UI smoke");
+  info(`target:      ${BASE_URL}`);
+  info(`user:        ${USERNAME}`);
+  info(`screenshots: ${SHOT_DIR}`);
+
+  let browser: Browser | undefined;
+  let context: BrowserContext | undefined;
+  let page: Page | undefined;
+
+  try {
+    browser = await chromium.launch({ headless: true });
+    context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      // Treat self-signed / sketchy certs as fatal — the deploy URL is HTTPS-only.
+      ignoreHTTPSErrors: false,
+    });
+    page = await context.newPage();
+    attachListeners(page);
+
+    // Track which cluster cid + first bucket id + first key id we discovered.
+    let discoveredCid = "";
+    let discoveredBucketId = "";
+    let discoveredKeyId = "";
+    let firstClusterDriver = "";
+
+    // ============================================================
+    // 1. Login flow
+    // ============================================================
+    section("[1] login flow");
+    await check("GET / → redirected to /login", async () => {
+      const resp = await page!.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+      if (!resp) throw new Error("no response from initial GET");
+      if (resp.status() >= 500) throw new Error(`HTTP ${resp.status()} on initial GET`);
+      // Wait for the SPA to settle on the login route.
+      await page!.waitForURL(/\/admin\/login/, { timeout: 10_000 });
+      // Login form should be visible.
+      await page!.waitForSelector('input#username', { timeout: 5_000 });
+      await page!.waitForSelector('input#password', { timeout: 5_000 });
+      await shot(page!, "01-login");
+    });
+
+    await check("submit credentials → land on /admin", async () => {
+      await page!.fill('input#username', USERNAME);
+      await page!.fill('input#password', PASSWORD);
+      await Promise.all([
+        page!.waitForURL(
+          (url) => /\/admin($|\/)/.test(url.pathname) && !/\/admin\/login/.test(url.pathname),
+          { timeout: 15_000 },
+        ),
+        page!.click('button[type="submit"]'),
+      ]);
+      // Admin chrome present (sticky header with "Clusters" nav link).
+      await page!.waitForSelector('nav[aria-label="Primary"] >> text=Clusters', { timeout: 10_000 });
+      await shot(page!, "02-post-login");
+    });
+
+    // ============================================================
+    // 2. Clusters list
+    // ============================================================
+    section("[2] clusters list");
+    await check("navigate to /admin/clusters", async () => {
+      await page!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
+      // Page heading.
+      await page!.waitForSelector('h1:has-text("Clusters")', { timeout: 10_000 });
+      // Wait for either at least one row OR the empty state.
+      await page!.waitForFunction(
+        () => {
+          const rows = document.querySelectorAll('tbody tr');
+          const empty = document.querySelector('[data-empty-state], h2:not(:empty)');
+          return rows.length > 0 || (empty?.textContent?.includes("Welcome") ?? false);
+        },
+        { timeout: 15_000 },
+      );
+      await shot(page!, "03-clusters");
+    });
+
+    await check("first cluster row has label, driver badge, resources counts", async () => {
+      const firstRow = page!.locator('tbody tr').first();
+      const rowCount = await page!.locator('tbody tr').count();
+      if (rowCount === 0) {
+        throw new Error("no cluster rows rendered — first-run empty state is not a passing condition here");
+      }
+      const cells = firstRow.locator('td');
+      // td[0] color dot, td[1] label, td[2] driver, td[3] status, td[4] resources counts, td[5] actions
+      const labelText = (await cells.nth(1).textContent())?.trim() ?? "";
+      if (!labelText) throw new Error("first cluster row label is empty");
+
+      const driverText = (await cells.nth(2).textContent())?.trim() ?? "";
+      if (!driverText) throw new Error("first cluster row driver badge is empty");
+      firstClusterDriver = driverText.toLowerCase();
+
+      // ClusterCounts loads async — wait until it has resolved to a
+      // string containing "buckets" AND "keys" (i.e. not the "…"
+      // loading placeholder).
+      const resourcesCell = cells.nth(4);
+      await page!.waitForFunction(
+        (el) => {
+          const t = el?.textContent ?? "";
+          return /buckets/.test(t) && /keys/.test(t);
+        },
+        await resourcesCell.elementHandle(),
+        { timeout: 15_000 },
+      );
+      const resourcesText = (await resourcesCell.textContent())?.trim() ?? "";
+      if (!/buckets/.test(resourcesText) || !/keys/.test(resourcesText)) {
+        throw new Error(`resources cell did not surface buckets+keys: '${resourcesText}'`);
+      }
+    });
+
+    // ============================================================
+    // 3. Cluster detail navigation (v0.3.1 regression test)
+    // ============================================================
+    section("[3] cluster detail navigation (v0.3.1 regression)");
+    await check("click first cluster row → /admin/clusters/{cid} renders Buckets + Keys sections", async () => {
+      // Click the label cell (column 2) rather than the row itself —
+      // the row also contains the actions dropdown and Test button
+      // which stopPropagation, and Playwright's row.click() can pick
+      // those if they're under the centroid.
+      const labelCell = page!.locator('tbody tr').first().locator('td').nth(1);
+      await labelCell.click();
+      await page!.waitForURL(/\/admin\/clusters\/[^/]+$/, { timeout: 15_000 });
+      const match = page!.url().match(/\/admin\/clusters\/([^/?#]+)$/);
+      if (!match) throw new Error(`unexpected URL after click: ${page!.url()}`);
+      discoveredCid = match[1];
+
+      // The v0.3.1 regression was that this page rendered as the
+      // cluster-row form (parent layout) instead of the detail page.
+      // The detail page has CardHeader text "Buckets" + "Keys" + an
+      // h1 with the cluster label. Match the section headers.
+      await page!.waitForSelector('text=/^Buckets( \\(|$)/', { timeout: 10_000 });
+      await page!.waitForSelector('text=/^Keys( \\(|$)/', { timeout: 10_000 });
+      await shot(page!, "04-cluster-detail");
+    });
+
+    // ============================================================
+    // 4. Bucket detail navigation (v0.3.1 regression test)
+    // ============================================================
+    section("[4] bucket detail navigation (v0.3.1 regression)");
+    if (!discoveredCid) {
+      skipLine("click first bucket link → /admin/clusters/{cid}/buckets/{id}", "cluster detail nav failed");
+    } else
+    await check("click first bucket link → /admin/clusters/{cid}/buckets/{id}", async () => {
+      // The cluster-detail page renders Buckets section with up to 8
+      // <Link> rows. Wait for either a link or the empty state.
+      const linkSelector = `a[href^="/admin/clusters/${discoveredCid}/buckets/"]`;
+      const hasLinks = await page!.locator(linkSelector).count();
+      if (hasLinks === 0) {
+        // EmptyState ok — log and skip the navigation portion, but
+        // still assert no console errors so far.
+        warnLine("no buckets in first cluster — skipping bucket-detail navigation");
+        return;
+      }
+      const firstLink = page!.locator(linkSelector).first();
+      const href = (await firstLink.getAttribute('href')) ?? "";
+      const m = href.match(/\/buckets\/([^/?#]+)/);
+      if (!m) throw new Error(`could not parse bucket id out of href '${href}'`);
+      discoveredBucketId = m[1];
+
+      await firstLink.click();
+      // TanStack Router does client-side navigation, so 'load' may
+      // not refire. Poll the URL pathname instead.
+      await page!.waitForFunction(
+        (target) => window.location.pathname === target,
+        `/admin/clusters/${discoveredCid}/buckets/${discoveredBucketId}`,
+        { timeout: 15_000 },
+      );
+      // Wait for the bucket page to render its detail content. The
+      // pre-v0.3.1 broken state showed the cluster-row form (parent
+      // layout), which had Buckets+Keys section headers — so the
+      // discriminator is the cluster-detail "Connection test" card
+      // (present on cluster-detail, absent on bucket-detail) and
+      // the cluster page's "Layout" card.
+      await page!.waitForSelector(
+        '.text-2xl.tracking-tight, h1.tracking-tight, button.tracking-tight',
+        { timeout: 10_000 },
+      );
+      // Wait for any cluster-detail-only content to clear from the DOM.
+      await page!.waitForFunction(
+        () => !document.body.innerText.includes("Connection test"),
+        null,
+        { timeout: 5_000 },
+      ).catch(() => {
+        // If still present, that's the regression — fail explicitly.
+        throw new Error("bucket page is showing cluster-detail content (Connection test card) — v0.3.1 regression returned");
+      });
+      await shot(page!, "05-bucket-detail");
+
+      // Back to cluster detail.
+      await page!.goBack({ waitUntil: "networkidle" });
+      await page!.waitForURL(/\/admin\/clusters\/[^/]+$/, { timeout: 10_000 });
+    });
+
+    // ============================================================
+    // 5. Key detail navigation (v0.3.1 regression test)
+    // ============================================================
+    section("[5] key detail navigation (v0.3.1 regression)");
+    if (!discoveredCid) {
+      skipLine("click first key link → /admin/clusters/{cid}/keys/{id}", "cluster detail nav failed");
+    } else
+    await check("click first key link → /admin/clusters/{cid}/keys/{id}", async () => {
+      const linkSelector = `a[href^="/admin/clusters/${discoveredCid}/keys/"]`;
+      const hasLinks = await page!.locator(linkSelector).count();
+      if (hasLinks === 0) {
+        warnLine("no keys in first cluster — skipping key-detail navigation");
+        return;
+      }
+      const firstLink = page!.locator(linkSelector).first();
+      const href = (await firstLink.getAttribute('href')) ?? "";
+      const m = href.match(/\/keys\/([^/?#]+)/);
+      if (!m) throw new Error(`could not parse key id out of href '${href}'`);
+      discoveredKeyId = m[1];
+
+      await firstLink.click();
+      await page!.waitForFunction(
+        (target) => window.location.pathname === target,
+        `/admin/clusters/${discoveredCid}/keys/${discoveredKeyId}`,
+        { timeout: 15_000 },
+      );
+      await page!.waitForSelector('h1.tracking-tight', { timeout: 10_000 });
+      await page!.waitForFunction(
+        () => !document.body.innerText.includes("Connection test"),
+        null,
+        { timeout: 5_000 },
+      ).catch(() => {
+        throw new Error("key page is showing cluster-detail content (Connection test card) — v0.3.1 regression returned");
+      });
+      await shot(page!, "06-key-detail");
+
+      // Back.
+      await page!.goBack({ waitUntil: "networkidle" });
+      await page!.waitForURL(/\/admin\/clusters\/[^/]+$/, { timeout: 10_000 });
+    });
+
+    // ============================================================
+    // 6. Layout editor
+    // ============================================================
+    section("[6] layout editor");
+    if (!discoveredCid) {
+      skipLine("navigate to /admin/clusters/{cid}/layout", "cluster detail nav failed");
+    } else
+    await check("navigate to /admin/clusters/{cid}/layout", async () => {
+      await page!.goto(`${BASE_URL}/admin/clusters/${discoveredCid}/layout`, { waitUntil: "networkidle" });
+      // Either the layout editor header "Layout · {label}" OR the
+      // "Layout not supported" card for aws-s3.
+      const isAwsS3 = firstClusterDriver.includes("s3") && !firstClusterDriver.includes("garage");
+      if (isAwsS3) {
+        await page!.waitForSelector('text="Layout not supported"', { timeout: 10_000 });
+      } else {
+        // Match either the supported header OR the unsupported card.
+        // The driver label heuristic above isn't perfect for non-Garage
+        // backends, so accept both as long as one of them is present.
+        await page!.waitForFunction(
+          () => {
+            const html = document.body.innerText || "";
+            return /Layout · /.test(html) || /Layout not supported/.test(html);
+          },
+          { timeout: 10_000 },
+        );
+      }
+      await shot(page!, "07-layout");
+    });
+
+    // ============================================================
+    // 7. Aggregated buckets
+    // ============================================================
+    section("[7] aggregated buckets");
+    await check("/admin/buckets (redirects to /admin) renders bucket rows", async () => {
+      await page!.goto(`${BASE_URL}/admin/buckets`, { waitUntil: "networkidle" });
+      // /admin/buckets is a Navigate to /admin. Wait for the redirect
+      // to settle then assert we're at /admin (the buckets list).
+      await page!.waitForURL((url) => url.pathname === "/admin" || url.pathname === "/admin/", { timeout: 10_000 });
+      // Wait for the "My Buckets" page heading OR for the empty state.
+      await page!.waitForSelector('h1:has-text("My Buckets")', { timeout: 10_000 });
+      // Either rows or the EmptyState "No buckets yet".
+      await page!.waitForFunction(
+        () => {
+          const rows = document.querySelectorAll('tbody tr');
+          const empty = document.body.innerText.includes("No buckets yet");
+          return rows.length > 0 || empty;
+        },
+        { timeout: 15_000 },
+      );
+      const rowCount = await page!.locator('tbody tr').count();
+      if (rowCount === 0) {
+        warnLine("/admin (aggregated buckets) is empty — that may be expected on a fresh deploy");
+      }
+      await shot(page!, "08-aggregated-buckets");
+    });
+
+    // ============================================================
+    // 8. Aggregated keys
+    // ============================================================
+    section("[8] aggregated keys");
+    await check("/admin/keys renders key rows", async () => {
+      await page!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
+      await page!.waitForURL(/\/admin\/keys$/, { timeout: 10_000 });
+      await page!.waitForSelector('h1:has-text("Access keys")', { timeout: 10_000 });
+      await page!.waitForFunction(
+        () => {
+          const rows = document.querySelectorAll('tbody tr');
+          const empty = document.body.innerText.includes("No keys yet")
+            || document.body.innerText.includes("No access keys");
+          return rows.length > 0 || empty;
+        },
+        { timeout: 15_000 },
+      );
+      const rowCount = await page!.locator('tbody tr').count();
+      if (rowCount === 0) {
+        warnLine("/admin/keys is empty — that may be expected on a fresh deploy");
+      }
+      await shot(page!, "09-aggregated-keys");
+    });
+
+    // ============================================================
+    // 9. Console / pageerror gate
+    // ============================================================
+    section("[9] console + pageerror gate");
+    await check("no console errors or page errors across the run", async () => {
+      if (consoleWarnings.length > 0) {
+        // Surface but don't fail.
+        warnLine(`saw ${consoleWarnings.length} console warning(s) — first: ${consoleWarnings[0].text.slice(0, 200)}`);
+      }
+      if (consoleErrors.length === 0 && pageErrors.length === 0) return;
+      const lines: string[] = [];
+      for (const e of consoleErrors) lines.push(`  [console.error @ ${e.url}] ${e.text.slice(0, 300)}`);
+      for (const e of pageErrors) lines.push(`  [pageerror @ ${e.url}] ${e.message.slice(0, 300)}`);
+      throw new Error(
+        `${consoleErrors.length} console error(s), ${pageErrors.length} pageerror(s)\n${lines.join("\n")}`,
+      );
+    });
+  } catch (setupErr) {
+    failLine("smoke setup", setupErr instanceof Error ? setupErr.message : String(setupErr));
+    return 2;
+  } finally {
+    if (page) await page.close().catch(() => {});
+    if (context) await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+  }
+
+  // ---------- summary ----------
+  const passed = results.filter((r) => r.ok).length;
+  const failed = results.length - passed;
+  process.stdout.write("\n");
+  if (failed === 0) {
+    process.stdout.write(`${C.bold}${C.green}${passed}/${results.length} checks passed${C.reset}\n`);
+    return 0;
+  }
+  process.stdout.write(`${C.bold}${C.red}${failed}/${results.length} checks failed${C.reset}\n`);
+  for (const r of results.filter((r) => !r.ok)) {
+    process.stdout.write(`  ${C.red}- ${r.name}${C.reset}\n`);
+  }
+  process.stdout.write(`${C.dim}screenshots saved to ${SHOT_DIR}${C.reset}\n`);
+  return 1;
+}
+
+main().then(
+  (code) => process.exit(code),
+  (err) => {
+    failLine("unhandled error", err instanceof Error ? err.stack ?? err.message : String(err));
+    process.exit(2);
+  },
+);
