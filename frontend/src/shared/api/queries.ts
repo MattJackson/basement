@@ -177,3 +177,34 @@ export function useListClusters() {
     retry: 1,
   });
 }
+
+export function useGetCluster(cid: string) {
+  return useQuery<Connection>({
+    queryKey: ["admin", "clusters", cid],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/clusters/${cid}`, response.status, error);
+      return data as Connection;
+    },
+    enabled: !!cid,
+    staleTime: 30_000,
+  });
+}
+
+export function useTestClusterQuery(cid: string) {
+  return useQuery<components["schemas"]["ConnectionTestResult"], Error>({
+    queryKey: ["admin", "clusters", cid, "_test"],
+    queryFn: async () => {
+      const { data, error, response } = await client.POST("/admin/clusters/{cid}/_test", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`testCluster/${cid}`, response.status, error);
+      return data as components["schemas"]["ConnectionTestResult"];
+    },
+    enabled: !!cid,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
