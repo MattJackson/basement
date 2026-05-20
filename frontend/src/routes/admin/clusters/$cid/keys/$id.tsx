@@ -80,7 +80,6 @@ function KeyDetailScreen() {
             <TableHeader>
               <TableRow>
                 <TableHead>Bucket</TableHead>
-                <TableHead className="w-48">Bucket ID</TableHead>
                 <TableHead className="w-40">Permissions</TableHead>
               </TableRow>
             </TableHeader>
@@ -88,7 +87,6 @@ function KeyDetailScreen() {
               {[...Array(5)].map((_, i) => (
                 <TableRow key={i}>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                   <TableCell><Skeleton className="h-6 w-16" /></TableCell>
                 </TableRow>
               ))}
@@ -224,7 +222,6 @@ function KeyDetailScreen() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Bucket</TableHead>
-                        <TableHead className="w-48">Bucket ID</TableHead>
                         <TableHead className="w-40 text-center">Permissions</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -232,14 +229,11 @@ function KeyDetailScreen() {
                       {editPermissions.map((perm) => (
                         <TableRow key={perm.bucketId}>
                           <TableCell>
-                            <BucketName 
+                            <BucketName
                               globalAliases={key.buckets?.find(b => b.bucketId === perm.bucketId)?.globalAliases}
                               localAliases={key.buckets?.find(b => b.bucketId === perm.bucketId)?.localAliases}
                               bucketId={perm.bucketId}
                             />
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {perm.bucketId.slice(0, 12)}...{perm.bucketId.slice(-4)}
                           </TableCell>
                           <TableCell className="text-center space-x-2">
                             <div className="flex items-center gap-2 justify-center">
@@ -289,7 +283,6 @@ function KeyDetailScreen() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Bucket</TableHead>
-                      <TableHead className="w-48">Bucket ID</TableHead>
                       <TableHead className="w-40">Permissions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -297,14 +290,11 @@ function KeyDetailScreen() {
                     {key.buckets.map((bucket) => (
                       <TableRow key={bucket.bucketId}>
                         <TableCell>
-                          <BucketName 
-                            globalAliases={bucket.globalAliases} 
-                            localAliases={bucket.localAliases} 
-                            bucketId={bucket.bucketId} 
+                          <BucketName
+                            globalAliases={bucket.globalAliases}
+                            localAliases={bucket.localAliases}
+                            bucketId={bucket.bucketId}
                           />
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          {bucket.bucketId.slice(0, 12)}...{bucket.bucketId.slice(-4)}
                         </TableCell>
                         <TableCell>
                           <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
