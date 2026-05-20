@@ -12,6 +12,11 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 # Vite's prebuild reads ../openapi/basement.yaml; mirror that layout.
 COPY openapi /openapi
 COPY frontend/ ./
+# COMMIT also baked into the bundle as __BUILD_COMMIT__ so the
+# version-mismatch banner can compare it against the X-Build header
+# returned by the running server.
+ARG COMMIT=dev
+ENV VITE_BUILD_COMMIT=$COMMIT
 RUN pnpm build
 # Vite writes to ../internal/web/dist (= /internal/web/dist in container).
 

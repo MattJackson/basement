@@ -129,8 +129,12 @@ func serveSPAIndex(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	// Don't cache the entry HTML — asset hashes change every build.
-	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+	// no-store on the entry HTML so the browser never serves a stale
+	// reference to old hashed bundles after a deploy — even out of
+	// bfcache. The HTML is tiny (~2KB) and HTTP/2-multiplexed, so the
+	// extra round-trip is negligible. Paired with X-Build header on
+	// /api/v1 responses + version-mismatch banner in the frontend.
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
