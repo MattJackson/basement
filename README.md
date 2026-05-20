@@ -4,7 +4,7 @@
 
 A multi-backend, multi-persona admin + end-user UI for self-hosted S3-compatible object storage. Run a Garage cluster at home, a MinIO/OpenMaxIO cluster at the office, and an AWS account for offsite backup — manage all of them from one place. No more switching between four single-backend admin tools just because the buckets live in different places.
 
-> **Status:** v0.1.x — Garage v1 and AWS S3 drivers shipped. MinIO/OpenMaxIO driver, OIDC, and multi-cluster admin land at v0.5.0 (the competitive milestone). v1.0 is reserved for the long-haul "feature-complete" release; we're staying on `0.x` until the project is fully load-bearing for the post-MinIO crowd.
+> **Status:** v0.4.x — Garage v1, AWS S3, MinIO/OpenMaxIO drivers shipped; multi-cluster admin shipped; OIDC (backend + frontend) shipped. v0.5.0 is the competitive milestone — the "one pane of glass" tagline becomes literal when the live deploy holds three drivers side-by-side. v1.0 is reserved for the long-haul "feature-complete" release.
 
 ---
 
@@ -32,17 +32,23 @@ The long-haul vision (v0.6+): a federated file-manager for end users where the u
 |---|---|---|
 | Garage v1 admin (buckets, keys, layout, delete protection) | shipped | v0.1.x |
 | AWS S3 driver (S3 plane + capabilities-gated admin) | shipped | v0.1.x |
-| Multi-cluster admin (Clusters as a top-level resource) | in flight | v0.2.0 |
-| MinIO / OpenMaxIO driver | planned | v0.3.0 |
-| OIDC + local-password coexistence | planned | v0.4.0 |
-| **Competitive milestone:** three drivers + OIDC + multi-cluster | planned | **v0.5.0** |
+| Multi-cluster admin (Clusters as a top-level resource) | shipped | v0.2.x |
+| MinIO / OpenMaxIO driver (S3 data plane) | shipped | v0.3.0 |
+| Cache invalidation (no-store + X-Build + version banner) | shipped | v0.3.2 |
+| Detail-page consistency + admin-grade columns | shipped | v0.4.0 / v0.4.1 |
+| Persona route split (`/` = My Buckets, `/admin/*` = admin) | shipped | v0.4.2 |
+| OIDC + local-password coexistence | shipped | v0.4.4 |
+| **Competitive milestone:** three drivers + OIDC + multi-cluster + admin-grade UI | upcoming | **v0.5.0** |
+| MinIO admin API (madmin-go) for write actions | planned | v0.5.x |
+| SETUP wizard (in-app driver config) | planned | v0.5.x |
+| RBAC role gate for the nav | planned | v0.5.x |
 | End-user UI scaffold (My files, browse, download) | planned | v0.6+ |
 | Upload, sharing, server-routed share links | planned | v0.7 |
 | Cross-backend copy / sync / mirror | planned | v0.8 |
 | Lifecycle wizards, scoped credentials, migration tooling | planned | v0.9 |
 | Feature-complete | reserved | v1.0 |
 
-Honest take: pre-v0.5.0 you get a working Garage v1 admin UI with an AWS driver behind a capabilities-aware UI. That's already useful — it's what the operator runs in production today. The "one pane of glass" tagline becomes literal at v0.5.0 when three drivers run side-by-side from one instance.
+What "solid" at v0.5.0 means: admin can run basement against one or more Garage / MinIO / OpenMaxIO / AWS S3 clusters from one binary; OIDC login works alongside local password; bucket and key admin actions work end-to-end on Garage; AWS / MinIO act as read-only inventory until v0.5.x adds madmin-go for write actions. Persona model is in place at the URL level (`/` for user views, `/admin/*` for admin), with the role gate landing as a one-line change once RBAC ships.
 
 ---
 
@@ -130,10 +136,10 @@ Every option is an environment variable prefixed `BASEMENT_*`. Canonical referen
 
 ## Roadmap
 
-- **v0.2.0** — multi-cluster pivot (Connections as a top-level resource; in flight as of HEAD v0.1.32)
-- **v0.3.0** — MinIO / OpenMaxIO driver
-- **v0.4.0** — OIDC + capability-gated admin tokens
-- **v0.5.0** — competitive milestone: Garage + MinIO + AWS drivers running side-by-side, OIDC, multi-cluster shipped
+- **v0.2.x** ✅ multi-cluster pivot (Connections as a top-level resource)
+- **v0.3.x** ✅ MinIO / OpenMaxIO driver (S3 data plane) + cache invalidation
+- **v0.4.x** ✅ detail-page consistency, admin-grade columns, persona route split, OIDC end-to-end
+- **v0.5.0** — competitive milestone tag: Garage + MinIO + AWS drivers running side-by-side, OIDC end-to-end, admin-grade UI
 - **v0.6+** — end-user UI scaffold (browse, "My files," per-user grants)
 - **v0.7** — upload, download, server-routed revocable share links
 - **v0.8** — cross-backend copy / mirror / sync (the federation layer)
@@ -160,4 +166,4 @@ For Garage-API specifics, basement targets Garage's **v2 admin API** (RPC-style 
 
 ---
 
-**One pane of glass for Garage, MinIO, OpenMaxIO, and AWS S3.** Pre-v0.5.0 today; that's the destination.
+**One pane of glass for Garage, MinIO, OpenMaxIO, and AWS S3.** v0.5.0 is the competitive milestone; v1.0 is the long-haul "the answer."
