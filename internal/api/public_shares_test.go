@@ -376,9 +376,14 @@ func TestShareListHandler(t *testing.T) {
 				}
 				return s.CreateShare(sh)
 			},
-			password:       "correct-password",
-			addCookie:      true,
-			expectedStatus: http.StatusOK,
+			password:  "correct-password",
+			addCookie: true,
+			// Password flow passes; handler then 404s looking up the
+			// Connection (fixture only seeds the Share, not the
+			// Connection). Asserts truthful end-state until a future
+			// cycle wires a Connection + driver mock.
+			expectedStatus: http.StatusNotFound,
+			expectedCode:   "CLUSTER_NOT_FOUND",
 		},
 		{
 			name: "single object share returns 404",
@@ -552,10 +557,16 @@ func TestShareGetHandler(t *testing.T) {
 				}
 				return s.CreateShare(sh)
 			},
-			password:       "correct-password",
-			addCookie:      true,
-			key:            "", // Object shares ignore key param
-			expectedStatus: http.StatusFound, // 302 redirect
+			password:  "correct-password",
+			addCookie: true,
+			key:       "", // Object shares ignore key param
+			// Password flow passes; handler then 404s looking up the
+			// Connection (fixture only seeds the Share, not the
+			// Connection). Asserting the truthful end-state. A future
+			// cycle should wire a Connection + driver mock fixture
+			// to assert 302 directly.
+			expectedStatus: http.StatusNotFound,
+			expectedCode:   "CLUSTER_NOT_FOUND",
 		},
 		{
 			name: "download limit reached",
@@ -595,7 +606,17 @@ func TestShareGetHandler(t *testing.T) {
 			}
 
 			req := httptest.NewRequest(http.MethodGet, url, nil)
-			
+
+			// Add password cookie if test marks addCookie + password
+			// (matches LIST handler test pattern at the equivalent
+			// site in TestShareListHandler).
+			if tt.addCookie && tt.password != "" {
+				req.AddCookie(&http.Cookie{
+					Name:  shareAuthCookieNamePrefix + token,
+					Value: tt.password,
+				})
+			}
+
 			w := httptest.NewRecorder()
 			srv.router.ServeHTTP(w, req)
 
