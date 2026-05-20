@@ -52,12 +52,30 @@ func (s *Server) listAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 	users := s.store.Users()
 
-	var result []UserResponse
-	for _, u := range users {
+	// Pre-allocate so encoding gives [] not null when no users exist
+	// (frontend crashes trying to .map() on null).
+	result := make([]UserResponse, 0, len(users)+1)
+
+	// Synthesize the env-seeded admin (matthew) as a user entry — it
+	// authenticates from cfg.Admin.User / cfg.Admin.Hash, not from
+	// users.json, so it wouldn't otherwise appear on /admin/users.
+	loadAdminCreds(s.cfg)
+	if adminUser != "" {
 		result = append(result, UserResponse{
-			Username:  u.Username,
-			Role:      u.Role,
-			UIAdmin:   u.UIAdmin,
+			Username: adminUser,
+			Role:     "admin",
+			UIAdmin:  true,
+		})
+	}
+
+	for _, u := range users {
+		if u.Username == adminUser {
+			continue // already synthesized above
+		}
+		result = append(result, UserResponse{
+			Username: u.Username,
+			Role:     u.Role,
+			UIAdmin:  u.UIAdmin,
 		})
 	}
 
