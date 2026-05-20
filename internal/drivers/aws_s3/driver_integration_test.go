@@ -1023,3 +1023,55 @@ func TestRealDriver_PutObjectStream_WithSizeZero(t *testing.T) {
 		t.Errorf("etag=%q, want \"zero-size-etag\"", result.ETag)
 	}
 }
+
+// TestRealDriver_ServerSideCopy_HappyPath ensures ServerSideCopy uses CopyObject.
+func TestRealDriver_ServerSideCopy_HappyPath(t *testing.T) {
+	if os.Getenv("DRIVER_INTEGRATION") == "" {
+		t.Skip("DRIVER_INTEGRATION not set")
+	}
+
+	var copyCalled bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "COPY" && strings.Contains(r.URL.Path, "src-bucket") {
+			copyCalled = true
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"copy-etag-456"</ETag></CopyObjectResult>`))
+			return
+		}
+
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	ctx := context.Background()
+
+	err := d.ServerSideCopy(ctx, "src-bucket", "src-key", "dst-bucket", "dst-key")
+	if err != nil {
+		t.Fatalf("ServerSideCopy: %v", err)
+	}
+	if !copyCalled {
+		t.Fatal("COPY request not sent to test server")
+	}
+}
+
+// TestRealDriver_ServerSideCopy_UsesCaps checks that Capabilities.ServerSideCopy is true.
+func TestRealDriver_ServerSideCopy_UsesCaps(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	defer ts.Close()
+	d := makeAwsS3Driver(t, ts)
+
+	caps, err := d.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if !caps.ServerSideCopy {
+		t.Errorf("ServerSideCopy capability not set; got %+v", caps)
+	}
+}

@@ -22,6 +22,7 @@ func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
 		Multipart:      d.s3Client != nil,
 		Versioning:     false,
 		ObjectBrowse:   d.s3Client != nil,
+		ServerSideCopy: d.s3Client != nil,
 	}
 	return c, nil
 }

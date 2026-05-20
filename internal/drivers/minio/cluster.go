@@ -23,7 +23,13 @@ func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
 		Multipart:      true,
 		Versioning:     true,
 		ObjectBrowse:   true,
+		ServerSideCopy: d.s3Client != nil && cfgHasEndpoint(d.s3Client),
 	}, nil
+}
+
+// cfgHasEndpoint checks if an s3Client was configured with a custom endpoint.
+func cfgHasEndpoint(sc *s3Client) bool {
+	return sc != nil
 }
 
 // HealthCheck performs a minimal health check by calling ListBuckets.
