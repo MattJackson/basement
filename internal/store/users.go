@@ -8,13 +8,22 @@ import (
 )
 
 // User represents a user in the system.
+//
+// Provider + Subject are populated for OIDC-provisioned users (e.g.
+// Provider="https://accounts.google.com", Subject="1234567890") and
+// empty for local-password users. Existing local-password users
+// continue to deserialize cleanly because both fields are omitempty.
 type User struct {
-	ID            string    `json:"id"`             // UUID
-	Username      string    `json:"username"`
-	PasswordHash  string    `json:"password_hash"`  // bcrypt
-	Role          string    `json:"role"`           // "admin" | "user"
-	OIDCSubject   string    `json:"oidc_subject,omitempty"`
-	Created       time.Time `json:"created"`
+	ID           string    `json:"id"` // UUID
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash,omitempty"` // bcrypt (empty for OIDC users)
+	Role         string    `json:"role"`                    // "admin" | "user"
+	Provider     string    `json:"provider,omitempty"`      // OIDC issuer URL ("" = local password)
+	Subject      string    `json:"subject,omitempty"`       // OIDC subject claim ("" = local password)
+	OIDCSubject  string    `json:"oidc_subject,omitempty"`  // legacy field, kept for back-compat
+	Email        string    `json:"email,omitempty"`
+	Name         string    `json:"name,omitempty"`
+	Created      time.Time `json:"created"`
 }
 
 // Users returns a deep copy of all users. Callers can mutate the returned slice freely.
@@ -90,4 +99,28 @@ func (s *Store) UserByUsername(name string) (User, error) {
 	}
 
 	return User{}, fmt.Errorf("user not found: %s", name)
+}
+
+// ErrUserNotFound is returned when a lookup does not find a matching user.
+var ErrUserNotFound = fmt.Errorf("user not found")
+
+// FindUserByProviderSubject returns a user whose (Provider, Subject) tuple
+// matches the given identity. Both provider and subject must be non-empty;
+// passing empty values returns ErrUserNotFound to prevent accidentally
+// matching local-password users (whose Provider/Subject are both empty).
+func (s *Store) FindUserByProviderSubject(provider, subject string) (User, error) {
+	if provider == "" || subject == "" {
+		return User{}, ErrUserNotFound
+	}
+
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+
+	for _, u := range s.usersCache {
+		if u.Provider == provider && u.Subject == subject {
+			return u, nil
+		}
+	}
+
+	return User{}, ErrUserNotFound
 }

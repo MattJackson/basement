@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"golang.org/x/oauth2"
 
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/config"
@@ -17,32 +18,48 @@ import (
 	"github.com/mattjackson/basement/internal/web"
 )
 
+// oidcProvider is the subset of *auth.OIDCProvider the API server needs.
+// Defined as an interface here so tests can substitute a fake.
+type oidcProvider interface {
+	AuthCodeURL(state, nonce string) string
+	Exchange(ctx context.Context, code string) (*oauth2.Token, error)
+	VerifyIDToken(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, error)
+	Issuer() string
+	AutoProvision() bool
+}
+
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	cfg         *config.Config
-	store       *store.Store
-	conns       store.Connections
-	drv         driver.Driver
-	reg         *driver.Registry
-	router      chi.Router
-	httpServer  *http.Server
-	logger      *slog.Logger
+	cfg        *config.Config
+	store      *store.Store
+	conns      store.Connections
+	drv        driver.Driver
+	reg        *driver.Registry
+	oidc       oidcProvider
+	router     chi.Router
+	httpServer *http.Server
+	logger     *slog.Logger
 }
 
 // New creates a new Server instance with both legacy single-driver (for back-compat) and registry.
+//
+// OIDC is wired separately via SetOIDC() so that callers and tests that
+// don't care about OIDC don't have to thread a nil through. When OIDC
+// isn't set, the /auth/oidc/* routes return 501 OIDC_NOT_CONFIGURED and
+// local-password login remains the only auth path.
 func New(cfg *config.Config, store *store.Store, conns store.Connections, drv driver.Driver, reg *driver.Registry) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
 	srv := &Server{
-		cfg:     cfg,
-		store:   store,
-		conns:   conns,
-		drv:     drv,
-		reg:     reg,
-		router:  chi.NewRouter(),
-		logger:  logger,
+		cfg:    cfg,
+		store:  store,
+		conns:  conns,
+		drv:    drv,
+		reg:    reg,
+		router: chi.NewRouter(),
+		logger: logger,
 	}
 
 	srv.routes()
@@ -56,6 +73,13 @@ func New(cfg *config.Config, store *store.Store, conns store.Connections, drv dr
 	}
 
 	return srv
+}
+
+// SetOIDC wires an OIDC provider into the server. Must be called before
+// Start. Passing nil is equivalent to leaving OIDC unconfigured (the
+// /auth/oidc/* routes will return 501).
+func (s *Server) SetOIDC(p oidcProvider) {
+	s.oidc = p
 }
 
 // Start starts the HTTP server and blocks until context is canceled or error.
@@ -91,6 +115,8 @@ func (s *Server) routes() {
 		apiR.Get("/health", s.healthHandler)
 		apiR.Get("/version", s.versionHandler)
 		apiR.Post("/auth/login", s.loginHandler)
+		apiR.Get("/auth/oidc/start", s.oidcStartHandler)
+		apiR.Get("/auth/oidc/callback", s.oidcCallbackHandler)
 
 		// Authenticated routes — JWT cookie required.
 		apiR.Group(func(authG chi.Router) {

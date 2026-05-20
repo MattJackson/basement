@@ -285,6 +285,7 @@ func TestLoad_OIDCAutoProvision(t *testing.T) {
 	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
 	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
 	t.Setenv("BASEMENT_OIDC_CLIENT_SECRET", "secret456")
+	t.Setenv("BASEMENT_OIDC_REDIRECT_URL", "https://example.com/api/v1/auth/oidc/callback")
 	t.Setenv("BASEMENT_OIDC_AUTO_PROVISION", "true")
 
 	cfg, err := Load()
@@ -301,8 +302,115 @@ func TestLoad_OIDCAutoProvision(t *testing.T) {
 	if cfg.OIDC.ClientSecret != "secret456" {
 		t.Errorf("OIDC.ClientSecret=%q, want \"secret456\"", cfg.OIDC.ClientSecret)
 	}
+	if cfg.OIDC.RedirectURL != "https://example.com/api/v1/auth/oidc/callback" {
+		t.Errorf("OIDC.RedirectURL=%q, want \"https://example.com/api/v1/auth/oidc/callback\"", cfg.OIDC.RedirectURL)
+	}
 	if !cfg.OIDC.AutoProvision {
 		t.Error("OIDC.AutoProvision=false, want true")
+	}
+}
+
+func TestLoad_OIDCRedirectURLDerivedFromPublicURL(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_PUBLIC_URL", "https://basement.example.com/")
+	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
+	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
+	t.Setenv("BASEMENT_OIDC_CLIENT_SECRET", "secret456")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := "https://basement.example.com/api/v1/auth/oidc/callback"
+	if cfg.OIDC.RedirectURL != want {
+		t.Errorf("OIDC.RedirectURL=%q, want %q", cfg.OIDC.RedirectURL, want)
+	}
+}
+
+func TestLoad_OIDCMissingClientID(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
+	t.Setenv("BASEMENT_OIDC_CLIENT_SECRET", "secret456")
+	t.Setenv("BASEMENT_OIDC_REDIRECT_URL", "https://example.com/api/v1/auth/oidc/callback")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_OIDC_CLIENT_ID") {
+		t.Errorf("error missing BASEMENT_OIDC_CLIENT_ID: %v", err)
+	}
+}
+
+func TestLoad_OIDCMissingClientSecret(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
+	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
+	t.Setenv("BASEMENT_OIDC_REDIRECT_URL", "https://example.com/api/v1/auth/oidc/callback")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_OIDC_CLIENT_SECRET") {
+		t.Errorf("error missing BASEMENT_OIDC_CLIENT_SECRET: %v", err)
+	}
+}
+
+func TestLoad_OIDCMissingRedirectURL(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
+	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
+	t.Setenv("BASEMENT_OIDC_CLIENT_SECRET", "secret456")
+	// PublicURL not set, RedirectURL not set — should fail validation.
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_OIDC_REDIRECT_URL") {
+		t.Errorf("error missing BASEMENT_OIDC_REDIRECT_URL: %v", err)
+	}
+}
+
+func TestLoad_OIDCDisabledByDefault(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.OIDC.Issuer != "" {
+		t.Errorf("OIDC.Issuer default=%q, want \"\"", cfg.OIDC.Issuer)
+	}
+	if cfg.OIDC.ClientID != "" {
+		t.Errorf("OIDC.ClientID default=%q, want \"\"", cfg.OIDC.ClientID)
 	}
 }
 
