@@ -36,8 +36,9 @@ function ClusterDetailScreen() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  // Test cluster state
-  const testQuery = useTestClusterQuery(cid);
+  // Test cluster state — auto-fires on mount + caches 60s so the
+  // header HealthPill reflects reality, not a default 'Unavailable'.
+  const testQuery = useTestClusterQuery(cid, { auto: true });
   const testResult = testQuery.data ?? null;
 
   const handleTestCluster = () => {
@@ -52,7 +53,10 @@ function ClusterDetailScreen() {
     return "healthy";
   };
 
-  const status = testResult ? getStatusFromResult(testResult) : "unavailable";
+  const status: "healthy" | "degraded" | "unavailable" | "checking" =
+    testResult ? getStatusFromResult(testResult)
+    : (testQuery.isFetching || testQuery.isPending) ? "checking"
+    : "unavailable";
 
   if (error) {
     return (
@@ -146,6 +150,8 @@ function ClusterDetailScreen() {
             <div className={`text-sm ${testResult.ok ? "text-green-600" : "text-destructive"}`}>
               {testResult.ok ? "✓ Connection successful" : `✗ ${testResult.message}`}
             </div>
+          ) : (testQuery.isFetching || testQuery.isPending) ? (
+            <p className="text-sm text-muted-foreground">Checking connection…</p>
           ) : (
             <p className="text-sm text-muted-foreground">Click "Test connection" to verify the cluster is reachable.</p>
           )}
@@ -444,17 +450,19 @@ function colorDot(color?: string) {
   );
 }
 
-function HealthPill({ status, message }: { status: "healthy" | "degraded" | "unavailable"; message?: string }) {
+function HealthPill({ status, message }: { status: "healthy" | "degraded" | "unavailable" | "checking"; message?: string }) {
   const variants = {
     healthy: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
     degraded: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
     unavailable: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
+    checking: "bg-muted/50 text-muted-foreground border-border",
   } as const;
 
   const labels = {
     healthy: "Healthy",
     degraded: "Degraded",
     unavailable: "Unavailable",
+    checking: "Checking…",
   } as const;
 
   return (
