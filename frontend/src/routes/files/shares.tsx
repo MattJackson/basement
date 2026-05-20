@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useUserShares, useRevokeUserShare } from "@/shared/api/queries";
 import { Button } from "@/components/ui/button";
 import { CopyIcon, TrashIcon, LinkIcon } from "lucide-react";
 
 function SharesList() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const navigate = useNavigate();
   const sharesQuery = useUserShares();
   const revokeShare = useRevokeUserShare();
 
@@ -44,18 +45,22 @@ function SharesList() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Shares</h1>
-        <p className="text-sm text-muted-foreground mt-1">Links you've created</p>
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Shares</h1>
+          <p className="text-sm text-muted-foreground mt-1">Links you've created</p>
+        </div>
+        <Button onClick={() => navigate({ to: "/files/shares/new" })}>+ New share</Button>
       </header>
 
       {shares.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-8 text-center space-y-2">
+        <div className="rounded-lg border border-dashed p-8 text-center space-y-3">
           <LinkIcon className="mx-auto h-12 w-12 text-muted-foreground" />
           <h3 className="text-lg font-medium">No shares yet</h3>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Create share links to give others access to your buckets or specific objects.
           </p>
+          <Button onClick={() => navigate({ to: "/files/shares/new" })}>+ Create your first share</Button>
         </div>
       ) : (
         <div className="rounded-lg border overflow-hidden">
