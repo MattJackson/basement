@@ -177,19 +177,24 @@ function AdminBucketDetail() {
               </div>
             ) : (
               <>
-                <button
-                  onClick={() => {
-                    setAliasInput(bucket.aliases?.[0] ?? "");
-                    setIsEditingAlias(true);
-                  }}
-                  className="text-2xl sm:text-3xl font-semibold tracking-tight hover:underline underline-offset-4 text-left"
-                >
-                  {bucket.aliases?.[0] ? (
-                    bucket.aliases[0]
-                  ) : (
-                    <span className="italic text-muted-foreground/70">(no alias)</span>
-                  )}
-                </button>
+                {/* Real <h1> for a11y / docOutline; the click-to-edit */}
+                {/* button is nested inside so visual + behavior stay */}
+                {/* unchanged but assistive tech sees a page heading. */}
+                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+                  <button
+                    onClick={() => {
+                      setAliasInput(bucket.aliases?.[0] ?? "");
+                      setIsEditingAlias(true);
+                    }}
+                    className="hover:underline underline-offset-4 text-left"
+                  >
+                    {bucket.aliases?.[0] ? (
+                      bucket.aliases[0]
+                    ) : (
+                      <span className="italic text-muted-foreground/70">(no alias)</span>
+                    )}
+                  </button>
+                </h1>
                 {bucket.aliases && bucket.aliases.length > 1 ? (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     {bucket.aliases.slice(1).map((alias) => (
