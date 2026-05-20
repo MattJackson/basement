@@ -6,13 +6,13 @@ import { Button } from "@/components/ui/button";
 import { useUpdateCluster } from "@/shared/api/mutations";
 import type { components } from "@/shared/api/types.gen";
 
-type Driver = "garage-v1" | "garage" | "aws-s3";
+type Driver = "garage-v1" | "garage" | "aws-s3" | "minio";
 
 const DRIVER_OPTIONS: { value: Driver; label: string }[] = [
   { value: "garage-v1", label: "Garage v1" },
   { value: "garage", label: "Garage" },
   { value: "aws-s3", label: "AWS S3" },
-  // { value: "minio", label: "MinIO" }, // lands with DRV.MINIO.A
+  { value: "minio", label: "MinIO / OpenMaxIO" },
 ];
 
 const COLOR_SWATCHES = ["#C9874B", "#10B981", "#3B82F6", "#EF4444", "#8B5CF6", "#F59E0B", "#EC4899", "#06B6D4"];
@@ -72,8 +72,12 @@ export function EditClusterDialog({ open, onOpenChange, cluster }: EditClusterDi
       config.accessKey = s3AccessKey;
       config.secretKey = s3SecretKey;
       if (adminUrl) config.endpoint = adminUrl;
+    } else if (driver === "minio") {
+      config.endpoint = adminUrl;
+      config.access_key = s3AccessKey;
+      config.secret_key = s3SecretKey;
+      config.region = s3Region || "us-east-1";
     }
-    // MinIO branch lands with DRV.MINIO.A.
 
     const update: components["schemas"]["ConnectionUpdate"] = {
       label: label.trim(),

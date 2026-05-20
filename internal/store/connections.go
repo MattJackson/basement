@@ -27,13 +27,15 @@ const (
 	DriverGarage    = "garage"
 	DriverGarageV1  = "garage-v1"
 	DriverAWSS3     = "aws-s3"
+	DriverMinio     = "minio"
 )
 
 // SupportedDrivers is the set of drivers that can be used in connections.
 var SupportedDrivers = map[string]bool{
-	DriverGarage:  true,
+	DriverGarage:   true,
 	DriverGarageV1: true,
 	DriverAWSS3:    true,
+	DriverMinio:    true,
 }
 
 // Connection represents a backend connection configuration.
