@@ -27,12 +27,15 @@ export function EditClusterDialog({ open, onOpenChange, cluster }: EditClusterDi
   const [label, setLabel] = useState(cluster.label);
   const [color, setColor] = useState(cluster.color ?? "#C9874B");
   const [driver, setDriver] = useState<Driver>(cluster.driver as Driver);
-  const [adminUrl, setAdminUrl] = useState(cluster.config.adminUrl || "");
-  const [adminToken, setAdminToken] = useState(cluster.config.adminToken || "");
-  const [s3Url, setS3Url] = useState(cluster.config.s3Url || "");
-  const [s3Region, setS3Region] = useState(cluster.config.s3Region ?? "garage");
-  const [s3AccessKey, setS3AccessKey] = useState(cluster.config.s3AccessKey || "");
-  const [s3SecretKey, setS3SecretKey] = useState(cluster.config.s3SecretKey || "");
+  // Read driver-canonical snake_case keys; legacy camelCase keys are
+  // accepted as fallback for any cluster created before v0.8.0d.5.
+  const cfg = cluster.config as Record<string, string | undefined>;
+  const [adminUrl, setAdminUrl] = useState(cfg.admin_url || cfg.adminUrl || "");
+  const [adminToken, setAdminToken] = useState(cfg.admin_token || cfg.adminToken || "");
+  const [s3Url, setS3Url] = useState(cfg.s3_endpoint || cfg.s3Url || cfg.endpoint || "");
+  const [s3Region, setS3Region] = useState(cfg.region ?? cfg.s3Region ?? "garage");
+  const [s3AccessKey, setS3AccessKey] = useState(cfg.access_key_id || cfg.access_key || cfg.s3AccessKey || "");
+  const [s3SecretKey, setS3SecretKey] = useState(cfg.secret_key || cfg.s3SecretKey || "");
 
   // Reset form to the cluster's current values whenever the dialog
   // (re)opens. Done inline rather than via useEffect to avoid the
@@ -44,12 +47,13 @@ export function EditClusterDialog({ open, onOpenChange, cluster }: EditClusterDi
     setLabel(cluster.label);
     setColor(cluster.color ?? "#C9874B");
     setDriver(cluster.driver as Driver);
-    setAdminUrl(cluster.config.adminUrl || "");
-    setAdminToken(cluster.config.adminToken || "");
-    setS3Url(cluster.config.s3Url || "");
-    setS3Region(cluster.config.s3Region ?? "garage");
-    setS3AccessKey(cluster.config.s3AccessKey || "");
-    setS3SecretKey(cluster.config.s3SecretKey || "");
+    const c = cluster.config as Record<string, string | undefined>;
+    setAdminUrl(c.admin_url || c.adminUrl || "");
+    setAdminToken(c.admin_token || c.adminToken || "");
+    setS3Url(c.s3_endpoint || c.s3Url || c.endpoint || "");
+    setS3Region(c.region ?? c.s3Region ?? "garage");
+    setS3AccessKey(c.access_key_id || c.access_key || c.s3AccessKey || "");
+    setS3SecretKey(c.secret_key || c.s3SecretKey || "");
   }
   if (key === null && lastSeenKey !== null) setLastSeenKey(null);
 
@@ -60,17 +64,18 @@ export function EditClusterDialog({ open, onOpenChange, cluster }: EditClusterDi
 
     const config: Record<string, string> = {};
     
+    // IMPORTANT: config keys must match what the driver expects
+    // (see internal/drivers/*/garage.go etc.). Use snake_case keys.
     if (driver === "garage-v1" || driver === "garage") {
-      config.adminUrl = adminUrl;
-      config.adminToken = adminToken;
-      if (s3Url) config.s3Url = s3Url;
-      config.s3Region = s3Region;
-      if (s3AccessKey) config.s3AccessKey = s3AccessKey;
-      if (s3SecretKey) config.s3SecretKey = s3SecretKey;
+      config.admin_url = adminUrl;
+      config.admin_token = adminToken;
+      if (s3Url) config.s3_endpoint = s3Url;
+      if (s3AccessKey) config.access_key_id = s3AccessKey;
+      if (s3SecretKey) config.secret_key = s3SecretKey;
     } else if (driver === "aws-s3") {
       config.region = s3Region;
-      config.accessKey = s3AccessKey;
-      config.secretKey = s3SecretKey;
+      config.access_key = s3AccessKey;
+      config.secret_key = s3SecretKey;
       if (adminUrl) config.endpoint = adminUrl;
     } else if (driver === "minio") {
       config.endpoint = adminUrl;

@@ -31,7 +31,7 @@ function UserBucketObjects() {
   const bucket = bucketsData?.find((b) => b.id === bid);
   const bucketAlias = bucket?.aliases?.[0] || "(no alias)";
 
-  const { data: objectsPage, isLoading: objectsLoading, refetch } = useUserObjects(
+  const { data: objectsPage, isLoading: objectsLoading, error: objectsError, refetch } = useUserObjects(
     cid,
     bid,
     prefix,
@@ -140,6 +140,20 @@ function UserBucketObjects() {
 
       {objectsLoading ? (
         <BucketListSkeleton />
+      ) : objectsError ? (
+        // Surface the backend error directly. Common case: Garage
+        // cluster Connection lacks an s3_endpoint, so ListObjects
+        // returns 501 DRIVER_UNSUPPORTED. Call out that specifically.
+        <EmptyState
+          icon="alert-circle"
+          title="Can't browse objects"
+          description={
+            String(objectsError).includes("DRIVER_UNSUPPORTED") ||
+            String(objectsError).includes("S3 endpoint not configured")
+              ? "This cluster doesn't have an S3 endpoint configured. Open the cluster in /admin/clusters and set the S3 URL (e.g. http://<garage>:3902) on the Edit dialog."
+              : `Backend returned an error: ${String(objectsError)}`
+          }
+        />
       ) : objectsPage?.objects.length === 0 && (!objectsPage?.prefixes || objectsPage.prefixes.length === 0) ? (
         <EmptyState
           icon="folder-open"

@@ -1,12 +1,12 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { userPage } from "@/shared/layout/userPage";
 
-// Layout for /files/$cid and its children. Renders only the Outlet;
-// the bucket list lives at index.tsx, the bucket browser at b/$bid.tsx.
-// Before this restructure, $cid.tsx was a leaf component with no Outlet,
-// so clicking a bucket changed the URL to /files/$cid/b/$bid but the
-// child route never mounted — destination kept showing the bucket list.
+// Layout for /files/$cid and its children. Wraps Outlet in userPage
+// so the UserShell chrome (header/nav) appears around BOTH the index
+// (bucket list) and child routes (bucket browser at b/$bid). Without
+// userPage here, /files/$cid/b/$bid would render bare (no shell).
 export const Route = createFileRoute("/files/$cid")({
-  component: ClusterLayout,
+  component: userPage(ClusterLayout),
 });
 
 function ClusterLayout() {

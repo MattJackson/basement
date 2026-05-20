@@ -41,21 +41,20 @@ export function AddClusterDialog({ open, onOpenChange }: AddClusterDialogProps) 
 
     const config: Record<string, string> = {};
     
+    // IMPORTANT: config keys must match what the driver expects
+    // (see internal/drivers/*/garage.go etc.). Use snake_case keys.
     if (driver === "garage-v1" || driver === "garage") {
-      config.adminUrl = adminUrl;
-      config.adminToken = adminToken;
-      if (s3Url) config.s3Url = s3Url;
-      config.s3Region = s3Region;
-      if (s3AccessKey) config.s3AccessKey = s3AccessKey;
-      if (s3SecretKey) config.s3SecretKey = s3SecretKey;
+      config.admin_url = adminUrl;
+      config.admin_token = adminToken;
+      if (s3Url) config.s3_endpoint = s3Url;
+      if (s3AccessKey) config.access_key_id = s3AccessKey;
+      if (s3SecretKey) config.secret_key = s3SecretKey;
     } else if (driver === "aws-s3") {
       config.region = s3Region;
-      config.accessKey = s3AccessKey;
-      config.secretKey = s3SecretKey;
+      config.access_key = s3AccessKey;
+      config.secret_key = s3SecretKey;
       if (adminUrl) config.endpoint = adminUrl;
     } else if (driver === "minio") {
-      // MinIO uses the S3-compatible plane via aws-sdk-go-v2; the
-      // driver requires endpoint + access_key + secret_key + region.
       config.endpoint = adminUrl;
       config.access_key = s3AccessKey;
       config.secret_key = s3SecretKey;
