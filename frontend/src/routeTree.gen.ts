@@ -24,6 +24,7 @@ import { Route as FilesCidIndexRouteImport } from "./routes/files/$cid/index"
 import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
 import { Route as AdminBucketsIndexRouteImport } from "./routes/admin/buckets/index"
+import { Route as FilesSharesNewRouteImport } from "./routes/files/shares/new"
 import { Route as FilesClustersNewRouteImport } from "./routes/files/clusters/new"
 import { Route as AdminClustersNewRouteImport } from "./routes/admin/clusters/new"
 import { Route as AdminClustersCidIndexRouteImport } from "./routes/admin/clusters/$cid/index"
@@ -108,6 +109,11 @@ const AdminBucketsIndexRoute = AdminBucketsIndexRouteImport.update({
   path: "/admin/buckets/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesSharesNewRoute = FilesSharesNewRouteImport.update({
+  id: "/new",
+  path: "/new",
+  getParentRoute: () => FilesSharesRoute,
+} as any)
 const FilesClustersNewRoute = FilesClustersNewRouteImport.update({
   id: "/files/clusters/new",
   path: "/files/clusters/new",
@@ -157,13 +163,14 @@ export interface FileRoutesByFullPath {
   "/admin/users": typeof AdminUsersRoute
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
-  "/files/shares": typeof FilesSharesRoute
+  "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
+  "/files/shares/new": typeof FilesSharesNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
@@ -181,13 +188,14 @@ export interface FileRoutesByTo {
   "/admin/system": typeof AdminSystemRoute
   "/admin/users": typeof AdminUsersRoute
   "/files/keys": typeof FilesKeysRoute
-  "/files/shares": typeof FilesSharesRoute
+  "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
+  "/files/shares/new": typeof FilesSharesNewRoute
   "/admin/buckets": typeof AdminBucketsIndexRoute
   "/admin/clusters": typeof AdminClustersIndexRoute
   "/admin/keys": typeof AdminKeysIndexRoute
@@ -207,13 +215,14 @@ export interface FileRoutesById {
   "/admin/users": typeof AdminUsersRoute
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
-  "/files/shares": typeof FilesSharesRoute
+  "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
+  "/files/shares/new": typeof FilesSharesNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
@@ -241,6 +250,7 @@ export interface FileRouteTypes {
     | "/files/"
     | "/admin/clusters/new"
     | "/files/clusters/new"
+    | "/files/shares/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
@@ -265,6 +275,7 @@ export interface FileRouteTypes {
     | "/files"
     | "/admin/clusters/new"
     | "/files/clusters/new"
+    | "/files/shares/new"
     | "/admin/buckets"
     | "/admin/clusters"
     | "/admin/keys"
@@ -290,6 +301,7 @@ export interface FileRouteTypes {
     | "/files/"
     | "/admin/clusters/new"
     | "/files/clusters/new"
+    | "/files/shares/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
@@ -309,7 +321,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRoute
   FilesCidRoute: typeof FilesCidRouteWithChildren
   FilesKeysRoute: typeof FilesKeysRoute
-  FilesSharesRoute: typeof FilesSharesRoute
+  FilesSharesRoute: typeof FilesSharesRouteWithChildren
   FilesSyncsRoute: typeof FilesSyncsRoute
   ShareTokenRoute: typeof ShareTokenRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -433,6 +445,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminBucketsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/files/shares/new": {
+      id: "/files/shares/new"
+      path: "/new"
+      fullPath: "/files/shares/new"
+      preLoaderRoute: typeof FilesSharesNewRouteImport
+      parentRoute: typeof FilesSharesRoute
+    }
     "/files/clusters/new": {
       id: "/files/clusters/new"
       path: "/files/clusters/new"
@@ -506,6 +525,18 @@ const FilesCidRouteWithChildren = FilesCidRoute._addFileChildren(
   FilesCidRouteChildren,
 )
 
+interface FilesSharesRouteChildren {
+  FilesSharesNewRoute: typeof FilesSharesNewRoute
+}
+
+const FilesSharesRouteChildren: FilesSharesRouteChildren = {
+  FilesSharesNewRoute: FilesSharesNewRoute,
+}
+
+const FilesSharesRouteWithChildren = FilesSharesRoute._addFileChildren(
+  FilesSharesRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminLoginRoute: AdminLoginRoute,
@@ -513,7 +544,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRoute,
   FilesCidRoute: FilesCidRouteWithChildren,
   FilesKeysRoute: FilesKeysRoute,
-  FilesSharesRoute: FilesSharesRoute,
+  FilesSharesRoute: FilesSharesRouteWithChildren,
   FilesSyncsRoute: FilesSyncsRoute,
   ShareTokenRoute: ShareTokenRoute,
   AdminIndexRoute: AdminIndexRoute,
