@@ -200,6 +200,10 @@ export function useGetCluster(cid: string) {
 }
 
 export function useTestClusterQuery(cid: string) {
+  // Manual-only — never auto-fires on mount, never polls. Caller
+  // triggers via .refetch(). HealthCheck on Garage takes 10–20s
+  // because /v1/health round-trips the whole cluster; auto-polling
+  // it per-cluster-row at 30s cadence saturates the server.
   return useQuery<components["schemas"]["ConnectionTestResult"], Error>({
     queryKey: ["admin", "clusters", cid, "_test"],
     queryFn: async () => {
@@ -209,8 +213,9 @@ export function useTestClusterQuery(cid: string) {
       if (!response.ok || !data) throw apiError(`testCluster/${cid}`, response.status, error);
       return data as components["schemas"]["ConnectionTestResult"];
     },
-    enabled: !!cid,
-    refetchInterval: 30_000,
-    refetchOnWindowFocus: true,
+    enabled: false,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
   });
 }

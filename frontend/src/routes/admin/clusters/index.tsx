@@ -205,11 +205,11 @@ interface ClusterRowProps {
 
 function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
   const navigate = useNavigate();
-  const { data: testResult, isLoading: testing } = useTestClusterQuery(cluster.id);
-
-  const status = testResult
-    ? getStatusFromResult(testResult)
-    : "unavailable"; // Default to unavailable until first test
+  // Manual test only — Garage /v1/health is 10-20s round-trip, so we
+  // never auto-poll. User clicks "Test" on the detail page when they
+  // want a fresh status.
+  const { data: testResult, isFetching, refetch } = useTestClusterQuery(cluster.id);
+  const status = testResult ? getStatusFromResult(testResult) : "unknown";
 
   return (
     <TableRow
@@ -220,14 +220,26 @@ function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
       <TableCell className="font-medium">{cluster.label}</TableCell>
       <TableCell><DriverBadge driver={cluster.driver} /></TableCell>
       <TableCell>
-        {testing ? (
-          <Skeleton className="h-6 w-20" />
+        {isFetching ? (
+          <span className="text-xs text-muted-foreground">Testing…</span>
+        ) : !testResult ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={(e) => {
+              e.stopPropagation();
+              refetch();
+            }}
+          >
+            Test
+          </Button>
         ) : status === "unavailable" && testResult?.message ? (
           <TooltipWrapper message={testResult.message}>
             <span className="text-xs text-destructive">Unavailable</span>
           </TooltipWrapper>
         ) : (
-          <HealthPill status={status} />
+          <HealthPill status={status as "healthy" | "degraded" | "unavailable"} />
         )}
       </TableCell>
       <TableCell>
