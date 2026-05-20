@@ -828,3 +828,50 @@ func TestDriver_UnsupportedHelper(t *testing.T) {
 		t.Errorf("not ErrUnsupported: %v", err)
 	}
 }
+
+// TestMinio_ServerSideCopy_HappyPath ensures ServerSideCopy uses CopyObject.
+func TestMinio_ServerSideCopy_HappyPath(t *testing.T) {
+	var copyCalled bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" && strings.Contains(r.URL.RawQuery, "x-id=CopyObject") {
+			copyCalled = true
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><ETag>"abc123"</ETag></CopyObjectResult>`))
+			return
+		}
+
+		if r.Method == "OPTIONS" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	d := makeMinioDriver(t, ts)
+
+	err := d.ServerSideCopy(context.Background(), "src-bucket", "src-key", "dst-bucket", "dst-key")
+	if err != nil {
+		t.Fatalf("ServerSideCopy: %v", err)
+	}
+	if !copyCalled {
+		t.Fatal("COPY request not sent to test server")
+	}
+}
+
+// TestMinio_ServerSideCopy_UsesCaps checks that Capabilities.ServerSideCopy is true.
+func TestMinio_ServerSideCopy_UsesCaps(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {}))
+	defer ts.Close()
+	d := makeMinioDriver(t, ts)
+
+	caps, err := d.Capabilities(context.Background())
+	if err != nil {
+		t.Fatalf("Capabilities: %v", err)
+	}
+	if !caps.ServerSideCopy {
+		t.Errorf("ServerSideCopy capability not set; got %+v", caps)
+	}
+}

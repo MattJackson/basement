@@ -9,16 +9,17 @@ import (
 
 // Caps represents driver capability flags.
 type Caps struct {
-	Driver         string           `json:"driver"`
-	Layout         LayoutCapability `json:"layout"`
-	Quotas         bool             `json:"quotas"`
-	BucketAliases  bool             `json:"bucketAliases"`
-	KeyModel       KeyModel         `json:"keyModel"`
-	Presign        bool             `json:"presign"`
-	Multipart      bool             `json:"multipart"`
-	Versioning     bool             `json:"versioning"`
-	ObjectBrowse   bool             `json:"objectBrowse"`
-	Streaming      bool             `json:"streaming"`
+	Driver          string           `json:"driver"`
+	Layout          LayoutCapability `json:"layout"`
+	Quotas          bool             `json:"quotas"`
+	BucketAliases   bool             `json:"bucketAliases"`
+	KeyModel        KeyModel         `json:"keyModel"`
+	Presign         bool             `json:"presign"`
+	Multipart       bool             `json:"multipart"`
+	Versioning      bool             `json:"versioning"`
+	ObjectBrowse    bool             `json:"objectBrowse"`
+	Streaming       bool             `json:"streaming"`
+	ServerSideCopy  bool             `json:"serverSideCopy"`
 }
 
 // LayoutCapability is the layout management mode supported by the driver.
@@ -264,4 +265,10 @@ type Driver interface {
 	// Streaming object operations for sync primitives.
 	StreamObject(ctx context.Context, bucket, key, rng string) (StreamResult, error)
 	PutObjectStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string, size int64) (PutResult, error)
+
+	// ServerSideCopy copies an object from (srcBucket, srcKey) to
+	// (dstBucket, dstKey) within the same backend. Drivers that can't
+	// (or for cross-driver pairs the sync engine never calls this on)
+	// return ErrUnsupported.
+	ServerSideCopy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) error
 }

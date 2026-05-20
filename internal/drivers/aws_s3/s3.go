@@ -3,7 +3,9 @@ package aws_s3
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -330,4 +332,26 @@ func (d *driver) PutObjectStream(ctx context.Context, bucket, key string, reader
 	return driverpkg.PutResult{
 		ETag: aws.ToString(resp.ETag),
 	}, nil
+}
+
+// ServerSideCopy copies an object from (srcBucket, srcKey) to (dstBucket, dstKey)
+// using S3's CopyObject API for same-backend optimization.
+func (d *driver) ServerSideCopy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) error {
+	input := &s3.CopyObjectInput{
+		CopySource:      aws.String(fmt.Sprintf("%s/%s", srcBucket, url.QueryEscape(srcKey))),
+		Bucket:          aws.String(dstBucket),
+		Key:             aws.String(dstKey),
+	}
+
+	_, err := d.s3Client.client.CopyObject(ctx, input)
+	if err != nil {
+		return &driverpkg.Error{
+			Op:      "ServerSideCopy",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	return nil
 }
