@@ -32,11 +32,16 @@ export function AppShell({ children }: AppShellProps): ReactNode {
               Admin
             </span>
             <nav className="flex items-center gap-5" aria-label="Primary">
+              {/* 'Buckets' previously pointed at '/' which the role */}
+              {/* gate redirects to '/admin/clusters' for UIAdmins — */}
+              {/* so it landed on the same page as the Clusters nav */}
+              {/* link. Now points directly at the aggregated buckets */}
+              {/* view (lives at /admin/buckets, real route as of */}
+              {/* v0.5.1 USER.ROUTING). */}
               <Link
-                to="/"
+                to="/admin/buckets"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                activeOptions={{ exact: true }}
               >
                 Buckets
               </Link>
