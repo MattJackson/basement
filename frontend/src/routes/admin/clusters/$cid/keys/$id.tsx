@@ -8,12 +8,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
-import { useKey } from "@/shared/api/queries";
+import { useKey, useClusterBuckets, useGetCluster } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 import { useUpdateKeyPermissions, useDeleteKey } from "@/shared/api/mutations";
 import { useState } from "react";
 import type { components } from "@/shared/api/types.gen";
 import { DangerZone } from "@/shared/ui/DangerZone";
+import { GrantBucketAccessDialog } from "@/shared/ui/GrantBucketAccessDialog";
+import { RevokeAccessConfirm } from "@/shared/ui/RevokeAccessConfirm";
 
 export const Route = createFileRoute("/admin/clusters/$cid/keys/$id")({
   component: adminPage(KeyDetailScreen),
