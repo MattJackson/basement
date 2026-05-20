@@ -409,7 +409,7 @@ function AdminBucketDetail() {
 function BackLink() {
   return (
     <Link
-      to="/admin"
+      to="/"
       className="inline-flex items-center gap-1 text-sm font-medium hover:underline text-muted-foreground"
     >
       ← Buckets
