@@ -101,7 +101,7 @@ export function UserKeyPairCard({
           ) : null}
         </div>
 
-        {created && (
+        {created && new Date(created).getFullYear() > 1970 && (
           <div className="text-xs text-muted-foreground pt-1">
             Created {new Date(created).toLocaleDateString()}
           </div>
