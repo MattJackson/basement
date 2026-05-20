@@ -66,6 +66,20 @@ export function UserMenu() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        {/* Persona switcher — admin ⇄ user. The role gate at `/` */}
+        {/* routes UIAdmins to /admin and others to /files; this lets */}
+        {/* an admin manually visit the user view + back. Both links */}
+        {/* render for now (pre-RBAC, everyone is admin); when RBAC */}
+        {/* lands, hide the admin link for non-UIAdmins. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLinkItem href="/admin/clusters">
+            Switch to admin view
+          </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem href="/files">
+            Switch to user view
+          </DropdownMenuLinkItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuLinkItem href="/admin/clusters">
             Clusters
@@ -73,9 +87,9 @@ export function UserMenu() {
           <DropdownMenuLinkItem href="/admin/keys">
             Access keys
           </DropdownMenuLinkItem>
-          <DropdownMenuItem disabled>
-            Settings
-          </DropdownMenuItem>
+          <DropdownMenuLinkItem href="/admin/system">
+            System settings
+          </DropdownMenuLinkItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout}>Sign out</DropdownMenuItem>

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -176,7 +177,24 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := s.conns.Update(r.Context(), cid, patch)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		// Map the real store error to the right code+status; the
+		// old freshman code returned 404 CLUSTER_NOT_FOUND for any
+		// error from Update, swallowing duplicate-label, unsupported-
+		// driver, and disk-write failures. Operator saw the wrong
+		// error message after a successful Edit Cluster save.
+		msg := err.Error()
+		switch {
+		case strings.Contains(msg, "connection not found"):
+			writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		case strings.Contains(msg, "duplicate label"):
+			writeErrorSimple(w, http.StatusConflict, "DUPLICATE_LABEL", msg)
+		case strings.Contains(msg, "unsupported driver"):
+			writeErrorSimple(w, http.StatusBadRequest, "INVALID_DRIVER", msg)
+		case strings.Contains(msg, "persisting"):
+			writeErrorSimple(w, http.StatusInternalServerError, "STORE_ERROR", msg)
+		default:
+			writeErrorSimple(w, http.StatusInternalServerError, "UPDATE_FAILED", msg)
+		}
 		return
 	}
 
