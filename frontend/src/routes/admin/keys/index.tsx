@@ -65,8 +65,11 @@ function KeysScreen() {
 
   const filteredKeys = keys.filter((key) => {
     if (clusterFilter && key.connectionId !== clusterFilter) return false;
-    const nameMatch = key.name?.toLowerCase().includes(search.toLowerCase()) ?? false;
-    return nameMatch;
+    if (!search) return true;
+    const needle = search.toLowerCase();
+    const nameMatch = key.name?.toLowerCase().includes(needle) ?? false;
+    const idMatch = key.id?.toLowerCase().includes(needle) ?? false;
+    return nameMatch || idMatch;
   });
 
   const errorBanner = errors.length > 0 ? (

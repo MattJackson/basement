@@ -35,10 +35,26 @@ export function Logo({ href = "/", iconOnly = false, className = "" }: LogoProps
         className="h-10 w-10 shrink-0"
       />
       {!iconOnly && (
-        <span className="text-xl tracking-tight font-semibold">
-          Basement
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className="text-xl tracking-tight font-semibold">
+            Basement
+          </span>
+          <LogoVersion />
+        </div>
       )}
     </a>
   );
 }
+
+import { useVersion } from "@/shared/api/queries";
+
+function LogoVersion() {
+  const { data } = useVersion();
+  if (!data?.version) return null;
+  return (
+    <span className="text-[10px] text-muted-foreground/70 tabular-nums leading-none">
+      {data.version}
+    </span>
+  );
+}
+

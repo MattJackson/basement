@@ -149,9 +149,6 @@ function ClusterDetailScreen() {
             Buckets
             {buckets ? <span className="ml-1.5 text-muted-foreground/60">({buckets.length})</span> : null}
           </h2>
-          <a href="/" className="text-xs font-medium hover:underline text-muted-foreground">
-            View all →
-          </a>
         </div>
         {bucketsLoading ? (
           <Skeleton className="h-24 w-full rounded-lg" />
@@ -181,8 +178,7 @@ function ClusterDetailScreen() {
             </Table>
             {buckets.length > 8 && (
               <div className="px-4 py-2 text-xs text-muted-foreground border-t">
-                + {buckets.length - 8} more —{" "}
-                <a href="/" className="hover:underline font-medium">view all</a>
+                + {buckets.length - 8} more in this cluster
               </div>
             )}
           </div>
@@ -277,7 +273,7 @@ function ClusterDetailScreen() {
       {/* Layout section - gated by capability. Route under cluster
           scope lands with CLUSTER.LAYOUT-EDITOR; for now anchor. */}
       {capabilities?.layout !== "readonly" ? (
-        <a href={`/admin/clusters/${cid}/layout`}>
+        <Link to="/admin/clusters/$cid/layout" params={{ cid }}>
           <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -302,7 +298,7 @@ function ClusterDetailScreen() {
               </div>
             </CardContent>
           </Card>
-        </a>
+        </Link>
       ) : (
         <Card>
           <CardContent className="pt-6">
