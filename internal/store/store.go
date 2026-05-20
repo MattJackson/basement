@@ -51,6 +51,16 @@ func Open(dataDir string, retention time.Duration) (*Store, error) {
 		return nil, fmt.Errorf("loading existing data: %w", err)
 	}
 
+	// Initialize OrgCapabilities sub-store. AUTH.RBAC (v0.5.7) added
+	// the type + accessor but the freshman forgot to wire it here —
+	// /admin/system handler then nil-deref'd, returning 500. Caught
+	// in v0.8.0d.12 post-deploy senior testing.
+	orgCaps, err := OpenOrgCapabilities(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening org capabilities: %w", err)
+	}
+	s.orgCaps = orgCaps
+
 	return s, nil
 }
 
