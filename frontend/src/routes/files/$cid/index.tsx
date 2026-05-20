@@ -8,10 +8,12 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes } from "@/shared/lib/format";
 import { useUserClusterBuckets, useUserClusters } from "@/shared/api/queries";
-import { userPage } from "@/shared/layout/userPage";
-
+// NOTE: do NOT wrap in userPage() — the parent layout
+// (routes/files/$cid.tsx) already wraps Outlet in userPage().
+// Wrapping again here would double-render UserShell (caught in
+// v0.8.0d.7 — operator saw two headers stacked).
 export const Route = createFileRoute("/files/$cid/")({
-  component: userPage(ClusterBuckets),
+  component: ClusterBuckets,
 });
 
 function ClusterBuckets() {
