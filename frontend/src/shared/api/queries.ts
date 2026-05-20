@@ -56,28 +56,34 @@ export function useCapabilities() {
   });
 }
 
-export function useNodes() {
+export function useNodes(cid: string) {
   return useQuery<Node[]>({
-    queryKey: ["admin", "nodes"],
+    queryKey: ["admin", "clusters", cid, "nodes"],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/admin/nodes");
-      if (!response.ok || !data) throw apiError("admin/nodes", response.status, error);
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}/nodes", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/nodes`, response.status, error);
       return data as Node[];
     },
+    enabled: !!cid,
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
     retry: 1,
   });
 }
 
-export function useLayout() {
+export function useLayout(cid: string) {
   return useQuery<Layout>({
-    queryKey: ["admin", "layout"],
+    queryKey: ["admin", "clusters", cid, "layout"],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/admin/layout");
-      if (!response.ok || !data) throw apiError("admin/layout", response.status, error);
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}/layout", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/layout`, response.status, error);
       return data as Layout;
     },
+    enabled: !!cid,
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
     retry: 1,

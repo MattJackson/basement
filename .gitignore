@@ -47,3 +47,4 @@ internal/web/dist/*
 # JSON store runtime data (for local dev)
 data/
 *.local.json
+basement

@@ -26,7 +26,7 @@ function ClusterDetailScreen() {
   const { cid } = Route.useParams();
 
   const { data: cluster, isLoading, error } = useGetCluster(cid);
-  const { data: nodes } = useNodes();
+  const { data: nodes } = useNodes(cid);
   const { data: capabilities } = useCapabilities();
   const deleteCluster = useDeleteCluster();
 
