@@ -26,7 +26,7 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import type { components } from "@/shared/api/types.gen";
 import { adminPage } from "@/shared/layout/adminPage";
-import { useListClusters, useTestClusterQuery } from "@/shared/api/queries";
+import { useListClusters, useTestClusterQuery, useClusterBuckets, useClusterKeys } from "@/shared/api/queries";
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { DeleteClusterConfirm } from "@/shared/ui/DeleteClusterConfirm";
 import { AddClusterDialog } from "@/components/clusters/AddClusterDialog";
@@ -102,7 +102,7 @@ if (error) {
                 <TableHead>Label</TableHead>
                 <TableHead>Driver</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Buckets</TableHead>
+                <TableHead>Resources</TableHead>
                 <TableHead className="w-16">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -142,7 +142,7 @@ if (error) {
                 <TableHead>Label</TableHead>
                 <TableHead>Driver</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Buckets</TableHead>
+                <TableHead>Resources</TableHead>
                 <TableHead className="w-16">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -197,6 +197,23 @@ function getStatusFromResult(result: components["schemas"]["ConnectionTestResult
   return "unavailable";
 }
 
+/** Bucket + key counts for the clusters list row. Two queries per
+ *  row but they hit /admin/clusters/{cid}/{buckets,keys} which are
+ *  cached for 30s — and on a single-row deployment we're talking
+ *  one extra fetch per resource type. */
+function ClusterCounts({ cid }: { cid: string }) {
+  const { data: buckets, isLoading: loadingB } = useClusterBuckets(cid);
+  const { data: keys, isLoading: loadingK } = useClusterKeys(cid);
+  if (loadingB || loadingK) return <span className="text-xs text-muted-foreground">…</span>;
+  const b = buckets?.length ?? 0;
+  const k = keys?.length ?? 0;
+  return (
+    <span className="text-xs text-muted-foreground">
+      <strong className="text-foreground tabular-nums">{b}</strong> buckets · <strong className="text-foreground tabular-nums">{k}</strong> keys
+    </span>
+  );
+}
+
 interface ClusterRowProps {
   cluster: components["schemas"]["Connection"];
   onEdit: () => void;
@@ -243,8 +260,7 @@ function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
         )}
       </TableCell>
       <TableCell>
-        {/* TODO: Implement bucket count per cluster */}
-        <span className="opacity-60">—</span>
+        <ClusterCounts cid={cluster.id} />
       </TableCell>
       <TableCell>
         <DropdownMenu>
