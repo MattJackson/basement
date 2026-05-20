@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { userPage } from "@/shared/layout/userPage";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,7 +19,7 @@ function Progress({ value }: { value: number }) {
 }
 
 export const Route = createFileRoute("/files/syncs")({
-  component: SyncsPage,
+  component: userPage(SyncsPage),
 });
 
 function SyncsPage() {

@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { userPage } from "@/shared/layout/userPage";
 import { useOrgCapabilities } from "@/shared/api/queries";
 import { useCreateUserCluster, useTestUserCluster } from "@/shared/api/mutations";
 import { useState } from "react";
 
 export const Route = createFileRoute("/files/clusters/new")({
-  component: AddClusterPage,
+  component: userPage(AddClusterPage),
 });
 
 type DriverName = "garage" | "garage-v1" | "aws-s3" | "minio";
