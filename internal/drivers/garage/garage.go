@@ -1,7 +1,11 @@
 // Package garage implements the garage device driver for Garage v2 admin API.
 package garage
 
-import driverpkg "github.com/mattjackson/basement/internal/driver"
+import (
+	"fmt"
+
+	driverpkg "github.com/mattjackson/basement/internal/driver"
+)
 
 func init() {
 	driverpkg.Register("garage", newDriver)
@@ -25,15 +29,26 @@ type driver struct {
 	s3Endpoint string
 	accessKey  string
 	secretKey  string
+	s3Client   *s3Client
 }
 
 func newDriver(cfg driverpkg.Config) (driverpkg.Driver, error) {
-	return &driver{
+	d := &driver{
 		client:     newClient(cfg),
 		s3Endpoint: cfg["s3_endpoint"],
 		accessKey:  cfg["access_key_id"],
 		secretKey:  cfg["secret_key"],
-	}, nil
+	}
+
+	if d.s3Endpoint != "" {
+		var err error
+		d.s3Client, err = newS3Client(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", d.s3Endpoint, err)
+		}
+	}
+
+	return d, nil
 }
 
 func (d *driver) unsupported(op string) error {
