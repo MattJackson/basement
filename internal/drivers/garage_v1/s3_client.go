@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 // s3Client wraps the AWS S3 client and provides a convenient interface for
@@ -98,6 +99,62 @@ func (c *s3Client) presignPutObject(ctx context.Context, bucket, key string, ttl
 	}
 
 	req, err := presignClient.PresignPutObject(ctx, input, s3.WithPresignExpires(ttl))
+
+	if err != nil {
+		return "", err
+	}
+
+	return req.URL, nil
+}
+
+// createMultipartUpload starts a multipart upload.
+func (c *s3Client) createMultipartUpload(ctx context.Context, bucket, key, contentType string) (*s3.CreateMultipartUploadOutput, error) {
+	input := &s3.CreateMultipartUploadInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	return c.client.CreateMultipartUpload(ctx, input)
+}
+
+// completeMultipartUpload completes a multipart upload with all parts.
+func (c *s3Client) completeMultipartUpload(ctx context.Context, bucket, key, uploadID string, parts []types.CompletedPart) (*s3.CompleteMultipartUploadOutput, error) {
+	input := &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &types.CompletedMultipartUpload{
+			Parts: parts,
+		},
+	}
+
+	return c.client.CompleteMultipartUpload(ctx, input)
+}
+
+// abortMultipartUpload cancels a multipart upload.
+func (c *s3Client) abortMultipartUpload(ctx context.Context, bucket, key, uploadID string) error {
+	_, err := c.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	return err
+}
+
+// presignUploadPart creates a presigned URL for uploading a part.
+func (c *s3Client) presignUploadPart(ctx context.Context, bucket, key, uploadID string, partNum int, ttl time.Duration) (string, error) {
+	presignClient := s3.NewPresignClient(c.client)
+
+	req, err := presignClient.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(int32(partNum)),
+	}, s3.WithPresignExpires(ttl))
 
 	if err != nil {
 		return "", err
