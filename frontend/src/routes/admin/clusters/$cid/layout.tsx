@@ -272,8 +272,8 @@ function ClusterLayoutScreen() {
                 <li key={n.id} className="flex items-center gap-2 text-muted-foreground">
                   <span className="font-mono text-xs">{n.id.slice(0, 12)}</span>
                   <Badge variant="secondary" className="capitalize">{n.role ?? "unassigned"}</Badge>
-                  <span>· {n.zone ?? "—"}</span>
-                  <span>· {n.capacity ? humanizeBytes(n.capacity) : "—"}</span>
+                  {n.zone ? <span>· {n.zone}</span> : null}
+                  {n.capacity ? <span>· {humanizeBytes(n.capacity)}</span> : null}
                   {n.tags && n.tags.length > 0 ? <span>· {n.tags.join(", ")}</span> : null}
                 </li>
               ))}
