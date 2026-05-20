@@ -210,7 +210,7 @@ function KeysScreen() {
                   <TableCell>
                     <ClusterBadge connectionId={key.connectionId} />
                   </TableCell>
-                  <TableCell className="font-medium">{key.name ?? "-"}</TableCell>
+                  <TableCell className="font-medium">{key.name ?? "—"}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-xs">{key.id}</span>
