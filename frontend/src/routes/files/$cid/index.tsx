@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes } from "@/shared/lib/format";
-import { useUserClusterBuckets, useUserClusters } from "@/shared/api/queries";
+import { useUserBucket, useUserClusterBuckets, useUserClusters } from "@/shared/api/queries";
 // NOTE: do NOT wrap in userPage() — the parent layout
 // (routes/files/$cid.tsx) already wraps Outlet in userPage().
 // Wrapping again here would double-render UserShell (caught in
@@ -111,12 +111,11 @@ function BucketRow({
   fallbackAliases: string[];
   onNavigate: () => void;
 }) {
-  const { data: detail } = useUserClusterBuckets(cid);
-  const bucketDetail = detail?.find((b) => b.id === bucketId);
-  
-  // Fallback to fetching detail if not in list response (hydration pattern)
-  const actualDetail = bucketDetail; 
-  const aliases = actualDetail?.aliases ?? fallbackAliases;
+  // Per-row hydration: Garage v1's ListBuckets returns bytes=0,
+  // objects=0 in the list response. Call useUserBucket per row to
+  // pull real stats from GetBucket. React Query dedupes + caches.
+  const { data: detail } = useUserBucket(cid, bucketId);
+  const aliases = detail?.aliases ?? fallbackAliases;
   const primaryAlias = aliases[0];
 
   return (
@@ -129,10 +128,10 @@ function BucketRow({
         )}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {actualDetail ? humanizeBytes(actualDetail.bytes) : <Skeleton className="h-3 w-12 ml-auto" />}
+        {detail ? humanizeBytes(detail.bytes) : <Skeleton className="h-3 w-12 ml-auto" />}
       </TableCell>
       <TableCell className="text-right tabular-nums">
-        {actualDetail ? (actualDetail.objects ?? 0).toLocaleString() : <Skeleton className="h-3 w-8 ml-auto" />}
+        {detail ? (detail.objects ?? 0).toLocaleString() : <Skeleton className="h-3 w-8 ml-auto" />}
       </TableCell>
       <TableCell>
         <DropdownMenu>
