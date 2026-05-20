@@ -233,6 +233,7 @@ export function useUpdateCluster(cid: string) {
   });
 }
 
+
 /**
  * Two-phase delete for clusters: POST /_arm-delete to mint a short-
  * lived HMAC token, then DELETE with X-Confirm-Delete header carrying
@@ -283,6 +284,56 @@ export function useTestCluster(cid: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid] });
+    },
+  });
+}
+
+// Layout editor mutations — per-cluster stage/apply/revert.
+
+export function useStageLayoutChange(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<components["schemas"]["LayoutDiff"], Error, components["schemas"]["LayoutChange"]>({
+    mutationFn: async (change) => {
+      const { data, error, response } = await client.POST("/admin/clusters/{cid}/layout/stage", {
+        params: { path: { cid } },
+        body: change,
+      });
+      if (!response.ok || !data) throw apiError(`stageLayout/${cid}`, response.status, error);
+      return data as components["schemas"]["LayoutDiff"];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "layout"] });
+    },
+  });
+}
+
+export function useApplyLayout(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: async () => {
+      const { response, error } = await client.POST("/admin/clusters/{cid}/layout/apply", {
+        params: { path: { cid } },
+      });
+      if (!response.ok) throw apiError(`applyLayout/${cid}`, response.status, error);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "layout"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "nodes"] });
+    },
+  });
+}
+
+export function useRevertLayout(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: async () => {
+      const { response, error } = await client.POST("/admin/clusters/{cid}/layout/revert", {
+        params: { path: { cid } },
+      });
+      if (!response.ok) throw apiError(`revertLayout/${cid}`, response.status, error);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "layout"] });
     },
   });
 }

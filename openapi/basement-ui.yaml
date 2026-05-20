@@ -1082,6 +1082,80 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/nodes:
+    get:
+      operationId: listClusterNodes
+      summary: List nodes for a specific cluster
+      tags: [AdminCluster]
+      security: [{ cookieAuth: [] }]
+      parameters:
+      - { name: cid, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Node' }
+        '404': { description: Cluster not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /admin/clusters/{cid}/layout:
+    get:
+      operationId: getClusterLayout
+      summary: Get the current layout for a cluster
+      tags: [AdminCluster]
+      security: [{ cookieAuth: [] }]
+      parameters:
+      - { name: cid, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Layout' }
+        '404': { description: Cluster not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /admin/clusters/{cid}/layout/stage:
+    post:
+      operationId: stageClusterLayout
+      summary: Stage a single node change against this cluster's layout
+      tags: [AdminCluster]
+      security: [{ cookieAuth: [] }]
+      parameters:
+      - { name: cid, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LayoutChange' }
+      responses:
+        '200':
+          description: Diff of staged change
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LayoutDiff' }
+        '404': { description: Cluster not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /admin/clusters/{cid}/layout/apply:
+    post:
+      operationId: applyClusterLayout
+      summary: Apply the staged layout for this cluster
+      tags: [AdminCluster]
+      security: [{ cookieAuth: [] }]
+      parameters:
+      - { name: cid, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Applied }
+        '404': { description: Cluster not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
+  /admin/clusters/{cid}/layout/revert:
+    post:
+      operationId: revertClusterLayout
+      summary: Discard the staged layout for this cluster
+      tags: [AdminCluster]
+      security: [{ cookieAuth: [] }]
+      parameters:
+      - { name: cid, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Reverted }
+        '404': { description: Cluster not found, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } } }
   /admin/clusters/{cid}/buckets:
     get:
       operationId: listBucketsByCluster
@@ -3149,7 +3223,6 @@ components:
         version:
           type: integer
           format: int64
-          minimum: 1
           description: Layout version number (monotonically increasing).
         nodes:
           type: array
@@ -3161,45 +3234,33 @@ components:
           items:
             type: string
           description: Zone names defined in this layout.
+        staged:
+          $ref: '#/components/schemas/Layout'
+          nullable: true
+          description: Pending uncommitted layout (present when there is a staged change set). Null when no changes are pending.
     LayoutChange:
       type: object
       required:
-      - node_changes
+      - nodeId
       properties:
-        node_changes:
-          type: array
-          items:
-            $ref: '#/components/schemas/LayoutNodeChange'
-          description: List of node changes to apply.
-    LayoutNodeChange:
-      type: object
-      required:
-      - node_id
-      properties:
-        node_id:
+        nodeId:
           type: string
-          description: ID of the node being changed (required for all operations).
+          description: ID of the node being staged.
+        role:
+          type: string
+          enum: [storage, gateway, ""]
+          description: Optional new role. Empty string treats the node as unassigned.
         zone:
           type: string
-          nullable: true
-          description: New zone assignment. If null and node exists, no change to zone.
+          description: Optional new zone assignment.
         capacity:
           type: integer
           format: int64
-          minimum: 0
-          nullable: true
-          description: New capacity in bytes. If null and node exists, sets gateway role. For new nodes,
-            required if not a gateway.
+          description: Optional new capacity in bytes.
         tags:
-          type: object
-          additionalProperties:
-            type: string
-          nullable: true
-          description: New tags map for the node. Replaces all existing tags if provided.
-        remove:
-          type: boolean
-          default: false
-          description: If true, marks this node for removal from the layout.
+          type: array
+          items: { type: string }
+          description: Optional replacement tag list.
     LayoutDiff:
       type: object
       required:

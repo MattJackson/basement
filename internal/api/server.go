@@ -106,11 +106,11 @@ func (s *Server) routes() {
 			adminG.Use(auth.Middleware(s.cfg.JWT.Secret))
 			adminG.Use(auth.RequireRole("admin"))
 
-			adminG.Get("/admin/nodes", s.listNodesHandler)
-			adminG.Get("/admin/layout", s.getLayoutHandler)
-			adminG.Post("/admin/layout/stage", s.stageLayoutHandler)
-			adminG.Post("/admin/layout/apply", s.applyLayoutHandler)
-			adminG.Post("/admin/layout/revert", s.revertLayoutHandler)
+			adminG.Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
+			adminG.Get("/admin/clusters/{cid}/layout", s.getLayoutHandler)
+			adminG.Post("/admin/clusters/{cid}/layout/stage", s.stageLayoutHandler)
+			adminG.Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
+			adminG.Post("/admin/clusters/{cid}/layout/revert", s.revertLayoutHandler)
 
 			// Connection CRUD
 			adminG.Get("/admin/clusters", s.listClustersHandler)
