@@ -15,7 +15,7 @@ const NAV_LINK_ACTIVE = "text-foreground font-medium";
 export function AppShell({ children }: AppShellProps): ReactNode {
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="sticky top-0 z-30 h-14 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+      <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
           <div className="flex items-center gap-6">
             <Logo />
