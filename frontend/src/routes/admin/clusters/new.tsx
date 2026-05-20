@@ -76,7 +76,19 @@ function AddClusterPage() {
     });
   };
 
-  const isSaveDisabled = !label.trim() || label.length < 1 || label.length > 64 || createCluster.isPending;
+  // Garage drivers: s3_endpoint requires both access keys or the
+  // driver build fails. Mirror of the same guard on the Edit page.
+  const garageS3Incomplete =
+    (driver === "garage-v1" || driver === "garage") &&
+    !!s3Url &&
+    (!s3AccessKey.trim() || !s3SecretKey.trim());
+
+  const isSaveDisabled =
+    !label.trim() ||
+    label.length < 1 ||
+    label.length > 64 ||
+    garageS3Incomplete ||
+    createCluster.isPending;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -100,6 +112,15 @@ function AddClusterPage() {
           </Button>
         </div>
       </header>
+
+      {garageS3Incomplete && (
+        <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm">
+          <p className="font-medium">Garage S3 plane needs all three together</p>
+          <p className="text-muted-foreground mt-1">
+            If S3 URL is set, Access Key ID + Secret Access Key are required too — otherwise the driver build fails. Either fill all three or clear the S3 URL.
+          </p>
+        </div>
+      )}
 
       {createCluster.error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">

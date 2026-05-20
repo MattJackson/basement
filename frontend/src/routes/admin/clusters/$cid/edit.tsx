@@ -114,7 +114,21 @@ function EditClusterPage() {
     });
   };
 
-  const isSaveDisabled = !label.trim() || label.length < 1 || label.length > 64 || updateCluster.isPending;
+  // Garage drivers: if s3_endpoint is set, access_key_id + secret_key
+  // are also required — otherwise the driver build fails and every
+  // call returns DRIVER_BUILD_FAILED. Senior caught this the hard
+  // way after PATCHing the cluster to add s3_endpoint without keys.
+  const garageS3Incomplete =
+    (driver === "garage-v1" || driver === "garage") &&
+    !!s3Url &&
+    (!s3AccessKey.trim() || !s3SecretKey.trim());
+
+  const isSaveDisabled =
+    !label.trim() ||
+    label.length < 1 ||
+    label.length > 64 ||
+    garageS3Incomplete ||
+    updateCluster.isPending;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -144,6 +158,15 @@ function EditClusterPage() {
       {updateCluster.error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {String(updateCluster.error.message ?? "Failed to update cluster")}
+        </div>
+      )}
+
+      {garageS3Incomplete && (
+        <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm">
+          <p className="font-medium">Garage S3 plane needs all three together</p>
+          <p className="text-muted-foreground mt-1">
+            If S3 URL is set, Access Key ID + Secret Access Key are required too. Otherwise the driver build fails and every cluster call returns DRIVER_BUILD_FAILED. Either fill all three or clear the S3 URL.
+          </p>
         </div>
       )}
 
