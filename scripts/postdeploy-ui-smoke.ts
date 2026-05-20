@@ -245,6 +245,24 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
+    // 1.5 role-gated root redirect (v0.6.0a USER.ROUTING)
+    // ============================================================
+    section("[1.5] role-gated root redirect");
+    
+    await check("role-gated root redirect: matthew is admin, / navigates to /admin/clusters", async () => {
+      await page!.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+      // Since matthew has role=admin today, the gate routes to /admin/clusters
+      await page!.waitForURL(/\/admin\/clusters$/, { timeout: 10_000 });
+      await page!.waitForSelector('h1:has-text("Clusters")', { timeout: 10_000 });
+    });
+
+    await check("/files renders user shell placeholder", async () => {
+      // Direct navigation is allowed even for admin users; role-gated UI nav comes in v0.6.1
+      await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("My Clusters")', { timeout: 10_000 });
+    });
+
+    // ============================================================
     // 2. Clusters list
     // ============================================================
     section("[2] clusters list");
@@ -460,21 +478,15 @@ async function main(): Promise<number> {
       await shot(page!, "07-layout");
     });
 
-    // ============================================================
-    // 7. Aggregated buckets
+   // ============================================================
+    // 7. Aggregated buckets (v0.6.0a USER.ROUTING)
     // ============================================================
     section("[7] aggregated buckets");
-    await check("/admin/buckets (redirects to user home /) renders bucket rows", async () => {
+    await check("/admin/buckets renders All Buckets list directly", async () => {
       await page!.goto(`${BASE_URL}/admin/buckets`, { waitUntil: "networkidle" });
-      // Post-persona-split (v0.4.2): /admin/buckets redirects to `/`
-      // (user-persona My Buckets). Pre-split it redirected to /admin.
-      // Accept either landing point for backwards-compat detection.
-      await page!.waitForURL(
-        (url) => url.pathname === "/" || url.pathname === "/admin" || url.pathname === "/admin/",
-        { timeout: 10_000 },
-      );
-      // Wait for the "My Buckets" page heading OR for the empty state.
-      await page!.waitForSelector('h1:has-text("My Buckets")', { timeout: 10_000 });
+      // v0.6.0a: /admin/buckets now renders the AdminBucketsAggregated component directly,
+      // no longer redirects to user home /
+      await page!.waitForURL(/\/admin\/buckets$/, { timeout: 10_000 });
       // Either rows or the EmptyState "No buckets yet".
       await page!.waitForFunction(
         () => {
@@ -486,7 +498,7 @@ async function main(): Promise<number> {
       );
       const rowCount = await page!.locator('tbody tr').count();
       if (rowCount === 0) {
-        warnLine("/admin (aggregated buckets) is empty — that may be expected on a fresh deploy");
+        warnLine("/admin/buckets is empty — that may be expected on a fresh deploy");
       }
       await shot(page!, "08-aggregated-buckets");
     });
