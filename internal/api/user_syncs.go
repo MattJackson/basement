@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -42,9 +41,9 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate mode (v0.8.0c: only pull supported)
-	if req.Mode != "pull" {
-		writeErrorSimple(w, http.StatusBadRequest, "INVALID_MODE", "Only 'pull' mode is supported in v0.8.0c")
+	// Validate mode (v0.8.0d: pull and push supported)
+	if req.Mode != "pull" && req.Mode != "push" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_MODE", "Mode must be \"pull\" or \"push\"")
 		return
 	}
 
@@ -248,7 +247,7 @@ func (s *Server) userPauseSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, ok := auth.FromContext(r.Context())
+	_, ok := auth.FromContext(r.Context())
 	if !ok {
 		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
 		return
@@ -277,7 +276,7 @@ func (s *Server) userResumeSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := auth.FromContext(r.Context())
+	claims, ok := auth.FromContext(r.Context())
 	if !ok {
 		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
 		return
