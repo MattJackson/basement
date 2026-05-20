@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from "./routes/__root"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as FilesIndexRouteImport } from "./routes/files/index"
 import { Route as AdminIndexRouteImport } from "./routes/admin/index"
+import { Route as ShareTokenRouteImport } from "./routes/share/$token"
 import { Route as FilesSharesRouteImport } from "./routes/files/shares"
 import { Route as FilesKeysRouteImport } from "./routes/files/keys"
 import { Route as FilesCidRouteImport } from "./routes/files/$cid"
@@ -41,6 +42,11 @@ const FilesIndexRoute = FilesIndexRouteImport.update({
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: "/admin/",
   path: "/admin/",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: "/share/$token",
+  path: "/share/$token",
   getParentRoute: () => rootRouteImport,
 } as any)
 const FilesSharesRoute = FilesSharesRouteImport.update({
@@ -128,6 +134,7 @@ export interface FileRoutesByFullPath {
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
+  "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
@@ -148,6 +155,7 @@ export interface FileRoutesByTo {
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
+  "/share/$token": typeof ShareTokenRoute
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
@@ -169,6 +177,7 @@ export interface FileRoutesById {
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
+  "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/files/clusters/new": typeof FilesClustersNewRoute
@@ -191,6 +200,7 @@ export interface FileRouteTypes {
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
+    | "/share/$token"
     | "/admin/"
     | "/files/"
     | "/files/clusters/new"
@@ -211,6 +221,7 @@ export interface FileRouteTypes {
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
+    | "/share/$token"
     | "/admin"
     | "/files"
     | "/files/clusters/new"
@@ -231,6 +242,7 @@ export interface FileRouteTypes {
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
+    | "/share/$token"
     | "/admin/"
     | "/files/"
     | "/files/clusters/new"
@@ -252,6 +264,7 @@ export interface RootRouteChildren {
   FilesCidRoute: typeof FilesCidRouteWithChildren
   FilesKeysRoute: typeof FilesKeysRoute
   FilesSharesRoute: typeof FilesSharesRoute
+  ShareTokenRoute: typeof ShareTokenRoute
   AdminIndexRoute: typeof AdminIndexRoute
   FilesIndexRoute: typeof FilesIndexRoute
   FilesClustersNewRoute: typeof FilesClustersNewRoute
@@ -285,6 +298,13 @@ declare module "@tanstack/react-router" {
       path: "/admin"
       fullPath: "/admin/"
       preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/share/$token": {
+      id: "/share/$token"
+      path: "/share/$token"
+      fullPath: "/share/$token"
+      preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/files/shares": {
@@ -415,6 +435,7 @@ const rootRouteChildren: RootRouteChildren = {
   FilesCidRoute: FilesCidRouteWithChildren,
   FilesKeysRoute: FilesKeysRoute,
   FilesSharesRoute: FilesSharesRoute,
+  ShareTokenRoute: ShareTokenRoute,
   AdminIndexRoute: AdminIndexRoute,
   FilesIndexRoute: FilesIndexRoute,
   FilesClustersNewRoute: FilesClustersNewRoute,

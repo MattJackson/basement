@@ -3900,6 +3900,198 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
+  /share/{token}/info:
+      get:
+        operationId: shareInfo
+        summary: Get share info (v1.3+)
+        description: Returns minimal share information for public access — requiresPassword, expired, revoked, isDirectory, displayName. No actual content exposed. Used by the public /share/$token route to determine what UI to render.
+        tags:
+        - Shares
+        x-basement-since: '1.3'
+        security: []
+        parameters:
+        - name: token
+          in: path
+          required: true
+          description: Share token
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Share info
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ShareInfoResponse'
+          '401':
+            description: Password required but not provided
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Share not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '410':
+            description: Share has been revoked or expired
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /share/{token}/auth:
+      post:
+        operationId: shareAuth
+        summary: Authenticate for password-protected share (v1.3+)
+        description: Validates password for a password-protected share and sets a scoped session cookie. On success, the client can access /share/{token}/list and /share/{token}/get endpoints. Returns 400 if no password is required.
+        tags:
+        - Shares
+        x-basement-since: '1.3'
+        security: []
+        parameters:
+        - name: token
+          in: path
+          required: true
+          description: Share token
+          schema:
+            type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  password:
+                    type: string
+                    format: password
+        responses:
+          '200':
+            description: Authenticated successfully, cookie set
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    message:
+                      type: string
+                      example: Authenticated
+          '400':
+            description: No password required for this share
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: Invalid password
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Share not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '410':
+            description: Share has been revoked or expired
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /share/{token}/list:
+      get:
+        operationId: shareList
+        summary: List objects in a prefix share (v1.3+)
+        description: Lists objects under the share's prefix for authenticated public access. Requires password cookie if share is password-protected. Returns paginated list of objects with continuation token. For object shares, returns 404 SHARE_IS_SINGLE_OBJECT.
+        tags:
+        - Shares
+        x-basement-since: '1.3'
+        security: []
+        parameters:
+        - name: token
+          in: path
+          required: true
+          description: Share token
+          schema:
+            type: string
+        - name: prefix
+          in: query
+          required: false
+          description: Sub-prefix to list within the share's prefix
+          schema:
+            type: string
+        responses:
+          '200':
+            description: List of objects
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ObjectPage'
+          '401':
+            description: Password required but not provided or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Share not found or is a single object share
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '410':
+            description: Share has been revoked, expired, or download limit reached
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /share/{token}/get:
+      get:
+        operationId: shareGet
+        summary: Get presigned URL for object (v1.3+)
+        description: Returns a redirect to a presigned URL for downloading an object. For prefix shares, requires key query parameter. For object shares, uses the stored key. Increments download counter and returns 410 if limit reached. Requires password cookie if share is password-protected.
+        tags:
+        - Shares
+        x-basement-since: '1.3'
+        security: []
+        parameters:
+        - name: token
+          in: path
+          required: true
+          description: Share token
+          schema:
+            type: string
+        - name: key
+          in: query
+          required: false
+          description: Object key (required for prefix shares)
+          schema:
+            type: string
+        responses:
+          '302':
+            description: Redirect to presigned URL
+          '401':
+            description: Password required but not provided or invalid
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Share not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '410':
+            description: Share has been revoked, expired, or download limit reached
+            content:
+              application/json:
+                schema:
+                   $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
       cookieAuth:
@@ -4811,6 +5003,37 @@ components:
             format: password
             nullable: true
             description: Optional password to protect the share link (min 8 characters).
+      ShareInfoResponse:
+        type: object
+        required:
+        - requiresPassword
+        - expired
+        - revoked
+        - isDirectory
+        properties:
+          requiresPassword:
+            type: boolean
+            description: Whether this share requires a password.
+          expired:
+            type: boolean
+            description: Whether the share has expired.
+          revoked:
+            type: boolean
+            description: Whether the share has been revoked.
+          isDirectory:
+            type: boolean
+            description: Whether this is a prefix (directory) share rather than single object.
+          displayName:
+            type: string
+            nullable: true
+            description: Human-readable name for display — either prefix or extracted filename from key.
+      ShareAuthRequest:
+        type: object
+        properties:
+          password:
+            type: string
+            format: password
+            description: Password for the share.
       CreateMultipartRequest:
         type: object
         required:

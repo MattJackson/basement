@@ -124,6 +124,12 @@ func (s *Server) routes() {
 		// Invite redemption (public, no auth required)
 		apiR.Post("/invites/{token}/redeem", s.inviteRedeemHandler)
 
+		// Public share routes — no auth required (v0.7.0h SHARE.PUBLIC).
+		apiR.Get("/share/{token}/info", s.shareInfoHandler)
+		apiR.Post("/share/{token}/auth", s.shareAuthHandler)
+		apiR.Get("/share/{token}/list", s.shareListHandler)
+		apiR.Get("/share/{token}/get", s.shareGetHandler)
+
 		// Authenticated routes — JWT cookie required.
 		apiR.Group(func(authG chi.Router) {
 			authG.Use(auth.Middleware(s.cfg.JWT.Secret))

@@ -531,3 +531,78 @@ export function useRevokeUserShare() {
   });
 }
 
+// v0.7.0h SHARE.PUBLIC — public share hooks (no auth required).
+
+export function useShareInfo(token: string | null) {
+  return useQuery<components["schemas"]["ShareInfoResponse"] | null>({
+    queryKey: ["share", token ?? "null"],
+    queryFn: async () => {
+      if (!token) throw new Error("Token required");
+
+      const res = await fetch(`/api/v1/share/${encodeURIComponent(token)}/info`);
+      if (!res.ok && res.status !== 404) {
+        const body = await res.json().catch(() => ({}));
+        throw apiError(`share/info/${token}`, res.status, body);
+      }
+
+      // Return null for not-found; screens handle their own rendering.
+      if (!res.ok && res.status === 404) {
+        return null;
+      }
+
+      const data = await res.json();
+      return data as components["schemas"]["ShareInfoResponse"];
+    },
+    enabled: !!token,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+export function useShareAuth() {
+  return useMutation({
+    mutationFn: async ({ token, password }: { token: string; password: string }) => {
+      const res = await fetch(`/api/v1/share/${encodeURIComponent(token)}/auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!res.ok && res.status !== 200) {
+        const errorBody = await res.json().catch(() => ({}));
+        throw apiError(`share/auth/${token}`, res.status, errorBody);
+      }
+
+      return res.json();
+    },
+  });
+}
+
+export function useShareList(token: string | null, prefix: string = "") {
+  return useQuery<components["schemas"]["ObjectPage"]>({
+    queryKey: ["share", token, "list", prefix],
+    queryFn: async () => {
+      if (!token) throw new Error("Token required");
+
+      const params: Record<string, string> = {};
+      if (prefix) params.prefix = prefix;
+
+      let url = `/api/v1/share/${encodeURIComponent(token)}/list`;
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += `?${qs}`;
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw apiError(`share/list/${token}`, res.status, body);
+      }
+
+      const data = await res.json();
+      return data as components["schemas"]["ObjectPage"];
+    },
+    enabled: !!token && prefix !== "", // Only enable when we have a token and prefix
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
