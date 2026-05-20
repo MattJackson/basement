@@ -359,12 +359,13 @@ func TestShareRevoke(t *testing.T) {
 		t.Fatalf("Open failed: %v", err)
 	}
 
+	expires := time.Now().Add(24 * time.Hour)
 	sh := Share{
-		Token:    "share-token-123",
-		UserID:   "user-1",
-		Bucket:   "photos",
-		Key:      "img.jpg",
-		Expires:  time.Now().Add(24 * time.Hour),
+		Token:       "share-token-123",
+		OwnerUserID: "user-1",
+		BucketID:    "photos",
+		Key:         "img.jpg",
+		ExpiresAt:   &expires,
 	}
 
 	if err := s.CreateShare(sh); err != nil {
@@ -376,7 +377,7 @@ func TestShareRevoke(t *testing.T) {
 		t.Fatalf("Share failed: %v", err)
 	}
 
-	if !got.Revoked.IsZero() {
+	if got.Revoked {
 		t.Error("share should not be revoked initially")
 	}
 
@@ -384,9 +385,11 @@ func TestShareRevoke(t *testing.T) {
 		t.Fatalf("RevokeShare failed: %v", err)
 	}
 
-	got, _ = s.Share("share-token-123")
-	if got.Revoked.IsZero() {
-		t.Error("share should be revoked after RevokeShare")
+	// After revoke, Share() returns an error (intentional — revoked shares
+	// are not retrievable through the same path that serves live ones).
+	_, err = s.Share("share-token-123")
+	if err == nil {
+		t.Error("Share() should error after RevokeShare; got nil")
 	}
 }
 
@@ -401,9 +404,9 @@ func TestSharesByUser(t *testing.T) {
 	user2 := "user-2"
 
 	shares := []Share{
-		{Token: "s1", UserID: user1, Bucket: "bucket1"},
-		{Token: "s2", UserID: user1, Bucket: "bucket2"},
-		{Token: "s3", UserID: user2, Bucket: "bucket3"},
+		{Token: "s1", OwnerUserID: user1, BucketID: "bucket1"},
+		{Token: "s2", OwnerUserID: user1, BucketID: "bucket2"},
+		{Token: "s3", OwnerUserID: user2, BucketID: "bucket3"},
 	}
 
 	for _, sh := range shares {

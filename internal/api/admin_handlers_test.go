@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -192,6 +193,21 @@ func (m *testMockDriver) AbortMultipart(ctx context.Context, upload driver.Multi
 	if m.abortMultipartFunc != nil {
 		return m.abortMultipartFunc(ctx, upload)
 	}
+	return nil
+}
+
+// v0.8.0a+b additions — stub methods so admin handler tests can use
+// this mock without touching every existing call site.
+
+func (m *testMockDriver) StreamObject(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, nil
+}
+
+func (m *testMockDriver) PutObjectStream(_ context.Context, _, _ string, _ io.Reader, _ string, _ int64) (driver.PutResult, error) {
+	return driver.PutResult{}, nil
+}
+
+func (m *testMockDriver) ServerSideCopy(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
 
