@@ -67,8 +67,8 @@ export function UserMenu() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuLinkItem href="/admin/cluster">
-            Cluster
+          <DropdownMenuLinkItem href="/admin/clusters">
+            Clusters
           </DropdownMenuLinkItem>
           <DropdownMenuLinkItem href="/admin/keys">
             Access keys

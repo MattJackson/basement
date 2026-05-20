@@ -138,8 +138,10 @@ function SharesList() {
   );
 }
 
+import { userPage } from "@/shared/layout/userPage";
+
 export const Route = createFileRoute("/files/shares")({
-  component: SharesList,
+  component: userPage(SharesList),
 });
 
 export default SharesList;
