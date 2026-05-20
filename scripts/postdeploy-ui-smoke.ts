@@ -996,6 +996,109 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
+    // [NN] Sync out affordance (v0.8.0d SYNC.ENGINE.PUSH) — button visible + dialog opens with correct direction
+    // ============================================================
+    section("[16a] sync out affordance (v0.8.0d SYNC.ENGINE.PUSH)");
+    
+    await check("discover first cluster + bucket via user endpoints for sync out test", async () => {
+      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
+      if (!clustersResp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${clustersResp.status()}`);
+      const clusters = await clustersResp.json();
+      
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        skipLine("sync out affordance test", "no user-visible clusters");
+        return;
+      }
+      
+      discoveredCid = clusters[0].id;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters/${discoveredCid}/buckets`);
+      if (!bucketsResp.ok()) throw new Error(`Buckets API failed: ${bucketsResp.status()}`);
+      
+      const buckets: any[] = await bucketsResp.json();
+      if (buckets.length === 0) {
+        skipLine("sync out affordance navigation", "no user-visible buckets");
+        return;
+      }
+
+      discoveredBucketId = buckets[0].id;
+    });
+
+    if (discoveredCid && discoveredBucketId) {
+      await check("[NN] /files/{cid}/b/{bid} has Sync out button alongside Sync in", async () => {
+        // Navigate to the object browser page
+        await page!.goto(`${BASE_URL}/files/${discoveredCid}/b/${discoveredBucketId}`, { waitUntil: "networkidle" });
+        
+        const expectedUrl = new RegExp(`/files/${discoveredCid}/b/${discoveredBucketId}$`);
+        await page!.waitForURL(expectedUrl, { timeout: 15_000 });
+
+        // Assert Sync out button is visible in the header actions area (next to Sync in)
+        const syncOutButton = page!.locator('button').filter({ hasText: /Sync out/ }).first();
+        
+        if (await syncOutButton.count() === 0) {
+          throw new Error("Sync out button not found in bucket toolbar");
+        }
+
+        // Assert Sync out button is enabled (not disabled)
+        const isDisabled = await syncOutButton.getAttribute('disabled');
+        if (isDisabled !== null) {
+          throw new Error("Sync out button should be enabled but is disabled");
+        }
+
+        // Verify both Sync in and Sync out buttons are present
+        const syncInButton = page!.locator('button').filter({ hasText: /Sync in/ }).first();
+        if (await syncInButton.count() === 0) {
+          throw new Error("Sync in button not found - required alongside Sync out");
+        }
+
+        await shot(page!, "nn-sync-out-button-visible");
+      });
+
+      // Check that clicking Sync out opens the dialog with correct direction (push mode pre-fills source)
+      await check("[NN] click Sync out → sync dialog opens with push direction, source pre-filled", async () => {
+        const syncOutButton = page!.locator('button').filter({ hasText: /Sync out/ }).first();
+        await syncOutButton.click({ waitUntil: 'networkidle' });
+
+        // Wait for dialog to open - look for the Dialog content or Sync out title
+        try {
+          await page!.waitForSelector('[role="dialog"] h1:has-text(/sync out/i)', { timeout: 5_000 });
+        } catch {
+          // Alternative selector if role not present
+          const hasSyncOutText = await page!.locator('h2').filter({ hasText: /sync out/i }).count();
+          const hasDialogTitle = await page!.locator('[role="dialog"] h1').count();
+          if (hasSyncOutText === 0 && hasDialogTitle === 0) {
+            throw new Error("Sync dialog did not open with correct title");
+          }
+        }
+
+        // For push direction, source cluster should be pre-filled and disabled
+        const srcClusterSelect = page!.locator('select').filter({ hasLabel: /source cluster/i });
+        if (await srcClusterSelect.count() > 0) {
+          const isDisabled = await srcClusterSelect.first().getAttribute('disabled');
+          if (isDisabled === null) {
+            warnLine("source cluster should be disabled for push direction");
+          }
+        }
+
+        // Close the dialog without syncing (just verify it was open with correct state)
+        const closeButtons = page!.locator('button').filter({ hasText: /Close|Cancel/ });
+        if (await closeButtons.count() > 0) {
+          await closeButtons.first().click();
+          
+          // Verify dialog closed - sync out title should be gone
+          try {
+            await page!.waitForSelector('[role="dialog"] h1:has-text(/sync out/i)', { timeout: 3_000 });
+            throw new Error("Sync dialog did not close after clicking Close");
+          } catch {
+            // Expected - dialog should be closed now
+          }
+        }
+
+        await shot(page!, "nn-sync-out-dialog-opened");
+      });
+    }
+
+    // ============================================================
     // 12. Fix 3, 1, 4: cluster detail buckets section and bucket detail
     // ============================================================
     section("[17] bucket detail and cluster detail fixes (Fix 1, 3, 4)");

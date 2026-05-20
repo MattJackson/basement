@@ -64,6 +64,7 @@ function UserBucketObjects() {
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [pushDialogOpen, setPushDialogOpen] = useState(false);
 
   const handleUploadSuccess = () => {
     setUploadOpen(false);
@@ -120,6 +121,14 @@ function UserBucketObjects() {
               disabled={objectsLoading}
             >
               Sync in…
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setPushDialogOpen(true)}
+              disabled={objectsLoading}
+            >
+              Sync out…
             </Button>
           </div>
         }
@@ -202,6 +211,16 @@ function UserBucketObjects() {
         open={syncDialogOpen}
         onOpenChange={setSyncDialogOpen}
       />
+
+      {bucket && (
+        <StartSyncDialog
+          open={pushDialogOpen}
+          onOpenChange={setPushDialogOpen}
+          direction="push"
+          defaultSrcConnectionId={cid}
+          defaultSrcBucket={bid}
+        />
+      )}
     </div>
   );
 }
