@@ -25,7 +25,6 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
-import { humanizeTime } from "@/shared/lib/format";
 import { useKeys, useListClusters } from "@/shared/api/queries";
 import type { components } from "@/shared/api/types.gen";
 import { adminPage } from "@/shared/layout/adminPage";
@@ -163,8 +162,6 @@ function KeysScreen() {
                 <TableHead className="w-48">Cluster</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Access Key ID</TableHead>
-                <TableHead>Buckets</TableHead>
-                <TableHead>Created</TableHead>
                 <TableHead className="w-16">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -174,8 +171,6 @@ function KeysScreen() {
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-8 w-8 rounded" /></TableCell>
                 </TableRow>
               ))}
@@ -200,8 +195,6 @@ function KeysScreen() {
                 <TableHead className="w-48">Cluster</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Access Key ID</TableHead>
-                <TableHead>Buckets</TableHead>
-                <TableHead>Created</TableHead>
                 <TableHead className="w-16">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -220,9 +213,7 @@ function KeysScreen() {
                   <TableCell className="font-medium">{key.name ?? "-"}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm">
-                        {key.id.slice(0, 12)}...{key.id.slice(-4)}
-                      </span>
+                      <span className="font-mono text-xs">{key.id}</span>
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -257,12 +248,6 @@ function KeysScreen() {
                       </TooltipProvider>
                     </div>
                   </TableCell>
-                  <TableCell>
-                    {/* Per-bucket permissions only live on GetKey detail,
-                        not on ListKeys — surfaced on /admin/keys/$id (v0.2). */}
-                    <span className="opacity-60">—</span>
-                  </TableCell>
-                  <TableCell>{key.created ? humanizeTime(key.created) : "—"}</TableCell>
                   <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger onClick={(e) => e.stopPropagation()}>
