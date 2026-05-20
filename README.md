@@ -20,15 +20,16 @@ admin (khairul169/garage-webui, Noooste/garage-ui — Garage-only), or
 ship as alpha-quality with security issues (RustFS).
 
 basement is the gap-filler: clean, multi-backend, identity-aware.
-Three drivers ship in v0.5.0 (Garage v1, AWS S3, MinIO/OpenMaxIO),
+Four drivers ship in v0.5.0 — **Garage v1**, **Garage v2** (first UI
+to support the v2 admin API), **AWS S3**, and **MinIO/OpenMaxIO** —
 with a driver interface that lets the project keep up with the
 ecosystem.
 
 ## Features
 
 - **Multi-cluster admin** — Add N clusters, manage them side by side
-- **Three drivers** — Garage v1, AWS S3, MinIO / OpenMaxIO
-- **Garage v2 support** — First UI to support Garage v2 admin API (vendor spec; refresh on upstream updates)
+- **Four drivers** — Garage v1, Garage v2, AWS S3, MinIO / OpenMaxIO
+- **First UI to support Garage v2 admin API** — vendored spec, refreshed on upstream updates
 - **OIDC + local password** — Sign in with Authentik / Keycloak /
   Pocket-ID; local password as break-glass
 - **Bucket + Key admin** — CRUD, quotas, per-bucket permissions,
