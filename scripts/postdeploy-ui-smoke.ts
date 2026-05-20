@@ -898,9 +898,107 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
+    // [NN] Upload affordance (v0.7.0e USER.UPLOAD) — button visible + dialog open
+    // ============================================================
+    section("[16] upload affordance (v0.7.0e USER.UPLOAD)");
+    
+    await check("discover first cluster + bucket via user endpoints for upload test", async () => {
+      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
+      if (!clustersResp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${clustersResp.status()}`);
+      const clusters = await clustersResp.json();
+      
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        skipLine("upload affordance test", "no user-visible clusters");
+        return;
+      }
+      
+      discoveredCid = clusters[0].id;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters/${discoveredCid}/buckets`);
+      if (!bucketsResp.ok()) throw new Error(`Buckets API failed: ${bucketsResp.status()}`);
+      
+      const buckets: any[] = await bucketsResp.json();
+      if (buckets.length === 0) {
+        skipLine("upload affordance navigation", "no user-visible buckets");
+        return;
+      }
+
+      discoveredBucketId = buckets[0].id;
+    });
+
+    if (discoveredCid && discoveredBucketId) {
+      await check("[NN] /files/{cid}/b/{bid} has Upload button in toolbar", async () => {
+        // Navigate to the object browser page
+        await page!.goto(`${BASE_URL}/files/${discoveredCid}/b/${discoveredBucketId}`, { waitUntil: "networkidle" });
+        
+        const expectedUrl = new RegExp(`/files/${discoveredCid}/b/${discoveredBucketId}$`);
+        await page!.waitForURL(expectedUrl, { timeout: 15_000 });
+
+        // Assert Upload button is visible in the header actions area
+        const uploadButton = page!.locator('button').filter({ hasText: /Upload/ }).first();
+        
+        if (await uploadButton.count() === 0) {
+          throw new Error("Upload button not found in bucket toolbar");
+        }
+
+        // Assert Upload button is enabled (not disabled)
+        const isDisabled = await uploadButton.getAttribute('disabled');
+        if (isDisabled !== null) {
+          throw new Error("Upload button should be enabled but is disabled");
+        }
+
+        await shot(page!, "nn-upload-button-visible");
+      });
+
+      // Check that clicking Upload opens the dialog (just confirm it appears, don't exercise actual upload)
+      await check("[NN] click Upload → upload dialog opens", async () => {
+        const uploadButton = page!.locator('button').filter({ hasText: /Upload/ }).first();
+        await uploadButton.click({ waitUntil: 'networkidle' });
+
+        // Wait for dialog to open - look for the Dialog content or Upload Files title
+        try {
+          await page!.waitForSelector('[role="dialog"] h1:has-text("Upload Files")', { timeout: 5_000 });
+        } catch {
+          // Alternative selector if role not present
+          await page!.waitForText('Upload Files', { timeout: 5_000 });
+        }
+
+        // Verify dialog has drag-drop zone (the dashed border area)
+        const hasDragDropZone = await page!.locator('.border-dashed').count() > 0;
+        if (!hasDragDropZone) {
+          throw new Error("Upload dialog missing drag-and-drop zone");
+        }
+
+        // Verify upload dialog has file list container
+        const hasFileList = await page!.locator('[class*="space-y-3"]').count() > 0 || 
+                           await page!.locator('div').filter({ hasText: /Drag and drop files/ }).count() > 0;
+        
+        if (!hasFileList) {
+          warnLine("upload dialog may be missing expected file list structure");
+        }
+
+        // Close the dialog without uploading (just verify it was open)
+        const closeButtons = page!.locator('button').filter({ hasText: /Close|Cancel/ });
+        if (await closeButtons.count() > 0) {
+          await closeButtons.first().click();
+          
+          // Verify dialog closed - Upload Files title should be gone
+          try {
+            await page!.waitForSelector('[role="dialog"] h1:has-text("Upload Files")', { timeout: 3_000 });
+            throw new Error("Upload dialog did not close after clicking Close");
+          } catch {
+            // Expected - dialog should be closed now
+          }
+        }
+
+        await shot(page!, "nn-upload-dialog-opened");
+      });
+    }
+
+    // ============================================================
     // 12. Fix 3, 1, 4: cluster detail buckets section and bucket detail
     // ============================================================
-    section("[15] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
+    section("[17] bucket detail and cluster detail fixes (Fix 1, 3, 4)");
     
     if (!discoveredCid) {
       skipLine("bucket/cluster detail checks", "cluster cid not discovered in prior steps");

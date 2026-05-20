@@ -367,3 +367,99 @@ export function useUserPresignGet(cid: string | null, bid: string | null) {
     },
   });
 }
+
+// Upload mutation hooks for v0.7.0e USER.UPLOAD
+
+export function useUserPresignPut(cid: string | null, bid: string | null) {
+  return useMutation({
+    mutationFn: async ({ key, contentType, ttl }: { key: string; contentType?: string; ttl?: number }) => {
+      if (!cid || !bid || !key) throw new Error("Missing required parameters");
+
+      const params: Record<string, string> = {};
+      params.ttl = String(ttl ?? 3600);
+
+      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects/${encodeURIComponent(key)}/presign-put`;
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += `?${qs}`;
+
+      const { data, error, response } = await client.POST(url as any, { 
+        params: { query: params },
+        body: { contentType },
+      });
+      if (!response.ok || !data) throw apiError(`user/presign-put/${cid}/${bid}/${key}`, response.status, error);
+      return data as components["schemas"]["PresignedURL"];
+    },
+  });
+}
+
+export function useUserMultipartInit(cid: string | null, bid: string | null) {
+  return useMutation({
+    mutationFn: async ({ key, contentType }: { key: string; contentType?: string }) => {
+      if (!cid || !bid || !key) throw new Error("Missing required parameters");
+
+      const { data, error, response } = await client.POST(
+        "/api/v1/user/clusters/{cid}/buckets/{bid}/multipart/init" as any,
+        { 
+          params: { path: { cid, bid } },
+          body: { key, contentType },
+        }
+      );
+      if (!response.ok || !data) throw apiError(`user/multipart/init/${cid}/${bid}/${key}`, response.status, error);
+      return data as components["schemas"]["MultipartUpload"];
+    },
+  });
+}
+
+export function useUserMultipartPartPresign(cid: string | null, bid: string | null, uploadId: string | null) {
+  return useMutation({
+    mutationFn: async ({ partNumber, ttl }: { partNumber: number; ttl?: number }) => {
+      if (!cid || !bid || !uploadId) throw new Error("Missing required parameters");
+
+      const params: Record<string, string> = {};
+      params.ttl = String(ttl ?? 3600);
+
+      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign`;
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += `?${qs}`;
+
+      const { data, error, response } = await client.POST(url as any, { params: { query: params } });
+      if (!response.ok || !data) throw apiError(`user/multipart/presign-part/${cid}/${bid}/${uploadId}/${partNumber}`, response.status, error);
+      return data as components["schemas"]["PresignedURL"];
+    },
+  });
+}
+
+export function useUserMultipartComplete(cid: string | null, bid: string | null) {
+  return useMutation({
+    mutationFn: async ({ uploadId, parts }: { uploadId: string; parts: { partNumber: number; etag: string }[] }) => {
+      if (!cid || !bid || !uploadId) throw new Error("Missing required parameters");
+
+      const { data, error, response } = await client.POST(
+        "/api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/complete" as any,
+        { 
+          params: { path: { cid, bid, uploadId } },
+          body: { parts },
+        }
+      );
+      if (!response.ok) throw apiError(`user/multipart/complete/${cid}/${bid}/${uploadId}`, response.status, error);
+      return data;
+    },
+  });
+}
+
+export function useUserMultipartAbort(cid: string | null, bid: string | null) {
+  return useMutation({
+    mutationFn: async (uploadId: string) => {
+      if (!cid || !bid || !uploadId) throw new Error("Missing required parameters");
+
+      const { data, error, response } = await client.DELETE(
+        "/api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}" as any,
+        { 
+          params: { path: { cid, bid, uploadId } },
+        }
+      );
+      if (!response.ok) throw apiError(`user/multipart/abort/${cid}/${bid}/${uploadId}`, response.status, error);
+      return data;
+    },
+  });
+}

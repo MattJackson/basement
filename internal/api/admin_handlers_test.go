@@ -36,6 +36,10 @@ type testMockDriver struct {
 	presignGetFunc   func(ctx context.Context, bucket, key string, ttl time.Duration) (driver.PresignedURL, error)
 	presignPutFunc   func(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driver.PresignedURL, error)
 	deleteObjectFunc func(ctx context.Context, bucket, key string) error
+	createMultipartFunc func(ctx context.Context, bucket, key, contentType string) (driver.MultipartUpload, error)
+	presignUploadPartFunc func(ctx context.Context, upload driver.MultipartUpload, partNum int) (driver.PresignedURL, error)
+	completeMultipartFunc func(ctx context.Context, upload driver.MultipartUpload, parts []driver.CompletedPart) error
+	abortMultipartFunc func(ctx context.Context, upload driver.MultipartUpload) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -148,12 +152,42 @@ func (m *testMockDriver) PresignGet(ctx context.Context, bucket, key string, ttl
 	}
 	return driver.PresignedURL{}, nil
 }
-func (m *testMockDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
-func (m *testMockDriver) DeleteObject(_ context.Context, _, _ string) error { return nil }
-func (m *testMockDriver) CreateMultipart(_ context.Context, _, _, _ string) (driver.MultipartUpload, error) { return driver.MultipartUpload{}, nil }
-func (m *testMockDriver) PresignUploadPart(_ context.Context, _ driver.MultipartUpload, _ int) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
-func (m *testMockDriver) CompleteMultipart(_ context.Context, _ driver.MultipartUpload, _ []driver.CompletedPart) error { return nil }
-func (m *testMockDriver) AbortMultipart(_ context.Context, _ driver.MultipartUpload) error { return nil }
+func (m *testMockDriver) PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driver.PresignedURL, error) {
+	if m.presignPutFunc != nil {
+		return m.presignPutFunc(ctx, bucket, key, ttl, contentType)
+	}
+	return driver.PresignedURL{}, nil
+}
+func (m *testMockDriver) DeleteObject(ctx context.Context, bucket, key string) error {
+	if m.deleteObjectFunc != nil {
+		return m.deleteObjectFunc(ctx, bucket, key)
+	}
+	return nil
+}
+func (m *testMockDriver) CreateMultipart(ctx context.Context, bucket, key, contentType string) (driver.MultipartUpload, error) {
+	if m.createMultipartFunc != nil {
+		return m.createMultipartFunc(ctx, bucket, key, contentType)
+	}
+	return driver.MultipartUpload{}, nil
+}
+func (m *testMockDriver) PresignUploadPart(ctx context.Context, upload driver.MultipartUpload, partNum int) (driver.PresignedURL, error) {
+	if m.presignUploadPartFunc != nil {
+		return m.presignUploadPartFunc(ctx, upload, partNum)
+	}
+	return driver.PresignedURL{}, nil
+}
+func (m *testMockDriver) CompleteMultipart(ctx context.Context, upload driver.MultipartUpload, parts []driver.CompletedPart) error {
+	if m.completeMultipartFunc != nil {
+		return m.completeMultipartFunc(ctx, upload, parts)
+	}
+	return nil
+}
+func (m *testMockDriver) AbortMultipart(ctx context.Context, upload driver.MultipartUpload) error {
+	if m.abortMultipartFunc != nil {
+		return m.abortMultipartFunc(ctx, upload)
+	}
+	return nil
+}
 
 // testSecret is a 32-byte secret used for JWT token generation in tests.
 var testSecret = func() []byte {
