@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -198,5 +199,131 @@ func TestBuildForUnknownDriver(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown driver")
 	}
+}
+
+// TestRegistryForBuildError covers the BuildFor-error branch in For(): the
+// connection exists but its factory returns an error.
+func TestRegistryForBuildError(t *testing.T) {
+	Register("test-build-fail", func(_ Config) (Driver, error) {
+		return nil, fmt.Errorf("factory exploded")
+	})
+
+	mockStore := newMockConnStore()
+	conn := store.Connection{
+		ID:     "explodes",
+		Label:  "explodes",
+		Driver: "test-build-fail",
+		Config: map[string]string{},
+		Owner:  "org",
+	}
+	if _, err := mockStore.Create(context.Background(), conn); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewRegistry(mockStore)
+	_, err := reg.For(context.Background(), "explodes")
+	if err == nil {
+		t.Fatal("expected error from factory failure")
+	}
+	if !strings.Contains(err.Error(), "building driver") {
+		t.Errorf("error msg=%q, want 'building driver' prefix", err.Error())
+	}
+
+	// Build-fail must not have cached anything; verify by checking that a
+	// second call also fails (vs returning a stale ok-cache entry).
+	_, err2 := reg.For(context.Background(), "explodes")
+	if err2 == nil {
+		t.Fatal("expected error on second call too — failed build should not be cached")
+	}
+}
+
+// TestRegistryForUnknownDriverThroughFor covers the BuildFor unknown-driver
+// path via Registry.For (not just via direct BuildFor).
+func TestRegistryForUnknownDriverThroughFor(t *testing.T) {
+	mockStore := newMockConnStore()
+	conn := store.Connection{
+		ID:     "unknown-drv",
+		Label:  "x",
+		Driver: "no-such-driver-name",
+		Config: map[string]string{},
+		Owner:  "org",
+	}
+	if _, err := mockStore.Create(context.Background(), conn); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewRegistry(mockStore)
+	_, err := reg.For(context.Background(), "unknown-drv")
+	if err == nil {
+		t.Fatal("expected error for unknown driver via For()")
+	}
+	if !strings.Contains(err.Error(), "building driver") {
+		t.Errorf("error msg=%q, want 'building driver' prefix", err.Error())
+	}
+}
+
+// TestRegistryConcurrentForAndInvalidate exercises the mutex pairing under
+// -race: many goroutines hammer For() while a second set repeatedly
+// Invalidate()s the same connection. No data race or panic permitted.
+func TestRegistryConcurrentForAndInvalidate(t *testing.T) {
+	Register("test-concurrent", func(_ Config) (Driver, error) {
+		return &mockDriver{}, nil
+	})
+
+	mockStore := newMockConnStore()
+	conn := store.Connection{
+		ID:     "shared",
+		Label:  "shared",
+		Driver: "test-concurrent",
+		Config: map[string]string{},
+		Owner:  "org",
+	}
+	if _, err := mockStore.Create(context.Background(), conn); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	reg := NewRegistry(mockStore)
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	const readers = 20
+	const invalidators = 5
+	const iters = 200
+
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				if _, err := reg.For(ctx, "shared"); err != nil {
+					t.Errorf("For failed mid-loop: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	for i := 0; i < invalidators; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				reg.Invalidate("shared")
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// TestRegistryInvalidateUnknownConnIsNoop ensures Invalidate doesn't panic
+// or error when called with an unknown ID.
+func TestRegistryInvalidateUnknownConnIsNoop(t *testing.T) {
+	mockStore := newMockConnStore()
+	reg := NewRegistry(mockStore)
+
+	// No assertion needed — just no panic.
+	reg.Invalidate("never-was-here")
+	reg.Invalidate("")
 }
 
