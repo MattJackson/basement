@@ -180,7 +180,7 @@ export function useDeleteKey() {
       }
       // Phase 2 — fire. Token goes in X-Confirm-Delete; server
       // re-verifies it matches the requested key + user before
-      // calling the backend delete.
+      // calling the delete.
       const del = await client.DELETE("/admin/keys/{id}", {
         params: {
           path: { id },
@@ -195,6 +195,100 @@ export function useDeleteKey() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
       navigate({ to: "/admin/keys" });
+    },
+  });
+}
+
+export function useCreateCluster() {
+  const queryClient = useQueryClient();
+
+  return useMutation<components["schemas"]["Connection"], Error, components["schemas"]["ConnectionSpec"]>({
+    mutationFn: async (spec) => {
+      const { data, error, response } = await client.POST("/admin/clusters", {
+        body: spec,
+      });
+      if (!response.ok || !data) throw apiError("createCluster", response.status, error);
+      return data as components["schemas"]["Connection"];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
+    },
+  });
+}
+
+export function useUpdateCluster(cid: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    components["schemas"]["Connection"],
+    Error,
+    components["schemas"]["ConnectionUpdate"]
+  >({
+    mutationFn: async (update) => {
+      const { data, error, response } = await client.PATCH("/admin/clusters/{cid}", {
+        params: { path: { cid } },
+        body: update as never,
+      });
+      if (!response.ok || !data) throw apiError(`updateCluster/${cid}`, response.status, error);
+      return data as components["schemas"]["Connection"];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid] });
+    },
+  });
+}
+
+/**
+ * Two-phase delete for clusters: POST /_arm-delete to mint a short-
+ * lived HMAC token, then DELETE with X-Confirm-Delete header carrying
+ * the token. Both phases happen inside one mutation so the UI calls
+ * `deleteCluster.mutate(cid)` and gets a single isPending/onError.
+ */
+export function useDeleteCluster() {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  return useMutation<void, Error, string>({
+    mutationFn: async (cid) => {
+      const arm = await client.POST("/admin/clusters/{cid}/_arm-delete", {
+        params: { path: { cid } },
+      });
+      if (!arm.response.ok || !arm.data?.token) {
+        throw apiError(`armDeleteCluster/${cid}`, arm.response.status, arm.error);
+      }
+      const del = await client.DELETE("/admin/clusters/{cid}", {
+        params: {
+          path: { cid },
+          header: { "X-Confirm-Delete": arm.data.token },
+        },
+        headers: { "X-Confirm-Delete": arm.data.token },
+      });
+      if (!del.response.ok) {
+        throw apiError(`deleteCluster/${cid}`, del.response.status, del.error);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
+      navigate({ to: "/admin/clusters" });
+    },
+  });
+}
+
+export function useTestCluster(cid: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation<components["schemas"]["ConnectionTestResult"], Error, void>({
+    mutationFn: async () => {
+      const { data, error, response } = await client.POST("/admin/clusters/{cid}/_test", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`testCluster/${cid}`, response.status, error);
+      return data as components["schemas"]["ConnectionTestResult"];
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid] });
     },
   });
 }
