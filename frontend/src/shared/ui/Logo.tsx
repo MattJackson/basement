@@ -21,7 +21,7 @@ interface LogoProps {
  * with tight tracking and semibold weight — the same restraint Linear
  * / Vercel use.
  */
-export function Logo({ href = "/admin", iconOnly = false, className = "" }: LogoProps) {
+export function Logo({ href = "/", iconOnly = false, className = "" }: LogoProps) {
   return (
     <a
       href={href}

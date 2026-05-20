@@ -107,7 +107,7 @@ export function useDeleteBucket() {
     onSuccess: (_, { cid, id }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "buckets", id] });
-      navigate({ to: "/admin" });
+      navigate({ to: "/" });
     },
   });
 }
