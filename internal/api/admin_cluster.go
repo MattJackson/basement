@@ -19,7 +19,7 @@ func (s *Server) resolveClusterDriver(w http.ResponseWriter, r *http.Request) dr
 	}
 	drv, err := s.reg.For(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return nil
 	}
 	return drv

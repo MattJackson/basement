@@ -378,12 +378,14 @@ func TestShareListHandler(t *testing.T) {
 			},
 			password:  "correct-password",
 			addCookie: true,
-			// Password flow passes; handler then 404s looking up the
-			// Connection (fixture only seeds the Share, not the
-			// Connection). Asserts truthful end-state until a future
-			// cycle wires a Connection + driver mock.
-			expectedStatus: http.StatusNotFound,
-			expectedCode:   "CLUSTER_NOT_FOUND",
+			// Password flow passes; handler then fails building the
+			// driver (fixture seeds a Share with driver:"garage-v1"
+			// but the test registry doesn't register that driver).
+			// v0.8.0d.27 introduced proper error mapping so this now
+			// surfaces as DRIVER_BUILD_FAILED instead of being
+			// swallowed as CLUSTER_NOT_FOUND.
+			expectedStatus: http.StatusInternalServerError,
+			expectedCode:   "DRIVER_BUILD_FAILED",
 		},
 		{
 			name: "single object share returns 404",
@@ -570,13 +572,13 @@ func TestShareGetHandler(t *testing.T) {
 			password:  "correct-password",
 			addCookie: true,
 			key:       "", // Object shares ignore key param
-			// Password flow passes; handler then 404s looking up the
-			// Connection (fixture only seeds the Share, not the
-			// Connection). Asserting the truthful end-state. A future
-			// cycle should wire a Connection + driver mock fixture
-			// to assert 302 directly.
-			expectedStatus: http.StatusNotFound,
-			expectedCode:   "CLUSTER_NOT_FOUND",
+			// Same DRIVER_BUILD_FAILED end-state as the LIST handler
+			// test above; the share's driver:"garage-v1" doesn't
+			// resolve in the test registry, so driver build fails
+			// (real production behavior — v0.8.0d.27 stopped hiding
+			// it as CLUSTER_NOT_FOUND).
+			expectedStatus: http.StatusInternalServerError,
+			expectedCode:   "DRIVER_BUILD_FAILED",
 		},
 		{
 			name: "download limit reached",

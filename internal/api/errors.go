@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/mattjackson/basement/internal/driver"
 )
@@ -66,4 +67,29 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeRegistryForError maps the err returned by Registry.For(...) to
+// the right HTTP status + error code, distinguishing 'connection not
+// found' (404 CLUSTER_NOT_FOUND) from 'driver build failed' (500
+// DRIVER_BUILD_FAILED with the real reason). The freshman handlers
+// were collapsing both into CLUSTER_NOT_FOUND, which made config
+// errors (e.g. Garage s3_endpoint set but access_key_id missing)
+// look like the cluster didn't exist.
+func writeRegistryForError(w http.ResponseWriter, err error) {
+	msg := err.Error()
+	// Registry.For wraps with "getting connection {id}: …" for store
+	// lookup failures and "building driver for connection {id}: …"
+	// for builder failures. Also handle bare store-Get errors which
+	// say "connection not found: {id}" without the Registry prefix.
+	switch {
+	case strings.Contains(msg, "connection not found"):
+		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+	case strings.Contains(msg, "getting connection") && strings.Contains(msg, "not found"):
+		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+	case strings.Contains(msg, "building driver"):
+		writeErrorSimple(w, http.StatusInternalServerError, "DRIVER_BUILD_FAILED", msg)
+	default:
+		writeErrorSimple(w, http.StatusInternalServerError, "REGISTRY_ERROR", msg)
+	}
 }
