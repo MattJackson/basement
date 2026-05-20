@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { adminPage } from "@/shared/layout/adminPage";
+import { userPage } from "@/shared/layout/userPage";
 
 export const Route = createFileRoute("/files/$cid")({
-  component: adminPage(ClusterBuckets),
+  component: userPage(ClusterBuckets),
 });
 
 function ClusterBuckets() {
