@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { StartSyncDialog } from "@/components/sync/StartSyncDialog";
 
 vi.mock("@/shared/api/queries", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
     useCreateUserSync: () => ({
