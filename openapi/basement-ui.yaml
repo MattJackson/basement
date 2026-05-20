@@ -5534,7 +5534,8 @@ components:
             type: string
             enum:
             - pull
-            description: Sync mode. v0.8.0c supports only 'pull'.
+            - push
+            description: Sync mode. v0.8.0d supports 'pull' and 'push'.
           srcConnectionId:
             type: string
             description: Source cluster/connection ID.
