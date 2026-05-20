@@ -936,6 +936,40 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
+    // [NN] /files/keys renders pair-cards (or empty state)
+    // ============================================================
+    section("[NN] /files/keys renders pair-cards or empty state");
+    await check("/files/keys displays keys grid or empty message", async () => {
+      await page!.goto(`${BASE_URL}/files/keys`, { waitUntil: "networkidle" });
+
+      // Wait for the page to render - either cards or empty state
+      const hasCards = await page!.locator('[data-testid="user-key-pair-card"]').count();
+      const hasEmptyState = await page!.locator('text=No keys yet').count();
+
+      if (hasCards === 0 && hasEmptyState === 0) {
+        throw new Error("/files/keys rendered neither key cards nor empty state");
+      }
+
+      // At least one should be present - permissive check for user matthew
+      if (hasCards > 0) {
+        const cardCount = await page!.locator('[data-testid="user-key-pair-card"]').count();
+        process.stdout.write(`${C.dim}found ${cardCount} key pair card(s)${C.reset}\n`);
+        
+        // Verify card structure
+        const firstCard = page!.locator('[data-testid="user-key-pair-card"]').first();
+        const hasCopyButton = await firstCard.locator('[data-testid="copy-key-button"]').count() > 0;
+        if (!hasCopyButton) {
+          throw new Error("Key card missing copy button");
+        }
+
+        await shot(page!, "nn-keys-pair-cards");
+      } else if (hasEmptyState === 1) {
+        process.stdout.write(`${C.dim}empty state shown (no user keys yet)${C.reset}\n`);
+        await shot(page!, "nn-keys-empty-state");
+      }
+    });
+
+    // ============================================================
     // 13. Fix 7: version label under Logo wordmark
     // ============================================================
     section("[16] version label under Logo (Fix 7)");
