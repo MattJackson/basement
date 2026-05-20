@@ -3,9 +3,11 @@ package minio
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
@@ -255,4 +257,77 @@ func (d *driver) AbortMultipart(ctx context.Context, upload driverpkg.MultipartU
 	}
 
 	return nil
+}
+
+// StreamObject returns the object body as a ReadCloser plus headers.
+func (d *driver) StreamObject(ctx context.Context, bucket, key, rng string) (driverpkg.StreamResult, error) {
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	if rng != "" {
+		input.Range = aws.String(rng)
+	}
+
+	resp, err := d.s3Client.client.GetObject(ctx, input)
+	if err != nil {
+		var apiErr interface{ ErrorCode() string }
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound" {
+			return driverpkg.StreamResult{}, &driverpkg.Error{
+				Op:      "StreamObject",
+				Driver:  driverName,
+				Err:     driverpkg.ErrNotFound,
+				Message: "object not found",
+			}
+		}
+
+		return driverpkg.StreamResult{}, &driverpkg.Error{
+			Op:      "StreamObject",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	result := driverpkg.StreamResult{
+		Body:          resp.Body,
+		ContentType:   aws.ToString(resp.ContentType),
+		ContentLength: aws.ToInt64(resp.ContentLength),
+		ETag:          aws.ToString(resp.ETag),
+	}
+
+	if resp.LastModified != nil {
+		result.LastModified = *resp.LastModified
+	}
+
+	return result, nil
+}
+
+// PutObjectStream writes the reader contents to the object.
+func (d *driver) PutObjectStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string, size int64) (driverpkg.PutResult, error) {
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(key),
+		Body:        reader,
+		ContentType: aws.String(contentType),
+	}
+
+	if size > 0 {
+		input.ContentLength = aws.Int64(size)
+	}
+
+	resp, err := d.s3Client.client.PutObject(ctx, input)
+	if err != nil {
+		return driverpkg.PutResult{}, &driverpkg.Error{
+			Op:      "PutObjectStream",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	return driverpkg.PutResult{
+		ETag: aws.ToString(resp.ETag),
+	}, nil
 }

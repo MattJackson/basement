@@ -3,6 +3,7 @@ package driver
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -17,6 +18,7 @@ type Caps struct {
 	Multipart      bool             `json:"multipart"`
 	Versioning     bool             `json:"versioning"`
 	ObjectBrowse   bool             `json:"objectBrowse"`
+	Streaming      bool             `json:"streaming"`
 }
 
 // LayoutCapability is the layout management mode supported by the driver.
@@ -207,6 +209,20 @@ type CompletedPart struct {
 	ETag       string `json:"etag"`
 }
 
+// StreamResult contains the result of a StreamObject call.
+type StreamResult struct {
+	Body          io.ReadCloser
+	ContentType   string
+	ContentLength int64
+	ETag          string
+	LastModified  time.Time
+}
+
+// PutResult contains the result of a PutObjectStream call.
+type PutResult struct {
+	ETag string
+}
+
 // Driver is the interface that all backend drivers must implement.
 type Driver interface {
 	// Identity
@@ -244,4 +260,8 @@ type Driver interface {
 	PresignUploadPart(ctx context.Context, upload MultipartUpload, partNum int) (PresignedURL, error)
 	CompleteMultipart(ctx context.Context, upload MultipartUpload, parts []CompletedPart) error
 	AbortMultipart(ctx context.Context, upload MultipartUpload) error
+
+	// Streaming object operations for sync primitives.
+	StreamObject(ctx context.Context, bucket, key, rng string) (StreamResult, error)
+	PutObjectStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string, size int64) (PutResult, error)
 }
