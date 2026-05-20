@@ -1,0 +1,61 @@
+# Multi-cluster demo stack with Garage, MinIO, and AWS S3 connection seed.
+# This is a dev-quality example for local development and quickstart demos.
+# For production, see deploy/docker-compose.yml and docs/configuration.md.
+
+services:
+  basement:
+    image: ghcr.io/mattjackson/basement:${VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # --- server ---
+      BASEMENT_LISTEN: 0.0.0.0:8080
+      BASEMENT_DATA_DIR: /var/lib/basement
+      BASEMENT_PUBLIC_URL: http://localhost:8080
+      BASEMENT_LOG_LEVEL: info
+      BASEMENT_SESSION_TTL: 168h
+      BASEMENT_AUDIT_RETENTION_DAYS: 90
+
+      # --- admin user (seeded for quickstart; change in production) ---
+      BASEMENT_ADMIN_USER: admin
+      BASEMENT_ADMIN_PASSWORD_HASH: '$2a$14$N5nK3rZ3Qj7XyL6vJ8wRoeLzQ5tH9xKpWcVdMfGhIjKlMnOp.QaS'  # bcrypt("changeme")
+      BASEMENT_JWT_SECRET: 'supersecretjwtkeythatmustbebase64decodable32bytes!'
+
+      # --- driver defaults (seeded cluster) ---
+      BASEMENT_DRIVER_GARAGE_ADMIN_URL: http://garage:3903
+      BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN: garage_admin_token
+      BASEMENT_DRIVER_GARAGE_S3_URL: http://garage:3900
+      BASEMENT_DRIVER_GARAGE_S3_REGION: garage
+      BASEMENT_DRIVER_GARAGE_S3_ACCESS_KEY: garage_access_key
+      BASEMENT_DRIVER_GARAGE_S3_SECRET_KEY: garage_secret_key
+
+      # --- OIDC (optional; enable by setting BASEMENT_OIDC_ENABLED=true) ---
+      # BASEMENT_OIDC_ENABLED: false
+      # BASEMENT_OIDC_ISSUER_URL: https://authentik.example.com/application/o/basement/
+      # BASEMENT_OIDC_CLIENT_ID: basement
+      # BASEMENT_OIDC_CLIENT_SECRET: oidc-client-secret
+      # BASEMENT_OIDC_REDIRECT_URI: http://localhost:8080/auth/oidc/callback
+      # BASEMENT_OIDC_SCOPES: openid profile email
+
+    volumes:
+      - basement-data:/var/lib/basement
+
+  garage:
+    image: ghcr.io/garage-cloud/garage:${GARAGE_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      - "3900:3900"  # S3 data plane
+      - "3901:3901"  # internal RPC
+      - "3902:3902"  # internal RPC (peers)
+      - "3903:3903"  # admin API
+    environment:
+      GARAGE_ADMIN_TOKEN: garage_admin_token
+      GARAGE_NODE_ID: node-1
+      GARAGE_CONFIG_FILE: /etc/garage/config.toml
+    volumes:
+      - garage-data:/opt/garage/data
+
+volumes:
+  basement-data:
+  garage-data:
