@@ -2,9 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 
 type UserResponse = {
-  id: string;
+  id?: string;
   username: string;
   role: "admin" | "user";
+  uiAdmin: boolean;
 };
 
 export function useUser() {
@@ -19,7 +20,18 @@ export function useUser() {
       if (!response.ok || !data) {
         throw new Error(`Failed to fetch user (status ${response.status})`);
       }
-      return data as UserResponse;
+      // Cast from backend User type to frontend UserResponse with uiAdmin field
+      const userData = data as unknown as {
+        username: string;
+        role: "admin" | "user";
+        uiAdmin?: boolean;
+      };
+      return {
+        id: (data as { id?: string }).id,
+        username: userData.username,
+        role: userData.role,
+        uiAdmin: userData.uiAdmin ?? false,
+      } as UserResponse;
     },
     staleTime: 5 * 60 * 1000,
     retry: (failureCount, error) => {

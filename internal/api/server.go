@@ -121,6 +121,9 @@ func (s *Server) routes() {
 		apiR.Get("/auth/oidc/start", s.oidcStartHandler)
 		apiR.Get("/auth/oidc/callback", s.oidcCallbackHandler)
 
+		// Invite redemption (public, no auth required)
+		apiR.Post("/invites/{token}/redeem", s.inviteRedeemHandler)
+
 		// Authenticated routes — JWT cookie required.
 		apiR.Group(func(authG chi.Router) {
 			authG.Use(auth.Middleware(s.cfg.JWT.Secret))
@@ -169,6 +172,21 @@ func (s *Server) routes() {
 			// Cross-cluster aggregated reads (legacy paths, now return wrapped responses)
 			adminG.Get("/admin/buckets", s.listAllBucketsHandler)
 			adminG.Get("/admin/keys", s.listAllKeysHandler)
+		})
+
+		// UI Admin routes — require uiAdmin=true.
+		apiR.Group(func(uiAdminG chi.Router) {
+			uiAdminG.Use(auth.Middleware(s.cfg.JWT.Secret))
+			uiAdminG.Use(auth.RequireUIAdmin())
+
+			// Org capabilities management
+			uiAdminG.Get("/admin/system", s.getOrgCapabilitiesHandler)
+			uiAdminG.Patch("/admin/system", s.updateOrgCapabilitiesHandler)
+
+			// User management (global, UI Admin only)
+			uiAdminG.Get("/admin/users", s.listAllUsersHandler)
+			uiAdminG.Post("/admin/users", s.createUserHandler)
+			uiAdminG.Delete("/admin/users/{id}", s.deleteUserHandler)
 		})
 
 		// User routes — authenticated users only. Grants filtered server-side.

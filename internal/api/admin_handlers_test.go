@@ -146,7 +146,7 @@ var testSecret = func() []byte {
 
 // generateAdminToken creates a valid admin JWT token for testing.
 func generateAdminToken() string {
-	token, err := auth.IssueToken(testSecret, "admin", "admin", 24*time.Hour)
+	token, err := auth.IssueToken(testSecret, "admin", "admin", true, 24*time.Hour)
 	if err != nil {
 		panic(err)
 	}
@@ -155,7 +155,7 @@ func generateAdminToken() string {
 
 // generateUserToken creates a valid non-admin user JWT token for testing.
 func generateUserToken() string {
-	token, err := auth.IssueToken(testSecret, "user", "user", 24*time.Hour)
+	token, err := auth.IssueToken(testSecret, "user", "user", false, 24*time.Hour)
 	if err != nil {
 		panic(err)
 	}

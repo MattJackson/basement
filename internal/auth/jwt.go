@@ -17,21 +17,23 @@ var ErrInvalidSignature = errors.New("invalid signature")
 // ErrInvalidAlgorithm is returned by ParseToken when the JWT algorithm is unsupported.
 var ErrInvalidAlgorithm = errors.New("unsupported algorithm")
 
-// Claims extends jwt.RegisteredClaims with UserID and Role fields.
+// Claims extends jwt.RegisteredClaims with UserID, Role, and UIAdmin fields.
 type Claims struct {
-	UserID string `json:"userId"`
-	Role   string `json:"role"`
+	UserID  string `json:"userId"`
+	Role    string `json:"role"`
+	UIAdmin bool   `json:"uiAdmin"`
 	*jwt.RegisteredClaims
 }
 
 // nowFunc allows tests to inject time for deterministic expiry testing.
 var nowFunc = time.Now
 
-// IssueToken creates a JWT with HS256 signing, userID, and role claims.
-func IssueToken(secret []byte, userID, role string, ttl time.Duration) (string, error) {
+// IssueToken creates a JWT with HS256 signing, userID, role, and uiAdmin claims.
+func IssueToken(secret []byte, userID, role string, uiAdmin bool, ttl time.Duration) (string, error) {
 	claims := &Claims{
-		UserID: userID,
-		Role:   role,
+		UserID:  userID,
+		Role:    role,
+		UIAdmin: uiAdmin,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(nowFunc().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(nowFunc()),

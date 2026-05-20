@@ -66,7 +66,7 @@ func TestJwtIssueAndParseToken(t *testing.T) {
 	userID := "user-123"
 	role := "admin"
 
-	token, err := IssueToken(testSecret, userID, role, 24*time.Hour)
+	token, err := IssueToken(testSecret, userID, role, true, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestJwtIssueAndParseToken(t *testing.T) {
 }
 
 func TestJwtTamperFails(t *testing.T) {
-	token, err := IssueToken(testSecret, "user-123", "admin", 24*time.Hour)
+	token, err := IssueToken(testSecret, "user-123", "admin", true, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestJwtExpiredFails(t *testing.T) {
 	nowFunc = func() time.Time { return time.Now().Add(-24 * time.Hour) }
 	defer func() { nowFunc = oldNow }()
 
-	token, err := IssueToken(testSecret, "user-123", "admin", -1*time.Second)
+	token, err := IssueToken(testSecret, "user-123", "admin", true, -1*time.Second)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestMiddlewareBadSignature(t *testing.T) {
 }
 
 func TestMiddlewareValidToken(t *testing.T) {
-	token, err := IssueToken(testSecret, "user-456", "admin", 24*time.Hour)
+	token, err := IssueToken(testSecret, "user-456", "admin", true, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestMiddlewareValidToken(t *testing.T) {
 }
 
 func TestRequireRoleAdmin(t *testing.T) {
-	token, err := IssueToken(testSecret, "user-789", "admin", 24*time.Hour)
+	token, err := IssueToken(testSecret, "user-789", "admin", true, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestRequireRoleAdmin(t *testing.T) {
 }
 
 func TestRequireRoleForbidden(t *testing.T) {
-	token, err := IssueToken(testSecret, "user-789", "user", 24*time.Hour)
+	token, err := IssueToken(testSecret, "user-789", "user", false, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestRequireRoleForbidden(t *testing.T) {
 }
 
 func TestCookieFlags(t *testing.T) {
-	token, err := IssueToken(testSecret, "user-test", "admin", 24*time.Hour)
+	token, err := IssueToken(testSecret, "user-test", "admin", true, 24*time.Hour)
 	if err != nil {
 		t.Fatalf("IssueToken failed: %v", err)
 	}

@@ -4,6 +4,7 @@ import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
+import { useUser } from "@/shared/auth/useUser";
 
 interface AppShellProps {
   children?: ReactNode;
@@ -14,6 +15,9 @@ const NAV_LINK =
 const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function AppShell({ children }: AppShellProps): ReactNode {
+  const { data: user } = useUser();
+  const isUIAdmin = user?.uiAdmin === true;
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
@@ -29,20 +33,24 @@ export function AppShell({ children }: AppShellProps): ReactNode {
               >
                 Buckets
               </Link>
-              <Link
-                to="/admin/clusters"
-                className={NAV_LINK}
-                activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-              >
-                Clusters
-              </Link>
-              <Link
-                to="/admin/keys"
-                className={NAV_LINK}
-                activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-              >
-                Keys
-              </Link>
+              {isUIAdmin && (
+                <>
+                  <Link
+                    to="/admin/clusters"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    Clusters
+                  </Link>
+                  <Link
+                    to="/admin/keys"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    Keys
+                  </Link>
+                </>
+              )}
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">

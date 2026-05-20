@@ -349,7 +349,7 @@ func generateTestToken(userID, role string) string {
 	for i := range secret {
 		secret[i] = byte(i)
 	}
-	token, err := auth.IssueToken(secret, userID, role, 24*time.Hour)
+	token, err := auth.IssueToken(secret, userID, role, true, 24*time.Hour)
 	if err != nil {
 		panic(err)
 	}

@@ -15,6 +15,8 @@ import { Route as AdminIndexRouteImport } from "./routes/admin/index"
 import { Route as FilesSharesRouteImport } from "./routes/files/shares"
 import { Route as FilesKeysRouteImport } from "./routes/files/keys"
 import { Route as FilesCidRouteImport } from "./routes/files/$cid"
+import { Route as AdminUsersRouteImport } from "./routes/admin/users"
+import { Route as AdminSystemRouteImport } from "./routes/admin/system"
 import { Route as AdminLoginRouteImport } from "./routes/admin/login"
 import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
@@ -52,6 +54,16 @@ const FilesKeysRoute = FilesKeysRouteImport.update({
 const FilesCidRoute = FilesCidRouteImport.update({
   id: "/files/$cid",
   path: "/files/$cid",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: "/admin/users",
+  path: "/admin/users",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSystemRoute = AdminSystemRouteImport.update({
+  id: "/admin/system",
+  path: "/admin/system",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
@@ -99,6 +111,8 @@ const AdminClustersCidBucketsIdRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/admin/login": typeof AdminLoginRoute
+  "/admin/system": typeof AdminSystemRoute
+  "/admin/users": typeof AdminUsersRoute
   "/files/$cid": typeof FilesCidRoute
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
@@ -115,6 +129,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/admin/login": typeof AdminLoginRoute
+  "/admin/system": typeof AdminSystemRoute
+  "/admin/users": typeof AdminUsersRoute
   "/files/$cid": typeof FilesCidRoute
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
@@ -132,6 +148,8 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/admin/login": typeof AdminLoginRoute
+  "/admin/system": typeof AdminSystemRoute
+  "/admin/users": typeof AdminUsersRoute
   "/files/$cid": typeof FilesCidRoute
   "/files/keys": typeof FilesKeysRoute
   "/files/shares": typeof FilesSharesRoute
@@ -150,6 +168,8 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/admin/login"
+    | "/admin/system"
+    | "/admin/users"
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
@@ -166,6 +186,8 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/admin/login"
+    | "/admin/system"
+    | "/admin/users"
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
@@ -182,6 +204,8 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/admin/login"
+    | "/admin/system"
+    | "/admin/users"
     | "/files/$cid"
     | "/files/keys"
     | "/files/shares"
@@ -199,6 +223,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminLoginRoute: typeof AdminLoginRoute
+  AdminSystemRoute: typeof AdminSystemRoute
+  AdminUsersRoute: typeof AdminUsersRoute
   FilesCidRoute: typeof FilesCidRoute
   FilesKeysRoute: typeof FilesKeysRoute
   FilesSharesRoute: typeof FilesSharesRoute
@@ -255,6 +281,20 @@ declare module "@tanstack/react-router" {
       path: "/files/$cid"
       fullPath: "/files/$cid"
       preLoaderRoute: typeof FilesCidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/users": {
+      id: "/admin/users"
+      path: "/admin/users"
+      fullPath: "/admin/users"
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/system": {
+      id: "/admin/system"
+      path: "/admin/system"
+      fullPath: "/admin/system"
+      preLoaderRoute: typeof AdminSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/admin/login": {
@@ -319,6 +359,8 @@ declare module "@tanstack/react-router" {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminLoginRoute: AdminLoginRoute,
+  AdminSystemRoute: AdminSystemRoute,
+  AdminUsersRoute: AdminUsersRoute,
   FilesCidRoute: FilesCidRoute,
   FilesKeysRoute: FilesKeysRoute,
   FilesSharesRoute: FilesSharesRoute,

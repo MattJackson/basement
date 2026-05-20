@@ -18,6 +18,7 @@ type User struct {
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"password_hash,omitempty"` // bcrypt (empty for OIDC users)
 	Role         string    `json:"role"`                    // "admin" | "user"
+	UIAdmin      bool      `json:"uiAdmin,omitempty"`       // UI Admin axis: platform-level config access
 	Provider     string    `json:"provider,omitempty"`      // OIDC issuer URL ("" = local password)
 	Subject      string    `json:"subject,omitempty"`       // OIDC subject claim ("" = local password)
 	OIDCSubject  string    `json:"oidc_subject,omitempty"`  // legacy field, kept for back-compat
