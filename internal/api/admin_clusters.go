@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mattjackson/basement/internal/auth"
@@ -345,18 +347,26 @@ func (s *Server) listAllBucketsHandler(w http.ResponseWriter, r *http.Request) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			drv, err := s.reg.For(r.Context(), conn.ID)
+			// Per-cluster deadline so an unreachable cluster doesn't
+			// block the aggregated response for the full per-call
+			// driver timeout (10s). 3s is well above a healthy
+			// Garage admin call but tight enough that operators see
+			// the rest of their clusters' data immediately.
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+
+			drv, err := s.reg.For(ctx, conn.ID)
 			if err != nil {
 				mu.Lock()
-				results = append(results, result{err: fmt.Errorf("building driver for %s: %w", conn.ID, err)})
+				results = append(results, result{connID: conn.ID, err: fmt.Errorf("building driver for %s: %w", conn.ID, err)})
 				mu.Unlock()
 				return
 			}
 
-			buckets, err := drv.ListBuckets(r.Context())
+			buckets, err := drv.ListBuckets(ctx)
 			if err != nil {
 				mu.Lock()
-				results = append(results, result{err: fmt.Errorf("listing buckets for %s: %w", conn.ID, err)})
+				results = append(results, result{connID: conn.ID, err: fmt.Errorf("listing buckets for %s: %w", conn.ID, err)})
 				mu.Unlock()
 				return
 			}
@@ -509,18 +519,23 @@ func (s *Server) listAllKeysHandler(w http.ResponseWriter, r *http.Request) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			drv, err := s.reg.For(r.Context(), conn.ID)
+			// Per-cluster 3s deadline so an unreachable cluster
+			// doesn't block the aggregated keys list.
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+
+			drv, err := s.reg.For(ctx, conn.ID)
 			if err != nil {
 				mu.Lock()
-				results = append(results, result{err: fmt.Errorf("building driver for %s: %w", conn.ID, err)})
+				results = append(results, result{connID: conn.ID, err: fmt.Errorf("building driver for %s: %w", conn.ID, err)})
 				mu.Unlock()
 				return
 			}
 
-			keys, err := drv.ListKeys(r.Context())
+			keys, err := drv.ListKeys(ctx)
 			if err != nil {
 				mu.Lock()
-				results = append(results, result{err: fmt.Errorf("listing keys for %s: %w", conn.ID, err)})
+				results = append(results, result{connID: conn.ID, err: fmt.Errorf("listing keys for %s: %w", conn.ID, err)})
 				mu.Unlock()
 				return
 			}
