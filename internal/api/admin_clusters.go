@@ -145,14 +145,22 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Check uniqueness (excluding self)
+		// Check uniqueness (excluding self) — the comment lied; the
+		// freshman passed the full list including the cluster being
+		// edited, so a no-op label change failed with DUPLICATE_LABEL.
 		existingConns, listErr := s.conns.List(r.Context())
 		if listErr != nil {
 			writeErrorSimple(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to list connections for duplicate check")
 			return
 		}
+		otherConns := make([]store.Connection, 0, len(existingConns))
+		for _, c := range existingConns {
+			if c.ID != cid {
+				otherConns = append(otherConns, c)
+			}
+		}
 
-		if ve := requireUniqueName("label", patch.Label, existingConns, func(c store.Connection) []string {
+		if ve := requireUniqueName("label", patch.Label, otherConns, func(c store.Connection) []string {
 			return []string{c.Label}
 		}); ve != nil {
 			writeValidationError(w, ve)
