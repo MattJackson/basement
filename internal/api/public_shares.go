@@ -287,7 +287,7 @@ func (s *Server) shareListHandler(w http.ResponseWriter, r *http.Request) {
 	// Get driver and list objects
 	drv, err := s.reg.For(r.Context(), sh.ConnectionID)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -414,7 +414,7 @@ func (s *Server) shareGetHandler(w http.ResponseWriter, r *http.Request) {
 	// Get driver and create presigned URL
 	drv, err := s.reg.For(r.Context(), sh.ConnectionID)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 

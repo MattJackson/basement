@@ -55,7 +55,7 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Validate connection exists and user has access.
 	if _, err := s.conns.Get(r.Context(), req.ConnectionID); err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -82,7 +82,7 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 	if s.reg != nil {
 		drv, err := s.reg.For(r.Context(), req.ConnectionID)
 		if err != nil {
-			writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+			writeRegistryForError(w, err)
 			return
 		}
 

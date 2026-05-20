@@ -54,7 +54,7 @@ func (s *Server) userListClusterBucketsHandler(w http.ResponseWriter, r *http.Re
 
 	drv, err := s.reg.For(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -98,7 +98,7 @@ func (s *Server) userGetClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := s.conns.Get(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -146,7 +146,7 @@ func (s *Server) userGetClusterBucketHandler(w http.ResponseWriter, r *http.Requ
 
 	drv, err := s.reg.For(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 

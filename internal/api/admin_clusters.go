@@ -113,7 +113,7 @@ func (s *Server) getClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := s.conns.Get(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -185,7 +185,7 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 		msg := err.Error()
 		switch {
 		case strings.Contains(msg, "connection not found"):
-			writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+			writeRegistryForError(w, err)
 		case strings.Contains(msg, "duplicate label"):
 			writeErrorSimple(w, http.StatusConflict, "DUPLICATE_LABEL", msg)
 		case strings.Contains(msg, "unsupported driver"):
@@ -225,7 +225,7 @@ func (s *Server) armDeleteClusterHandler(w http.ResponseWriter, r *http.Request)
 
 	// Confirm the connection exists before issuing a token.
 	if _, err := s.conns.Get(r.Context(), cid); err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -281,7 +281,7 @@ func (s *Server) deleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.conns.Delete(r.Context(), cid); err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -307,7 +307,7 @@ func (s *Server) testClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	drv, err := s.reg.For(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -453,7 +453,7 @@ func (s *Server) listBucketsByClusterHandler(w http.ResponseWriter, r *http.Requ
 
 	drv, err := s.reg.For(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
@@ -485,7 +485,7 @@ func (s *Server) listKeysByClusterHandler(w http.ResponseWriter, r *http.Request
 
 	drv, err := s.reg.For(r.Context(), cid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		writeRegistryForError(w, err)
 		return
 	}
 
