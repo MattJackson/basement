@@ -111,6 +111,8 @@ func (s *Server) routes() {
 	r.Use(middleware.AllowContentType("application/json"))
 
 	r.Route("/api/v1", func(apiR chi.Router) {
+		apiR.Use(xBuildMiddleware)
+
 		// Public routes — no auth required.
 		apiR.Get("/health", s.healthHandler)
 		apiR.Get("/version", s.versionHandler)
