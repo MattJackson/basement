@@ -136,26 +136,38 @@ func TestCreateKeyError(t *testing.T) {
 
 func TestUpdateKeyPermissions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/AllowBucketKey" || r.Method != "POST" {
-			t.Errorf("expected POST /v2/AllowBucketKey, got %s %s", r.Method, r.URL.Path)
-		}
+		if r.URL.Path == "/v2/AllowBucketKey" && r.Method == "POST" {
+			var req allowBucketKeyRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("failed to decode Allow request: %v", err)
+			}
 
-		var req allowBucketKeyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
+			if req.AccessKeyID != "test-key-id" {
+				t.Errorf("expected AccessKeyID 'test-key-id', got '%s'", req.AccessKeyID)
+			}
 
-		if req.AccessKeyID != "test-key-id" {
-			t.Errorf("expected AccessKeyID 'test-key-id', got '%s'", req.AccessKeyID)
-		}
+			if !req.Permissions.Read || !req.Permissions.Write || !req.Permissions.Owner {
+				t.Errorf("expected all permissions true, got read=%v write=%v owner=%v", 
+					req.Permissions.Read, req.Permissions.Write, req.Permissions.Owner)
+			}
 
-		if !req.Permissions.Read || !req.Permissions.Write || !req.Permissions.Owner {
-			t.Errorf("expected all permissions true, got read=%v write=%v owner=%v", 
-				req.Permissions.Read, req.Permissions.Write, req.Permissions.Owner)
-		}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		} else if r.URL.Path == "/v2/DenyBucketKey" && r.Method == "POST" {
+			var req bucketPermChangeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("failed to decode Deny request: %v", err)
+			}
 
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
+			if req.AccessKeyID != "test-key-id" {
+				t.Errorf("expected AccessKeyID 'test-key-id', got '%s'", req.AccessKeyID)
+			}
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		} else {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -175,19 +187,29 @@ func TestUpdateKeyPermissionsMultipleBuckets(t *testing.T) {
 	callCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/AllowBucketKey" || r.Method != "POST" {
-			t.Errorf("expected POST /v2/AllowBucketKey, got %s %s", r.Method, r.URL.Path)
+		if r.URL.Path == "/v2/AllowBucketKey" && r.Method == "POST" {
+			var req allowBucketKeyRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("failed to decode Allow request: %v", err)
+			}
+
+			callCount++
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		} else if r.URL.Path == "/v2/DenyBucketKey" && r.Method == "POST" {
+			var req bucketPermChangeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("failed to decode Deny request: %v", err)
+			}
+
+			callCount++
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		} else {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-
-		var req allowBucketKeyRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
-
-		callCount++
-
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -203,8 +225,8 @@ func TestUpdateKeyPermissionsMultipleBuckets(t *testing.T) {
 		t.Fatalf("UpdateKeyPermissions failed: %v", err)
 	}
 
-	if callCount != 2 {
-		t.Errorf("expected 2 API calls (one per bucket), got %d", callCount)
+	if callCount != 4 {
+		t.Errorf("expected 4 API calls (Allow + Deny per bucket), got %d", callCount)
 	}
 }
 

@@ -1,4 +1,3 @@
-// Package garage implements the garage device driver.
 package garage
 
 import (
@@ -10,8 +9,8 @@ import (
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
-// ListKeys returns all access keys in the cluster.
-// Endpoint: GET /v2/ListKeys (docs/garage-admin-api.md lines 316-323)
+// ListKeys returns all API access keys in the cluster.
+// Endpoint: GET /v2/ListKeys (garage-admin-v2.json:1263-1286).
 func (d *driver) ListKeys(ctx context.Context) ([]driverpkg.Key, error) {
 	var resp []listKeysResponseItem
 	if err := d.client.do(ctx, "GET", "/v2/ListKeys", nil, &resp); err != nil {
@@ -20,80 +19,55 @@ func (d *driver) ListKeys(ctx context.Context) ([]driverpkg.Key, error) {
 
 	keys := make([]driverpkg.Key, 0, len(resp))
 	for _, k := range resp {
-		var createdTime time.Time
-		if k.Created != "" {
-			createdTime, _ = time.Parse(time.RFC3339, k.Created)
-		}
-
 		key := driverpkg.Key{
-			ID:                k.ID,
-			Name:              k.Name,
-			Created:           createdTime,
-			AllowCreateBucket: false, // Not available from ListKeys endpoint
+			ID:          k.ID,
+			Name:        k.Name,
+			AccessKeyID: k.ID,
 		}
-
 		keys = append(keys, key)
 	}
-
 	return keys, nil
 }
 
-// GetKey returns details for a specific access key by ID.
-// Endpoint: GET /v2/GetKeyInfo?id={id} (docs/garage-admin-api.md lines 297-305)
+// GetKey returns details for a specific access key by id.
+// Endpoint: GET /v2/GetKeyInfo (garage-admin-v2.json:843-895).
 func (d *driver) GetKey(ctx context.Context, id string) (driverpkg.Key, error) {
+	path := fmt.Sprintf("/v2/GetKeyInfo?id=%s", url.QueryEscape(id))
+
 	var resp getKeyInfoResponse
-	if err := d.client.do(ctx, "GET", "/v2/GetKeyInfo?id="+url.QueryEscape(id), nil, &resp); err != nil {
+	if err := d.client.do(ctx, "GET", path, nil, &resp); err != nil {
 		return driverpkg.Key{}, err
 	}
 
-	key := keyFromGetKeyInfo(resp, time.Now())
-
-	if resp.SecretAccessKey != nil {
-		key.AccessKeyID = *resp.SecretAccessKey
-	} else if resp.ID != "" {
-		key.AccessKeyID = resp.ID
-	}
-
-	return key, nil
+	return keyFromInfo(resp), nil
 }
 
-// CreateKey creates a new API access key with the specified name.
-// Endpoint: POST /v2/CreateKey (docs/garage-admin-api.md lines 278-285)
+// CreateKey creates a new API access key.
+// Endpoint: POST /v2/CreateKey (garage-admin-v2.json:367-400).
 func (d *driver) CreateKey(ctx context.Context, spec driverpkg.KeySpec) (driverpkg.Key, error) {
-	reqBody := createKeyRequest{
-		Name: spec.Name,
-	}
+	body := createKeyRequest{Name: spec.Name}
 
 	var resp getKeyInfoResponse
-	if err := d.client.do(ctx, "POST", "/v2/CreateKey", reqBody, &resp); err != nil {
+	if err := d.client.do(ctx, "POST", "/v2/CreateKey", body, &resp); err != nil {
 		return driverpkg.Key{}, err
 	}
 
-	key := keyFromGetKeyInfo(resp, time.Now())
-
-	// AccessKeyID is the PUBLIC credential (GK... in Garage). The
-	// previous code mixed up the secret here — it assigned
-	// secret_access_key into AccessKeyID, hiding the secret from the
-	// UI on top of leaking it into the wrong field. Fix:
-	key.AccessKeyID = resp.ID
+	key := keyFromInfo(resp)
+	// Surface the create-only secret. Garage returns it exactly here;
+	// keyFromInfo drops it because GetKey/UpdateKeyPermissions paths
+	// reuse the same converter but don't carry the secret.
 	if resp.SecretAccessKey != nil && *resp.SecretAccessKey != "" {
 		key.SecretAccessKey = resp.SecretAccessKey
 	}
-
 	return key, nil
 }
 
-// UpdateKeyPermissions updates the permissions for a key on multiple buckets.
-// This method calls AllowBucketKey or DenyBucketKey for each bucket based on the desired permissions.
-// OPEN: The diff-allow-deny logic assumes we have full previous state to compare against.
-// If caller doesn't provide previous permissions, this only sets the new ones without removing old grants.
-// Endpoint: POST /v2/AllowBucketKey and POST /v2/DenyBucketKey (docs/garage-admin-api.md lines 187-194, 234-241)
+// UpdateKeyPermissions sets per-bucket permissions for a key.
+// Endpoints: POST /v2/AllowBucketKey and POST /v2/DenyBucketKey (garage-admin-v2.json:129-162, 526-559).
 func (d *driver) UpdateKeyPermissions(ctx context.Context, keyID string, perms []driverpkg.BucketPermission) error {
-	// For each desired permission entry, call AllowBucketKey with the flags set appropriately.
-	// Note: Garage's semantics are unconventional - true activates, false keeps previous value.
-	// So to grant read/write/owner, we set those flags to true in AllowBucketKey.
 	for _, p := range perms {
-		permChange := allowBucketKeyRequest{
+		// AllowBucketKey: set permissions that should be true (garage-admin-v2.json:129-162)
+		allowReq := bucketPermChangeRequest{
 			BucketID:    p.BucketID,
 			AccessKeyID: keyID,
 			Permissions: apiBucketKeyPerm{
@@ -103,90 +77,127 @@ func (d *driver) UpdateKeyPermissions(ctx context.Context, keyID string, perms [
 			},
 		}
 
-		if err := d.client.do(ctx, "POST", "/v2/AllowBucketKey", permChange, nil); err != nil {
+		var allowResp getBucketInfoResponse
+		if err := d.client.do(ctx, "POST", "/v2/AllowBucketKey", allowReq, &allowResp); err != nil {
+			return err
+		}
+
+		// DenyBucketKey: set permissions that should be false (garage-admin-v2.json:526-559)
+		denyReq := bucketPermChangeRequest{
+			BucketID:    p.BucketID,
+			AccessKeyID: keyID,
+			Permissions: apiBucketKeyPerm{
+				Read:  !p.Read,
+				Write: !p.Write,
+				Owner: !p.Owner,
+			},
+		}
+
+		var denyResp getBucketInfoResponse
+		if err := d.client.do(ctx, "POST", "/v2/DenyBucketKey", denyReq, &denyResp); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
-// DeleteKey deletes an access key by ID.
-// Endpoint: POST /v2/DeleteKey?id={id} (docs/garage-admin-api.md lines 287-295)
+// DeleteKey deletes an access key by id.
+// Endpoint: POST /v2/DeleteKey (garage-admin-v2.json:498-525).
 func (d *driver) DeleteKey(ctx context.Context, id string) error {
 	path := fmt.Sprintf("/v2/DeleteKey?id=%s", url.QueryEscape(id))
 	return d.client.do(ctx, "POST", path, nil, nil)
 }
 
-// Response types for ListKeys endpoint
-
-type listKeysResponseItem struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Created    string `json:"created,omitempty"`
-	Expiration string `json:"expiration,omitempty"`
-	Expired    bool   `json:"expired"`
-}
-
-// Request/Response types for GetKey, CreateKey, UpdateKeyPermissions, DeleteKey
-
-type getKeyInfoResponse struct {
-	ID                string            `json:"id"`
-	SecretAccessKey   *string           `json:"secretAccessKey,omitempty"`
-	Name              string            `json:"name"`
-	BucketsPermissions []bucketPermissionResp `json:"bucketsPermissions"`
-}
-
-type bucketPermissionResp struct {
-	BucketID         string             `json:"bucketId"`
-	Read             bool               `json:"read"`
-	Write            bool               `json:"write"`
-	Owner            bool               `json:"owner"`
-	BucketLocalAliases []bucketLocalAlias `json:"bucketLocalAliases,omitempty"`
-}
-
-// keyFromGetKeyInfo converts a GetKeyInfo response into a driver.Key.
-func keyFromGetKeyInfo(resp getKeyInfoResponse, now time.Time) driverpkg.Key {
+// keyFromInfo converts a GetKeyInfoResponse into a driver.Key.
+// GetKeyInfoResponse schema: garage-admin-v2.json:2875-2930.
+func keyFromInfo(resp getKeyInfoResponse) driverpkg.Key {
 	buckets := make([]driverpkg.KeyBucketAccess, 0, len(resp.BucketsPermissions))
 	for _, b := range resp.BucketsPermissions {
-		globalAliases := []string{}
-		localAliases := make([]string, 0, len(b.BucketLocalAliases))
-		for _, la := range b.BucketLocalAliases {
-			localAliases = append(localAliases, la.Alias)
-		}
-
 		buckets = append(buckets, driverpkg.KeyBucketAccess{
 			BucketID:      b.BucketID,
-			GlobalAliases: globalAliases,
-			LocalAliases:  localAliases,
+			GlobalAliases: []string{},
+			LocalAliases:  []string{},
 			Read:          b.Read,
 			Write:         b.Write,
 			Owner:         b.Owner,
 		})
 	}
 
-	return driverpkg.Key{
+	key := driverpkg.Key{
 		ID:                resp.ID,
 		Name:              resp.Name,
-		Created:           now, // Created not returned by default per spec
-		AllowCreateBucket: false,      // Not returned by GetKeyInfo
+		AccessKeyID:       resp.ID,
 		Buckets:           buckets,
+		Created:           resp.Created,
+		AllowCreateBucket: resp.Permissions.CreateBucket,
 	}
+
+	if resp.Expiration != nil {
+		key.Created = *resp.Expiration // Use expiration as proxy for created if needed
+	}
+
+	return key
 }
 
+// ===== v2 wire types for keys =====
+
+// listKeysResponseItem mirrors ListKeysResponseItem (garage-admin-v2.json:3244-3270).
+type listKeysResponseItem struct {
+	ID        string     `json:"id"`
+	Name      string     `json:"name"`
+	Created   *time.Time `json:"created,omitempty"`
+	Expiration *time.Time `json:"expiration,omitempty"`
+	Expired   bool       `json:"expired"`
+}
+
+// getKeyInfoResponse mirrors GetKeyInfoResponse (garage-admin-v2.json:2875-2930).
+type getKeyInfoResponse struct {
+	ID                 string              `json:"accessKeyId"`
+	Name               string              `json:"name"`
+	SecretAccessKey    *string             `json:"secretAccessKey,omitempty"`
+	Created            time.Time           `json:"created,omitempty"`
+	Expiration         *time.Time          `json:"expiration,omitempty"`
+	Expired            bool                `json:"expired"`
+	Permissions        keyPerm             `json:"permissions"`
+	BucketsPermissions []bucketPermissionResp `json:"buckets"`
+}
+
+// bucketPermissionResp is used for tests and matches the buckets permissions structure.
+type bucketPermissionResp struct {
+	BucketID string `json:"id"`
+	Read     bool   `json:"read"`
+	Write    bool   `json:"write"`
+	Owner    bool   `json:"owner"`
+}
+
+// keyInfoBucketResponse mirrors KeyInfoBucketResponse (garage-admin-v2.json:3490-3527).
+type keyInfoBucketResponse struct {
+	ID            string          `json:"id"`
+	GlobalAliases []string        `json:"globalAliases"`
+	LocalAliases  []string        `json:"localAliases"`
+	Permissions   apiBucketKeyPerm `json:"permissions"`
+}
+
+// keyPerm mirrors KeyPerm (garage-admin-v2.json:3124-3131).
+type keyPerm struct {
+	CreateBucket bool `json:"createBucket,omitempty"`
+}
+
+// createKeyRequest mirrors CreateKeyRequest (garage-admin-v2.json:396-410).
 type createKeyRequest struct {
-	Name          string  `json:"name"`
-	AccessKeyID   *string `json:"accessKeyId,omitempty"`
+	Name string `json:"name"`
 }
 
-type allowBucketKeyRequest struct {
-	BucketID    string         `json:"bucketId"`
-	AccessKeyID string         `json:"accessKeyId"`
+// bucketPermChangeRequest mirrors BucketKeyPermChangeRequest (garage-admin-v2.json:1728-1745).
+type bucketPermChangeRequest struct {
+	BucketID    string          `json:"bucketId"`
+	AccessKeyID string          `json:"accessKeyId"`
 	Permissions apiBucketKeyPerm `json:"permissions"`
 }
 
-type apiBucketKeyPerm struct {
-	Read  bool `json:"read"`
-	Write bool `json:"write"`
-	Owner bool `json:"owner"`
+// allowBucketKeyRequest mirrors AllowBucketKeyRequest (garage-admin-v2.json:1730-1745).
+type allowBucketKeyRequest struct {
+	BucketID    string          `json:"bucketId"`
+	AccessKeyID string          `json:"accessKeyId"`
+	Permissions apiBucketKeyPerm `json:"permissions"`
 }

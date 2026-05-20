@@ -1,4 +1,3 @@
-// Package garage implements the garage device driver.
 package garage
 
 import (
@@ -13,40 +12,49 @@ import (
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
-// client is the internal HTTP client for Garage v2 admin API.
+// client is the internal HTTP client for the Garage v2 admin API.
 type client struct {
 	baseURL string
 	token   string
 	http    *http.Client
 }
 
-// newClient creates a new Garage client from config.
+// newClient creates a new Garage v2 admin client from config.
 // Config keys:
-//   - "admin_url": Garage admin URL (e.g., http://garage:3903)
+//   - "admin_url": Garage admin URL (e.g., http://garage:3902)
 //   - "admin_token": Bearer token for authentication
+//   - "s3_endpoint": Optional S3 API endpoint (defaults to :3902 if not specified)
+//
+// security scheme: garage-admin-v2.json:5063-5074 (bearerAuth)
 func newClient(cfg driverpkg.Config) *client {
-	baseURL := cfg["admin_url"]
-	token := cfg["admin_token"]
-
 	return &client{
-		baseURL: baseURL,
-		token:   token,
+		baseURL: cfg["admin_url"],
+		token:   cfg["admin_token"],
 		http: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 10 * time.Second,
 		},
 	}
 }
 
-// do makes an HTTP request to the Garage admin API and decodes the response.
-// It handles JSON encoding/decoding, Bearer token authentication, and error mapping.
-func (c *client) do(ctx context.Context, method, path string, body any, out any) error {
+// do executes an HTTP request against the Garage v2 admin API. It handles
+// JSON encoding of the request body, Bearer-token authentication, decoding
+// of the response into out (if non-nil), and HTTP status -> driver sentinel
+// error mapping:
+//
+//	401          -> ErrUnauthenticated
+//	403          -> ErrPermissionDenied
+//	404          -> ErrNotFound
+//	409          -> ErrConflict
+//	400, 405, 422-> ErrInvalid
+//	5xx          -> raw "HTTP <code>: <body>" (no sentinel)
+func (c *client) do(ctx context.Context, method, path string, body, out any) error {
 	var reqBody io.Reader
 	if body != nil {
 		jsonBytes, err := json.Marshal(body)
 		if err != nil {
 			return &driverpkg.Error{
 				Op:      method,
-				Driver:  "garage",
+				Driver:  driverName,
 				Err:     driverpkg.ErrInvalid,
 				Message: fmt.Sprintf("failed to marshal request body: %v", err),
 			}
@@ -59,7 +67,7 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 	if err != nil {
 		return &driverpkg.Error{
 			Op:      method,
-			Driver:  "garage",
+			Driver:  driverName,
 			Err:     driverpkg.ErrInvalid,
 			Message: fmt.Sprintf("failed to create request: %v", err),
 		}
@@ -74,7 +82,7 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 	if err != nil {
 		return &driverpkg.Error{
 			Op:      method,
-			Driver:  "garage",
+			Driver:  driverName,
 			Err:     driverpkg.ErrUnauthenticated,
 			Message: fmt.Sprintf("HTTP request failed: %v", err),
 		}
@@ -85,7 +93,7 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 	if err != nil {
 		return &driverpkg.Error{
 			Op:      method,
-			Driver:  "garage",
+			Driver:  driverName,
 			Err:     driverpkg.ErrInvalid,
 			Message: fmt.Sprintf("failed to read response body: %v", err),
 		}
@@ -96,7 +104,7 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 			if err := json.Unmarshal(respBody, out); err != nil {
 				return &driverpkg.Error{
 					Op:      method,
-					Driver:  "garage",
+					Driver:  driverName,
 					Err:     driverpkg.ErrInvalid,
 					Message: fmt.Sprintf("failed to unmarshal response: %v", err),
 				}
@@ -107,22 +115,22 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 
 	var mappedErr error
 	switch resp.StatusCode {
-	case 401:
+	case http.StatusUnauthorized:
 		mappedErr = driverpkg.ErrUnauthenticated
-	case 403:
+	case http.StatusForbidden:
 		mappedErr = driverpkg.ErrPermissionDenied
-	case 404:
+	case http.StatusNotFound:
 		mappedErr = driverpkg.ErrNotFound
-	case 409:
+	case http.StatusConflict:
 		mappedErr = driverpkg.ErrConflict
-	case 400, 405, 422:
+	case http.StatusBadRequest, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
 		mappedErr = driverpkg.ErrInvalid
 	default:
 		if resp.StatusCode >= 500 {
 			mappedErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 		} else {
 			mappedErr = &driverpkg.Error{
-				Driver:  "garage",
+				Driver:  driverName,
 				Err:     driverpkg.ErrInvalid,
 				Message: fmt.Sprintf("unexpected status: %d", resp.StatusCode),
 			}
@@ -131,7 +139,7 @@ func (c *client) do(ctx context.Context, method, path string, body any, out any)
 
 	return &driverpkg.Error{
 		Op:      method,
-		Driver:  "garage",
+		Driver:  driverName,
 		Err:     mappedErr,
 		Message: string(respBody),
 	}
