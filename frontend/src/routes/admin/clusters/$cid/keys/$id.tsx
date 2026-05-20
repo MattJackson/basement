@@ -71,24 +71,10 @@ function KeyDetailScreen() {
         <BackLink />
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-4 w-64" />
-        <Card>
-          <CardContent className="pt-6">
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
-              <div>
-                <dt className="text-sm text-muted-foreground">Access Key ID</dt>
-                <dd><Skeleton className="h-4 w-full mt-1" /></dd>
-              </div>
-              <div>
-                <dt className="text-sm text-muted-foreground">Created</dt>
-                <dd><Skeleton className="h-4 w-32 mt-1" /></dd>
-              </div>
-              <div>
-                <dt className="text-sm text-muted-foreground">Allow create bucket</dt>
-                <dd><Skeleton className="h-4 w-16 mt-1" /></dd>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border bg-card px-4 py-3 flex gap-8">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-4 w-36" />
+        </div>
         <Card>
           <Table>
             <TableHeader>
@@ -201,30 +187,22 @@ function KeyDetailScreen() {
         </p>
       </div>
 
-      {/* Metadata card */}
-      <Card>
-        <CardContent className="pt-6">
-          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-md">
-            <div>
-              <dt className="text-sm text-muted-foreground">Access Key ID</dt>
-              <dd className="font-mono text-sm mt-1">{key.accessKeyId}</dd>
-            </div>
-            {(() => {
-              const human = humanizeTime(key.created);
-              return human === "—" ? null : (
-                <div>
-                  <dt className="text-sm text-muted-foreground">Created</dt>
-                  <dd className="mt-1">{human}</dd>
-                </div>
-              );
-            })()}
-            <div>
-              <dt className="text-sm text-muted-foreground">Allow create bucket</dt>
-              <dd className="mt-1">{key.allowCreateBucket ? "Yes" : "No"}</dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>
+      {/* Metadata — compact inline row to match Quotas pattern on bucket detail */}
+      <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 text-sm rounded-lg border bg-card px-4 py-3">
+        {(() => {
+          const human = humanizeTime(key.created);
+          return human === "—" ? null : (
+            <span>
+              <span className="text-xs text-muted-foreground mr-1.5">Created</span>
+              <span className="font-medium">{human}</span>
+            </span>
+          );
+        })()}
+        <span>
+          <span className="text-xs text-muted-foreground mr-1.5">Can create buckets</span>
+          <span className="font-medium">{key.allowCreateBucket ? "Yes" : "No"}</span>
+        </span>
+      </div>
 
       {/* Bucket access table */}
       <Card>
