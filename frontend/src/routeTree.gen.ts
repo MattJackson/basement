@@ -20,7 +20,10 @@ import { Route as FilesCidRouteImport } from "./routes/files/$cid"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
 import { Route as AdminSystemRouteImport } from "./routes/admin/system"
 import { Route as AdminLoginRouteImport } from "./routes/admin/login"
+import { Route as FilesSyncsIndexRouteImport } from "./routes/files/syncs/index"
+import { Route as FilesSharesIndexRouteImport } from "./routes/files/shares/index"
 import { Route as FilesCidIndexRouteImport } from "./routes/files/$cid/index"
+import { Route as AdminUsersIndexRouteImport } from "./routes/admin/users/index"
 import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
 import { Route as AdminBucketsIndexRouteImport } from "./routes/admin/buckets/index"
@@ -91,10 +94,25 @@ const AdminLoginRoute = AdminLoginRouteImport.update({
   path: "/admin/login",
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesSyncsIndexRoute = FilesSyncsIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => FilesSyncsRoute,
+} as any)
+const FilesSharesIndexRoute = FilesSharesIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => FilesSharesRoute,
+} as any)
 const FilesCidIndexRoute = FilesCidIndexRouteImport.update({
   id: "/",
   path: "/",
   getParentRoute: () => FilesCidRoute,
+} as any)
+const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => AdminUsersRoute,
 } as any)
 const AdminKeysIndexRoute = AdminKeysIndexRouteImport.update({
   id: "/admin/keys/",
@@ -188,7 +206,10 @@ export interface FileRoutesByFullPath {
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
+  "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$cid/": typeof FilesCidIndexRoute
+  "/files/shares/": typeof FilesSharesIndexRoute
+  "/files/syncs/": typeof FilesSyncsIndexRoute
   "/admin/clusters/$cid/edit": typeof AdminClustersCidEditRoute
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/files/$cid/b/$bid": typeof FilesCidBBidRoute
@@ -200,10 +221,7 @@ export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/system": typeof AdminSystemRoute
-  "/admin/users": typeof AdminUsersRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
-  "/files/shares": typeof FilesSharesRouteWithChildren
-  "/files/syncs": typeof FilesSyncsRouteWithChildren
   "/share/$token": typeof ShareTokenRoute
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
@@ -215,7 +233,10 @@ export interface FileRoutesByTo {
   "/admin/buckets": typeof AdminBucketsIndexRoute
   "/admin/clusters": typeof AdminClustersIndexRoute
   "/admin/keys": typeof AdminKeysIndexRoute
+  "/admin/users": typeof AdminUsersIndexRoute
   "/files/$cid": typeof FilesCidIndexRoute
+  "/files/shares": typeof FilesSharesIndexRoute
+  "/files/syncs": typeof FilesSyncsIndexRoute
   "/admin/clusters/$cid/edit": typeof AdminClustersCidEditRoute
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/files/$cid/b/$bid": typeof FilesCidBBidRoute
@@ -244,7 +265,10 @@ export interface FileRoutesById {
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
+  "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$cid/": typeof FilesCidIndexRoute
+  "/files/shares/": typeof FilesSharesIndexRoute
+  "/files/syncs/": typeof FilesSyncsIndexRoute
   "/admin/clusters/$cid/edit": typeof AdminClustersCidEditRoute
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/files/$cid/b/$bid": typeof FilesCidBBidRoute
@@ -274,7 +298,10 @@ export interface FileRouteTypes {
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
+    | "/admin/users/"
     | "/files/$cid/"
+    | "/files/shares/"
+    | "/files/syncs/"
     | "/admin/clusters/$cid/edit"
     | "/admin/clusters/$cid/layout"
     | "/files/$cid/b/$bid"
@@ -286,10 +313,7 @@ export interface FileRouteTypes {
     | "/"
     | "/admin/login"
     | "/admin/system"
-    | "/admin/users"
     | "/files/keys"
-    | "/files/shares"
-    | "/files/syncs"
     | "/share/$token"
     | "/admin"
     | "/files"
@@ -301,7 +325,10 @@ export interface FileRouteTypes {
     | "/admin/buckets"
     | "/admin/clusters"
     | "/admin/keys"
+    | "/admin/users"
     | "/files/$cid"
+    | "/files/shares"
+    | "/files/syncs"
     | "/admin/clusters/$cid/edit"
     | "/admin/clusters/$cid/layout"
     | "/files/$cid/b/$bid"
@@ -329,7 +356,10 @@ export interface FileRouteTypes {
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
+    | "/admin/users/"
     | "/files/$cid/"
+    | "/files/shares/"
+    | "/files/syncs/"
     | "/admin/clusters/$cid/edit"
     | "/admin/clusters/$cid/layout"
     | "/files/$cid/b/$bid"
@@ -441,12 +471,33 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/files/syncs/": {
+      id: "/files/syncs/"
+      path: "/"
+      fullPath: "/files/syncs/"
+      preLoaderRoute: typeof FilesSyncsIndexRouteImport
+      parentRoute: typeof FilesSyncsRoute
+    }
+    "/files/shares/": {
+      id: "/files/shares/"
+      path: "/"
+      fullPath: "/files/shares/"
+      preLoaderRoute: typeof FilesSharesIndexRouteImport
+      parentRoute: typeof FilesSharesRoute
+    }
     "/files/$cid/": {
       id: "/files/$cid/"
       path: "/"
       fullPath: "/files/$cid/"
       preLoaderRoute: typeof FilesCidIndexRouteImport
       parentRoute: typeof FilesCidRoute
+    }
+    "/admin/users/": {
+      id: "/admin/users/"
+      path: "/"
+      fullPath: "/admin/users/"
+      preLoaderRoute: typeof AdminUsersIndexRouteImport
+      parentRoute: typeof AdminUsersRoute
     }
     "/admin/keys/": {
       id: "/admin/keys/"
@@ -551,10 +602,12 @@ declare module "@tanstack/react-router" {
 
 interface AdminUsersRouteChildren {
   AdminUsersNewRoute: typeof AdminUsersNewRoute
+  AdminUsersIndexRoute: typeof AdminUsersIndexRoute
 }
 
 const AdminUsersRouteChildren: AdminUsersRouteChildren = {
   AdminUsersNewRoute: AdminUsersNewRoute,
+  AdminUsersIndexRoute: AdminUsersIndexRoute,
 }
 
 const AdminUsersRouteWithChildren = AdminUsersRoute._addFileChildren(
@@ -577,10 +630,12 @@ const FilesCidRouteWithChildren = FilesCidRoute._addFileChildren(
 
 interface FilesSharesRouteChildren {
   FilesSharesNewRoute: typeof FilesSharesNewRoute
+  FilesSharesIndexRoute: typeof FilesSharesIndexRoute
 }
 
 const FilesSharesRouteChildren: FilesSharesRouteChildren = {
   FilesSharesNewRoute: FilesSharesNewRoute,
+  FilesSharesIndexRoute: FilesSharesIndexRoute,
 }
 
 const FilesSharesRouteWithChildren = FilesSharesRoute._addFileChildren(
@@ -589,10 +644,12 @@ const FilesSharesRouteWithChildren = FilesSharesRoute._addFileChildren(
 
 interface FilesSyncsRouteChildren {
   FilesSyncsNewRoute: typeof FilesSyncsNewRoute
+  FilesSyncsIndexRoute: typeof FilesSyncsIndexRoute
 }
 
 const FilesSyncsRouteChildren: FilesSyncsRouteChildren = {
   FilesSyncsNewRoute: FilesSyncsNewRoute,
+  FilesSyncsIndexRoute: FilesSyncsIndexRoute,
 }
 
 const FilesSyncsRouteWithChildren = FilesSyncsRoute._addFileChildren(
