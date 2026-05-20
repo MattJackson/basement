@@ -104,6 +104,41 @@ export function useBuckets() {
   });
 }
 
+// Per-cluster bucket list — directly hits /admin/clusters/{cid}/buckets
+// rather than going through the aggregate fan-out. Used on the cluster
+// detail page and for bucket-count badges on the clusters list.
+export function useClusterBuckets(cid: string) {
+  return useQuery<Bucket[]>({
+    queryKey: ["admin", "clusters", cid, "buckets"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}/buckets", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/buckets`, response.status, error);
+      return data as Bucket[];
+    },
+    enabled: !!cid,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+export function useClusterKeys(cid: string) {
+  return useQuery<Key[]>({
+    queryKey: ["admin", "clusters", cid, "keys"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/admin/clusters/{cid}/keys", {
+        params: { path: { cid } },
+      });
+      if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/keys`, response.status, error);
+      return data as Key[];
+    },
+    enabled: !!cid,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
 export function useBucketsFlat() {
   const query = useBuckets();
   if (query.data) {

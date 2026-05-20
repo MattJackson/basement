@@ -11,14 +11,14 @@ import { DangerZone } from "@/shared/ui/DangerZone";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeTime } from "@/shared/lib/format";
-import { useGetCluster, useNodes, useCapabilities, useTestClusterQuery } from "@/shared/api/queries";
+import { useGetCluster, useNodes, useCapabilities, useTestClusterQuery, useClusterBuckets, useClusterKeys } from "@/shared/api/queries";
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
 import { EditClusterDialog } from "@/components/clusters/EditClusterDialog";
 import { DriverBadge } from "@/components/clusters/DriverBadge";
 
-export const Route = createFileRoute("/admin/clusters/$cid")({
+export const Route = createFileRoute("/admin/clusters/$cid/")({
   component: adminPage(ClusterDetailScreen),
 });
 
@@ -28,6 +28,8 @@ function ClusterDetailScreen() {
   const { data: cluster, isLoading, error } = useGetCluster(cid);
   const { data: nodes } = useNodes(cid);
   const { data: capabilities } = useCapabilities();
+  const { data: buckets, isLoading: bucketsLoading } = useClusterBuckets(cid);
+  const { data: keys, isLoading: keysLoading } = useClusterKeys(cid);
   const deleteCluster = useDeleteCluster();
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -139,44 +141,87 @@ function ClusterDetailScreen() {
       {/* Buckets section */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <span>Buckets</span>
-          {/* Routes /admin/clusters/$cid/buckets|keys|layout land in
-              CLUSTER.RESOURCE-DETAIL + CLUSTER.LAYOUT-EDITOR cycles.
-              Until then this is a plain anchor that goes to the
-              cross-cluster lists pre-filtered by cluster. */}
+          <span>Buckets {buckets && <span className="text-muted-foreground font-normal">({buckets.length})</span>}</span>
           <a
-            href={`/admin?cluster=${cid}`}
+            href="/admin"
             className="text-sm font-medium hover:underline text-muted-foreground"
           >
             View all →
           </a>
         </CardHeader>
         <CardContent className="pt-6">
-          <EmptyState
-            icon="database"
-            title="No buckets yet"
-            description="Buckets in this cluster will appear here."
-          />
+          {bucketsLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : !buckets || buckets.length === 0 ? (
+            <EmptyState
+              icon="database"
+              title="No buckets yet"
+              description="Buckets in this cluster will appear here."
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {buckets.slice(0, 8).map((b) => {
+                const name = b.aliases?.[0] ?? b.id.slice(0, 12);
+                return (
+                  <li key={b.id} className="py-2">
+                    <Link
+                      to="/admin/clusters/$cid/buckets/$id"
+                      params={{ cid, id: b.id }}
+                      className="flex items-center justify-between hover:bg-muted/40 -mx-2 px-2 py-1 rounded transition-colors"
+                    >
+                      <span className="font-medium text-sm">{name}</span>
+                      <span className="font-mono text-xs text-muted-foreground">{b.id.slice(0, 12)}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+              {buckets.length > 8 && (
+                <li className="py-2 text-sm text-muted-foreground">+ {buckets.length - 8} more</li>
+              )}
+            </ul>
+          )}
         </CardContent>
       </Card>
 
       {/* Keys section */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <span>Keys</span>
+          <span>Keys {keys && <span className="text-muted-foreground font-normal">({keys.length})</span>}</span>
           <a
-            href={`/admin/keys?cluster=${cid}`}
+            href="/admin/keys"
             className="text-sm font-medium hover:underline text-muted-foreground"
           >
             View all →
           </a>
         </CardHeader>
         <CardContent className="pt-6">
-          <EmptyState
-            icon="key"
-            title="No keys yet"
-            description="Access keys for this cluster will appear here."
-          />
+          {keysLoading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : !keys || keys.length === 0 ? (
+            <EmptyState
+              icon="key"
+              title="No keys yet"
+              description="Access keys for this cluster will appear here."
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {keys.slice(0, 8).map((k) => (
+                <li key={k.id} className="py-2">
+                  <Link
+                    to="/admin/clusters/$cid/keys/$id"
+                    params={{ cid, id: k.id }}
+                    className="flex items-center justify-between hover:bg-muted/40 -mx-2 px-2 py-1 rounded transition-colors"
+                  >
+                    <span className="font-medium text-sm">{k.name || "Unnamed"}</span>
+                    <span className="font-mono text-xs text-muted-foreground">{k.id.slice(0, 12)}</span>
+                  </Link>
+                </li>
+              ))}
+              {keys.length > 8 && (
+                <li className="py-2 text-sm text-muted-foreground">+ {keys.length - 8} more</li>
+              )}
+            </ul>
+          )}
         </CardContent>
       </Card>
 
