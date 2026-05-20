@@ -263,6 +263,38 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
+    // 1.6 user-persona chrome (v0.5.3 USER.SHELL)
+    // ============================================================
+    section("[1.6] user-persona chrome");
+    
+    await check("[NN] /files header shows user-persona nav (Files/Keys/Shares)", async () => {
+      await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
+      
+      // Assert Files, Keys, Shares nav items are present in Primary nav
+      const primaryNav = page!.locator('nav[aria-label="Primary"]');
+      
+      await Promise.all([
+        primaryNav.locator('text=Files').first().waitFor({ state: 'visible', timeout: 10_000 }),
+        primaryNav.locator('text=Keys').first().waitFor({ state: 'visible', timeout: 10_000 }),
+        primaryNav.locator('text=Shares').first().waitFor({ state: 'visible', timeout: 10_000 }),
+      ]);
+
+      // Assert Clusters is NOT in the Primary nav (user-shell should not show it)
+      const clustersLink = await primaryNav.locator('text=Clusters').count();
+      if (clustersLink > 0) {
+        throw new Error("User shell incorrectly shows 'Clusters' in Primary nav - should only show Files/Keys/Shares");
+      }
+
+      // Assert Logo href is /files
+      const logoHref = await page!.locator('a[data-testid="logo"]').getAttribute('href');
+      if (logoHref !== "/files") {
+        throw new Error(`Logo href is '${logoHref}', expected '/files'`);
+      }
+
+      await shot(page!, "13-user-shell");
+    });
+
+    // ============================================================
     // 2. Clusters list
     // ============================================================
     section("[2] clusters list");
