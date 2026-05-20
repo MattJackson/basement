@@ -41,6 +41,8 @@ tags:
   description: Share link creation and management (v1.2+)
 - name: User
   description: User persona endpoints — clusters, buckets, keys, objects
+- name: Sync
+  description: Cross-cluster sync job management (v0.8.0c)
 paths:
   /admin/buckets:
       get:
@@ -4092,6 +4094,265 @@ paths:
               application/json:
                 schema:
                    $ref: '#/components/schemas/ErrorResponse'
+
+  # User sync endpoints (v0.8.0c SYNC.ENGINE.PULL)
+  /user/syncs:
+      post:
+        operationId: createUserSync
+        summary: Create a new cross-cluster sync job (pull mode only, v0.8.0c)
+        description: Creates an asynchronous sync job that copies objects from a source bucket to a destination bucket. Returns 202 Accepted immediately with the job ID; the actual sync runs asynchronously. User must have grants on both source and destination connections.
+        tags:
+        - Sync
+        x-basement-since: '1.4'
+        security:
+        - cookieAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserSyncCreateRequest'
+        responses:
+          '202':
+            description: Sync job created and queued for processing
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: Job ID (UUID).
+                    state:
+                      type: string
+                      enum: [queued]
+                      description: Initial job state.
+                    message:
+                      type: string
+                      example: Sync job created and queued
+          '400':
+            description: Invalid request body or unsupported mode
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: User lacks grants on source or destination connection
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Source or destination cluster not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      get:
+        operationId: listUserSyncs
+        summary: List user's sync jobs
+        description: Returns all sync jobs owned by the authenticated user, sorted by creation time (newest first).
+        tags:
+        - Sync
+        x-basement-since: '1.4'
+        security:
+        - cookieAuth: []
+        responses:
+          '200':
+            description: List of sync jobs
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SyncJob'
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
+  /user/syncs/{id}:
+      get:
+        operationId: getUserSync
+        summary: Get sync job detail and progress
+        description: Returns detailed information about a specific sync job including current state, progress metrics, and any error messages.
+        tags:
+        - Sync
+        x-basement-since: '1.4'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job ID (UUID)
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Sync job details
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/SyncJob'
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: Access denied (not owner)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Sync job not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: deleteUserSync
+        summary: Delete a sync job
+        description: Deletes a sync job. Only the owner can delete their own jobs. Does not cancel running syncs (they continue to completion).
+        tags:
+        - Sync
+        x-basement-since: '1.4'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job ID (UUID)
+          schema:
+            type: string
+        responses:
+          '204':
+            description: Sync job deleted successfully
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: Access denied (not owner)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Sync job not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
+  /user/syncs/{id}/pause:
+      post:
+        operationId: pauseUserSync
+        summary: Pause a running sync job
+        description: Pauses an active sync job. The job state becomes 'paused'. Use resume to restart.
+        tags:
+        - Sync
+        x-basement-since: '1.4'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job ID (UUID)
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Sync job paused successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    state:
+                      type: string
+                      enum: [paused]
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: Access denied (not owner)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Sync job not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
+  /user/syncs/{id}/resume:
+      post:
+        operationId: resumeUserSync
+        summary: Resume a paused sync job
+        description: Resumes a previously paused sync job. The job state becomes 'running'. Only works for jobs in 'paused' state.
+        tags:
+        - Sync
+        x-basement-since: '1.4'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          description: Job ID (UUID)
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Sync job resumed successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    state:
+                      type: string
+                      enum: [running]
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: Access denied (not owner)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Sync job not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
       cookieAuth:
@@ -5160,5 +5421,155 @@ components:
                 etag:
                   type: string
                   description: ETag returned by the storage service after part upload.
+      SyncJob:
+        type: object
+        required:
+        - id
+        - ownerUserId
+        - mode
+        - srcConnectionId
+        - srcBucket
+        - dstConnectionId
+        - dstBucket
+        - createdAt
+        - state
+        - progress
+        properties:
+          id:
+            type: string
+            description: Unique job identifier (UUID).
+          ownerUserId:
+            type: string
+            description: User ID that owns this sync job.
+          mode:
+            type: string
+            enum:
+            - pull
+            - push
+            - two-way
+            description: Sync mode. v0.8.0c supports only 'pull'.
+          srcConnectionId:
+            type: string
+            description: Source cluster/connection ID.
+          srcBucket:
+            type: string
+            description: Source bucket name.
+          srcPrefix:
+            type: string
+            nullable: true
+            description: Optional source prefix for partial sync.
+          dstConnectionId:
+            type: string
+            description: Destination cluster/connection ID.
+          dstBucket:
+            type: string
+            description: Destination bucket name.
+          dstPrefix:
+            type: string
+            nullable: true
+            description: Optional destination prefix mapping.
+          createdAt:
+            type: string
+            format: date-time
+            description: Job creation timestamp (RFC 3339).
+          state:
+            type: string
+            enum:
+            - queued
+            - running
+            - paused
+            - done
+            - error
+            description: Current job state.
+          progress:
+            $ref: '#/components/schemas/SyncProgress'
+          lastError:
+            type: string
+            nullable: true
+            description: Error message if state is 'error'.
+      SyncProgress:
+        type: object
+        required:
+        - objectsTotal
+        - objectsCopied
+        - bytesTotal
+        - bytesCopied
+        properties:
+          objectsTotal:
+            type: integer
+            minimum: 0
+            description: Total number of objects to sync.
+          objectsCopied:
+            type: integer
+            minimum: 0
+            description: Number of objects successfully copied.
+          bytesTotal:
+            type: integer
+            minimum: 0
+            description: Total bytes to copy.
+          bytesCopied:
+            type: integer
+            minimum: 0
+            description: Bytes successfully copied.
+          startedAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: When the sync started (RFC 3339).
+          finishedAt:
+            type: string
+            format: date-time
+            nullable: true
+            description: When the sync completed (RFC 3339).
+      UserSyncCreateRequest:
+        type: object
+        required:
+        - mode
+        - srcConnectionId
+        - srcBucket
+        - dstConnectionId
+        - dstBucket
+        properties:
+          mode:
+            type: string
+            enum:
+            - pull
+            description: Sync mode. v0.8.0c supports only 'pull'.
+          srcConnectionId:
+            type: string
+            description: Source cluster/connection ID.
+          srcBucket:
+            type: string
+            description: Source bucket name.
+          srcPrefix:
+            type: string
+            nullable: true
+            description: Optional source prefix for partial sync.
+          dstConnectionId:
+            type: string
+            description: Destination cluster/connection ID.
+          dstBucket:
+            type: string
+            description: Destination bucket name.
+          dstPrefix:
+            type: string
+            nullable: true
+            description: Optional destination prefix mapping.
+      CreateSyncResponse:
+        type: object
+        required:
+        - id
+        - state
+        properties:
+          id:
+            type: string
+            description: Job ID (UUID).
+          state:
+            type: string
+            enum: [queued]
+            description: Initial job state.
+          message:
+            type: string
+            example: Sync job created and queued
 security:
 - cookieAuth: []

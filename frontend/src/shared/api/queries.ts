@@ -606,3 +606,87 @@ export function useShareList(token: string | null, prefix: string = "") {
   });
 }
 
+// v0.8.0c SYNC.ENGINE.PULL — sync job hooks.
+
+export function useUserSyncs() {
+  return useQuery<components["schemas"]["SyncJob"][]>({
+    queryKey: ["user", "syncs"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/syncs");
+      if (!response.ok || !data) throw apiError("user/syncs", response.status, error);
+      return (data as unknown[]) as components["schemas"]["SyncJob"][];
+    },
+    staleTime: 5 * 1000, // Refresh every 5 seconds for active jobs
+    refetchInterval: 2000, // Poll every 2s while job is running/queued
+    retry: 1,
+  });
+}
+
+export function useUserSync(id: string | null) {
+  return useQuery<components["schemas"]["SyncJob"]>({
+    queryKey: ["user", "syncs", id],
+    queryFn: async () => {
+      if (!id) throw new Error("Sync ID required");
+      const { data, error, response } = await client.GET("/user/syncs/{id}", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`user/syncs/${id}`, response.status, error);
+      return data as components["schemas"]["SyncJob"];
+    },
+    enabled: !!id,
+    staleTime: 5 * 1000,
+    refetchInterval: (query) => {
+      // Poll every 2s while job is running or queued
+      const state = query.state?.data?.state;
+      return state === "running" || state === "queued" ? 2000 : false;
+    },
+    retry: 1,
+  });
+}
+
+export function useCreateUserSync() {
+  return useMutation({
+    mutationFn: async (data: components["schemas"]["UserSyncCreateRequest"]) => {
+      const { data: result, error, response } = await client.POST("/user/syncs", { body: data });
+      if (!response.ok || !result) throw apiError("user/syncs/create", response.status, error);
+      return result as components["schemas"]["CreateSyncResponse"];
+    },
+  });
+}
+
+export function useDeleteUserSync() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error, response } = await client.DELETE("/user/syncs/{id}", {
+        params: { path: { id } },
+      });
+      if (!response.ok) throw apiError(`user/syncs/delete/${id}`, response.status, error);
+      return data;
+    },
+  });
+}
+
+export function usePauseUserSync() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error, response } = await client.POST("/user/syncs/{id}/pause", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`user/syncs/pause/${id}`, response.status, error);
+      return data as { state: string };
+    },
+  });
+}
+
+export function useResumeUserSync() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error, response } = await client.POST("/user/syncs/{id}/resume", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`user/syncs/resume/${id}`, response.status, error);
+      return data as { state: string };
+    },
+  });
+}
+

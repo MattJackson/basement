@@ -9,6 +9,7 @@ import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { useUserClusterBuckets, useUserObjects, useUserPresignGet } from "@/shared/api/queries";
 import { ObjectRow } from "@/components/objects/ObjectRow";
 import { UploadDialog } from "@/components/upload/UploadDialog";
+import { StartSyncDialog } from "@/components/sync/StartSyncDialog";
 
 export const Route = createFileRoute("/files/$cid/b/$bid")({
   component: UserBucketObjects,
@@ -62,6 +63,7 @@ function UserBucketObjects() {
   };
 
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
 
   const handleUploadSuccess = () => {
     setUploadOpen(false);
@@ -110,6 +112,14 @@ function UserBucketObjects() {
               disabled={objectsLoading}
             >
               Upload
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => setSyncDialogOpen(true)}
+              disabled={objectsLoading}
+            >
+              Sync in…
             </Button>
           </div>
         }
@@ -186,6 +196,11 @@ function UserBucketObjects() {
         bid={bid}
         prefix={prefix}
         onSuccess={handleUploadSuccess}
+      />
+
+      <StartSyncDialog
+        open={syncDialogOpen}
+        onOpenChange={setSyncDialogOpen}
       />
     </div>
   );
