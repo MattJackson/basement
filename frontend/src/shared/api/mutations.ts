@@ -28,21 +28,27 @@ function apiError(
   return err;
 }
 
+// Buckets are now connection-scoped. All bucket mutations thread cid
+// through so the registry resolves the right driver and so the
+// invalidation keys segregate per cluster.
+
 export function useCreateBucket() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  return useMutation<Bucket, Error, { alias: string }>({
-    mutationFn: async (spec) => {
-      const { data, error, response } = await client.POST("/admin/buckets", {
-        body: spec,
+  return useMutation<Bucket, Error, { cid: string; alias: string }>({
+    mutationFn: async ({ cid, alias }) => {
+      const { data, error, response } = await client.POST("/admin/clusters/{cid}/buckets", {
+        params: { path: { cid } },
+        body: { alias },
       });
       if (!response.ok || !data) throw apiError("createBucket", response.status, error);
       return data;
     },
-    onSuccess: (bucket) => {
+    onSuccess: (bucket, { cid }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
-      navigate({ to: "/admin/buckets/$id", params: { id: bucket.id } });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "buckets"] });
+      navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid, id: bucket.id } });
     },
   });
 }
@@ -53,48 +59,43 @@ export function useUpdateBucket() {
   return useMutation<
     Bucket,
     Error,
-    { id: string; update: { aliases?: string[] } | { quotas?: { max_size?: number | null; max_objects?: number | null } | undefined } }
+    { cid: string; id: string; update: { aliases?: string[] } | { quotas?: { max_size?: number | null; max_objects?: number | null } | undefined } }
   >({
-    mutationFn: async ({ id, update }) => {
-      const { data: _data, error, response } = await client.PATCH("/admin/buckets/{id}", {
-        params: { path: { id } },
+    mutationFn: async ({ cid, id, update }) => {
+      const { data: _data, error, response } = await client.PATCH("/admin/clusters/{cid}/buckets/{id}", {
+        params: { path: { cid, id } },
         body: update as never,
       });
       if (!response.ok || !_data) throw apiError(`updateBucket/${id}`, response.status, error);
       return _data as Bucket;
     },
-    onSuccess: (_, { id }) => {
+    onSuccess: (_, { cid, id }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "buckets", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "buckets", id] });
     },
   });
 }
 
 /**
- * Two-phase delete: POST /_arm-delete to mint a short-lived HMAC
- * token, then DELETE with X-Confirm-Delete header carrying the token.
- * No single curl-by-hand can destroy a bucket.
+ * Two-phase delete: POST /_arm-delete then DELETE with X-Confirm-Delete.
+ * Connection-scoped — the token is bound to (bucket id, user); the path
+ * carries the cid.
  */
 export function useDeleteBucket() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  return useMutation<void, Error, string>({
-    mutationFn: async (id) => {
-      // Phase 1 — arm. Server verifies the bucket exists and mints a
-      // 60-second HMAC token bound to (bucket id, current user).
-      const arm = await client.POST("/admin/buckets/{id}/_arm-delete", {
-        params: { path: { id } },
+  return useMutation<void, Error, { cid: string; id: string }>({
+    mutationFn: async ({ cid, id }) => {
+      const arm = await client.POST("/admin/clusters/{cid}/buckets/{id}/_arm-delete", {
+        params: { path: { cid, id } },
       });
       if (!arm.response.ok || !arm.data?.token) {
         throw apiError(`armDeleteBucket/${id}`, arm.response.status, arm.error);
       }
-      // Phase 2 — fire. Token goes in X-Confirm-Delete; server
-      // re-verifies it matches the requested bucket + user before
-      // calling the backend delete.
-      const del = await client.DELETE("/admin/buckets/{id}", {
+      const del = await client.DELETE("/admin/clusters/{cid}/buckets/{id}", {
         params: {
-          path: { id },
+          path: { cid, id },
           header: { "X-Confirm-Delete": arm.data.token },
         },
         headers: { "X-Confirm-Delete": arm.data.token },
@@ -103,9 +104,9 @@ export function useDeleteBucket() {
         throw apiError(`deleteBucket/${id}`, del.response.status, del.error);
       }
     },
-    onSuccess: (_, id) => {
+    onSuccess: (_, { cid, id }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "buckets", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "buckets", id] });
       navigate({ to: "/admin" });
     },
   });
@@ -123,17 +124,19 @@ export function useDeleteBucket() {
 export function useCreateKey() {
   const queryClient = useQueryClient();
 
-  return useMutation<components["schemas"]["Key"], Error, { name: string }>({
-    mutationFn: async (spec) => {
-      const { data, error, response } = await client.POST("/admin/keys", {
-        body: spec,
+  return useMutation<components["schemas"]["Key"], Error, { cid: string; name: string }>({
+    mutationFn: async ({ cid, name }) => {
+      const { data, error, response } = await client.POST("/admin/clusters/{cid}/keys", {
+        params: { path: { cid } },
+        body: { name },
       });
       if (!response.ok || !data) throw apiError("createKey", response.status, error);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_, { cid }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
-      // No navigate — the caller surfaces secretAccessKey first.
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys"] });
+      // No navigate — caller surfaces secretAccessKey first.
     },
   });
 }
@@ -144,46 +147,37 @@ export function useCreateKey() {
 export function useUpdateKeyPermissions() {
   const queryClient = useQueryClient();
 
-  return useMutation<components["schemas"]["Key"], Error, { id: string; permissions: components["schemas"]["BucketPermission"][] }>({
-    mutationFn: async ({ id, permissions }) => {
-      const { data, error, response } = await client.PATCH("/admin/keys/{id}", {
-        params: { path: { id } },
+  return useMutation<components["schemas"]["Key"], Error, { cid: string; id: string; permissions: components["schemas"]["BucketPermission"][] }>({
+    mutationFn: async ({ cid, id, permissions }) => {
+      const { data, error, response } = await client.PATCH("/admin/clusters/{cid}/keys/{id}", {
+        params: { path: { cid, id } },
         body: { bucketsPermissions: permissions },
       });
       if (!response.ok || !data) throw apiError(`updateKeyPermissions/${id}`, response.status, error);
       return data;
     },
-    onSuccess: (_, { id }) => {
+    onSuccess: (_, { cid, id }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "keys", id] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys", id] });
     },
   });
 }
 
-/**
- * Two-phase delete for access keys: POST /_arm-delete to mint a short-lived HMAC
- * token, then DELETE with X-Confirm-Delete header carrying the token.
- */
 export function useDeleteKey() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  return useMutation<void, Error, string>({
-    mutationFn: async (id) => {
-      // Phase 1 — arm. Server verifies the key exists and mints a
-      // 60-second HMAC token bound to (key id, current user).
-      const arm = await client.POST("/admin/keys/{id}/_arm-delete", {
-        params: { path: { id } },
+  return useMutation<void, Error, { cid: string; id: string }>({
+    mutationFn: async ({ cid, id }) => {
+      const arm = await client.POST("/admin/clusters/{cid}/keys/{id}/_arm-delete", {
+        params: { path: { cid, id } },
       });
       if (!arm.response.ok || !arm.data?.token) {
         throw apiError(`armDeleteKey/${id}`, arm.response.status, arm.error);
       }
-      // Phase 2 — fire. Token goes in X-Confirm-Delete; server
-      // re-verifies it matches the requested key + user before
-      // calling the delete.
-      const del = await client.DELETE("/admin/keys/{id}", {
+      const del = await client.DELETE("/admin/clusters/{cid}/keys/{id}", {
         params: {
-          path: { id },
+          path: { cid, id },
           header: { "X-Confirm-Delete": arm.data.token },
         },
         headers: { "X-Confirm-Delete": arm.data.token },

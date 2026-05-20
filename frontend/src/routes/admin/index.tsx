@@ -58,34 +58,41 @@ function MyBuckets() {
     queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
   };
 
+  const buckets = bucketsData?.buckets ?? [];
+  const errors = bucketsData?.errors ?? [];
+
+  // For cross-cluster create, target cluster = active filter if set,
+  // else fall back to the first cluster that has any buckets visible
+  // here (or the first cluster overall when buckets is empty).
+  const targetCid = clusterFilter ?? clusters?.[0]?.id ?? null;
+
   const handleCreateSubmit = async (values: CreateBucketFormValues) => {
-    try {
-      createMutation.mutate(
-        { alias: values.alias },
-        {
-          onError: () => {
-            // Error stays in dialog, don't close
-          }
-        }
-      );
-    } catch {
-      // Handled by mutation error state
-    }
+    if (!targetCid) return;
+    createMutation.mutate(
+      { cid: targetCid, alias: values.alias },
+      {
+        onError: () => {
+          // Error stays in dialog, don't close
+        },
+      },
+    );
   };
+
+  // Each row carries its own connectionId; pair into state on click.
+  const deleteTarget = deleteDialogId
+    ? buckets.find((b) => b.id === deleteDialogId)
+    : null;
 
   const handleDeleteClick = (bucketId: string) => {
     setDeleteDialogId(bucketId);
   };
 
   const confirmDelete = () => {
-    if (deleteDialogId) {
-      deleteMutation.mutate(deleteDialogId);
+    if (deleteDialogId && deleteTarget?.connectionId) {
+      deleteMutation.mutate({ cid: deleteTarget.connectionId, id: deleteDialogId });
       setDeleteDialogId(null);
     }
   };
-
-  const buckets = bucketsData?.buckets ?? [];
-  const errors = bucketsData?.errors ?? [];
 
   const filteredBuckets = buckets.filter((bucket) => {
     if (clusterFilter && bucket.connectionId !== clusterFilter) return false;
@@ -190,8 +197,6 @@ function MyBuckets() {
                     key={bucket.id}
                     className="cursor-pointer hover:bg-muted/50"
                     onClick={() => {
-                      // PLANNED: /admin/clusters/{cid}/buckets/{id} route (CLUSTER.RESOURCE-DETAIL)
-                      // @ts-expect-error route not yet defined
                       navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
                     }}
                   >
@@ -226,12 +231,10 @@ function MyBuckets() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                             onClick={(e) => {
-                                e.stopPropagation();
-                                // PLANNED: /admin/clusters/{cid}/buckets/{id} route (CLUSTER.RESOURCE-DETAIL)
-                                // @ts-expect-error route not yet defined
-                                navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
-                              }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate({ to: "/admin/clusters/$cid/buckets/$id", params: { cid: bucket.connectionId, id: bucket.id } });
+                            }}
                           >
                             View
                           </DropdownMenuItem>

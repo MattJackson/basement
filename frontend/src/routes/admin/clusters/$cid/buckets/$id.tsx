@@ -18,7 +18,7 @@ import { useBucket } from "@/shared/api/queries";
 import { useUpdateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 
-export const Route = createFileRoute("/admin/buckets/$id")({
+export const Route = createFileRoute("/admin/clusters/$cid/buckets/$id")({
   component: adminPage(AdminBucketDetail),
 });
 
@@ -75,14 +75,14 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function AdminBucketDetail() {
-  const { id } = Route.useParams();
+  const { cid, id } = Route.useParams();
   const updateMutation = useUpdateBucket();
   const deleteMutation = useDeleteBucket();
   const [isEditingAlias, setIsEditingAlias] = useState(false);
   const [aliasInput, setAliasInput] = useState("");
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const { data: bucket, isLoading, error } = useBucket(id);
+  const { data: bucket, isLoading, error } = useBucket(cid, id);
 
   if (error) {
     return (
@@ -162,6 +162,7 @@ function AdminBucketDetail() {
     const aliases = bucket.aliases ?? [];
     const newAliases = [aliasInput, ...aliases.filter((a) => a !== aliases[0])];
     updateMutation.mutate({
+      cid,
       id: bucket.id,
       update: { aliases: newAliases },
     });
@@ -180,6 +181,7 @@ function AdminBucketDetail() {
     };
 
     updateMutation.mutate({
+      cid,
       id: bucket.id,
       update: { quotas },
     });
@@ -187,7 +189,7 @@ function AdminBucketDetail() {
   };
 
   const handleDelete = () => {
-    deleteMutation.mutate(bucket.id);
+    deleteMutation.mutate({ cid, id: bucket.id });
     setDeleteDialogOpen(false);
   };
 

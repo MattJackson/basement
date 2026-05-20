@@ -15,7 +15,7 @@ import { useState } from "react";
 import type { components } from "@/shared/api/types.gen";
 import { DangerZone } from "@/shared/ui/DangerZone";
 
-export const Route = createFileRoute("/admin/keys/$id")({
+export const Route = createFileRoute("/admin/clusters/$cid/keys/$id")({
   component: adminPage(KeyDetailScreen),
 });
 
@@ -45,8 +45,8 @@ function BucketName({ globalAliases, localAliases, bucketId }: { globalAliases?:
 }
 
 function KeyDetailScreen() {
-  const { id } = Route.useParams();
-  const { data: key, isLoading, error } = useKey(id);
+  const { cid, id } = Route.useParams();
+  const { data: key, isLoading, error } = useKey(cid, id);
   
   const updatePermissions = useUpdateKeyPermissions();
   const deleteKey = useDeleteKey();
@@ -139,7 +139,7 @@ function KeyDetailScreen() {
   };
 
   const handleSave = () => {
-    updatePermissions.mutate({ id, permissions: editPermissions });
+    updatePermissions.mutate({ cid, id, permissions: editPermissions });
     setIsEditing(false);
   };
 
@@ -361,7 +361,7 @@ function KeyDetailScreen() {
         keyName={key.name}
         isDeleting={deleteKey.isPending}
         onConfirm={() => {
-          deleteKey.mutate(id);
+          deleteKey.mutate({ cid, id });
           setDeleteDialogOpen(false);
         }}
         onCancel={() => setDeleteDialogOpen(false)}
