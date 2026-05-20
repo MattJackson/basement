@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -63,11 +64,17 @@ type JWTConfig struct {
 }
 
 // OIDCConfig holds OIDC configuration (v1.3).
+//
+// Optional: if Issuer is empty, OIDC is disabled and local-password login
+// is the only authentication path. If Issuer is set, ClientID, ClientSecret,
+// and RedirectURL must also be set (RedirectURL falls back to
+// ${PublicURL}/api/v1/auth/oidc/callback when PublicURL is set).
 type OIDCConfig struct {
 	Issuer        string // BASEMENT_OIDC_ISSUER
-	ClientID      string
-	ClientSecret  string
-	AutoProvision bool
+	ClientID      string // BASEMENT_OIDC_CLIENT_ID
+	ClientSecret  string // BASEMENT_OIDC_CLIENT_SECRET
+	RedirectURL   string // BASEMENT_OIDC_REDIRECT_URL, defaults to ${PublicURL}/api/v1/auth/oidc/callback
+	AutoProvision bool   // BASEMENT_OIDC_AUTO_PROVISION, default false
 }
 
 // Load reads and validates configuration from environment variables.
@@ -146,6 +153,7 @@ func Load() (*Config, error) {
 	cfg.OIDC.Issuer = envOr("BASEMENT_OIDC_ISSUER", "")
 	cfg.OIDC.ClientID = envOr("BASEMENT_OIDC_CLIENT_ID", "")
 	cfg.OIDC.ClientSecret = envOr("BASEMENT_OIDC_CLIENT_SECRET", "")
+	cfg.OIDC.RedirectURL = envOr("BASEMENT_OIDC_REDIRECT_URL", "")
 
 	// Parse OIDC AutoProvision (optional, default false)
 	oidcAutoProvEnv := os.Getenv("BASEMENT_OIDC_AUTO_PROVISION")
@@ -155,6 +163,11 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("invalid BASEMENT_OIDC_AUTO_PROVISION: %w", err)
 		}
 		cfg.OIDC.AutoProvision = parsed
+	}
+
+	// Derive RedirectURL from PublicURL if not set explicitly.
+	if cfg.OIDC.Issuer != "" && cfg.OIDC.RedirectURL == "" && cfg.PublicURL != "" {
+		cfg.OIDC.RedirectURL = strings.TrimRight(cfg.PublicURL, "/") + "/api/v1/auth/oidc/callback"
 	}
 
 	// Validation - aggregate all errors
@@ -205,6 +218,19 @@ func Load() (*Config, error) {
 		errs = append(errs, errors.New("BASEMENT_JWT_SECRET is required"))
 	} else if len(cfg.JWT.Secret) < 32 {
 		errs = append(errs, fmt.Errorf("BASEMENT_JWT_SECRET must be at least 32 bytes after base64 decoding (got %d)", len(cfg.JWT.Secret)))
+	}
+
+	// Validate OIDC config (optional — only validated if Issuer is set).
+	if cfg.OIDC.Issuer != "" {
+		if cfg.OIDC.ClientID == "" {
+			errs = append(errs, errors.New("BASEMENT_OIDC_CLIENT_ID is required when BASEMENT_OIDC_ISSUER is set"))
+		}
+		if cfg.OIDC.ClientSecret == "" {
+			errs = append(errs, errors.New("BASEMENT_OIDC_CLIENT_SECRET is required when BASEMENT_OIDC_ISSUER is set"))
+		}
+		if cfg.OIDC.RedirectURL == "" {
+			errs = append(errs, errors.New("BASEMENT_OIDC_REDIRECT_URL is required when BASEMENT_OIDC_ISSUER is set (or set BASEMENT_PUBLIC_URL to derive it)"))
+		}
 	}
 
 	// Validate log level (optional, must be one of debug|info|warn|error)

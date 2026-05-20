@@ -2147,46 +2147,85 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /auth/oidc/callback:
     get:
-      operationId: handleOIDCCallback
-      summary: Handle OIDC authorization callback (v1.3+)
-      description: Callback endpoint from OIDC provider. Exchanges authorization code for ID token, validates
-        signature against issuer's JWKS, creates or updates user account, issues JWT session cookie.
+      operationId: oidcCallback
+      summary: OIDC authorization-code callback
+      description: |
+        Callback endpoint hit by the browser after the OIDC provider redirects back
+        from the authorization endpoint. Validates the `state` parameter against the
+        `__Host-basement_oidc_state` cookie (CSRF guard), exchanges the `code` for an
+        OAuth2 token, verifies the ID token's signature, audience, expiry, and nonce,
+        looks up the user by (provider, subject), and — on success — issues the
+        session JWT cookie and 302s to `/`.
       tags:
       - Auth
-      x-basement-since: '1.3'
+      x-basement-since: '0.5'
+      parameters:
+      - name: state
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Opaque state token; must equal the value stored in the state cookie.
+      - name: code
+        in: query
+        required: true
+        schema:
+          type: string
+        description: Authorization code returned by the OIDC provider.
       responses:
-        '200':
-          description: OIDC authentication successful, JWT cookie set
+        '302':
+          description: Authentication succeeded; session cookie set; browser redirected to `/`.
           headers:
             Location:
               schema:
                 type: string
                 format: uri
-        '401':
-          description: Invalid or expired authorization code
+            Set-Cookie:
+              schema:
+                type: string
+        '400':
+          description: Missing/mismatched state, missing code, exchange failed, or ID token invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: User not provisioned and `BASEMENT_OIDC_AUTO_PROVISION=false`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '501':
+          description: OIDC is not configured on this server (BASEMENT_OIDC_ISSUER unset).
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
   /auth/oidc/start:
-    post:
-      operationId: startOIDCFlow
-      summary: Initiate OIDC authentication flow (v1.3+)
-      description: Begins the OIDC authorization code flow. Redirects browser to the configured OIDC issuer's
-        authorization endpoint with basement's client ID. Requires BASEMENT_OIDC_* env vars.
+    get:
+      operationId: startOIDC
+      summary: Begin OIDC authorization-code flow
+      description: |
+        Generates a fresh `state` and `nonce`, stores them in the short-lived
+        `__Host-basement_oidc_state` cookie (HttpOnly, Secure, SameSite=Lax, 5 min TTL),
+        and 302-redirects the browser to the configured OIDC provider's authorization
+        endpoint with `openid profile email` scopes.
       tags:
       - Auth
-      x-basement-since: '1.3'
+      x-basement-since: '0.5'
       responses:
-        '200':
-          description: OIDC flow initiated, browser redirected
+        '302':
+          description: Redirect to the OIDC provider's authorization endpoint.
           headers:
             Location:
               schema:
                 type: string
                 format: uri
-        '400':
-          description: OIDC not configured or invalid request
+            Set-Cookie:
+              schema:
+                type: string
+        '501':
+          description: OIDC is not configured on this server (BASEMENT_OIDC_ISSUER unset).
           content:
             application/json:
               schema:

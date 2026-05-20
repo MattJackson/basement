@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/mattjackson/basement/internal/api"
+	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/config"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 	_ "github.com/mattjackson/basement/internal/drivers/aws_s3"
@@ -172,6 +173,18 @@ func main() {
 	}
 
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
+
+	// Optional: wire up OIDC if BASEMENT_OIDC_ISSUER is set. When unset,
+	// local-password remains the only login path.
+	if cfg.OIDC.Issuer != "" {
+		oidcProv, err := auth.NewOIDCProvider(ctx, cfg.OIDC)
+		if err != nil {
+			slog.Error("failed to initialise OIDC provider", "error", err)
+			os.Exit(1)
+		}
+		srv.SetOIDC(oidcProv)
+		slog.Info("OIDC enabled", "issuer", cfg.OIDC.Issuer, "auto_provision", cfg.OIDC.AutoProvision)
+	}
 
 	ctxSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
