@@ -2,6 +2,7 @@ package garage_v1
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -10,18 +11,109 @@ import (
 )
 
 // The Garage v1 admin API does not include S3 data-plane operations; those
-// are spoken on a separate S3-compatible endpoint. The methods below are
-// stubbed exactly like the v2 driver's S3 stubs and will be replaced with
-// real implementations against aws-sdk-go-v2 in a follow-up task.
+// are spoken on a separate S3-compatible endpoint. The methods below use the
+// aws-sdk-go-v2 S3 client configured against Garage's S3 endpoint.
 
-// ListObjects is not yet implemented.
-func (d *driver) ListObjects(_ context.Context, _, _, _ string, _ int) (driverpkg.ObjectPage, error) {
-	return driverpkg.ObjectPage{}, d.unsupported("ListObjects")
+// ListObjects lists objects in a bucket with optional prefix and pagination.
+func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (driverpkg.ObjectPage, error) {
+	if d.s3Client == nil {
+		return driverpkg.ObjectPage{}, &driverpkg.Error{
+			Op:      "ListObjects",
+			Driver:  driverName,
+			Err:     driverpkg.ErrUnsupported,
+			Message: "S3 endpoint not configured — set s3_endpoint in connection config",
+		}
+	}
+
+	resp, err := d.s3Client.listObjectsV2(ctx, bucket, prefix, continuation, limit)
+	if err != nil {
+		return driverpkg.ObjectPage{}, &driverpkg.Error{
+			Op:      "ListObjects",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	objects := make([]driverpkg.ObjectInfo, 0, len(resp.Contents))
+	for _, obj := range resp.Contents {
+		info := driverpkg.ObjectInfo{
+			Key:    keyFromPtr(obj.Key),
+			Size:   sizeFromPtr(obj.Size),
+			ETag:   etagFromPtr(obj.ETag),
+			IsDir:  false,
+		}
+		if obj.LastModified != nil {
+			info.LastModified = *obj.LastModified
+		}
+		objects = append(objects, info)
+	}
+
+	prefixes := make([]string, 0, len(resp.CommonPrefixes))
+	for _, p := range resp.CommonPrefixes {
+		if p.Prefix != nil {
+			prefixes = append(prefixes, *p.Prefix)
+		}
+	}
+
+	page := driverpkg.ObjectPage{
+		Objects:     objects,
+		Prefixes:    prefixes,
+		IsTruncated: resp.IsTruncated != nil && *resp.IsTruncated,
+	}
+
+	if resp.NextContinuationToken != nil {
+		page.NextContinuation = *resp.NextContinuationToken
+	}
+
+	return page, nil
 }
 
-// StatObject is not yet implemented.
-func (d *driver) StatObject(_ context.Context, _, _ string) (driverpkg.ObjectInfo, error) {
-	return driverpkg.ObjectInfo{}, d.unsupported("StatObject")
+// StatObject gets object metadata via HeadObject.
+func (d *driver) StatObject(ctx context.Context, bucket, key string) (driverpkg.ObjectInfo, error) {
+	if d.s3Client == nil {
+		return driverpkg.ObjectInfo{}, &driverpkg.Error{
+			Op:      "StatObject",
+			Driver:  driverName,
+			Err:     driverpkg.ErrUnsupported,
+			Message: "S3 endpoint not configured — set s3_endpoint in connection config",
+		}
+	}
+
+	resp, err := d.s3Client.headObject(ctx, bucket, key)
+	if err != nil {
+		var apiErr interface{ ErrorCode() string }
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound" {
+			return driverpkg.ObjectInfo{}, &driverpkg.Error{
+				Op:      "StatObject",
+				Driver:  driverName,
+				Err:     driverpkg.ErrNotFound,
+				Message: "object not found",
+			}
+		}
+
+		return driverpkg.ObjectInfo{}, &driverpkg.Error{
+			Op:      "StatObject",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	info := driverpkg.ObjectInfo{
+		Key:    key,
+		IsDir:  false,
+		Size:   sizeFromPtr(resp.ContentLength),
+		ETag:   etagFromPtr(resp.ETag),
+	}
+	if resp.LastModified != nil {
+		info.LastModified = *resp.LastModified
+	}
+	if resp.ContentType != nil {
+		info.ContentType = *resp.ContentType
+	}
+
+	return info, nil
 }
 
 // PresignGet returns a presigned GET URL for an object.
@@ -84,11 +176,6 @@ func (d *driver) PresignPut(ctx context.Context, bucket, key string, ttl time.Du
 		Expires: expires,
 		Method:  "PUT",
 	}, nil
-}
-
-// DeleteObject is not yet implemented.
-func (d *driver) DeleteObject(_ context.Context, _, _ string) error {
-	return d.unsupported("DeleteObject")
 }
 
 // CreateMultipart starts a multipart upload and returns the upload ID.
@@ -210,4 +297,50 @@ func (d *driver) AbortMultipart(ctx context.Context, upload driverpkg.MultipartU
 	}
 
 	return nil
+}
+
+// DeleteObject deletes an object from a bucket.
+func (d *driver) DeleteObject(ctx context.Context, bucket, key string) error {
+	if d.s3Client == nil {
+		return &driverpkg.Error{
+			Op:      "DeleteObject",
+			Driver:  driverName,
+			Err:     driverpkg.ErrUnsupported,
+			Message: "S3 endpoint not configured — set s3_endpoint in connection config",
+		}
+	}
+
+	err := d.s3Client.deleteObject(ctx, bucket, key)
+	if err != nil {
+		return &driverpkg.Error{
+			Op:      "DeleteObject",
+			Driver:  driverName,
+			Err:     driverpkg.ErrInvalid,
+			Message: err.Error(),
+		}
+	}
+
+	return nil
+}
+
+// Helper functions for pointer dereferencing.
+func keyFromPtr(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+func sizeFromPtr(i *int64) int64 {
+	if i != nil {
+		return *i
+	}
+	return 0
+}
+
+func etagFromPtr(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
 }

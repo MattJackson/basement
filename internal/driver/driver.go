@@ -8,14 +8,15 @@ import (
 
 // Caps represents driver capability flags.
 type Caps struct {
-	Driver        string           `json:"driver"`
-	Layout        LayoutCapability `json:"layout"`
-	Quotas        bool             `json:"quotas"`
-	BucketAliases bool             `json:"bucketAliases"`
-	KeyModel      KeyModel         `json:"keyModel"`
-	Presign       bool             `json:"presign"`
-	Multipart     bool             `json:"multipart"`
-	Versioning    bool             `json:"versioning"`
+	Driver         string           `json:"driver"`
+	Layout         LayoutCapability `json:"layout"`
+	Quotas         bool             `json:"quotas"`
+	BucketAliases  bool             `json:"bucketAliases"`
+	KeyModel       KeyModel         `json:"keyModel"`
+	Presign        bool             `json:"presign"`
+	Multipart      bool             `json:"multipart"`
+	Versioning     bool             `json:"versioning"`
+	ObjectBrowse   bool             `json:"objectBrowse"`
 }
 
 // LayoutCapability is the layout management mode supported by the driver.

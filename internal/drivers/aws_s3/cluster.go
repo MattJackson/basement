@@ -14,17 +14,18 @@ import (
 //   - Quotas=false: bucket quotas not exposed via this driver layer
 //   - BucketAliases=false: buckets are globally unique by name
 //   - KeyModelIAM: keys are IAM-managed (not in S3 service)
-//   - Presign=true, Multipart=true, Versioning=true: native S3 features
+//   - Presign=true, Multipart=true, Versioning=true, ObjectBrowse=true: native S3 features
 func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
 	return driverpkg.Caps{
-		Driver:        driverName,
-		Layout:        driverpkg.LayoutReadonly,
-		Quotas:        false,
-		BucketAliases: false,
-		KeyModel:      driverpkg.KeyModelIAM,
-		Presign:       true,
-		Multipart:     true,
-		Versioning:    true,
+		Driver:         driverName,
+		Layout:         driverpkg.LayoutReadonly,
+		Quotas:         false,
+		BucketAliases:  false,
+		KeyModel:       driverpkg.KeyModelIAM,
+		Presign:        true,
+		Multipart:      true,
+		Versioning:     true,
+		ObjectBrowse:   true,
 	}, nil
 }
 

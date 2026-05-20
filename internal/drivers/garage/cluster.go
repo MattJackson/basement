@@ -11,14 +11,15 @@ import (
 // Citation: docs/garage-admin-api.md lines 65-72, design.md § The driver interface
 func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
 	return driverpkg.Caps{
-		Driver:        "garage",
-		Layout:        driverpkg.LayoutApplyRevert,
-		Quotas:        true,
-		BucketAliases: true,
-		KeyModel:      driverpkg.KeyModelGarage,
-		Presign:       true,
-		Multipart:     true,
-		Versioning:    false,
+		Driver:         "garage",
+		Layout:         driverpkg.LayoutApplyRevert,
+		Quotas:         true,
+		BucketAliases:  true,
+		KeyModel:       driverpkg.KeyModelGarage,
+		Presign:        d.s3Client != nil,
+		Multipart:      d.s3Client != nil,
+		Versioning:     false,
+		ObjectBrowse:   d.s3Client != nil,
 	}, nil
 }
 

@@ -268,3 +268,75 @@ func TestGarageV1_AbortMultipart_EmptyEndpoint(t *testing.T) {
 		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
 	}
 }
+
+// TestGarageV1_ListObjects_EmptyEndpoint ensures ListObjects returns ErrUnsupported.
+func TestGarageV1_ListObjects_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	_, err := d.ListObjects(context.Background(), "bucket", "", "", 100)
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+	if !strings.Contains(driverErr.Message, "S3 endpoint not configured") {
+		t.Errorf("unexpected error message: %q", driverErr.Message)
+	}
+}
+
+// TestGarageV1_StatObject_EmptyEndpoint ensures StatObject returns ErrUnsupported.
+func TestGarageV1_StatObject_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	_, err := d.StatObject(context.Background(), "bucket", "key")
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+	if !strings.Contains(driverErr.Message, "S3 endpoint not configured") {
+		t.Errorf("unexpected error message: %q", driverErr.Message)
+	}
+}
+
+// TestGarageV1_DeleteObject_EmptyEndpoint ensures DeleteObject returns ErrUnsupported.
+func TestGarageV1_DeleteObject_EmptyEndpoint(t *testing.T) {
+	d := &driver{
+		client:     newClient(map[string]string{"admin_url": "http://example.com"}),
+		s3Endpoint: "",
+	}
+
+	err := d.DeleteObject(context.Background(), "bucket", "key")
+	if err == nil {
+		t.Fatal("expected error when s3_endpoint is empty")
+	}
+
+	var driverErr *driverpkg.Error
+	if !errors.As(err, &driverErr) {
+		t.Fatalf("expected *driver.Error, got %T", err)
+	}
+	if driverErr.Err != driverpkg.ErrUnsupported {
+		t.Errorf("err=%v (Err=%v), want ErrUnsupported", err, driverErr.Err)
+	}
+	if !strings.Contains(driverErr.Message, "S3 endpoint not configured") {
+		t.Errorf("unexpected error message: %q", driverErr.Message)
+	}
+}

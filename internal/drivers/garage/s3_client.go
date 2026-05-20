@@ -162,3 +162,39 @@ func (c *s3Client) presignUploadPart(ctx context.Context, bucket, key, uploadID 
 
 	return req.URL, nil
 }
+
+// listObjectsV2 lists objects in a bucket with optional prefix and pagination.
+func (c *s3Client) listObjectsV2(ctx context.Context, bucket, prefix, continuation string, limit int) (*s3.ListObjectsV2Output, error) {
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucket),
+		Prefix: aws.String(prefix),
+	}
+
+	if continuation != "" {
+		input.ContinuationToken = aws.String(continuation)
+	}
+	if limit > 0 {
+		input.MaxKeys = aws.Int32(int32(limit))
+	}
+
+	return c.client.ListObjectsV2(ctx, input)
+}
+
+// headObject gets object metadata.
+func (c *s3Client) headObject(ctx context.Context, bucket, key string) (*s3.HeadObjectOutput, error) {
+	return c.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+}
+
+// deleteObject deletes an object from a bucket.
+func (c *s3Client) deleteObject(ctx context.Context, bucket, key string) error {
+	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	return err
+}
+
+

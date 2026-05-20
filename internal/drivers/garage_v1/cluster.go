@@ -11,21 +11,19 @@ import (
 // layout, quotas, bucket aliases, garage-style key model. Presign + multipart
 // are advertised because the operator will wire them via aws-sdk-go-v2 in
 // a follow-up; the methods themselves currently stub ErrUnsupported.
-//
-// Citation: garage-admin-v1.yml:187-335 (layout stage/apply/revert),
-// garage-admin-v1.yml:755-828 (bucket quotas/website on PUT /bucket),
-// garage-admin-v1.yml:1184-1218 (ClusterLayout schema).
 func (d *driver) Capabilities(_ context.Context) (driverpkg.Caps, error) {
-	return driverpkg.Caps{
-		Driver:        driverName,
-		Layout:        driverpkg.LayoutApplyRevert,
-		Quotas:        true,
-		BucketAliases: true,
-		KeyModel:      driverpkg.KeyModelGarage,
-		Presign:       true,
-		Multipart:     true,
-		Versioning:    false,
-	}, nil
+	c := driverpkg.Caps{
+		Driver:         driverName,
+		Layout:         driverpkg.LayoutApplyRevert,
+		Quotas:         true,
+		BucketAliases:  true,
+		KeyModel:       driverpkg.KeyModelGarage,
+		Presign:        d.s3Client != nil,
+		Multipart:      d.s3Client != nil,
+		Versioning:     false,
+		ObjectBrowse:   d.s3Client != nil,
+	}
+	return c, nil
 }
 
 // HealthCheck reports the cluster health.
