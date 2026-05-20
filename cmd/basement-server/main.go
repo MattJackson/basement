@@ -43,6 +43,21 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(logger)
 
+	// Fail loud at startup if the data dir isn't writable. Without
+	// this, the server boots fine, the user logs in, and every save
+	// fails silently with a confusing 'persisting' error. Operator
+	// hit exactly this on the v0.8.0d.20 cluster edit.
+	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
+		slog.Error("data dir not creatable — fix host mount permissions (chown to UID 65532 if running the distroless image)", "dir", cfg.DataDir, "error", err)
+		os.Exit(1)
+	}
+	probe := cfg.DataDir + "/.write-probe"
+	if err := os.WriteFile(probe, []byte("ok"), 0644); err != nil {
+		slog.Error("data dir not writable by this process — fix host mount permissions (chown to UID 65532 if running the distroless image; the binary runs as uid:gid 65532:65532)", "dir", cfg.DataDir, "error", err)
+		os.Exit(1)
+	}
+	_ = os.Remove(probe)
+
 	connStore, err := store.OpenConnections(cfg.DataDir)
 	if err != nil {
 		slog.Error("failed to open connections store", "error", err)
