@@ -145,7 +145,7 @@ function ClusterDetailScreen() {
             Buckets
             {buckets ? <span className="ml-1.5 text-muted-foreground/60">({buckets.length})</span> : null}
           </h2>
-          <a href="/admin" className="text-xs font-medium hover:underline text-muted-foreground">
+          <a href="/" className="text-xs font-medium hover:underline text-muted-foreground">
             View all →
           </a>
         </div>
@@ -179,7 +179,7 @@ function ClusterDetailScreen() {
             {buckets.length > 8 && (
               <div className="px-4 py-2 text-xs text-muted-foreground border-t">
                 + {buckets.length - 8} more —{" "}
-                <a href="/admin" className="hover:underline font-medium">view all</a>
+                <a href="/" className="hover:underline font-medium">view all</a>
               </div>
             )}
           </div>

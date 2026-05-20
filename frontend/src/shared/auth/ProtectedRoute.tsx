@@ -29,7 +29,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     if (isLoading || data) return;
     // Already on the login route? Nothing to do — don't recurse.
     if (location.pathname === "/admin/login") return;
-    const next = location.pathname.startsWith("/admin") ? location.pathname : "/admin";
+    const next = location.pathname.startsWith("/admin") ? location.pathname : "/";
     navigate({ to: "/admin/login", search: { next } });
   }, [isLoading, data, navigate, location]);
 

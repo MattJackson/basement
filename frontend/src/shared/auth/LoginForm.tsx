@@ -63,7 +63,7 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const nextPath = typeof search.next === "string" ? search.next : "/admin";
+  const nextPath = typeof search.next === "string" ? search.next : "/";
   const oidcError = typeof search.error === "string" ? search.error : null;
 
   const {
