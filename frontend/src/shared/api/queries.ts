@@ -486,3 +486,48 @@ export function useOrgCapabilities() {
   });
 }
 
+// v0.7.0g USER.SHARES — share link hooks.
+export function useUserShares() {
+  return useQuery<components["schemas"]["Share"][]>({
+    queryKey: ["user", "shares"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/shares");
+      if (!response.ok || !data) throw apiError("user/shares", response.status, error);
+      return (data as unknown[]) as components["schemas"]["Share"][];
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useCreateUserShare() {
+  return useMutation({
+    mutationFn: async (data: {
+      connectionId: string;
+      bucketId: string;
+      prefix?: string;
+      key?: string;
+      expiresAt?: string;
+      downloadLimit?: number;
+      password?: string;
+    }) => {
+      const { data: result, error, response } = await client.POST("/user/shares", { body: data });
+      if (!response.ok || !result) throw apiError("user/shares/create", response.status, error);
+      return result as components["schemas"]["Share"];
+    },
+  });
+}
+
+export function useRevokeUserShare() {
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const { data, error, response } = await client.DELETE("/user/shares/{token}", {
+        params: { path: { token } },
+      });
+      if (!response.ok || !data) throw apiError(`user/shares/revoke/${token}`, response.status, error);
+      return data;
+    },
+  });
+}
+
