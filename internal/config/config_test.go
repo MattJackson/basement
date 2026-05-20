@@ -511,3 +511,191 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("OIDC.AutoProvision default=%v, want false", cfg.OIDC.AutoProvision)
 	}
 }
+
+// TestLoad_AwsS3Driver_Happy covers DRIVER=aws-s3 with all required keys set.
+func TestLoad_AwsS3Driver_Happy(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "aws-s3")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_REGION", "us-west-2")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "AKIA-test")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "secret/test")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_ENDPOINT", "https://s3.example.com")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Driver.Name != "aws-s3" {
+		t.Errorf("Driver.Name=%q, want aws-s3", cfg.Driver.Name)
+	}
+	if cfg.Driver.Aws.Region != "us-west-2" {
+		t.Errorf("Aws.Region=%q", cfg.Driver.Aws.Region)
+	}
+	if cfg.Driver.Aws.AccessKey != "AKIA-test" {
+		t.Errorf("Aws.AccessKey=%q", cfg.Driver.Aws.AccessKey)
+	}
+	if cfg.Driver.Aws.SecretKey != "secret/test" {
+		t.Errorf("Aws.SecretKey=%q", cfg.Driver.Aws.SecretKey)
+	}
+	if cfg.Driver.Aws.Endpoint != "https://s3.example.com" {
+		t.Errorf("Aws.Endpoint=%q", cfg.Driver.Aws.Endpoint)
+	}
+}
+
+// TestLoad_AwsS3Driver_MissingRegion covers the missing-region branch.
+func TestLoad_AwsS3Driver_MissingRegion(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "aws-s3")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "k")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "s")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER_AWS_S3_REGION") {
+		t.Errorf("error missing AWS region: %v", err)
+	}
+}
+
+// TestLoad_AwsS3Driver_MissingAccessKey covers the missing-access-key branch.
+func TestLoad_AwsS3Driver_MissingAccessKey(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "aws-s3")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_REGION", "us-east-1")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "s")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER_AWS_S3_ACCESS_KEY") {
+		t.Errorf("error missing AWS access key: %v", err)
+	}
+}
+
+// TestLoad_AwsS3Driver_MissingSecretKey covers the missing-secret-key branch.
+func TestLoad_AwsS3Driver_MissingSecretKey(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "aws-s3")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_REGION", "us-east-1")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "k")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_DRIVER_AWS_S3_SECRET_KEY") {
+		t.Errorf("error missing AWS secret key: %v", err)
+	}
+}
+
+// TestLoad_GarageV1Driver covers DRIVER=garage-v1 (same garage validation
+// applies — covers the "garage" || "garage-v1" branch path).
+func TestLoad_GarageV1Driver(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage-v1")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage-v1:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Driver.Name != "garage-v1" {
+		t.Errorf("Driver.Name=%q, want garage-v1", cfg.Driver.Name)
+	}
+}
+
+// TestLoad_MinioDriver covers DRIVER=minio (no minio-specific required-env
+// validation in Load() at present — accepted as a valid name).
+func TestLoad_MinioDriver(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "minio")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Driver.Name != "minio" {
+		t.Errorf("Driver.Name=%q, want minio", cfg.Driver.Name)
+	}
+}
+
+// TestLoad_CustomListenAndDataDir covers BASEMENT_LISTEN, DATA_DIR, PUBLIC_URL.
+func TestLoad_CustomListenAndDataDir(t *testing.T) {
+	t.Setenv("BASEMENT_LISTEN", "127.0.0.1:9999")
+	t.Setenv("BASEMENT_DATA_DIR", "/custom/data")
+	t.Setenv("BASEMENT_PUBLIC_URL", "https://basement.example.com")
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Listen != "127.0.0.1:9999" {
+		t.Errorf("Listen=%q", cfg.Listen)
+	}
+	if cfg.DataDir != "/custom/data" {
+		t.Errorf("DataDir=%q", cfg.DataDir)
+	}
+	if cfg.PublicURL != "https://basement.example.com" {
+		t.Errorf("PublicURL=%q", cfg.PublicURL)
+	}
+}
+
+// TestLoad_LogLevelVariants covers each accepted log-level value.
+func TestLoad_LogLevelVariants(t *testing.T) {
+	for _, level := range []string{"debug", "info", "warn", "error"} {
+		t.Run(level, func(t *testing.T) {
+			t.Setenv("BASEMENT_LOG_LEVEL", level)
+			t.Setenv("BASEMENT_DRIVER", "garage")
+			t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+			t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
+			t.Setenv("BASEMENT_ADMIN_USER", "admin")
+			t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+			t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.LogLevel != level {
+				t.Errorf("LogLevel=%q, want %q", cfg.LogLevel, level)
+			}
+		})
+	}
+}
+
+// TestEnvOr exercises the envOr helper directly.
+func TestEnvOr(t *testing.T) {
+	t.Setenv("ENV_OR_PRESENT", "found")
+	if got := envOr("ENV_OR_PRESENT", "default"); got != "found" {
+		t.Errorf("present=%q, want found", got)
+	}
+	if got := envOr("ENV_OR_MISSING_KEY_NOT_SET", "default"); got != "default" {
+		t.Errorf("missing=%q, want default", got)
+	}
+	// Empty env var falls back to default per envOr semantics.
+	t.Setenv("ENV_OR_EMPTY", "")
+	if got := envOr("ENV_OR_EMPTY", "fallback"); got != "fallback" {
+		t.Errorf("empty=%q, want fallback (envOr treats empty as unset)", got)
+	}
+}
