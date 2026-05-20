@@ -14,9 +14,12 @@ import { PermissionChips } from "@/shared/ui/PermissionChips";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
-import { useBucket } from "@/shared/api/queries";
-import { useUpdateBucket, useDeleteBucket } from "@/shared/api/mutations";
+import { useBucket, useClusterKeys, useGetCluster } from "@/shared/api/queries";
+import { useUpdateBucket, useDeleteBucket, useUpdateKeyPermissions } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
+import { AttachKeyToBucketDialog } from "@/shared/ui/AttachKeyToBucketDialog";
+import { RevokeAccessConfirm } from "@/shared/ui/RevokeAccessConfirm";
+import type { components } from "@/shared/api/types.gen";
 
 export const Route = createFileRoute("/admin/clusters/$cid/buckets/$id")({
   component: adminPage(AdminBucketDetail),
@@ -26,11 +29,23 @@ function AdminBucketDetail() {
   const { cid, id } = Route.useParams();
   const updateMutation = useUpdateBucket();
   const deleteMutation = useDeleteBucket();
+  const updateKeyPerms = useUpdateKeyPermissions();
   const [isEditingAlias, setIsEditingAlias] = useState(false);
   const [aliasInput, setAliasInput] = useState("");
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [attachKeyOpen, setAttachKeyOpen] = useState(false);
+  const [detachTarget, setDetachTarget] = useState<{ keyId: string; label: string } | null>(null);
   const { data: bucket, isLoading, error } = useBucket(cid, id);
+  const { data: cluster } = useGetCluster(cid);
+  const { data: clusterKeys } = useClusterKeys(cid);
+  // We need the detach target's current permissions on OTHER buckets
+  // intact — UpdateKeyPermissions only touches buckets named in the
+  // body, so a simple {bucketId, all-false} is safe. No extra fetch
+  // needed for that path. The attach path likewise only writes the
+  // single new edge.
+  const supportsGrants =
+    cluster?.driver === "garage" || cluster?.driver === "garage-v1";
 
   if (error) {
     return (
@@ -343,18 +358,29 @@ function AdminBucketDetail() {
 
           {/* Attached keys */}
           <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">
-              Attached keys
-              {bucket.keys && bucket.keys.length > 0 ? (
-                <span className="ml-1.5 text-muted-foreground/60">({bucket.keys.length})</span>
-              ) : null}
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Attached keys
+                {bucket.keys && bucket.keys.length > 0 ? (
+                  <span className="ml-1.5 text-muted-foreground/60">({bucket.keys.length})</span>
+                ) : null}
+              </h2>
+              {supportsGrants && (
+                <Button variant="outline" size="sm" onClick={() => setAttachKeyOpen(true)}>
+                  + Attach key
+                </Button>
+              )}
+            </div>
             {bucket.keys == null || bucket.keys.length === 0 ? (
               <div className="rounded-lg border bg-card p-6">
                 <EmptyState
                   icon="key"
                   title="No keys attached"
-                  description="Grant a key access to this bucket from the Keys page."
+                  description={
+                    supportsGrants
+                      ? "Use “+ Attach key” to grant an existing key access to this bucket."
+                      : "Grant a key access to this bucket from the Keys page."
+                  }
                 />
               </div>
             ) : (
@@ -365,6 +391,7 @@ function AdminBucketDetail() {
                       <TableHead>Name</TableHead>
                       <TableHead className="w-[260px]">Access Key ID</TableHead>
                       <TableHead className="w-[140px]">Permissions</TableHead>
+                      {supportsGrants && <TableHead className="w-24 text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -381,6 +408,23 @@ function AdminBucketDetail() {
                             owner={!!keyAccess.owner}
                           />
                         </TableCell>
+                        {supportsGrants && (
+                          <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setDetachTarget({
+                                  keyId: keyAccess.keyId,
+                                  label: keyAccess.name ?? keyAccess.keyId.slice(0, 12),
+                                })
+                              }
+                              disabled={updateKeyPerms.isPending}
+                            >
+                              Detach
+                            </Button>
+                          </TableCell>
+                        )}
                       </TableRow>
                     ))}
                   </TableBody>
@@ -410,6 +454,65 @@ function AdminBucketDetail() {
              isDeleting={deleteMutation.isPending}
              onConfirm={handleDelete}
              onCancel={() => setDeleteDialogOpen(false)}
+           />
+
+           {/* Attach key dialog — only mounted on Garage clusters. The
+               candidate list excludes keys that already touch this
+               bucket (any R/W/O grant), since the operator's intent on
+               "+ Attach key" is to add a NEW edge, not edit an
+               existing one (use the per-key page for that). */}
+           {supportsGrants && (
+             <AttachKeyToBucketDialog
+               open={attachKeyOpen}
+               isSaving={updateKeyPerms.isPending}
+               errorMessage={updateKeyPerms.isError ? "Couldn't attach key. Try again." : null}
+               candidates={(() => {
+                 const attached = new Set((bucket.keys ?? []).map((k) => k.keyId));
+                 return (clusterKeys ?? [])
+                   .filter((k) => k.id && !attached.has(k.id))
+                   .map((k) => ({
+                     keyId: k.id as string,
+                     label: k.name ? `${k.name} (${(k.id as string).slice(0, 12)}…)` : (k.id as string),
+                   }));
+               })()}
+               onCancel={() => setAttachKeyOpen(false)}
+               onSubmit={({ keyId, read, write, owner }) => {
+                 // Single-edge write: UpdateKeyPermissions only touches
+                 // the bucket(s) named in the payload, so other grants
+                 // on this key are untouched.
+                 const perms: components["schemas"]["BucketPermission"][] = [
+                   { bucketId: bucket.id, read, write, owner },
+                 ];
+                 updateKeyPerms.mutate(
+                   { cid, id: keyId, permissions: perms },
+                   { onSuccess: () => setAttachKeyOpen(false) },
+                 );
+               }}
+             />
+           )}
+
+           {/* Detach confirmation — symmetric to revoke on the key
+               detail page, just framed from the bucket's side. Writes
+               an all-false edge to drop the grant. */}
+           <RevokeAccessConfirm
+             open={detachTarget !== null}
+             subject={detachTarget?.label ?? ""}
+             target={bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
+             isRevoking={updateKeyPerms.isPending}
+             onCancel={() => setDetachTarget(null)}
+             onConfirm={() => {
+               if (!detachTarget) return;
+               updateKeyPerms.mutate(
+                 {
+                   cid,
+                   id: detachTarget.keyId,
+                   permissions: [
+                     { bucketId: bucket.id, read: false, write: false, owner: false },
+                   ],
+                 },
+                 { onSuccess: () => setDetachTarget(null) },
+               );
+             }}
            />
      </div>
    );

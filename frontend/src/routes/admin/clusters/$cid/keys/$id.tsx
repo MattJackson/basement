@@ -49,14 +49,27 @@ function BucketName({ globalAliases, localAliases, bucketId }: { globalAliases?:
 function KeyDetailScreen() {
   const { cid, id } = Route.useParams();
   const { data: key, isLoading, error } = useKey(cid, id);
-  
+  const { data: cluster } = useGetCluster(cid);
+  const { data: clusterBuckets } = useClusterBuckets(cid);
+
   const updatePermissions = useUpdateKeyPermissions();
   const deleteKey = useDeleteKey();
-  
+
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
   const [editPermissions, setEditPermissions] = useState<components["schemas"]["BucketPermission"][]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<{ bucketId: string; label: string } | null>(null);
+
+  // Capability gate: per-key R/W/O bucket permissions are the Garage key
+  // model. AWS-S3 / MinIO use IAM; those drivers return ErrUnsupported
+  // from UpdateKeyPermissions and the affordances would just 501 on
+  // submit. We gate on the connection's driver field here; switching to
+  // a per-connection capability fetch (keyModel === "garage") is the
+  // doctrinally correct move once that endpoint lands.
+  const supportsGrants =
+    cluster?.driver === "garage" || cluster?.driver === "garage-v1";
 
   if (error) {
     return (
@@ -207,11 +220,25 @@ function KeyDetailScreen() {
       {/* Bucket access table */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <span>Bucket access</span>
-          {!isEditing && key.buckets && key.buckets.length > 0 && (
-            <Button variant="outline" size="sm" onClick={handleEditToggle}>
-              Edit permissions
-            </Button>
+          <span>
+            Bucket access
+            {key.buckets && key.buckets.length > 0 ? (
+              <span className="ml-1.5 text-muted-foreground/60 text-sm font-normal">({key.buckets.length})</span>
+            ) : null}
+          </span>
+          {!isEditing && (
+            <div className="flex items-center gap-2">
+              {supportsGrants && (
+                <Button variant="outline" size="sm" onClick={() => setGrantOpen(true)}>
+                  + Grant access
+                </Button>
+              )}
+              {key.buckets && key.buckets.length > 0 && (
+                <Button variant="outline" size="sm" onClick={handleEditToggle}>
+                  Edit permissions
+                </Button>
+              )}
+            </div>
           )}
         </CardHeader>
         <CardContent className="pt-6">
@@ -286,23 +313,42 @@ function KeyDetailScreen() {
                     <TableRow>
                       <TableHead>Bucket</TableHead>
                       <TableHead className="w-40">Permissions</TableHead>
+                      {supportsGrants && <TableHead className="w-24 text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {key.buckets.map((bucket) => (
-                      <TableRow key={bucket.bucketId}>
-                        <TableCell>
-                          <BucketName
-                            globalAliases={bucket.globalAliases}
-                            localAliases={bucket.localAliases}
-                            bucketId={bucket.bucketId}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {key.buckets.map((bucket) => {
+                      const bucketLabel =
+                        bucket.globalAliases?.[0] ??
+                        bucket.localAliases?.[0] ??
+                        `${bucket.bucketId.slice(0, 12)}…`;
+                      return (
+                        <TableRow key={bucket.bucketId}>
+                          <TableCell>
+                            <BucketName
+                              globalAliases={bucket.globalAliases}
+                              localAliases={bucket.localAliases}
+                              bucketId={bucket.bucketId}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
+                          </TableCell>
+                          {supportsGrants && (
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setRevokeTarget({ bucketId: bucket.bucketId, label: bucketLabel })}
+                                disabled={updatePermissions.isPending}
+                              >
+                                Revoke
+                              </Button>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               )}
@@ -337,8 +383,72 @@ function KeyDetailScreen() {
         onCancel={() => setDeleteDialogOpen(false)}
       />
 
-      {/* Show error if permission update fails */}
-      {updatePermissions.isError && (
+      {/* Grant access dialog — only mounted when supported. Candidates
+          are cluster buckets minus those already in this key's grants
+          (Garage can't have two edges to the same bucket-key pair). */}
+      {supportsGrants && (
+        <GrantBucketAccessDialog
+          open={grantOpen}
+          isSaving={updatePermissions.isPending}
+          errorMessage={updatePermissions.isError ? "Couldn't grant access. Try again." : null}
+          candidates={(() => {
+            const owned = new Set((key.buckets ?? []).map((b) => b.bucketId));
+            return (clusterBuckets ?? [])
+              .filter((b) => b.id && !owned.has(b.id))
+              .map((b) => ({
+                bucketId: b.id as string,
+                label: b.aliases?.[0] ?? `${(b.id as string).slice(0, 12)}…`,
+              }));
+          })()}
+          onCancel={() => setGrantOpen(false)}
+          onSubmit={({ bucketId, read, write, owner }) => {
+            const existing: components["schemas"]["BucketPermission"][] = (key.buckets ?? []).map((b) => ({
+              bucketId: b.bucketId,
+              read: b.read,
+              write: b.write,
+              owner: b.owner,
+            }));
+            const next = [...existing, { bucketId, read, write, owner }];
+            updatePermissions.mutate(
+              { cid, id, permissions: next },
+              { onSuccess: () => setGrantOpen(false) },
+            );
+          }}
+        />
+      )}
+
+      {/* Revoke confirmation. Submit translates to UpdateKeyPermissions
+          with read=write=owner=false on the target bucket — Garage's
+          /bucket/deny resolves the edge to nothing, which lists/details
+          drop on next fetch. */}
+      <RevokeAccessConfirm
+        open={revokeTarget !== null}
+        subject={key.name ?? "this key"}
+        target={revokeTarget?.label ?? ""}
+        isRevoking={updatePermissions.isPending}
+        onCancel={() => setRevokeTarget(null)}
+        onConfirm={() => {
+          if (!revokeTarget) return;
+          updatePermissions.mutate(
+            {
+              cid,
+              id,
+              permissions: [
+                {
+                  bucketId: revokeTarget.bucketId,
+                  read: false,
+                  write: false,
+                  owner: false,
+                },
+              ],
+            },
+            { onSuccess: () => setRevokeTarget(null) },
+          );
+        }}
+      />
+
+      {/* Show error if permission update fails (and no dialog is showing it) */}
+      {updatePermissions.isError && !grantOpen && !revokeTarget && (
         <div className="rounded bg-destructive/10 p-4 text-destructive">
           Failed to save permissions. Please try again.
         </div>

@@ -159,6 +159,14 @@ export function useUpdateKeyPermissions() {
     onSuccess: (_, { cid, id }) => {
       queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys", id] });
+      // Per-cluster key list (count + access-bucket badges per row).
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys"] });
+      // Bucket-side mirror — every affected bucket's "Attached keys"
+      // section needs to refetch. Cheapest correct move is to invalidate
+      // the whole cluster's bucket list and aggregate list; both pages
+      // re-pull on mount.
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "buckets"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });
     },
   });
 }
