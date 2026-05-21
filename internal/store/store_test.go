@@ -165,52 +165,11 @@ func TestConcurrentWrites(t *testing.T) {
 	}
 }
 
-func TestMatchGrantLongestPrefix(t *testing.T) {
-	tmpDir := t.TempDir()
-	s, err := Open(tmpDir, 24*time.Hour)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-
-	userID := "test-user"
-
-	grants := []Grant{
-		{UserID: userID, Bucket: "photos", Prefix: "", Permissions: []string{"list"}},
-		{UserID: userID, Bucket: "photos", Prefix: "vacation", Permissions: []string{"read"}},
-		{UserID: userID, Bucket: "photos", Prefix: "vacation/2024", Permissions: []string{"read", "write"}},
-	}
-
-	if err := s.SetGrants(userID, grants); err != nil {
-		t.Fatalf("SetGrants failed: %v", err)
-	}
-
-	tests := []struct {
-		key          string
-		expectedBucket string
-		expectedPrefix string
-		hasMatch     bool
-	}{
-		{"photos/file.jpg", "photos", "", true},              // bucket root grant
-		{"photos/vacation/img.jpg", "photos", "vacation", true},      // vacation prefix grant
-		{"photos/vacation/2024/sunny.jpg", "photos", "vacation/2024", true}, // deepest prefix grant
-		{"other/bucket.txt", "", "", false},             // no match
-	}
-
-	for _, tt := range tests {
-		g, ok := s.MatchGrant(userID, tt.expectedBucket, tt.key)
-		if tt.hasMatch && !ok {
-			t.Fatalf("MatchGrant('%s'): expected match, got none", tt.key)
-		}
-		if !tt.hasMatch && ok {
-			t.Errorf("MatchGrant('%s'): expected no match, got grant with prefix '%s'", tt.key, g.Prefix)
-		}
-
-		if ok && g.Prefix != tt.expectedPrefix {
-			t.Errorf("MatchGrant('%s'): expected prefix '%s', got '%s' (grant: %+v)",
-				tt.key, tt.expectedPrefix, g.Prefix, g)
-		}
-	}
-}
+// TestMatchGrantLongestPrefix removed in v1.0.0b: the legacy Grant +
+// MatchGrant tested here was retired in favour of BucketGrants (per-user
+// per-bucket S3 credentials, ADR-0001) plus the policy enforcer. Prefix
+// matching has no equivalent in the new model — visibility comes from
+// BucketGrants and permission from policy.Can.
 
 func TestAuditRotation(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -426,37 +385,5 @@ func TestSharesByUser(t *testing.T) {
 	}
 }
 
-func TestGrantUpdate(t *testing.T) {
-	tmpDir := t.TempDir()
-	s, err := Open(tmpDir, 24*time.Hour)
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
-
-	userID := "update-test-user"
-
-	grants1 := []Grant{
-		{UserID: userID, Bucket: "bucket1", Prefix: "", Permissions: []string{"list"}},
-	}
-
-	if err := s.SetGrants(userID, grants1); err != nil {
-		t.Fatalf("SetGrants failed: %v", err)
-	}
-
-	grants2 := []Grant{
-		{UserID: userID, Bucket: "bucket2", Prefix: "prefix", Permissions: []string{"read", "write"}},
-	}
-
-	if err := s.SetGrants(userID, grants2); err != nil {
-		t.Fatalf("SetGrants failed: %v", err)
-	}
-
-	allGrants := s.Grants(userID)
-	if len(allGrants) != 1 {
-		t.Errorf("expected 1 grant after update, got %d", len(allGrants))
-	}
-
-	if allGrants[0].Bucket != "bucket2" {
-		t.Errorf("expected bucket 'bucket2', got '%s'", allGrants[0].Bucket)
-	}
-}
+// TestGrantUpdate removed in v1.0.0b together with the legacy Grant
+// type. BucketGrants has its own Update test in bucket_grants_test.go.

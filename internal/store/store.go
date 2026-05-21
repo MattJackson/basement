@@ -15,17 +15,14 @@ type Store struct {
 	retention time.Duration
 
 	usersMu sync.RWMutex
-	grantsMu sync.RWMutex
 	sharesMu sync.RWMutex
 
 	usersPath   string
-	grantsPath  string
 	sharesPath  string
 	auditDir    string
 	orgCapsPath string
 
 	usersCache     []User
-	grantsCache    map[string][]Grant // userID -> grants
 	sharesCache    []Share
 	orgCaps        *OrgCapabilitiesStore
 	bucketGrants   BucketGrants
@@ -42,7 +39,6 @@ func Open(dataDir string, retention time.Duration) (*Store, error) {
 		retention: retention,
 
 		usersPath: filepath.Join(dataDir, "users.json"),
-		grantsPath: filepath.Join(dataDir, "grants.json"),
 		sharesPath: filepath.Join(dataDir, "shares.json"),
 		orgCapsPath: filepath.Join(dataDir, "org_capabilities.json"),
 		auditDir: filepath.Join(dataDir, "audit"),
@@ -75,14 +71,6 @@ func (s *Store) loadAll() error {
 		s.usersMu.Lock()
 		s.usersCache = users
 		s.usersMu.Unlock()
-	}
-
-	if grants, err := loadJSON[map[string][]Grant](s.grantsPath); err != nil && !os.IsNotExist(err) {
-		errs = append(errs, fmt.Errorf("loading grants: %w", err))
-	} else if err == nil {
-		s.grantsMu.Lock()
-		s.grantsCache = grants
-		s.grantsMu.Unlock()
 	}
 
 	if shares, err := loadJSON[[]Share](s.sharesPath); err != nil && !os.IsNotExist(err) {
@@ -122,13 +110,11 @@ func (s *Store) WireBucketGrants(jwtSecret []byte) error {
 
 // CredGrants returns the credential-grant store (per-user per-bucket
 // S3 keys, ADR-0001). Returns nil if WireBucketGrants has not been
-// called — callers must nil-check until the v0.9.0d/e cycles wire
-// consumer code.
+// called — callers must nil-check.
 //
-// Named CredGrants() rather than BucketGrants() because the legacy
-// Store.BucketGrants(userID string) []string accessor in grants.go
-// owns that method name; the legacy method is a policy artefact
-// scheduled for retirement once the policy package fully replaces it.
+// Historically named CredGrants() because the now-retired (v1.0.0b)
+// legacy Store.BucketGrants(userID string) []string accessor owned the
+// BucketGrants() method name. The name is kept for source stability.
 func (s *Store) CredGrants() BucketGrants {
 	return s.bucketGrants
 }
