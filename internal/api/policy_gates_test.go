@@ -215,10 +215,13 @@ func TestAdminCreateCluster_WithCapability(t *testing.T) {
 	}
 }
 
-// TestSeedEnvAdmin_GrantsThreeBlankets: SeedEnvAdmin gives the env
-// admin host_admin / cluster_admin / bucket_user blanket assignments,
-// satisfying capabilities at every relevant scope.
-func TestSeedEnvAdmin_GrantsThreeBlankets(t *testing.T) {
+// TestSeedEnvAdmin_GrantsFourBlankets: SeedEnvAdmin gives the env
+// admin host_admin / cluster_admin / bucket_user blanket assignments
+// PLUS host_admin @ "*" (true superuser scope, v0.9.0m.1), satisfying
+// capabilities at every relevant scope domain — including domains
+// added by future cycles (key:*, lifecycle:*, etc.) which the
+// per-domain seeds alone don't cover.
+func TestSeedEnvAdmin_GrantsFourBlankets(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "seed-env-admin-")
 	if err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -236,9 +239,19 @@ func TestSeedEnvAdmin_GrantsThreeBlankets(t *testing.T) {
 	cases := []struct {
 		cap, scope string
 	}{
+		// Pre-v0.9.0m.1 coverage (still works).
 		{"host:manage_users", "host:*"},
 		{"cluster:edit", "cluster:some-cid"},
 		{"objects:list", "bucket:some-cid:lsi"},
+		// v0.9.0m.1 superuser-scope coverage — these were silently
+		// blocked before the * seed because no per-domain assignment
+		// matched the key: / bucket:cid:* / objects:cid:bid:* gates
+		// minted in v0.9.0f and later cycles.
+		{"key:create", "key:some-cid:*"},
+		{"key:delete", "key:some-cid:some-kid"},
+		{"key:edit_permissions", "key:some-cid:some-kid"},
+		{"bucket:create", "bucket:some-cid:*"},
+		{"bucket:delete", "bucket:some-cid:some-bid"},
 	}
 	for _, c := range cases {
 		if !enf.Can("matthew", c.cap, c.scope) {
@@ -252,9 +265,23 @@ func TestSeedEnvAdmin_GrantsThreeBlankets(t *testing.T) {
 		t.Errorf("re-SeedEnvAdmin: %v", err)
 	}
 	assignments := enf.AssignmentsFor("matthew")
-	if len(assignments) != 3 {
-		t.Errorf("expected 3 assignments after idempotent re-seed, got %d: %#v",
+	if len(assignments) != 4 {
+		t.Errorf("expected 4 assignments after idempotent re-seed, got %d: %#v",
 			len(assignments), assignments)
+	}
+
+	// One of those four must be host_admin @ "*" — the superuser row
+	// is the cycle's whole point. Other tests assert the role/scope
+	// combos for the other three.
+	var hasSuperuser bool
+	for _, a := range assignments {
+		if a.RoleID == "host_admin" && a.Scope == "*" {
+			hasSuperuser = true
+			break
+		}
+	}
+	if !hasSuperuser {
+		t.Errorf("v0.9.0m.1 expected host_admin @ \"*\" assignment, missing from %#v", assignments)
 	}
 
 	// Empty username is a no-op (preserves tests that don't seed an env admin).
