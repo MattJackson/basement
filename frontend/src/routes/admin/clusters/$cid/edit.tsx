@@ -88,8 +88,9 @@ function EditClusterPage() {
       config.admin_url = adminUrl;
       config.admin_token = adminToken;
       if (s3Url) config.s3_endpoint = s3Url;
-      if (s3AccessKey) config.access_key_id = s3AccessKey;
-      if (s3SecretKey) config.secret_key = s3SecretKey;
+      // ADR-0001 (v0.9.0d): per-user S3 creds (access_key_id +
+      // secret_key) no longer live on the cluster — they're Grants
+      // minted per user × bucket. Edit form intentionally omits them.
     } else if (driver === "aws-s3") {
       config.region = s3Region;
       config.access_key = s3AccessKey;
@@ -114,20 +115,14 @@ function EditClusterPage() {
     });
   };
 
-  // Garage drivers: if s3_endpoint is set, access_key_id + secret_key
-  // are also required — otherwise the driver build fails and every
-  // call returns DRIVER_BUILD_FAILED. Senior caught this the hard
-  // way after PATCHing the cluster to add s3_endpoint without keys.
-  const garageS3Incomplete =
-    (driver === "garage-v1" || driver === "garage") &&
-    !!s3Url &&
-    (!s3AccessKey.trim() || !s3SecretKey.trim());
-
+  // ADR-0001 (v0.9.0d): the s3_endpoint+key tri-state guard is gone
+  // because user-tier creds (access_key_id, secret_key) moved out of
+  // the cluster Connection and into per-user Grants. The cluster can
+  // now safely store just the s3_endpoint as a presign destination.
   const isSaveDisabled =
     !label.trim() ||
     label.length < 1 ||
     label.length > 64 ||
-    garageS3Incomplete ||
     updateCluster.isPending;
 
   return (
@@ -158,15 +153,6 @@ function EditClusterPage() {
       {updateCluster.error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {String(updateCluster.error.message ?? "Failed to update cluster")}
-        </div>
-      )}
-
-      {garageS3Incomplete && (
-        <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm">
-          <p className="font-medium">Garage S3 plane needs all three together</p>
-          <p className="text-muted-foreground mt-1">
-            If S3 URL is set, Access Key ID + Secret Access Key are required too. Otherwise the driver build fails and every cluster call returns DRIVER_BUILD_FAILED. Either fill all three or clear the S3 URL.
-          </p>
         </div>
       )}
 
@@ -236,8 +222,7 @@ function EditClusterPage() {
           <div>
             <h2 className="text-sm font-medium text-muted-foreground">Garage S3 plane (optional)</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              S3 endpoint + cred — required for object browsing, upload, download, and presign.
-              Without this, /files/{`{cid}`}/b/{`{bid}`} can't list objects.
+              S3 endpoint URL where Garage's S3 API listens (default :3902). Required for presign + user-side object browsing. <strong>Per-user S3 credentials now live as Grants — see <Link to="/admin/users" className="underline hover:no-underline">/admin/users</Link>.</strong>
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -248,14 +233,6 @@ function EditClusterPage() {
             <div className="grid gap-2">
               <Label htmlFor="s3Region">S3 Region</Label>
               <Input id="s3Region" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={updateCluster.isPending} placeholder="garage" />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="s3AccessKey">Access Key ID</Label>
-              <Input id="s3AccessKey" value={s3AccessKey} onChange={(e) => setS3AccessKey(e.target.value)} disabled={updateCluster.isPending} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="s3SecretKey">Secret Access Key</Label>
-              <Input id="s3SecretKey" type="password" value={s3SecretKey} onChange={(e) => setS3SecretKey(e.target.value)} disabled={updateCluster.isPending} />
             </div>
           </div>
         </section>
