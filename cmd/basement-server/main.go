@@ -215,6 +215,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Per ADR-0002 (v1.1.0b): the driver registry needs a handle to
+	// the region keychain so ForUserRegion can refuse to operate when
+	// the store is unwired (returns ErrUnsupported). Production always
+	// has a non-nil store here because WireUserRegions above would
+	// have os.Exit(1)'d on failure.
+	reg.SetUserRegionsStore(st.UserRegions())
+
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
 
 	// Per ADR-0001 (v0.9.0b/e): policy enforcer + matthew->host_admin

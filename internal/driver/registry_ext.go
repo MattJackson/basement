@@ -17,6 +17,11 @@ import (
 // "{connID}|{accessKeyID}" caches driver instances built with per-user
 // S3 credentials so backend audit logs attribute requests to the
 // caller's key rather than the cluster's shared key.
+//
+// User-region cache (ADR-0002, v1.1.0b): a third map keyed by
+// "{endpoint}|{accessKeyID}" caches driver instances built from a raw
+// (endpoint, accessKey, secret, region) tuple — no Connection record
+// required. Used by the /api/v1/user/regions/* endpoints.
 type Registry struct {
 	conns store.Connections
 	mu    sync.RWMutex
@@ -24,15 +29,53 @@ type Registry struct {
 
 	userMu    sync.RWMutex
 	userCache map[string]Driver // keyed by connID + "|" + accessKeyID (user-tier creds)
+
+	regionMu          sync.RWMutex
+	regionCache       map[string]Driver // keyed by endpoint + "|" + accessKeyID
+	regionDriverBuild RegionDriverBuilder
+	regions           store.UserRegions
 }
+
+// RegionDriverBuilder constructs a Driver from a raw (endpoint, accessKey,
+// secret, region) tuple — no Connection record required. The Registry
+// holds one; production wiring leaves it nil and falls back to the
+// registered "garage-v1" factory. Tests override it via
+// SetRegionDriverBuilder to inject a mock driver without touching the
+// global factory map.
+type RegionDriverBuilder func(endpoint, accessKeyID, secretKey, region string) (Driver, error)
 
 // NewRegistry creates a new driver registry backed by the given connections store.
 func NewRegistry(conns store.Connections) *Registry {
 	return &Registry{
-		conns:     conns,
-		cache:     make(map[string]Driver),
-		userCache: make(map[string]Driver),
+		conns:       conns,
+		cache:       make(map[string]Driver),
+		userCache:   make(map[string]Driver),
+		regionCache: make(map[string]Driver),
 	}
+}
+
+// SetRegionDriverBuilder overrides the per-region driver constructor.
+// Used by tests to inject a mock driver without registering a new factory
+// in the global driver map. Pass nil to restore the default
+// (Open("garage-v1", cfg)) behaviour.
+func (r *Registry) SetRegionDriverBuilder(b RegionDriverBuilder) {
+	r.regionMu.Lock()
+	defer r.regionMu.Unlock()
+	r.regionDriverBuild = b
+	// Bust the cache — old entries were built with the previous builder.
+	r.regionCache = make(map[string]Driver)
+}
+
+// SetUserRegionsStore attaches the per-user region keychain to the
+// registry. main.go wires this once at boot, right after
+// Store.WireUserRegions. ForUserRegion refuses to operate when this
+// hasn't been set, returning ErrUnsupported — guards against a half-
+// configured deploy that would otherwise sign user requests against
+// regions that nothing else in the system can persist or look up.
+func (r *Registry) SetUserRegionsStore(s store.UserRegions) {
+	r.regionMu.Lock()
+	defer r.regionMu.Unlock()
+	r.regions = s
 }
 
 // For returns a driver instance for the given connection ID. It looks up the
@@ -163,4 +206,86 @@ func (r *Registry) ForUserGrant(ctx context.Context, connID, accessKeyID, secret
 	r.userMu.Unlock()
 
 	return drv, nil
+}
+
+// ForUserRegion builds a driver that signs against an arbitrary S3
+// endpoint with the supplied creds. No Connection record required —
+// regions are user-owned and don't necessarily map to an admin-curated
+// cluster (ADR-0002).
+//
+// Cache key: (endpoint, accessKeyID). Repeat calls from the same user
+// for the same region share an underlying S3 client. Eviction on
+// UserRegion delete is the caller's responsibility via
+// InvalidateUserRegion; cycle staleness on rotation is acceptable
+// because regions are user-managed and changes are rare.
+//
+// Driver type is forced to garage-v1 for now (matches v0.9.0e
+// behaviour); when AWS/MinIO BYO support lands the caller will pass a
+// driver type explicitly. The garage-v1 driver's S3 path only needs
+// s3_endpoint + access_key_id + secret_key + region — admin_url and
+// admin_token are not required for user-tier ops.
+//
+// Returns ErrUnsupported when SetUserRegionsStore hasn't been called
+// (Store.UserRegions() was nil at wire-up) — defensive against a half-
+// configured deploy. Callers map to 503.
+func (r *Registry) ForUserRegion(_ context.Context, endpoint, accessKeyID, secretKey, region string) (Driver, error) {
+	if endpoint == "" {
+		return nil, fmt.Errorf("ForUserRegion: empty endpoint")
+	}
+	if accessKeyID == "" {
+		return nil, fmt.Errorf("ForUserRegion: empty accessKeyID")
+	}
+	if secretKey == "" {
+		return nil, fmt.Errorf("ForUserRegion: empty secretKey")
+	}
+
+	cacheKey := endpoint + "|" + accessKeyID
+
+	r.regionMu.RLock()
+	regions := r.regions
+	cached, ok := r.regionCache[cacheKey]
+	builder := r.regionDriverBuild
+	r.regionMu.RUnlock()
+	if regions == nil {
+		return nil, ErrUnsupported
+	}
+	if ok {
+		return cached, nil
+	}
+
+	var drv Driver
+	var err error
+	if builder != nil {
+		drv, err = builder(endpoint, accessKeyID, secretKey, region)
+	} else {
+		cfg := Config{
+			"s3_endpoint":   endpoint,
+			"access_key_id": accessKeyID,
+			"secret_key":    secretKey,
+			"region":        region,
+			// Legacy aliases the garage_v1 S3 path may consult.
+			"s3_access_key": accessKeyID,
+			"s3_secret_key": secretKey,
+		}
+		drv, err = Open("garage-v1", cfg)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("building per-region driver for %s: %w", endpoint, err)
+	}
+
+	r.regionMu.Lock()
+	r.regionCache[cacheKey] = drv
+	r.regionMu.Unlock()
+
+	return drv, nil
+}
+
+// InvalidateUserRegion evicts the cached per-region driver for the
+// (endpoint, accessKeyID) pair. Callers invoke this after a UserRegion
+// is deleted or its secret rotated so the next ForUserRegion rebuild
+// picks up the fresh creds. Idempotent — a miss is a no-op.
+func (r *Registry) InvalidateUserRegion(endpoint, accessKeyID string) {
+	r.regionMu.Lock()
+	delete(r.regionCache, endpoint+"|"+accessKeyID)
+	r.regionMu.Unlock()
 }
