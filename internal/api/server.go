@@ -12,6 +12,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
@@ -38,6 +39,7 @@ type Server struct {
 	reg        *driver.Registry
 	syncStore  sync.Store
 	oidc       oidcProvider
+	policy     policy.Enforcer
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
@@ -85,6 +87,15 @@ func New(cfg *config.Config, store *store.Store, conns store.Connections, drv dr
 // /auth/oidc/* routes will return 501).
 func (s *Server) SetOIDC(p oidcProvider) {
 	s.oidc = p
+}
+
+// SetPolicy wires the policy enforcer into the server (ADR-0001).
+// Must be called before Start when the policy subsystem is enabled.
+// Handlers that need RoleAssignments — e.g. POST /user/buckets/connect —
+// nil-check s.policy and return 503 POLICY_NOT_WIRED when this hasn't
+// been called.
+func (s *Server) SetPolicy(p policy.Enforcer) {
+	s.policy = p
 }
 
 // Start starts the HTTP server and blocks until context is canceled or error.
@@ -208,6 +219,12 @@ func (s *Server) routes() {
 			userG.Get("/user/clusters", s.userListClustersHandler)
 			userG.Post("/user/clusters", s.createUserClusterHandler)
 			userG.Post("/user/clusters/_test", s.testUserClusterHandler)
+
+			// Per ADR-0001 (v0.9.0e): user-persona "Add bucket access"
+			// flow. The user brings their own S3 creds for a bucket
+			// they're entitled to and basement stores a Grant + a
+			// bucket_user RoleAssignment for them.
+			userG.Post("/user/buckets/connect", s.userBucketsConnectHandler)
 			userG.Get("/user/clusters/{cid}", s.userGetClusterHandler)
 			userG.Get("/user/clusters/{cid}/buckets", s.userListClusterBucketsHandler)
 			userG.Get("/user/clusters/{cid}/buckets/{bid}", s.userGetClusterBucketHandler)
