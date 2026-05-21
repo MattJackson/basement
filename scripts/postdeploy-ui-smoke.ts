@@ -1143,11 +1143,14 @@ async function main(): Promise<number> {
           { waitUntil: "networkidle" }
         );
 
-        // Wait for bucket detail to render - look for the H1-style button
-        await page!.waitForSelector('button.text-2xl.tracking-tight', { timeout: 10_000 });
+        // Wait for bucket detail to render. v0.8.0d.29 wrapped the
+        // click-to-edit button inside a real <h1>; the classes moved
+        // off the button onto the h1.
+        await page!.waitForSelector('h1', { timeout: 10_000 });
 
         const h1Text = await page!
-          .locator('button.text-2xl.tracking-tight')
+          .locator('h1')
+          .first()
           .textContent();
         
         if (!h1Text) throw new Error("H1 button has no text content");
