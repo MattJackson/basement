@@ -90,6 +90,9 @@ export function UserMenu() {
           <DropdownMenuLinkItem href="/admin/policies">
             Policies
           </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem href="/admin/audit">
+            Audit log
+          </DropdownMenuLinkItem>
           <DropdownMenuLinkItem href="/admin/system">
             System settings
           </DropdownMenuLinkItem>

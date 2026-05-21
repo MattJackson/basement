@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
@@ -69,6 +70,21 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 	passwordMatch := auth.VerifyPassword(adminHash, req.Password)
 
 	if !usernameMatch || !passwordMatch {
+		// Per v1.0.0c: record auth failures so a privilege-escalation
+		// attempt — repeated wrong-password storms from one IP, or a
+		// surge across many usernames — surfaces in the audit view.
+		// Actor stays empty because by definition no JWT issued yet;
+		// the submitted username goes into Detail (NOT Actor) so the
+		// schema stays consistent: Actor = "authenticated user ID."
+		s.audit.Log(audit.Event{
+			Action:    "auth:login",
+			Resource:  resourceUser(req.Username),
+			Result:    audit.ResultFailure,
+			Detail:    "invalid credentials",
+			IP:        clientIP(r),
+			UserAgent: r.UserAgent(),
+		})
+
 		// Return same error for both cases to prevent enumeration.
 		writeErrorSimple(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid credentials")
 		return

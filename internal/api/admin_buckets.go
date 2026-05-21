@@ -114,10 +114,12 @@ func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 
 	bucket, err := s.drv.CreateBucket(r.Context(), spec)
 	if err != nil {
+		s.auditFailure(r, "bucket:create", resourceBucket(chi.URLParam(r, "cid"), spec.Alias), err)
 		writeDriverError(w, "CreateBucket", err)
 		return
 	}
 
+	s.auditSuccess(r, "bucket:create", resourceBucket(chi.URLParam(r, "cid"), bucket.ID))
 	writeJSON(w, http.StatusCreated, bucket)
 }
 
@@ -155,10 +157,12 @@ func (s *Server) updateBucketHandler(w http.ResponseWriter, r *http.Request) {
 
 	bucket, err := s.drv.UpdateBucket(r.Context(), id, update)
 	if err != nil {
+		s.auditFailure(r, "bucket:edit_alias", resourceBucket(chi.URLParam(r, "cid"), id), err)
 		writeDriverError(w, "UpdateBucket", err)
 		return
 	}
 
+	s.auditSuccess(r, "bucket:edit_alias", resourceBucket(chi.URLParam(r, "cid"), id))
 	writeJSON(w, http.StatusOK, bucket)
 }
 
@@ -262,9 +266,11 @@ func (s *Server) deleteBucketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.drv.DeleteBucket(r.Context(), id); err != nil {
+		s.auditFailure(r, "bucket:delete", resourceBucket(cid, id), err)
 		writeDriverError(w, "DeleteBucket", err)
 		return
 	}
 
+	s.auditSuccess(r, "bucket:delete", resourceBucket(cid, id))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Bucket deleted"})
 }

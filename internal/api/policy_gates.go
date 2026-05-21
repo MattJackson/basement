@@ -101,6 +101,13 @@ func (s *Server) requireCapability(w http.ResponseWriter, r *http.Request, capab
 	}
 
 	if !s.policy.Can(claims.UserID, capability, scope) {
+		// Per v1.0.0c: a forbidden capability check is an audit-
+		// worthy event — operators want to see "alice tried to
+		// delete cluster prod and was blocked" so they can
+		// investigate. The Resource encodes capability+scope so
+		// the audit log self-documents what the user was after.
+		s.auditFailureDetail(r, "auth:forbidden", capability+"@"+scope, "policy denied "+capability+" on "+scope)
+
 		writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN",
 			fmt.Sprintf("Requires %s on %s", capability, scope))
 		return "", false

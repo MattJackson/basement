@@ -119,10 +119,12 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 	key, err := drv.CreateKey(r.Context(), spec)
 	if err != nil {
+		s.auditFailure(r, "key:create", resourceKey(cid, spec.Name), err)
 		writeDriverError(w, "CreateKey", err)
 		return
 	}
 
+	s.auditSuccess(r, "key:create", resourceKey(cid, key.ID))
 	// v0.9.0m: response carries secretAccessKey verbatim when the
 	// driver populated it (Garage v1/v2 both do on /v1/key resp.
 	// /v2/CreateKey). Never log it server-side — pass through only.
@@ -164,9 +166,11 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	// Handle permissions update first (if provided)
 	if body.BucketsPermissions != nil {
 		if err := s.drv.UpdateKeyPermissions(r.Context(), id, *body.BucketsPermissions); err != nil {
+			s.auditFailure(r, "key:edit_permissions", resourceKey(cid, id), err)
 			writeDriverError(w, "UpdateKeyPermissions", err)
 			return
 		}
+		s.auditSuccess(r, "key:edit_permissions", resourceKey(cid, id))
 	} else if body.Name != nil {
 		// OPEN: Rename not supported by driver interface yet.
 		// Per task T2.38b, when only name is set (no permissions), return 501 Not Implemented.
@@ -283,9 +287,11 @@ func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.drv.DeleteKey(r.Context(), id); err != nil {
+		s.auditFailure(r, "key:delete", resourceKey(cid, id), err)
 		writeDriverError(w, "DeleteKey", err)
 		return
 	}
 
+	s.auditSuccess(r, "key:delete", resourceKey(cid, id))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Access key deleted"})
 }

@@ -1025,6 +1025,58 @@ export function useUsageOverview() {
   });
 }
 
+// v1.0.0c: audit log query. Filters mirror the backend QueryFilter
+// shape; the response carries the events plus a `truncated` hint so
+// the UI can render an honest "load more / narrow the window" CTA.
+
+export interface AuditEvent {
+  time: string;
+  actor: string;
+  actorRole?: string;
+  action: string;
+  resource: string;
+  result: "success" | "failure";
+  detail?: string;
+  ip?: string;
+  userAgent?: string;
+}
+
+export interface AuditFilter {
+  from?: string;
+  to?: string;
+  actor?: string;
+  action?: string;
+  resource?: string;
+  result?: string;
+  limit?: number;
+}
+
+export interface AuditResponse {
+  events: AuditEvent[];
+  total: number;
+  truncated: boolean;
+}
+
+export function useAudit(filter: AuditFilter) {
+  return useQuery<AuditResponse>({
+    queryKey: ["admin", "audit", filter],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(filter)) {
+        if (v !== undefined && v !== "" && v !== null) {
+          params.set(k, String(v));
+        }
+      }
+      const url = "/api/v1/admin/audit" + (params.toString() ? "?" + params.toString() : "");
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/audit", res.status, body);
+      return body as AuditResponse;
+    },
+    staleTime: 10 * 1000,
+  });
+}
+
 export function useMigrateOrphanCreds() {
   return useMutation({
     mutationFn: async (args: {

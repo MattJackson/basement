@@ -159,10 +159,12 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.store.CreateShare(share); err != nil {
+		s.auditFailure(r, "share:create", resourceBucket(req.ConnectionID, req.BucketID), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "STORE_ERROR", "Failed to create share")
 		return
 	}
 
+	s.auditSuccess(r, "share:create", resourceShare(share.Token))
 	// Return the share with plaintext token (only time it's returned).
 	writeJSON(w, http.StatusCreated, share)
 }
@@ -275,6 +277,7 @@ func (s *Server) userRevokeShareHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := s.store.RevokeShare(token); err != nil {
+		s.auditFailure(r, "share:revoke", resourceShare(token), err)
 		if err.Error() == "share not found: "+token {
 			writeErrorSimple(w, http.StatusNotFound, "SHARE_NOT_FOUND", "Share not found")
 			return
@@ -283,6 +286,7 @@ func (s *Server) userRevokeShareHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	s.auditSuccess(r, "share:revoke", resourceShare(token))
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Share link revoked",
 	})

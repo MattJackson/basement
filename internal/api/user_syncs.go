@@ -107,9 +107,12 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Save initial job state
 	if err := s.syncStore.Save(job); err != nil {
+		s.auditFailure(r, "sync:create", resourceSync(job.ID), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", "Failed to save sync job")
 		return
 	}
+
+	s.auditSuccess(r, "sync:create", resourceSync(job.ID))
 
 	// Spawn goroutine to run the sync (async, return 202 immediately)
 	go func() {
@@ -233,10 +236,12 @@ func (s *Server) userDeleteSyncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.syncStore.Delete(jobID); err != nil {
+		s.auditFailure(r, "sync:delete", resourceSync(jobID), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", "Failed to delete sync job")
 		return
 	}
 
+	s.auditSuccess(r, "sync:delete", resourceSync(jobID))
 	w.WriteHeader(http.StatusNoContent)
 }
 

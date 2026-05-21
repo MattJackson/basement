@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"golang.org/x/oauth2"
 
+	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/config"
@@ -40,6 +41,7 @@ type Server struct {
 	syncStore  sync.Store
 	oidc       oidcProvider
 	policy     policy.Enforcer
+	audit      audit.Logger
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
@@ -78,6 +80,11 @@ func New(cfg *config.Config, store *store.Store, conns store.Connections, drv dr
 		router:    chi.NewRouter(),
 		logger:    logger,
 		policy:    permissiveEnforcer{},
+		// Default to a no-op audit logger so the many existing
+		// api.New(...) callers (tests, fixtures) don't have to
+		// thread a logger through. Production main.go replaces
+		// this with a real FileLogger via SetAuditLogger().
+		audit: audit.NewNoop(),
 	}
 
 	srv.routes()
@@ -107,6 +114,18 @@ func (s *Server) SetOIDC(p oidcProvider) {
 // been called.
 func (s *Server) SetPolicy(p policy.Enforcer) {
 	s.policy = p
+}
+
+// SetAuditLogger wires the audit log writer into the server (v1.0.0c).
+// Must be called before Start in production so every mutating handler
+// records its action; tests that don't care leave the no-op default
+// installed by New().
+func (s *Server) SetAuditLogger(l audit.Logger) {
+	if l == nil {
+		s.audit = audit.NewNoop()
+		return
+	}
+	s.audit = l
 }
 
 // Start starts the HTTP server and blocks until context is canceled or error.
@@ -261,6 +280,13 @@ func (s *Server) routes() {
 			// reads; per-handler gate is host:manage_users so any Host
 			// Admin sees it without needing a new capability.
 			uiAdminG.Get("/admin/usage/overview", s.getUsageOverviewHandler)
+
+			// AUDIT.LOG (v1.0.0c): query the append-only event log.
+			// Per-handler gate is host:manage_policies — the same
+			// persona that controls the matrix is the one who needs
+			// the accountability view (and seeing audit data without
+			// the gate would leak who-did-what across the matrix).
+			uiAdminG.Get("/admin/audit", s.listAuditHandler)
 		})
 
 		// User routes — authenticated users only. Grants filtered server-side.
