@@ -140,9 +140,12 @@ func (s *Server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.CreateUser(user); err != nil {
+		s.auditFailure(r, "user:create", resourceUser(user.Username), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create user")
 		return
 	}
+
+	s.auditSuccess(r, "user:create", resourceUser(user.Username))
 
 	resp := UserResponse{
 		Username:  user.Username,
@@ -210,9 +213,11 @@ func (s *Server) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.DeleteUser(id); err != nil {
+		s.auditFailure(r, "user:delete", resourceUser(id), err)
 		writeErrorSimple(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found")
 		return
 	}
 
+	s.auditSuccess(r, "user:delete", resourceUser(id))
 	w.WriteHeader(http.StatusNoContent)
 }

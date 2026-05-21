@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/mattjackson/basement/internal/api"
+	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/config"
@@ -222,6 +223,15 @@ func main() {
 	}
 
 	srv.SetPolicy(enforcer)
+
+	// v1.0.0c: append-only audit log of every mutating handler.
+	// FileLogger appends one JSON line per event to
+	// {dataDir}/audit/YYYY-MM-DD.log and fsyncs each write so a
+	// crashing process never loses a recorded action. Tests that
+	// instantiate api.New() don't get this wiring — they fall
+	// through to the no-op default installed by New().
+	auditLogger := audit.NewFileLogger(cfg.DataDir)
+	srv.SetAuditLogger(auditLogger)
 
 	// Optional: wire up OIDC if BASEMENT_OIDC_ISSUER is set. When unset,
 	// local-password remains the only login path.

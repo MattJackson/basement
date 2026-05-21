@@ -224,6 +224,26 @@ function OrgCapabilitiesPage() {
           </Link>
         </CardContent>
       </Card>
+
+      {/* Audit log link card — v1.0.0c surfaces the append-only event */}
+      {/* log so incident response has one click from the system page. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Audit log</CardTitle>
+          <CardDescription>
+            Append-only record of every mutating action across basement.
+            Who did what, when, against which resource, success or failure.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            to="/admin/audit"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Open the audit log &rarr;
+          </Link>
+        </CardContent>
+      </Card>
     </div>
   );
 }

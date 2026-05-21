@@ -1329,6 +1329,34 @@ async function main(): Promise<number> {
       await page!.waitForSelector('h1', { timeout: 10_000 });
     });
 
+    // v1.0.0c: audit log page. The route renders for the
+    // host_admin (matthew); the table either has rows (matthew
+    // performed at least the login event when we hit /api/v1/auth/login
+    // earlier in the run) or shows the empty-state copy.
+    await check("/admin/audit renders the audit log (host_admin gate)", async () => {
+      await page!.goto(`${BASE_URL}/admin/audit`, { waitUntil: "networkidle" });
+      const url = page!.url();
+      if (/\/admin\/login/.test(url)) {
+        throw new Error("/admin/audit bounced to /admin/login — auth lost");
+      }
+      if (url === `${BASE_URL}/` || url.endsWith("/files")) {
+        throw new Error("/admin/audit bounced to user shell — matthew should pass the gate");
+      }
+      // Page should render the "Audit log" heading.
+      await page!.waitForSelector('h1', { timeout: 10_000 });
+      const heading = await page!.locator('h1').first().textContent();
+      if (!heading || !heading.toLowerCase().includes("audit")) {
+        throw new Error(`expected h1 to contain "audit", got: ${heading}`);
+      }
+      // Either the table is present OR the empty-state copy is.
+      const hasTable = await page!.locator('table').count();
+      const hasEmpty = await page!.locator('text=No events match the filter').count();
+      if (hasTable === 0 && hasEmpty === 0) {
+        throw new Error("neither table nor empty-state visible on /admin/audit");
+      }
+      await shot(page!, "16b-audit");
+    });
+
     // ============================================================
     // 13. Fix 7: version label under Logo wordmark
     // ============================================================

@@ -24,6 +24,7 @@ import { Route as AdminPoliciesRouteImport } from "./routes/admin/policies"
 import { Route as AdminMigrationsRouteImport } from "./routes/admin/migrations"
 import { Route as AdminMigrateRouteImport } from "./routes/admin/migrate"
 import { Route as AdminLoginRouteImport } from "./routes/admin/login"
+import { Route as AdminAuditRouteImport } from "./routes/admin/audit"
 import { Route as FilesSyncsIndexRouteImport } from "./routes/files/syncs/index"
 import { Route as FilesSharesIndexRouteImport } from "./routes/files/shares/index"
 import { Route as FilesCidIndexRouteImport } from "./routes/files/$cid/index"
@@ -118,6 +119,11 @@ const AdminMigrateRoute = AdminMigrateRouteImport.update({
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: "/admin/login",
   path: "/admin/login",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminAuditRoute = AdminAuditRouteImport.update({
+  id: "/admin/audit",
+  path: "/admin/audit",
   getParentRoute: () => rootRouteImport,
 } as any)
 const FilesSyncsIndexRoute = FilesSyncsIndexRouteImport.update({
@@ -226,6 +232,7 @@ const AdminClustersCidBucketsIdLifecycleRuleIdEditRoute =
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
+  "/admin/audit": typeof AdminAuditRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/migrations": typeof AdminMigrationsRoute
@@ -263,6 +270,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
+  "/admin/audit": typeof AdminAuditRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/migrations": typeof AdminMigrationsRoute
@@ -297,6 +305,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
+  "/admin/audit": typeof AdminAuditRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/migrations": typeof AdminMigrationsRoute
@@ -336,6 +345,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | "/"
+    | "/admin/audit"
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/migrations"
@@ -373,6 +383,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
+    | "/admin/audit"
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/migrations"
@@ -406,6 +417,7 @@ export interface FileRouteTypes {
   id:
     | "__root__"
     | "/"
+    | "/admin/audit"
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/migrations"
@@ -444,6 +456,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminAuditRoute: typeof AdminAuditRoute
   AdminLoginRoute: typeof AdminLoginRoute
   AdminMigrateRoute: typeof AdminMigrateRoute
   AdminMigrationsRoute: typeof AdminMigrationsRoute
@@ -575,6 +588,13 @@ declare module "@tanstack/react-router" {
       path: "/admin/login"
       fullPath: "/admin/login"
       preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/audit": {
+      id: "/admin/audit"
+      path: "/admin/audit"
+      fullPath: "/admin/audit"
+      preLoaderRoute: typeof AdminAuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/files/syncs/": {
@@ -796,6 +816,7 @@ const AdminClustersCidBucketsIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminAuditRoute: AdminAuditRoute,
   AdminLoginRoute: AdminLoginRoute,
   AdminMigrateRoute: AdminMigrateRoute,
   AdminMigrationsRoute: AdminMigrationsRoute,

@@ -123,12 +123,14 @@ func (s *Server) upsertRoleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.policy.UpsertRole(role); err != nil {
+		s.auditFailure(r, "policy:role_upsert", resourceRole(role.ID), err)
 		// UpsertRole returns descriptive errors for unknown capabilities
 		// and malformed expressions — surface them rather than swallow.
 		writeErrorSimple(w, http.StatusBadRequest, "ROLE_INVALID", err.Error())
 		return
 	}
 
+	s.auditSuccess(r, "policy:role_upsert", resourceRole(role.ID))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(role)
@@ -159,6 +161,7 @@ func (s *Server) deleteRoleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.policy.DeleteRole(id); err != nil {
+		s.auditFailure(r, "policy:role_delete", resourceRole(id), err)
 		msg := err.Error()
 		switch {
 		case strings.Contains(msg, "seed role"):
@@ -172,6 +175,7 @@ func (s *Server) deleteRoleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.auditSuccess(r, "policy:role_delete", resourceRole(id))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -209,6 +213,7 @@ func (s *Server) assignRoleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.policy.AssignRole(a); err != nil {
+		s.auditFailure(r, "policy:assign", resourceAssignment(a.UserID, a.RoleID, a.Scope), err)
 		msg := err.Error()
 		if strings.Contains(msg, "does not exist") {
 			writeErrorSimple(w, http.StatusBadRequest, "ROLE_NOT_FOUND", msg)
@@ -218,6 +223,7 @@ func (s *Server) assignRoleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.auditSuccess(r, "policy:assign", resourceAssignment(a.UserID, a.RoleID, a.Scope))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(a)
@@ -254,9 +260,11 @@ func (s *Server) unassignRoleHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.policy.UnassignRole(userID, roleID, scope); err != nil {
+		s.auditFailure(r, "policy:unassign", resourceAssignment(userID, roleID, scope), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "UNASSIGN_FAILED", err.Error())
 		return
 	}
 
+	s.auditSuccess(r, "policy:unassign", resourceAssignment(userID, roleID, scope))
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -100,10 +100,12 @@ func (s *Server) createClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := s.conns.Create(r.Context(), spec)
 	if err != nil {
+		s.auditFailure(r, "cluster:create", "cluster:"+spec.Label, err)
 		writeErrorSimple(w, http.StatusBadRequest, "CREATE_FAILED", "Failed to create connection")
 		return
 	}
 
+	s.auditSuccess(r, "cluster:create", resourceCluster(conn.ID))
 	writeJSON(w, http.StatusCreated, conn)
 }
 
@@ -192,6 +194,7 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := s.conns.Update(r.Context(), cid, patch)
 	if err != nil {
+		s.auditFailure(r, "cluster:edit", resourceCluster(cid), err)
 		// Map the real store error to the right code+status; the
 		// old freshman code returned 404 CLUSTER_NOT_FOUND for any
 		// error from Update, swallowing duplicate-label, unsupported-
@@ -222,6 +225,7 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 		s.reg.Invalidate(cid)
 	}
 
+	s.auditSuccess(r, "cluster:edit", resourceCluster(cid))
 	writeJSON(w, http.StatusOK, conn)
 }
 
@@ -310,6 +314,7 @@ func (s *Server) deleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.conns.Delete(r.Context(), cid); err != nil {
+		s.auditFailure(r, "cluster:delete", resourceCluster(cid), err)
 		writeRegistryForError(w, err)
 		return
 	}
@@ -318,6 +323,7 @@ func (s *Server) deleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 		s.reg.Invalidate(cid)
 	}
 
+	s.auditSuccess(r, "cluster:delete", resourceCluster(cid))
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Cluster deleted"})
 }
 

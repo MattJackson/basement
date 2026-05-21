@@ -42,10 +42,12 @@ func (s *Server) updateOrgCapabilitiesHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	if err := s.store.OrgCapabilities().Update(caps); err != nil {
+		s.auditFailure(r, "host:org_caps_edit", resourceHost, err)
 		writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update capabilities")
 		return
 	}
 
+	s.auditSuccess(r, "host:org_caps_edit", resourceHost)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(caps)
