@@ -55,6 +55,41 @@ func TestListBuckets_403(t *testing.T) {
 	}
 }
 
+// TestListBuckets_S3Fallback_Garage404_ReturnsEmpty: Garage's S3
+// data-plane endpoint does NOT implement ListBuckets and returns 404.
+// We translate that specific case to an empty list so the user sees
+// the friendly empty-state instead of a scary backend error — they
+// can still navigate to a known bucket by URL on Garage.
+func TestListBuckets_S3Fallback_Garage404_ReturnsEmpty(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`))
+	}))
+	defer ts.Close()
+
+	d := &driver{
+		client:     &client{baseURL: "", http: &http.Client{}},
+		s3Endpoint: ts.URL,
+	}
+	s3c, err := newS3Client(map[string]string{
+		"s3_endpoint":   ts.URL,
+		"access_key_id": "AK",
+		"secret_key":    "SK",
+	})
+	if err != nil {
+		t.Fatalf("newS3Client: %v", err)
+	}
+	d.s3Client = s3c
+
+	buckets, err := d.ListBuckets(context.Background())
+	if err != nil {
+		t.Fatalf("ListBuckets on Garage 404 should not error, got %v", err)
+	}
+	if len(buckets) != 0 {
+		t.Errorf("expected empty bucket list on Garage 404, got %+v", buckets)
+	}
+}
+
 // TestListBuckets_S3Fallback_ADR0002 verifies that when the driver is
 // built without an admin URL (the region-tier path introduced by
 // ADR-0002 / v1.1.0c), ListBuckets falls back to the S3 ListBuckets
