@@ -343,6 +343,23 @@ func (s *Server) routes() {
 			userG.Post("/user/syncs/{id}/pause", s.userPauseSyncHandler)
 			userG.Post("/user/syncs/{id}/resume", s.userResumeSyncHandler)
 
+			// User region keychain endpoints (ADR-0002, cycle
+			// v1.1.0b). The region's S3 key IS the permission —
+			// audit is via the owner-check (404 on mismatch) and
+			// the backend's own access enforcement, not via
+			// requireCapability. See internal/api/user_regions.go.
+			userG.Post("/user/regions", s.userCreateRegionHandler)
+			userG.Get("/user/regions", s.userListRegionsHandler)
+			userG.Get("/user/regions/{regionId}", s.userGetRegionHandler)
+			userG.Delete("/user/regions/{regionId}", s.userDeleteRegionHandler)
+			userG.Get("/user/regions/{regionId}/buckets", s.userListRegionBucketsHandler)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/objects", s.userListRegionBucketObjectsHandler)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/objects/{key}/presign-get", s.userPresignGetRegionObjectHandler)
+			userG.Post("/user/regions/{regionId}/buckets/{bid}/objects/{key}/presign-put", s.userPresignPutRegionObjectHandler)
+			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/init", s.userInitRegionMultipartHandler)
+			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/complete", s.userCompleteRegionMultipartHandler)
+			userG.Delete("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}", s.userAbortRegionMultipartHandler)
+
 			// User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat", s.userStatClusterBucketObjectHandler)

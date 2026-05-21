@@ -1,0 +1,564 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/mattjackson/basement/internal/audit"
+	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/driver"
+	"github.com/mattjackson/basement/internal/store"
+)
+
+// memAuditLogger is a minimal in-memory audit.Logger so tests can
+// assert which events fired without disk IO.
+type memAuditLogger struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (m *memAuditLogger) Log(e audit.Event) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = append(m.events, e)
+}
+
+func (m *memAuditLogger) Query(_, _ time.Time, _ audit.QueryFilter) ([]audit.Event, error) {
+	return nil, nil
+}
+
+func (m *memAuditLogger) snapshot() []audit.Event {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]audit.Event, len(m.events))
+	copy(out, m.events)
+	return out
+}
+
+// regionMockDriver is a per-test mock that records the calls the
+// region handlers make. Embeds testMockDriver so we don't reimplement
+// every method.
+type regionMockDriver struct {
+	*testMockDriver
+}
+
+func newRegionMockDriver() *regionMockDriver {
+	return &regionMockDriver{testMockDriver: &testMockDriver{}}
+}
+
+// newRegionsTestEnv builds a Server with a real Store (with
+// UserRegions wired), an in-memory audit logger, and a Registry whose
+// per-region driver builder hands back the supplied mock driver.
+func newRegionsTestEnv(t *testing.T, mock *regionMockDriver) (*Server, *memAuditLogger, func()) {
+	t.Helper()
+
+	tmp, err := os.MkdirTemp("", "user-regions-")
+	if err != nil {
+		t.Fatalf("mkdir temp: %v", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tmp) }
+
+	cfg := newTestConfig()
+	cfg.DataDir = tmp
+
+	st, err := store.Open(tmp, 90*24*time.Hour)
+	if err != nil {
+		cleanup()
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WireUserRegions(cfg.JWT.Secret); err != nil {
+		cleanup()
+		t.Fatalf("WireUserRegions: %v", err)
+	}
+
+	conns := &testMockConnectionStore{}
+	reg := driver.NewRegistry(conns)
+	reg.SetUserRegionsStore(st.UserRegions())
+	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (driver.Driver, error) {
+		return mock, nil
+	})
+
+	auditLog := &memAuditLogger{}
+
+	srv := New(cfg, st, conns, nil, reg)
+	srv.SetAuditLogger(auditLog)
+
+	return srv, auditLog, func() {
+		cleanup()
+	}
+}
+
+// regionUserCookieReq adds the standard "user" session cookie used by
+// the rest of the user-tier API tests.
+func regionUserCookieReq(req *http.Request) *http.Request {
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUserToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	return req
+}
+
+// regionCookieReqFor builds a request with a session cookie for the
+// supplied (username, role) pair. Used for the ownership test where
+// two distinct users have to see each other's regions.
+func regionCookieReqFor(t *testing.T, method, url, username string, body interface{}) *http.Request {
+	t.Helper()
+	var req *http.Request
+	if body != nil {
+		data, _ := json.Marshal(body)
+		req = httptest.NewRequest(method, url, bytes.NewReader(data))
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, url, nil)
+		req.Header.Set("Content-Type", "application/json")
+	}
+	token, err := auth.IssueToken(testSecret, username, "user", false, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    token,
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	return req
+}
+
+// TestUserRegions_HappyPath_CreateListGetUseDelete walks the full
+// lifecycle: create a region, list it, get it, sign ListBuckets, and
+// delete. All against the in-memory store + a mock driver.
+func TestUserRegions_HappyPath_CreateListGetUseDelete(t *testing.T) {
+	mock := newRegionMockDriver()
+	mock.listBucketsFunc = func(_ context.Context) ([]driver.Bucket, error) {
+		return []driver.Bucket{{ID: "lsi", Aliases: []string{"lsi"}}, {ID: "cheshire", Aliases: []string{"cheshire"}}}, nil
+	}
+
+	srv, auditLog, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	// 1. Create
+	body := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.basement.pq.io",
+		"accessKeyId": "GK_user_key",
+		"secretKey":   "user-secret-do-not-log",
+		"region":      "garage",
+	}
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	var created userRegionResponse
+	if err := json.NewDecoder(rr.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	if created.ID == "" {
+		t.Errorf("expected non-empty region ID")
+	}
+	if created.UserID != "user" {
+		t.Errorf("expected userId=user, got %q", created.UserID)
+	}
+	if created.AccessKeyID != "GK_user_key" {
+		t.Errorf("expected accessKeyId echoed back, got %q", created.AccessKeyID)
+	}
+	// Endpoint normalized
+	if created.Endpoint != "https://s3.basement.pq.io" {
+		t.Errorf("expected normalized endpoint, got %q", created.Endpoint)
+	}
+	// Secret never leaked
+	rawBody := rr.Body.String()
+	if bytes.Contains([]byte(rawBody), []byte("user-secret-do-not-log")) {
+		t.Errorf("create response leaked plaintext secret: %s", rawBody)
+	}
+
+	// 2. List
+	listReq := regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions", nil))
+	listReq.Header.Set("Content-Type", "application/json")
+	rrList := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrList, listReq)
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d (body=%s)", rrList.Code, rrList.Body.String())
+	}
+	var list []userRegionResponse
+	if err := json.NewDecoder(rrList.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != created.ID {
+		t.Errorf("expected single region matching create, got %#v", list)
+	}
+
+	// 3. Get
+	getReq := regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+created.ID, nil))
+	getReq.Header.Set("Content-Type", "application/json")
+	rrGet := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrGet, getReq)
+	if rrGet.Code != http.StatusOK {
+		t.Fatalf("get: expected 200, got %d (body=%s)", rrGet.Code, rrGet.Body.String())
+	}
+
+	// 4. Use for ListBuckets — also verifies LastUsedAt bump
+	bucketsReq := regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+created.ID+"/buckets", nil))
+	bucketsReq.Header.Set("Content-Type", "application/json")
+	rrBuckets := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrBuckets, bucketsReq)
+	if rrBuckets.Code != http.StatusOK {
+		t.Fatalf("buckets: expected 200, got %d (body=%s)", rrBuckets.Code, rrBuckets.Body.String())
+	}
+	var buckets []driver.Bucket
+	if err := json.NewDecoder(rrBuckets.Body).Decode(&buckets); err != nil {
+		t.Fatalf("decode buckets: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Errorf("expected 2 buckets from mock, got %d", len(buckets))
+	}
+
+	// LastUsedAt was bumped
+	stored, err := srv.store.UserRegions().Get(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("Get post-buckets: %v", err)
+	}
+	if stored.LastUsedAt.IsZero() {
+		t.Errorf("expected LastUsedAt to be set after /buckets call")
+	}
+
+	// 5. Delete
+	delReq := regionUserCookieReq(httptest.NewRequest(http.MethodDelete, "/api/v1/user/regions/"+created.ID, nil))
+	delReq.Header.Set("Content-Type", "application/json")
+	rrDel := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrDel, delReq)
+	if rrDel.Code != http.StatusNoContent {
+		t.Fatalf("delete: expected 204, got %d (body=%s)", rrDel.Code, rrDel.Body.String())
+	}
+
+	// Subsequent GET on deleted region → 404
+	rrGetAfter := httptest.NewRecorder()
+	getAfter := regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+created.ID, nil))
+	getAfter.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(rrGetAfter, getAfter)
+	if rrGetAfter.Code != http.StatusNotFound {
+		t.Errorf("get after delete: expected 404, got %d", rrGetAfter.Code)
+	}
+
+	// 6. Audit log: create + delete events
+	evs := auditLog.snapshot()
+	foundCreate, foundDelete := false, false
+	for _, e := range evs {
+		if e.Action == "region:create" && e.Result == audit.ResultSuccess && e.Resource == "region:"+created.ID {
+			foundCreate = true
+		}
+		if e.Action == "region:delete" && e.Result == audit.ResultSuccess && e.Resource == "region:"+created.ID {
+			foundDelete = true
+		}
+	}
+	if !foundCreate {
+		t.Errorf("expected region:create audit success, got %#v", evs)
+	}
+	if !foundDelete {
+		t.Errorf("expected region:delete audit success, got %#v", evs)
+	}
+}
+
+// TestUserRegions_OwnershipReturns404 — user B asking for user A's
+// region must see 404 (not 403, to avoid existence leak).
+func TestUserRegions_OwnershipReturns404(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	// User A (the standard "user" token) creates a region.
+	create := map[string]string{
+		"alias":       "alice-home",
+		"endpoint":    "https://s3.alice.example.com",
+		"accessKeyId": "GKalice",
+		"secretKey":   "alice-secret",
+	}
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create as A: expected 201, got %d", rr.Code)
+	}
+	var aRegion userRegionResponse
+	_ = json.NewDecoder(rr.Body).Decode(&aRegion)
+
+	// User B (different cookie) asks for A's region by ID.
+	rrB := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrB, regionCookieReqFor(t, http.MethodGet, "/api/v1/user/regions/"+aRegion.ID, "bob", nil))
+	if rrB.Code != http.StatusNotFound {
+		t.Errorf("user B reading A's region: expected 404, got %d (body=%s)", rrB.Code, rrB.Body.String())
+	}
+
+	// And B's list is empty (A's region not visible).
+	rrList := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrList, regionCookieReqFor(t, http.MethodGet, "/api/v1/user/regions", "bob", nil))
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("list as B: expected 200, got %d", rrList.Code)
+	}
+	var bList []userRegionResponse
+	_ = json.NewDecoder(rrList.Body).Decode(&bList)
+	if len(bList) != 0 {
+		t.Errorf("expected B's list to be empty, got %#v", bList)
+	}
+}
+
+// TestUserRegions_DuplicateEndpoint409 — second create for the same
+// endpoint from the same user returns 409 DUPLICATE_REGION.
+func TestUserRegions_DuplicateEndpoint409(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	body := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.basement.pq.io",
+		"accessKeyId": "AK1",
+		"secretKey":   "S1",
+	}
+	rr1 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr1, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("first create: expected 201, got %d (body=%s)", rr1.Code, rr1.Body.String())
+	}
+
+	// Same endpoint, different alias and key → still 409 per ADR-0002
+	// uniqueness on (userId, endpoint).
+	body2 := map[string]string{
+		"alias":       "other-name",
+		"endpoint":    "https://s3.basement.pq.io",
+		"accessKeyId": "AK2",
+		"secretKey":   "S2",
+	}
+	rr2 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr2, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body2)))
+	if rr2.Code != http.StatusConflict {
+		t.Fatalf("duplicate create: expected 409, got %d (body=%s)", rr2.Code, rr2.Body.String())
+	}
+	var errResp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rr2.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if errResp.Error.Code != "DUPLICATE_REGION" {
+		t.Errorf("expected code DUPLICATE_REGION, got %q", errResp.Error.Code)
+	}
+}
+
+// TestUserRegions_InvalidEndpoint400 — malformed endpoint → 400
+// INVALID_ENDPOINT.
+func TestUserRegions_InvalidEndpoint400(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	body := map[string]string{
+		"alias":       "home",
+		"endpoint":    "not-a-url",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	}
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	var errResp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&errResp)
+	if errResp.Error.Code != "INVALID_ENDPOINT" {
+		t.Errorf("expected code INVALID_ENDPOINT, got %q", errResp.Error.Code)
+	}
+}
+
+// TestUserRegions_MissingFields_400 — each required field empty →
+// 400 INVALID_REQUEST.
+func TestUserRegions_MissingFields_400(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	cases := []struct {
+		name string
+		body map[string]string
+	}{
+		{"missing alias", map[string]string{"endpoint": "https://x", "accessKeyId": "k", "secretKey": "s"}},
+		{"missing endpoint", map[string]string{"alias": "h", "accessKeyId": "k", "secretKey": "s"}},
+		{"missing accessKeyId", map[string]string{"alias": "h", "endpoint": "https://x", "secretKey": "s"}},
+		{"missing secretKey", map[string]string{"alias": "h", "endpoint": "https://x", "accessKeyId": "k"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", tc.body)))
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d (body=%s)", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestUserRegions_NoAuth — every endpoint requires a session cookie.
+func TestUserRegions_NoAuth(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	cases := []struct {
+		method, path string
+	}{
+		{http.MethodPost, "/api/v1/user/regions"},
+		{http.MethodGet, "/api/v1/user/regions"},
+		{http.MethodGet, "/api/v1/user/regions/some-id"},
+		{http.MethodDelete, "/api/v1/user/regions/some-id"},
+		{http.MethodGet, "/api/v1/user/regions/some-id/buckets"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			var req *http.Request
+			if tc.method == http.MethodPost {
+				req = newJSONRequest(tc.path, map[string]string{})
+				req.Method = tc.method
+			} else {
+				req = httptest.NewRequest(tc.method, tc.path, nil)
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rr := httptest.NewRecorder()
+			srv.router.ServeHTTP(rr, req)
+			if rr.Code != http.StatusUnauthorized {
+				t.Errorf("expected 401, got %d", rr.Code)
+			}
+		})
+	}
+}
+
+// TestUserRegions_DeleteInvalidatesDriverCache — after delete, the
+// registry's per-region cache no longer has the old entry; verified
+// by checking the cache via a second build that hits the (mock) builder.
+func TestUserRegions_DeleteInvalidatesDriverCache(t *testing.T) {
+	mock := newRegionMockDriver()
+	mock.listBucketsFunc = func(_ context.Context) ([]driver.Bucket, error) { return nil, nil }
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	// We need to count builder invocations to assert eviction.
+	built := 0
+	srv.reg.SetRegionDriverBuilder(func(_, _, _, _ string) (driver.Driver, error) {
+		built++
+		return mock, nil
+	})
+
+	create := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.basement.pq.io",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	}
+	rrC := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rrC.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrC.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrC.Body).Decode(&region)
+
+	// First buckets call: builder fires once.
+	rrB1 := httptest.NewRecorder()
+	getB := regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+region.ID+"/buckets", nil))
+	getB.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(rrB1, getB)
+	if rrB1.Code != http.StatusOK {
+		t.Fatalf("buckets1: %d (%s)", rrB1.Code, rrB1.Body.String())
+	}
+	if built != 1 {
+		t.Errorf("expected 1 build after first list, got %d", built)
+	}
+
+	// Delete — should invalidate the cache.
+	rrD := httptest.NewRecorder()
+	delReq := regionUserCookieReq(httptest.NewRequest(http.MethodDelete, "/api/v1/user/regions/"+region.ID, nil))
+	delReq.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(rrD, delReq)
+	if rrD.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d", rrD.Code)
+	}
+
+	// Re-create the same endpoint — should rebuild.
+	rrC2 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC2, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rrC2.Code != http.StatusCreated {
+		t.Fatalf("re-create: %d (%s)", rrC2.Code, rrC2.Body.String())
+	}
+	var region2 userRegionResponse
+	_ = json.NewDecoder(rrC2.Body).Decode(&region2)
+
+	rrB2 := httptest.NewRecorder()
+	getB2 := regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+region2.ID+"/buckets", nil))
+	getB2.Header.Set("Content-Type", "application/json")
+	srv.router.ServeHTTP(rrB2, getB2)
+	if rrB2.Code != http.StatusOK {
+		t.Fatalf("buckets2: %d", rrB2.Code)
+	}
+	if built != 2 {
+		t.Errorf("expected 2 builds after delete + re-create, got %d", built)
+	}
+}
+
+// TestUserRegions_UnwiredRegionsStore_503 — when the keychain hasn't
+// been wired the API surfaces a 503 REGIONS_NOT_WIRED.
+func TestUserRegions_UnwiredRegionsStore_503(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "user-regions-unwired-")
+	if err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	cfg := newTestConfig()
+	cfg.DataDir = tmp
+	// Open store WITHOUT WireUserRegions.
+	st, err := store.Open(tmp, 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	conns := &testMockConnectionStore{}
+	reg := driver.NewRegistry(conns)
+	srv := New(cfg, st, conns, nil, reg)
+
+	body := map[string]string{
+		"alias": "h", "endpoint": "https://x.example.com", "accessKeyId": "k", "secretKey": "s",
+	}
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on unwired store, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	var errResp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.NewDecoder(rr.Body).Decode(&errResp)
+	if errResp.Error.Code != "REGIONS_NOT_WIRED" {
+		t.Errorf("expected REGIONS_NOT_WIRED, got %q", errResp.Error.Code)
+	}
+}
+
