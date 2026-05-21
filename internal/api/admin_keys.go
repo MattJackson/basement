@@ -58,6 +58,18 @@ func (s *Server) getKeyHandler(w http.ResponseWriter, r *http.Request) {
 // createKeyHandler handles POST /admin/clusters/{cid}/keys.
 //
 // Per ADR-0001 v0.9.0f: gated on key:create at "key:{cid}:*".
+//
+// v0.9.0m: routes through the connection-scoped Registry so multi-cluster
+// operators hitting /admin/clusters/cluster-B/keys mint into cluster B,
+// not the default. Falls back to s.drv when no cid (legacy) or when the
+// registry is unwired (older tests that pass nil for reg).
+//
+// IMPORTANT: the driver's CreateKey response includes SecretAccessKey
+// — Garage returns it exactly once at creation and never again. The
+// handler is a pass-through: it does NOT log or persist the secret;
+// it lives in the response body and that's it. basement's DB has
+// no field for it. Drop a copy in the response, render once in the UI
+// (shown-once dialog), and the operator owns its lifecycle from there.
 func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -69,6 +81,19 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.requireCapability(w, r, "key:create", "key:"+cid+":*"); !ok {
 			return
 		}
+	}
+
+	// Pick the per-cluster driver when possible; fall back to s.drv
+	// when no registry / no cid. Mirrors listKeysByClusterHandler so
+	// the create + list pair stay consistent for any given cid.
+	drv := s.drv
+	if cid != "" && s.reg != nil {
+		d, err := s.reg.For(r.Context(), cid)
+		if err != nil {
+			writeRegistryForError(w, err)
+			return
+		}
+		drv = d
 	}
 
 	var spec driver.KeySpec
@@ -83,7 +108,7 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 		writeValidationError(w, ve)
 		return
 	}
-	if existing, listErr := s.drv.ListKeys(r.Context()); listErr == nil {
+	if existing, listErr := drv.ListKeys(r.Context()); listErr == nil {
 		if ve := requireUniqueName("name", spec.Name, existing, func(k driver.Key) []string {
 			return []string{k.Name}
 		}); ve != nil {
@@ -92,12 +117,15 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	key, err := s.drv.CreateKey(r.Context(), spec)
+	key, err := drv.CreateKey(r.Context(), spec)
 	if err != nil {
 		writeDriverError(w, "CreateKey", err)
 		return
 	}
 
+	// v0.9.0m: response carries secretAccessKey verbatim when the
+	// driver populated it (Garage v1/v2 both do on /v1/key resp.
+	// /v2/CreateKey). Never log it server-side — pass through only.
 	writeJSON(w, http.StatusCreated, key)
 }
 

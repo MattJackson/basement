@@ -393,6 +393,51 @@ function KeysScreen() {
                 </div>
               </div>
 
+              {/* Pre-filled ~/.aws/credentials snippet. Not a live aws-cli
+                  invocation — just a paste-ready profile block so the
+                  operator can drop it into the SDK config most S3
+                  clients pick up by default. The profile name uses the
+                  key's display name (or "basement" if anonymous) so
+                  multiple keys don't collide. */}
+              {createdKey.secretAccessKey && (
+                <div>
+                  <div className="text-xs font-medium text-muted-foreground mb-1">
+                    ~/.aws/credentials snippet
+                  </div>
+                  <div className="flex gap-2">
+                    <pre
+                      className="flex-1 rounded bg-muted px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all"
+                      data-testid="aws-cli-snippet"
+                    >
+                      {(() => {
+                        const profile = (createdKey.name ?? "basement")
+                          .toLowerCase()
+                          .replace(/[^a-z0-9_-]+/g, "-")
+                          .replace(/^-+|-+$/g, "") || "basement";
+                        return `[${profile}]
+aws_access_key_id = ${createdKey.accessKeyId ?? createdKey.id}
+aws_secret_access_key = ${createdKey.secretAccessKey}`;
+                      })()}
+                    </pre>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const profile = (createdKey.name ?? "basement")
+                          .toLowerCase()
+                          .replace(/[^a-z0-9_-]+/g, "-")
+                          .replace(/^-+|-+$/g, "") || "basement";
+                        navigator.clipboard.writeText(
+                          `[${profile}]\naws_access_key_id = ${createdKey.accessKeyId ?? createdKey.id}\naws_secret_access_key = ${createdKey.secretAccessKey}`,
+                        );
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+              )}
+
               <label className="flex items-start gap-2 pt-2 cursor-pointer select-none">
                 <Checkbox
                   checked={savedConfirmed}

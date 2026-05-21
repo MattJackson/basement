@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -101,8 +102,24 @@ func (d *fanoutDriver) ListKeys(ctx context.Context) ([]driver.Key, error) {
 func (d *fanoutDriver) GetKey(_ context.Context, _ string) (driver.Key, error) {
 	return driver.Key{}, nil
 }
-func (d *fanoutDriver) CreateKey(_ context.Context, _ driver.KeySpec) (driver.Key, error) {
-	return driver.Key{}, nil
+// CreateKey on the fanout stub returns a populated key including a
+// SecretAccessKey so v0.9.0m's "secret shown once" handler test can
+// assert the response surface. behavior="error" still errors so the
+// existing error-path tests keep their meaning.
+func (d *fanoutDriver) CreateKey(_ context.Context, spec driver.KeySpec) (driver.Key, error) {
+	if d.behavior == "error" {
+		return driver.Key{}, errors.New("CreateKey error from " + d.connID)
+	}
+	secret := "S" + d.connID + "-secret-" + spec.Name
+	return driver.Key{
+		ID:          "k-" + d.connID + "-new",
+		Name:        spec.Name,
+		AccessKeyID: "GK" + d.connID + "ACCESS",
+		// Pointer to a string — driver.Key models the secret as *string
+		// because it's only populated on create. Get/List paths leave
+		// it nil so callers can't accidentally leak a stale value.
+		SecretAccessKey: &secret,
+	}, nil
 }
 func (d *fanoutDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []driver.BucketPermission) error {
 	return nil
@@ -630,6 +647,84 @@ func TestListKeysByClusterHandler_DriverError(t *testing.T) {
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("status=%d, want 500", rr.Code)
+	}
+}
+
+// TestCreateKeyHandler_ReturnsSecretAccessKey covers the v0.9.0m
+// shown-once contract: POST /admin/clusters/{cid}/keys MUST return both
+// accessKeyId AND secretAccessKey in the response body. Without the
+// secret in the response, basement can't bootstrap an operator's
+// Connect-a-bucket flow — Garage hands the secret out exactly once at
+// creation, and the only path off the wire is this handler's reply.
+//
+// The test additionally asserts the registry routed to the cid-specific
+// driver (the returned accessKeyId carries the connID we hit), so a
+// future regression that flips back to s.drv would be caught.
+func TestCreateKeyHandler_ReturnsSecretAccessKey(t *testing.T) {
+	registerFanoutDriver(t)
+	connsStore := makeFanoutConnsStore(map[string]string{"cc": "ok"})
+	reg := driver.NewRegistry(connsStore)
+	srv := New(newTestConfig(), nil, connsStore, nil, reg)
+
+	body := bytes.NewBufferString(`{"name":"bootstrap"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/cc/keys", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie())
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+
+	var got driver.Key
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Both fields MUST be present. The secret in particular — the
+	// frontend's shown-once dialog reads it straight off this response;
+	// strip it on the server side and the dialog shows "(no secret
+	// returned by backend)" and the operator is blocked.
+	if got.AccessKeyID == "" {
+		t.Errorf("accessKeyId empty, want non-empty")
+	}
+	if got.SecretAccessKey == nil {
+		t.Fatalf("secretAccessKey nil — handler dropped the create-only secret")
+	}
+	if *got.SecretAccessKey == "" {
+		t.Errorf("secretAccessKey empty string, want non-empty")
+	}
+
+	// Registry-routing sanity: the stub embeds connID in both fields,
+	// so a cross-wired registry would surface a different cid here.
+	if !bytes.Contains([]byte(got.AccessKeyID), []byte("cc")) {
+		t.Errorf("accessKeyId=%q does not reference cid=cc — handler used wrong driver", got.AccessKeyID)
+	}
+	if !bytes.Contains([]byte(*got.SecretAccessKey), []byte("cc")) {
+		t.Errorf("secretAccessKey=%q does not reference cid=cc — handler used wrong driver", *got.SecretAccessKey)
+	}
+}
+
+// TestCreateKeyHandler_UnknownCluster: POST to a cid the conn store
+// doesn't know about must 404 via the registry, not silently fall
+// through to s.drv. Catches a regression where the handler skips the
+// registry lookup when reg returns ErrConnectionNotFound.
+func TestCreateKeyHandler_UnknownCluster(t *testing.T) {
+	registerFanoutDriver(t)
+	connsStore := &testMockConnectionStore{}
+	reg := driver.NewRegistry(connsStore)
+	srv := New(newTestConfig(), nil, connsStore, nil, reg)
+
+	body := bytes.NewBufferString(`{"name":"k"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/missing/keys", body)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(adminCookie())
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status=%d, want 404; body=%s", rr.Code, rr.Body.String())
 	}
 }
 

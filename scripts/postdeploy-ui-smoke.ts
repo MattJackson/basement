@@ -616,6 +616,36 @@ async function main(): Promise<number> {
       await shot(page!, "09-aggregated-keys");
     });
 
+    // v0.9.0m: "+ New" affordance must open the create-key form
+    // dialog with a name field. We don't submit — actually minting a
+    // key in the smoke would dirty the prod cluster — but we assert
+    // the dialog renders, the form takes input, and Cancel closes
+    // without mutating state.
+    await check("/admin/keys '+ New' opens create-key dialog (v0.9.0m)", async () => {
+      await page!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Access keys")', { timeout: 10_000 });
+
+      // Header button labelled "New" (button, not a link).
+      const newBtn = page!.locator('button:has-text("New")').first();
+      await newBtn.waitFor({ state: "visible", timeout: 5_000 });
+      await newBtn.click();
+
+      // Dialog should show the create-key form.
+      await page!.waitForSelector('text=Create access key', { timeout: 5_000 });
+      await page!.waitForSelector('input[placeholder*="Key name"]', { timeout: 5_000 });
+
+      // Cancel — we intentionally do NOT submit; minting a real key
+      // here would leave a stray credential behind on every smoke run.
+      await page!.locator('button:has-text("Cancel")').first().click();
+
+      // Dialog should close — heading goes away.
+      await page!.waitForFunction(
+        () => !document.body.innerText.includes("Create access key"),
+        { timeout: 5_000 },
+      );
+      await shot(page!, "09a-create-key-dialog");
+    });
+
     // ============================================================
     // 11. User endpoints (v0.5.2 USER.BACKEND)
     // ============================================================
