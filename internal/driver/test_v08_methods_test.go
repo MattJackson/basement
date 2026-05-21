@@ -21,3 +21,18 @@ func (m *mockDriver) PutObjectStream(_ context.Context, _, _ string, _ io.Reader
 func (m *mockDriver) ServerSideCopy(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
+
+// v0.9.0i (LIFECYCLE.WIZARD) shims — registry tests don't exercise
+// the new lifecycle methods so cheap no-op stubs are fine here.
+
+func (m *mockDriver) LifecycleSupport() LifecycleCapabilities {
+	return LifecycleCapabilities{Supported: false}
+}
+
+func (m *mockDriver) GetLifecycle(_ context.Context, _ string) ([]LifecycleRule, error) {
+	return nil, nil
+}
+
+func (m *mockDriver) PutLifecycle(_ context.Context, _ string, _ []LifecycleRule) error {
+	return nil
+}

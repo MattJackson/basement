@@ -40,6 +40,8 @@ import { Route as AdminClustersCidLayoutRouteImport } from "./routes/admin/clust
 import { Route as AdminClustersCidEditRouteImport } from "./routes/admin/clusters/$cid/edit"
 import { Route as AdminClustersCidKeysIdRouteImport } from "./routes/admin/clusters/$cid/keys/$id"
 import { Route as AdminClustersCidBucketsIdRouteImport } from "./routes/admin/clusters/$cid/buckets/$id"
+import { Route as AdminClustersCidBucketsIdLifecycleNewRouteImport } from "./routes/admin/clusters/$cid/buckets/$id/lifecycle/new"
+import { Route as AdminClustersCidBucketsIdLifecycleRuleIdEditRouteImport } from "./routes/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -197,6 +199,18 @@ const AdminClustersCidBucketsIdRoute =
     path: "/admin/clusters/$cid/buckets/$id",
     getParentRoute: () => rootRouteImport,
   } as any)
+const AdminClustersCidBucketsIdLifecycleNewRoute =
+  AdminClustersCidBucketsIdLifecycleNewRouteImport.update({
+    id: "/lifecycle/new",
+    path: "/lifecycle/new",
+    getParentRoute: () => AdminClustersCidBucketsIdRoute,
+  } as any)
+const AdminClustersCidBucketsIdLifecycleRuleIdEditRoute =
+  AdminClustersCidBucketsIdLifecycleRuleIdEditRouteImport.update({
+    id: "/lifecycle/$ruleId/edit",
+    path: "/lifecycle/$ruleId/edit",
+    getParentRoute: () => AdminClustersCidBucketsIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
@@ -228,8 +242,10 @@ export interface FileRoutesByFullPath {
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/files/$cid/b/$bid": typeof FilesCidBBidRoute
   "/admin/clusters/$cid/": typeof AdminClustersCidIndexRoute
-  "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRoute
+  "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
+  "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
+  "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit": typeof AdminClustersCidBucketsIdLifecycleRuleIdEditRoute
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
@@ -257,8 +273,10 @@ export interface FileRoutesByTo {
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/files/$cid/b/$bid": typeof FilesCidBBidRoute
   "/admin/clusters/$cid": typeof AdminClustersCidIndexRoute
-  "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRoute
+  "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
+  "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
+  "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit": typeof AdminClustersCidBucketsIdLifecycleRuleIdEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -291,8 +309,10 @@ export interface FileRoutesById {
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/files/$cid/b/$bid": typeof FilesCidBBidRoute
   "/admin/clusters/$cid/": typeof AdminClustersCidIndexRoute
-  "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRoute
+  "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
+  "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
+  "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit": typeof AdminClustersCidBucketsIdLifecycleRuleIdEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -328,6 +348,8 @@ export interface FileRouteTypes {
     | "/admin/clusters/$cid/"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
+    | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
+    | "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
   fileRoutesByTo: FileRoutesByTo
   to:
     | "/"
@@ -357,6 +379,8 @@ export interface FileRouteTypes {
     | "/admin/clusters/$cid"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
+    | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
+    | "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
   id:
     | "__root__"
     | "/"
@@ -390,6 +414,8 @@ export interface FileRouteTypes {
     | "/admin/clusters/$cid/"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
+    | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
+    | "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -414,7 +440,7 @@ export interface RootRouteChildren {
   AdminClustersCidEditRoute: typeof AdminClustersCidEditRoute
   AdminClustersCidLayoutRoute: typeof AdminClustersCidLayoutRoute
   AdminClustersCidIndexRoute: typeof AdminClustersCidIndexRoute
-  AdminClustersCidBucketsIdRoute: typeof AdminClustersCidBucketsIdRoute
+  AdminClustersCidBucketsIdRoute: typeof AdminClustersCidBucketsIdRouteWithChildren
   AdminClustersCidKeysIdRoute: typeof AdminClustersCidKeysIdRoute
 }
 
@@ -637,6 +663,20 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminClustersCidBucketsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/admin/clusters/$cid/buckets/$id/lifecycle/new": {
+      id: "/admin/clusters/$cid/buckets/$id/lifecycle/new"
+      path: "/lifecycle/new"
+      fullPath: "/admin/clusters/$cid/buckets/$id/lifecycle/new"
+      preLoaderRoute: typeof AdminClustersCidBucketsIdLifecycleNewRouteImport
+      parentRoute: typeof AdminClustersCidBucketsIdRoute
+    }
+    "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit": {
+      id: "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
+      path: "/lifecycle/$ruleId/edit"
+      fullPath: "/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
+      preLoaderRoute: typeof AdminClustersCidBucketsIdLifecycleRuleIdEditRouteImport
+      parentRoute: typeof AdminClustersCidBucketsIdRoute
+    }
   }
 }
 
@@ -696,6 +736,24 @@ const FilesSyncsRouteWithChildren = FilesSyncsRoute._addFileChildren(
   FilesSyncsRouteChildren,
 )
 
+interface AdminClustersCidBucketsIdRouteChildren {
+  AdminClustersCidBucketsIdLifecycleNewRoute: typeof AdminClustersCidBucketsIdLifecycleNewRoute
+  AdminClustersCidBucketsIdLifecycleRuleIdEditRoute: typeof AdminClustersCidBucketsIdLifecycleRuleIdEditRoute
+}
+
+const AdminClustersCidBucketsIdRouteChildren: AdminClustersCidBucketsIdRouteChildren =
+  {
+    AdminClustersCidBucketsIdLifecycleNewRoute:
+      AdminClustersCidBucketsIdLifecycleNewRoute,
+    AdminClustersCidBucketsIdLifecycleRuleIdEditRoute:
+      AdminClustersCidBucketsIdLifecycleRuleIdEditRoute,
+  }
+
+const AdminClustersCidBucketsIdRouteWithChildren =
+  AdminClustersCidBucketsIdRoute._addFileChildren(
+    AdminClustersCidBucketsIdRouteChildren,
+  )
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminLoginRoute: AdminLoginRoute,
@@ -718,7 +776,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminClustersCidEditRoute: AdminClustersCidEditRoute,
   AdminClustersCidLayoutRoute: AdminClustersCidLayoutRoute,
   AdminClustersCidIndexRoute: AdminClustersCidIndexRoute,
-  AdminClustersCidBucketsIdRoute: AdminClustersCidBucketsIdRoute,
+  AdminClustersCidBucketsIdRoute: AdminClustersCidBucketsIdRouteWithChildren,
   AdminClustersCidKeysIdRoute: AdminClustersCidKeysIdRoute,
 }
 export const routeTree = rootRouteImport

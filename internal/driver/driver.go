@@ -224,6 +224,37 @@ type PutResult struct {
 	ETag string
 }
 
+// LifecycleRule represents one rule in a bucket lifecycle policy
+// (S3-compatible). Drivers translate between this and their native
+// representation. Per LIFECYCLE.WIZARD (v0.9.0i): the wire shape is
+// flat + S3-shaped so the UI can treat all four drivers uniformly;
+// per-backend differences surface via LifecycleCapabilities, not via
+// rule-shape divergence.
+type LifecycleRule struct {
+	ID                 string `json:"id"`
+	Status             string `json:"status"`                       // "Enabled" | "Disabled"
+	Prefix             string `json:"prefix,omitempty"`             // applies to objects with this prefix
+	ExpirationDays     *int   `json:"expirationDays,omitempty"`     // delete after N days
+	TransitionDays     *int   `json:"transitionDays,omitempty"`     // move to lower-tier after N days
+	TransitionTier     string `json:"transitionTier,omitempty"`     // e.g. "GLACIER", "STANDARD_IA"
+	NoncurrentDays     *int   `json:"noncurrentDays,omitempty"`     // for versioned buckets
+	AbortMultipartDays *int   `json:"abortMultipartDays,omitempty"` // cancel incomplete uploads after N days
+}
+
+// LifecycleCapabilities tells the UI what this driver supports.
+// Per the operator's driver-parity doctrine the UI gates rule
+// editing on these flags, not on the driver name — Garage v1 sets
+// Supported=false today and the rule editor renders disabled fields
+// uniformly across backends as a result.
+type LifecycleCapabilities struct {
+	Supported          bool     `json:"supported"`
+	Expiration         bool     `json:"expiration"`         // delete after N days
+	Transition         bool     `json:"transition"`         // tier migration
+	TransitionTiers    []string `json:"transitionTiers"`    // valid TransitionTier values
+	NoncurrentDays     bool     `json:"noncurrentDays"`     // versioned bucket support
+	AbortMultipartDays bool     `json:"abortMultipartDays"`
+}
+
 // Driver is the interface that all backend drivers must implement.
 type Driver interface {
 	// Identity
@@ -271,4 +302,14 @@ type Driver interface {
 	// (or for cross-driver pairs the sync engine never calls this on)
 	// return ErrUnsupported.
 	ServerSideCopy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) error
+
+	// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). LifecycleSupport()
+	// is the UI's gate — drivers without lifecycle return
+	// {Supported: false} and the rule editor renders disabled. Get
+	// and Put return ErrUnsupported on those drivers; UI never sees
+	// the error because it short-circuits on the capability flag, but
+	// the wrapped sentinel makes a direct API caller's error path sane.
+	LifecycleSupport() LifecycleCapabilities
+	GetLifecycle(ctx context.Context, bucketID string) ([]LifecycleRule, error)
+	PutLifecycle(ctx context.Context, bucketID string, rules []LifecycleRule) error
 }
