@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,25 @@ import (
 
 	"github.com/mattjackson/basement/internal/store"
 )
+
+// seedShareUserGrant installs a BucketGrant (v1.0.0b: replaces the old
+// legacy store.Grant fixtures). user_shares.go reads visibility via
+// CredGrants now, so the test seed must mirror the production shape.
+func seedShareUserGrant(t *testing.T, st *store.Store, userID, connID, bucketID string) {
+	t.Helper()
+	if err := st.WireBucketGrants(testSecret); err != nil {
+		t.Fatalf("WireBucketGrants: %v", err)
+	}
+	if _, err := st.CredGrants().Create(context.Background(), store.BucketGrantInput{
+		UserID:       userID,
+		ConnectionID: connID,
+		BucketID:     bucketID,
+		AccessKeyID:  "ak-test",
+		SecretKey:    "sk-test",
+	}); err != nil {
+		t.Fatalf("CredGrants.Create: %v", err)
+	}
+}
 
 // TestCreateShare_NoAuth returns 401.
 func TestCreateShare_NoAuth(t *testing.T) {
@@ -93,16 +113,11 @@ func TestCreateShare_HappyPath(t *testing.T) {
 			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
 		},
 	}
-	st, _ := store.Open("/tmp/test-store-shares", 90*24*time.Hour)
-	defer os.RemoveAll("/tmp/test-store-shares")
+	tmpDir := t.TempDir()
+	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a grant for the test user.
-	testGrants := []store.Grant{
-		{UserID: "user", Scope: "bucket", Bucket: "conn-123/bucket-456"},
-	}
-	if err := st.SetGrants("user", testGrants); err != nil {
-		t.Fatalf("failed to set grants: %v", err)
-	}
+	// Create a bucket grant for the test user.
+	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
 
 	srv := New(cfg, st, connsStore, nil, nil)
 
@@ -142,15 +157,10 @@ func TestCreateShare_WithPassword(t *testing.T) {
 			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
 		},
 	}
-	st, _ := store.Open("/tmp/test-store-shares", 90*24*time.Hour)
-	defer os.RemoveAll("/tmp/test-store-shares")
+	tmpDir := t.TempDir()
+	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	testGrants := []store.Grant{
-		{UserID: "user", Scope: "bucket", Bucket: "conn-123/bucket-456"},
-	}
-	if err := st.SetGrants("user", testGrants); err != nil {
-		t.Fatalf("failed to set grants: %v", err)
-	}
+	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
 
 	srv := New(cfg, st, connsStore, nil, nil)
 
@@ -189,16 +199,11 @@ func TestListShares_HappyPath(t *testing.T) {
 			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
 		},
 	}
-	st, _ := store.Open("/tmp/test-store-shares", 90*24*time.Hour)
-	defer os.RemoveAll("/tmp/test-store-shares")
+	tmpDir := t.TempDir()
+	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a grant for the test user.
-	testGrants := []store.Grant{
-		{UserID: "user", Scope: "bucket", Bucket: "conn-123/bucket-456"},
-	}
-	if err := st.SetGrants("user", testGrants); err != nil {
-		t.Fatalf("failed to set grants: %v", err)
-	}
+	// Create a bucket grant for the test user.
+	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
 
 	// Create some test shares.
 	now := time.Now()
@@ -256,16 +261,11 @@ func TestRevokeShare_HappyPath(t *testing.T) {
 			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
 		},
 	}
-	st, _ := store.Open("/tmp/test-store-shares", 90*24*time.Hour)
-	defer os.RemoveAll("/tmp/test-store-shares")
+	tmpDir := t.TempDir()
+	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a grant for the test user.
-	testGrants := []store.Grant{
-		{UserID: "user", Scope: "bucket", Bucket: "conn-123/bucket-456"},
-	}
-	if err := st.SetGrants("user", testGrants); err != nil {
-		t.Fatalf("failed to set grants: %v", err)
-	}
+	// Create a bucket grant for the test user.
+	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
 
 	// Create a test share.
 	now := time.Now()
@@ -318,16 +318,11 @@ func TestRevokeShare_OwnershipCheck(t *testing.T) {
 			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
 		},
 	}
-	st, _ := store.Open("/tmp/test-store-shares", 90*24*time.Hour)
-	defer os.RemoveAll("/tmp/test-store-shares")
+	tmpDir := t.TempDir()
+	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a grant for the test user.
-	testGrants := []store.Grant{
-		{UserID: "user", Scope: "bucket", Bucket: "conn-123/bucket-456"},
-	}
-	if err := st.SetGrants("user", testGrants); err != nil {
-		t.Fatalf("failed to set grants: %v", err)
-	}
+	// Create a bucket grant for the test user.
+	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
 
 	// Create a test share owned by different user.
 	now := time.Now()

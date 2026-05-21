@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"strings"
 
 	"github.com/mattjackson/basement/internal/auth"
 )
@@ -10,6 +9,13 @@ import (
 // userVisibleConnections returns connection IDs that the current user has any grant on,
 // or owns. For admin users (role="admin"), all connections are visible.
 // This is the filter used by GET /api/v1/user/clusters.
+//
+// Per ADR-0001 (v1.0.0b): visibility is sourced from BucketGrants
+// (s.store.CredGrants()), not the retired legacy `Grant` policy table.
+// A user "sees" a cluster iff they hold a BucketGrant on any bucket
+// there. Cluster-wide admin scopes live in the policy enforcer now —
+// the visibility filter only needs to surface clusters the user has
+// SOMETHING to do on, and cred-grant presence is the right signal.
 func (s *Server) userVisibleConnections(ctx context.Context) []string {
 	claims, ok := auth.FromContext(ctx)
 	if !ok {
@@ -29,36 +35,19 @@ func (s *Server) userVisibleConnections(ctx context.Context) []string {
 		return ids
 	}
 
-	// For non-admin users, check grants.
-	if s.store == nil {
+	// For non-admin users, derive visibility from BucketGrants.
+	if s.store == nil || s.store.CredGrants() == nil {
 		return []string{}
 	}
-	userGrants := s.store.Grants(claims.UserID)
-	if userGrants == nil || len(userGrants) == 0 {
+	grants, err := s.store.CredGrants().ListForUser(ctx, claims.UserID)
+	if err != nil || len(grants) == 0 {
 		return []string{}
 	}
 
-	// Collect unique connection IDs from grants.
 	connIDs := make(map[string]bool)
-	for _, g := range userGrants {
-		connID := ""
-		bucketID := ""
-
-		// Parse grant path: format is "connectionId/bucketId" or just "connectionId" for cluster-level.
-		parts := strings.Split(g.Bucket, "/")
-		if len(parts) >= 1 && parts[0] != "" {
-			connID = parts[0]
-		}
-		if len(parts) >= 2 && parts[1] != "" {
-			bucketID = parts[1]
-		}
-
-		if connID != "" {
-			connIDs[connID] = true
-		}
-		if bucketID != "" {
-			// Bucket grant implies connection visibility.
-			connIDs[connID] = true
+	for _, g := range grants {
+		if g.ConnectionID != "" {
+			connIDs[g.ConnectionID] = true
 		}
 	}
 
@@ -71,6 +60,10 @@ func (s *Server) userVisibleConnections(ctx context.Context) []string {
 
 // userVisibleBuckets returns bucket IDs that the current user has any grant on within a cluster.
 // This is the filter used by GET /api/v1/user/clusters/{cid}/buckets.
+//
+// Per ADR-0001 (v1.0.0b): sourced from BucketGrants; one BucketGrant
+// per (user, cluster, bucket) triple, so the filter is a straight
+// connectionID match.
 func (s *Server) userVisibleBuckets(ctx context.Context, connID string) []string {
 	claims, ok := auth.FromContext(ctx)
 	if !ok {
@@ -94,21 +87,19 @@ func (s *Server) userVisibleBuckets(ctx context.Context, connID string) []string
 		return ids
 	}
 
-	// For non-admin users, check grants for this specific connection.
-	if s.store == nil {
+	// For non-admin users, derive visibility from BucketGrants on this cluster.
+	if s.store == nil || s.store.CredGrants() == nil {
 		return []string{}
 	}
-	userGrants := s.store.Grants(claims.UserID)
-	if userGrants == nil || len(userGrants) == 0 {
+	grants, err := s.store.CredGrants().ListForUser(ctx, claims.UserID)
+	if err != nil || len(grants) == 0 {
 		return []string{}
 	}
 
-	// Collect bucket IDs from grants matching this connection.
 	bucketIDs := make(map[string]bool)
-	for _, g := range userGrants {
-		parts := strings.Split(g.Bucket, "/")
-		if len(parts) >= 2 && parts[0] == connID && parts[1] != "" {
-			bucketIDs[parts[1]] = true
+	for _, g := range grants {
+		if g.ConnectionID == connID && g.BucketID != "" {
+			bucketIDs[g.BucketID] = true
 		}
 	}
 
