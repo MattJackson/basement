@@ -257,9 +257,10 @@ async function main(): Promise<number> {
     });
 
     await check("/files renders user shell placeholder", async () => {
-      // Direct navigation is allowed even for admin users; role-gated UI nav comes in v0.6.1
+      // Direct navigation is allowed even for admin users; role-gated UI nav comes in v0.6.1.
+      // ADR-0002 (v1.1.0c) renamed "My Clusters" -> "My Regions".
       await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
-      await page!.waitForSelector('h1:has-text("My Clusters")', { timeout: 10_000 });
+      await page!.waitForSelector('h1:has-text("My Regions")', { timeout: 10_000 });
     });
 
     // ============================================================
@@ -295,60 +296,64 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 1.7 My Clusters card grid (v0.6.0d USER.MYCLUSTERS)
+    // 1.7 My Regions card grid (ADR-0002, v1.1.0c)
     // ============================================================
-    section("[1.7] My Clusters card grid (v0.6.0d)");
-    
-    await check("/files renders cluster cards with driver badges", async () => {
+    section("[1.7] My Regions card grid (v1.1.0c)");
+
+    await check("/files renders region cards or empty state", async () => {
       await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
-      
-      // Assert header is present
-      await page!.waitForSelector('h1:has-text("My Clusters")', { timeout: 10_000 });
-      await page!.waitForSelector('p:has-text("Storage you have access to")', { timeout: 10_000 });
-      
-      // Wait for either cluster cards or empty state. Use the
-      // Link wrapper testid (-link suffix) so getAttribute('href')
-      // resolves against the <a> element, not the Card inside.
-      const hasCards = await page!.locator('[data-testid="user-cluster-card-link"]').count();
+
+      // Assert header is present — v1.1.0c renamed "My Clusters" -> "My Regions"
+      await page!.waitForSelector('h1:has-text("My Regions")', { timeout: 10_000 });
+      await page!.waitForSelector('p:has-text("S3 endpoints you have a key for")', { timeout: 10_000 });
+
+      // Wait for either region cards or empty state. The link wrapper
+      // testid (-link suffix) ensures getAttribute('href') hits the
+      // <a> element, not the Card inside.
+      const hasCards = await page!.locator('[data-testid="user-region-card-link"]').count();
       if (hasCards === 0) {
-        // Empty state is acceptable on fresh deploy
-        const hasEmptyState = await page!.locator('text="No clusters yet"').count();
+        const hasEmptyState = await page!.locator('text="No regions yet"').count();
         if (hasEmptyState > 0) {
-          warnLine("/files shows empty state — may be expected on fresh deploy");
+          // Empty-state CTA must be the Connect button pointing at /files/regions/new
+          const connectCta = page!.locator('a:has-text("+ Connect a region")').first();
+          const href = await connectCta.getAttribute('href');
+          if (href !== "/files/regions/new") {
+            throw new Error(`Connect CTA href is '${href}', expected '/files/regions/new'`);
+          }
+          warnLine("/files shows empty state — expected on fresh deploy");
           return;
         }
       }
 
-      // Assert at least one card is visible if not empty
-      const cardCount = await page!.locator('[data-testid="user-cluster-card-link"]').count();
+      // Assert at least one region card is visible
+      const cardCount = await page!.locator('[data-testid="user-region-card-link"]').count();
       if (cardCount > 0) {
-        // Each card should have a driver badge
-        for (let i = 0; i < cardCount; i++) {
-          const card = page!.locator('[data-testid="user-cluster-card-link"]').nth(i);
-          await card.locator('text=/Garage|AWS S3|MinIO/').first().waitFor({
-            state: 'visible',
-            timeout: 10_000
-          });
+        const firstCard = page!.locator('[data-testid="user-region-card-link"]').first();
+        const href = await firstCard.getAttribute('href');
+        if (!href || !href.match(/^\/files\/[^/]+$/)) {
+          throw new Error(`First region card has invalid href: ${href}`);
         }
 
-        // Click the first card and verify navigation to /files/{cid}
-        const firstCard = page!.locator('[data-testid="user-cluster-card-link"]').first();
-        const href = await firstCard.getAttribute('href');
-        
-        if (!href || !href.match(/^\/files\/[^/]+$/)) {
-          throw new Error(`First card has invalid href: ${href}`);
-        }
-        
-        // Click the card and verify navigation
         await firstCard.click({ waitUntil: 'networkidle' });
         const currentUrl = page!.url();
-        
         if (!currentUrl.match(/\/files\/[^/]+$/)) {
-          throw new Error(`Navigation did not go to /files/{cid}: ${currentUrl}`);
+          throw new Error(`Navigation did not go to /files/{regionId}: ${currentUrl}`);
         }
       }
 
-      await shot(page!, "14-files-clusters");
+      await shot(page!, "14-files-regions");
+    });
+
+    // /files/regions/new must render the Connect-a-region form
+    await check("/files/regions/new renders the connect form", async () => {
+      await page!.goto(`${BASE_URL}/files/regions/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Connect a region")', { timeout: 10_000 });
+      // All five fields must exist
+      for (const id of ["alias", "endpoint", "accessKeyId", "secretKey", "region"]) {
+        const has = await page!.locator(`#${id}`).count();
+        if (has === 0) throw new Error(`/files/regions/new missing field #${id}`);
+      }
+      await shot(page!, "14b-files-regions-new");
     });
 
     // ============================================================
@@ -711,20 +716,29 @@ async function main(): Promise<number> {
     // ============================================================
     // [NN] /files/{first-cid} renders bucket list (v0.5.2 USER.MYBUCKETS-IN-CLUSTER)
     // ============================================================
-    section("[14] user bucket list under cluster (/files/{cid})");
-    
-    await check("discover first cluster via /api/v1/user/clusters and navigate to /files/{cid}", async () => {
+    section("[14] user bucket list under cluster (/files/{cid}) — OBSOLETE post v1.1.0c");
+
+    // ADR-0002 v1.1.0c retired the /files/{cid} cluster-tier route in
+    // favour of /files/{regionId}. The legacy /api/v1/user/clusters
+    // endpoint still answers (until v1.1.0e removes it) so we keep
+    // discovering a cluster ID for the later admin-tier sections that
+    // depend on `discoveredCid` (e.g. section [17]). The /files/{cid}
+    // UI assertions below are skipped because the route is gone.
+    await check("discover first cluster via /api/v1/user/clusters (legacy)", async () => {
       const resp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
       if (!resp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${resp.status()}`);
       const clusters = await resp.json();
-      
+
       if (!Array.isArray(clusters) || clusters.length === 0) {
         skipLine("/files/{cid} test", "no user-visible clusters");
         return;
       }
-      
+
       discoveredCid = clusters[0].id;
     });
+
+    // Section [14] UI checks intentionally skipped — see retired-route note above.
+    if (false) {
 
     if (discoveredCid) {
       await check("[NN] /files/{first-cid} renders bucket list", async () => {
@@ -1128,6 +1142,8 @@ async function main(): Promise<number> {
       });
     }
 
+    } // end of `if (false) {` — cluster-tier sections [14], [NN object browser], [16 upload], [16a sync-out] retired in v1.1.0c (ADR-0002)
+
     // ============================================================
     // 12. Fix 3, 1, 4: cluster detail buckets section and bucket detail
     // ============================================================
@@ -1360,31 +1376,31 @@ async function main(): Promise<number> {
     // ============================================================
     // 13. Fix 7: version label under Logo wordmark
     // ============================================================
-    // USER.CONNECTBUCKET — v0.9.0e: /files/buckets/connect (replaces
-    // the deleted v0.7.0f /files/clusters/new flow). Mints a
-    // per-bucket Grant per ADR-0001.
+    // USER.CONNECTREGION — ADR-0002 v1.1.0c: /files/regions/new
+    // (replaces /files/buckets/connect from v0.9.0e). Creates a
+    // UserRegion keychain entry per ADR-0002.
     // ============================================================
-    section("[15a] USER.CONNECTBUCKET — /files/buckets/connect renders the bucket-centric form (v0.9.0e)");
-    await check("navigate to /files/buckets/connect and verify form", async () => {
-      await page!.goto(`${BASE_URL}/files/buckets/connect`, { waitUntil: "networkidle" });
+    section("[15a] USER.CONNECTREGION — /files/regions/new renders the region-centric form (v1.1.0c)");
+    await check("navigate to /files/regions/new and verify form", async () => {
+      await page!.goto(`${BASE_URL}/files/regions/new`, { waitUntil: "networkidle" });
 
       const url = page!.url();
       if (/\/admin/.test(url)) {
         throw new Error("redirected to /admin — should stay in user shell");
       }
 
-      const hasHeading = await page!.locator('h1').filter({ hasText: /Connect a bucket/ }).count() > 0;
+      const hasHeading = await page!.locator('h1').filter({ hasText: /Connect a region/ }).count() > 0;
       if (!hasHeading) {
-        throw new Error("Could not find 'Connect a bucket' heading on /files/buckets/connect");
+        throw new Error("Could not find 'Connect a region' heading on /files/regions/new");
       }
 
-      // Form should have bucket alias + S3 endpoint + access key fields
-      const inputCount = await page!.locator('input').count();
-      if (inputCount < 4) {
-        throw new Error(`Expected ≥4 inputs (alias, endpoint, access key, secret), got ${inputCount}`);
+      // Form should have alias + endpoint + accessKeyId + secretKey + region inputs
+      for (const id of ["alias", "endpoint", "accessKeyId", "secretKey", "region"]) {
+        const has = await page!.locator(`#${id}`).count();
+        if (has === 0) throw new Error(`/files/regions/new missing field #${id}`);
       }
 
-      await shot(page!, "15a-connect-bucket-page");
+      await shot(page!, "15a-connect-region-page");
     });
 
 
