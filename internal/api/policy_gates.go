@@ -45,6 +45,21 @@ import (
 type permissiveEnforcer struct{}
 
 func (permissiveEnforcer) Can(userID, capability, scope string) bool { return userID != "" }
+func (permissiveEnforcer) CanWithReason(userID, capability, scope string) (bool, []policy.RoleAssignment, []policy.ReasoningStep) {
+	// Mirrors Can: any non-empty user is allowed. The single reasoning
+	// step makes it obvious in test output that the permissive stub
+	// (not a real enforcer) produced this answer.
+	if userID == "" {
+		return false, nil, []policy.ReasoningStep{{
+			Step:   "permissive enforcer: empty user",
+			Detail: "no JWT user id present",
+		}}
+	}
+	return true, nil, []policy.ReasoningStep{{
+		Step:   "permissive enforcer",
+		Detail: "test default grants every capability at every scope to authenticated users",
+	}}
+}
 func (permissiveEnforcer) Capabilities(userID, scope string) []string {
 	// Returning empty here is fine — Capabilities() is for UI gating
 	// (which buttons to render), and tests that use the permissive

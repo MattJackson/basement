@@ -823,6 +823,40 @@ export function useUnassignRole() {
   });
 }
 
+// POLICY.SIM v0.9.0j — what-if simulator over the existing matrix.
+//
+// Pure analysis: no side effects, no enforcer mutation. The hook is a
+// mutation rather than a query because operators want explicit "run
+// this what-if" semantics — auto-fetching on field change would make
+// every keystroke fire a request.
+export type PolicyReasoningStep = { step: string; detail: string };
+export type SimulateRequest = {
+  userId: string;
+  capability: string;
+  scope: string;
+};
+export type SimulateResponse = {
+  allowed: boolean;
+  reasoning: PolicyReasoningStep[];
+  matchingAssignments: PolicyAssignment[];
+};
+
+export function useSimulatePolicy() {
+  return useMutation({
+    mutationFn: async (req: SimulateRequest) => {
+      const res = await fetch("/api/v1/admin/policies/simulate", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/policies/simulate", res.status, body);
+      return body as SimulateResponse;
+    },
+  });
+}
+
 // ADR-0001 v0.9.0h: orphaned-creds migration helpers.
 //
 // useOrphanCreds is enabled by an explicit flag (typically
