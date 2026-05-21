@@ -823,3 +823,67 @@ export function useUnassignRole() {
   });
 }
 
+// ADR-0001 v0.9.0h: orphaned-creds migration helpers.
+//
+// useOrphanCreds is enabled by an explicit flag (typically
+// `user.uiAdmin === true`) so non-admins never trigger the call. The
+// endpoint itself is gated server-side on host:manage_policies — the
+// flag here is purely a network-noise reduction for the common case.
+export type OrphanCred = {
+  connectionId: string;
+  label: string;
+  driver: string;
+  accessKeyId: string;
+  hasSecretKey: boolean;
+  discoveredBuckets: string[];
+};
+
+export type OrphanCredsResponse = {
+  orphans: OrphanCred[];
+};
+
+export function useOrphanCreds(enabled: boolean) {
+  return useQuery<OrphanCredsResponse>({
+    queryKey: ["admin", "migrations", "orphan_creds"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/migrations/orphan_creds", {
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/migrations/orphan_creds", res.status, body);
+      return body as OrphanCredsResponse;
+    },
+    enabled,
+    staleTime: 60 * 1000,
+    // Don't retry — a 403 (not-host-admin) shouldn't pummel the server,
+    // and a real 5xx will surface via React Query's error path.
+    retry: false,
+  });
+}
+
+export function useMigrateOrphanCreds() {
+  return useMutation({
+    mutationFn: async (args: {
+      connectionId: string;
+      userId: string;
+      bucketAliases: string[];
+    }) => {
+      const url = `/api/v1/admin/migrations/orphan_creds/${encodeURIComponent(args.connectionId)}/grant`;
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: args.userId,
+          bucketAliases: args.bucketAliases,
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`admin/migrations/orphan_creds/${args.connectionId}/grant`, res.status, body);
+      }
+      return body as { grantsCreated: number; connectionUpdated: boolean };
+    },
+  });
+}
+

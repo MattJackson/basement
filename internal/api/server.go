@@ -232,6 +232,17 @@ func (s *Server) routes() {
 			uiAdminG.Delete("/admin/policies/roles/{id}", s.deleteRoleHandler)
 			uiAdminG.Post("/admin/policies/assignments", s.assignRoleHandler)
 			uiAdminG.Delete("/admin/policies/assignments", s.unassignRoleHandler)
+
+			// Migration helpers (ADR-0001 cycle v0.9.0h). Surfaces
+			// Connections whose config still carries the legacy
+			// access_key_id + secret_key that pre-date the
+			// BucketGrant runtime, and offers a one-click "convert
+			// these to a per-user grant + strip them from config"
+			// path. Gated on host:manage_policies — the operator
+			// who controls the matrix is the same persona who
+			// should be migrating legacy creds.
+			uiAdminG.Get("/admin/migrations/orphan_creds", s.listOrphanCredsHandler)
+			uiAdminG.Post("/admin/migrations/orphan_creds/{cid}/grant", s.migrateOrphanCredsHandler)
 		})
 
 		// User routes — authenticated users only. Grants filtered server-side.
