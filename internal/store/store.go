@@ -26,6 +26,7 @@ type Store struct {
 	sharesCache    []Share
 	orgCaps        *OrgCapabilitiesStore
 	bucketGrants   BucketGrants
+	userRegions    UserRegions
 }
 
 // Open opens or creates the store at dataDir with the given retention period.
@@ -117,6 +118,27 @@ func (s *Store) WireBucketGrants(jwtSecret []byte) error {
 // BucketGrants() method name. The name is kept for source stability.
 func (s *Store) CredGrants() BucketGrants {
 	return s.bucketGrants
+}
+
+// WireUserRegions opens the per-user S3 region keychain (ADR-0002,
+// v1.1.0a) and attaches it to this Store. Kept separate from Open()
+// for the same source-compatibility reason as WireBucketGrants. main.go
+// calls this once at boot with cfg.JWT.Secret, right after
+// WireBucketGrants.
+func (s *Store) WireUserRegions(jwtSecret []byte) error {
+	ur, err := OpenUserRegions(s.dataDir, jwtSecret)
+	if err != nil {
+		return fmt.Errorf("opening user regions: %w", err)
+	}
+	s.userRegions = ur
+	return nil
+}
+
+// UserRegions returns the region-keychain store (per-user encrypted
+// S3 credentials, ADR-0002). Returns nil if WireUserRegions has not
+// been called — callers must nil-check.
+func (s *Store) UserRegions() UserRegions {
+	return s.userRegions
 }
 
 // MigrateLegacyUsers sets uiAdmin=true for existing admin users.

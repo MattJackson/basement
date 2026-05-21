@@ -205,6 +205,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Per ADR-0002 (v1.1.0a): per-user S3 region keychain, AES-GCM
+	// encrypted at rest with a key derived from the JWT secret. The
+	// region-tier abstraction supersedes per-bucket grants at the user
+	// persona; bucket_grants stays wired through v1.1.0d's migration
+	// cycle.
+	if err := st.WireUserRegions(cfg.JWT.Secret); err != nil {
+		slog.Error("failed to wire user-region store", "error", err)
+		os.Exit(1)
+	}
+
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
 
 	// Per ADR-0001 (v0.9.0b/e): policy enforcer + matthew->host_admin
