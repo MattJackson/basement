@@ -16,6 +16,7 @@ import (
 	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
+	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
 	"github.com/mattjackson/basement/internal/sync"
 	"github.com/mattjackson/basement/internal/web"
@@ -42,6 +43,7 @@ type Server struct {
 	oidc       oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
+	metrics    metrics.Recorder
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
@@ -85,6 +87,10 @@ func New(cfg *config.Config, store *store.Store, conns store.Connections, drv dr
 		// thread a logger through. Production main.go replaces
 		// this with a real FileLogger via SetAuditLogger().
 		audit: audit.NewNoop(),
+		// Same pattern for the metrics recorder: tests get a
+		// no-op so /admin/usage/series returns an empty result;
+		// production wires a FileRecorder via SetMetricsRecorder.
+		metrics: metrics.NewNoop(),
 	}
 
 	srv.routes()
@@ -126,6 +132,18 @@ func (s *Server) SetAuditLogger(l audit.Logger) {
 		return
 	}
 	s.audit = l
+}
+
+// SetMetricsRecorder wires the metrics-snapshot recorder into the
+// server (v1.0.0d). The recorder is consumed by /admin/usage/series
+// for the time-series view. Production wires a FileRecorder; tests
+// leave the no-op default installed by New().
+func (s *Server) SetMetricsRecorder(r metrics.Recorder) {
+	if r == nil {
+		s.metrics = metrics.NewNoop()
+		return
+	}
+	s.metrics = r
 }
 
 // Start starts the HTTP server and blocks until context is canceled or error.
@@ -280,6 +298,11 @@ func (s *Server) routes() {
 			// reads; per-handler gate is host:manage_users so any Host
 			// Admin sees it without needing a new capability.
 			uiAdminG.Get("/admin/usage/overview", s.getUsageOverviewHandler)
+
+			// OBS.USAGE.SERIES (v1.0.0d): per-bucket time series from
+			// the metrics recorder. Same host:manage_users gate as the
+			// snapshot view above.
+			uiAdminG.Get("/admin/usage/series", s.getUsageSeriesHandler)
 
 			// AUDIT.LOG (v1.0.0c): query the append-only event log.
 			// Per-handler gate is host:manage_policies — the same

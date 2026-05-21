@@ -1025,6 +1025,40 @@ export function useUsageOverview() {
   });
 }
 
+// v1.0.0d: per-bucket time-series, populated hourly by the backend
+// snapshot scheduler. Used by the inline trend chart on /admin/usage
+// when a row is expanded. Default range 7 days; backend clamps to 90d.
+export interface UsageSeriesPoint {
+  time: string;
+  bytes: number;
+  objects: number;
+}
+
+export interface UsageSeriesResponse {
+  snapshots: UsageSeriesPoint[];
+  bucketAlias?: string;
+  range: string;
+}
+
+export function useUsageSeries(cid: string, bid: string, enabled = true) {
+  return useQuery<UsageSeriesResponse>({
+    queryKey: ["admin", "usage", "series", cid, bid],
+    queryFn: async () => {
+      const params = new URLSearchParams({ cid, bid });
+      const res = await fetch(
+        "/api/v1/admin/usage/series?" + params.toString(),
+        { credentials: "include" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/usage/series", res.status, body);
+      return body as UsageSeriesResponse;
+    },
+    enabled: enabled && !!cid && !!bid,
+    staleTime: 60 * 1000,
+    retry: 1,
+  });
+}
+
 // v1.0.0c: audit log query. Filters mirror the backend QueryFilter
 // shape; the response carries the events plus a `truncated` hint so
 // the UI can render an honest "load more / narrow the window" CTA.
