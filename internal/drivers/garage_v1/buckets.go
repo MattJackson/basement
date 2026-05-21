@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	driverpkg "github.com/mattjackson/basement/internal/driver"
@@ -26,6 +27,17 @@ import (
 // field is currently always zero for the v1 driver.
 func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 	// Region-tier fallback: no admin client wired -> use S3 ListBuckets.
+	//
+	// CAVEAT: Garage's S3 data-plane endpoint does NOT implement the
+	// ListBuckets verb (returns 404). Bucket enumeration only works
+	// via the admin API on Garage, which the region tier doesn't have
+	// creds for. AWS S3 + MinIO both implement S3 ListBuckets, so
+	// region-tier users on those backends get a real list. Garage
+	// users see an empty list and must navigate to a known bucket by
+	// URL — the bucket browser itself still works because
+	// ListObjects + presign-* go through the bucket-specific S3 paths
+	// which Garage DOES implement. Tracked in ADR-0002 follow-ups
+	// for a v1.1.0d/v1.1.0e revisit.
 	if d.client == nil || d.client.baseURL == "" {
 		if d.s3Client == nil {
 			return nil, &driverpkg.Error{
@@ -37,9 +49,13 @@ func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 		}
 		out, err := d.s3Client.listBucketsS3(ctx)
 		if err != nil {
-			// Wrap so writeDriverError surfaces the real SDK message
-			// (e.g. "dial tcp: i/o timeout", "SignatureDoesNotMatch")
-			// instead of the generic 500 INTERNAL fallback.
+			// Garage's S3 endpoint 404s on ListBuckets — translate
+			// to an empty list so the UI can render the friendly
+			// "no buckets / navigate by URL" empty state instead of
+			// a scary error banner.
+			if strings.Contains(err.Error(), "StatusCode: 404") || strings.Contains(err.Error(), "NotFound") {
+				return []driverpkg.Bucket{}, nil
+			}
 			return nil, &driverpkg.Error{
 				Op:      "ListBuckets",
 				Driver:  driverName,
