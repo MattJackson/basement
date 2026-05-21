@@ -716,3 +716,110 @@ export function useResumeUserSync() {
   });
 }
 
+// ADR-0001 v0.9.0g: policy matrix editor (/admin/policies).
+//
+// The OpenAPI spec doesn't carry these endpoints yet, so we go around
+// openapi-fetch with bare fetch — same pattern as useOrgCapabilities.
+// All mutations invalidate ["admin", "policies"] so the editor pane
+// refreshes on every mutation.
+export type PolicyCapability = { id: string; description: string };
+export type PolicyRole = {
+  id: string;
+  label: string;
+  description: string;
+  capabilities: string[];
+  seed: boolean;
+};
+export type PolicyAssignment = {
+  userId: string;
+  roleId: string;
+  scope: string;
+};
+export type PoliciesResponse = {
+  capabilities: PolicyCapability[];
+  roles: PolicyRole[];
+  assignments: PolicyAssignment[];
+};
+
+export function usePolicies() {
+  return useQuery<PoliciesResponse>({
+    queryKey: ["admin", "policies"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/policies", { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/policies", res.status, body);
+      return body as PoliciesResponse;
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useUpsertRole() {
+  return useMutation({
+    mutationFn: async (role: Omit<PolicyRole, "seed"> & { seed?: boolean }) => {
+      const res = await fetch("/api/v1/admin/policies/roles", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(role),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/policies/roles/upsert/${role.id}`, res.status, body);
+      return body as PolicyRole;
+    },
+  });
+}
+
+export function useDeleteRole() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/v1/admin/policies/roles/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`admin/policies/roles/delete/${id}`, res.status, body);
+      }
+      return null;
+    },
+  });
+}
+
+export function useAssignRole() {
+  return useMutation({
+    mutationFn: async (assignment: PolicyAssignment) => {
+      const res = await fetch("/api/v1/admin/policies/assignments", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(assignment),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/policies/assignments/assign", res.status, body);
+      return body as PolicyAssignment;
+    },
+  });
+}
+
+export function useUnassignRole() {
+  return useMutation({
+    mutationFn: async (a: PolicyAssignment) => {
+      const params = new URLSearchParams({
+        userId: a.userId,
+        roleId: a.roleId,
+        scope: a.scope,
+      });
+      const res = await fetch(`/api/v1/admin/policies/assignments?${params.toString()}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError("admin/policies/assignments/unassign", res.status, body);
+      }
+      return null;
+    },
+  });
+}
+
