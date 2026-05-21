@@ -562,3 +562,162 @@ func TestUserRegions_UnwiredRegionsStore_503(t *testing.T) {
 	}
 }
 
+// TestUserRegions_PresignUploadPart_HappyPath verifies the v1.1.0c
+// per-part presign endpoint signs the request via the region driver
+// and surfaces the presigned URL to the caller.
+func TestUserRegions_PresignUploadPart_HappyPath(t *testing.T) {
+	mock := newRegionMockDriver()
+	mock.presignUploadPartFunc = func(_ context.Context, upload driver.MultipartUpload, partNum int) (driver.PresignedURL, error) {
+		if upload.UploadID != "U-1" || upload.Bucket != "lsi" {
+			t.Errorf("presign got upload=%+v", upload)
+		}
+		if partNum != 3 {
+			t.Errorf("presign got partNum=%d, want 3", partNum)
+		}
+		return driver.PresignedURL{URL: "https://signed.example.com/part-3"}, nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	// Create a region to use.
+	create := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	}
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d (body=%s)", rrCreate.Code, rrCreate.Body.String())
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	// Presign part 3.
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/multipart/U-1/part/3/presign"
+	req := regionUserCookieReq(httptest.NewRequest(http.MethodPost, url, nil))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("presign-part: expected 200, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	var presign driver.PresignedURL
+	if err := json.NewDecoder(rr.Body).Decode(&presign); err != nil {
+		t.Fatalf("decode presign: %v", err)
+	}
+	if presign.URL != "https://signed.example.com/part-3" {
+		t.Errorf("expected signed URL echoed, got %q", presign.URL)
+	}
+}
+
+// TestUserRegions_PresignUploadPart_BadPartNumber rejects part numbers
+// outside the [1, 10000] S3 range with a 400.
+func TestUserRegions_PresignUploadPart_BadPartNumber(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	for _, bad := range []string{"0", "10001", "abc"} {
+		url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/multipart/U-1/part/" + bad + "/presign"
+		req := regionUserCookieReq(httptest.NewRequest(http.MethodPost, url, nil))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		srv.router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("partNum=%s: expected 400, got %d", bad, rr.Code)
+		}
+	}
+}
+
+// TestUserRegions_DeleteObject_HappyPath verifies the v1.1.0c object
+// delete endpoint hits the region driver and returns 204.
+func TestUserRegions_DeleteObject_HappyPath(t *testing.T) {
+	mock := newRegionMockDriver()
+	deleted := struct {
+		bucket string
+		key    string
+	}{}
+	mock.deleteObjectFunc = func(_ context.Context, bucket, key string) error {
+		deleted.bucket = bucket
+		deleted.key = key
+		return nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/objects/notes.txt"
+	req := regionUserCookieReq(httptest.NewRequest(http.MethodDelete, url, nil))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("delete-object: expected 204, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	if deleted.bucket != "lsi" || deleted.key != "notes.txt" {
+		t.Errorf("expected driver.DeleteObject(lsi, notes.txt), got (%q, %q)", deleted.bucket, deleted.key)
+	}
+}
+
+// TestUserRegions_DeleteObject_OtherUser404 — user B cannot delete an
+// object via user A's region; the owner check returns 404.
+func TestUserRegions_DeleteObject_OtherUser404(t *testing.T) {
+	mock := newRegionMockDriver()
+	mock.deleteObjectFunc = func(_ context.Context, _, _ string) error {
+		t.Errorf("driver.DeleteObject must not be called for non-owner")
+		return nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/objects/notes.txt"
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionCookieReqFor(t, http.MethodDelete, url, "bob", nil))
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for non-owner delete, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+}
+

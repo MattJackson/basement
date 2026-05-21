@@ -11,13 +11,13 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import FilesHome from "@/routes/files/index";
-import { useUserClusters } from "@/shared/api/queries";
+import { useUserRegions } from "@/shared/api/queries";
 
 vi.mock("@/shared/api/queries", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
-    useUserClusters: vi.fn(),
+    useUserRegions: vi.fn(),
   };
 });
 
@@ -39,9 +39,9 @@ function renderWithProviders(component: React.ReactNode) {
   );
 }
 
-describe("FilesHome", () => {
-  it("renders loading skeletons when clusters are loading", async () => {
-    vi.mocked(useUserClusters).mockReturnValue({
+describe("FilesHome (region tier, ADR-0002)", () => {
+  it("renders loading skeletons when regions are loading", async () => {
+    vi.mocked(useUserRegions).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
@@ -51,15 +51,13 @@ describe("FilesHome", () => {
 
     renderWithProviders(<FilesHome />);
 
-    expect(screen.getByText("My Clusters")).toBeInTheDocument();
-    expect(screen.getByText("Storage you have access to")).toBeInTheDocument();
-    
-    // At minimum, we should see the header area (no error banner)
-    expect(screen.queryByText(/Couldn't connect/)).not.toBeInTheDocument();
+    expect(screen.getByText("My Regions")).toBeInTheDocument();
+    expect(screen.getByText("S3 endpoints you have a key for")).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't load your regions/)).not.toBeInTheDocument();
   });
 
-  it("renders empty state when clusters array is empty", async () => {
-    vi.mocked(useUserClusters).mockReturnValue({
+  it("renders empty state with Connect button when regions array is empty", async () => {
+    vi.mocked(useUserRegions).mockReturnValue({
       data: [],
       isLoading: false,
       error: null,
@@ -69,29 +67,41 @@ describe("FilesHome", () => {
 
     renderWithProviders(<FilesHome />);
 
-    expect(screen.getByText("My Clusters")).toBeInTheDocument();
-    expect(screen.getByText("No clusters yet")).toBeInTheDocument();
-    expect(screen.getByText("Contact your administrator to get access.")).toBeInTheDocument();
+    expect(screen.getByText("My Regions")).toBeInTheDocument();
+    expect(screen.getByText("No regions yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Connect to a region with an S3 access key from your cluster admin."),
+    ).toBeInTheDocument();
+    // CTA appears once (in the empty-state action slot) when there are no regions.
+    expect(screen.getAllByText("+ Connect a region")).toHaveLength(1);
   });
 
-  it("renders cluster cards when clusters are populated", async () => {
-    const mockClusters = [
+  it("renders region cards when regions are populated", async () => {
+    const mockRegions = [
       {
-        id: "cid-abc123",
-        label: "My Garage Cluster",
-        driver: "garage-v1",
-        color: "#4A90D9",
+        id: "reg-abc123",
+        userId: "matthew",
+        alias: "home",
+        endpoint: "https://s3.basement.pq.io",
+        region: "garage",
+        accessKeyId: "GKabc",
+        createdAt: "2026-05-01T00:00:00Z",
+        updatedAt: "2026-05-01T00:00:00Z",
       },
       {
-        id: "cid-def456",
-        label: "S3 Backup",
-        driver: "aws-s3",
-        color: "#E74C3C",
+        id: "reg-def456",
+        userId: "matthew",
+        alias: "work",
+        endpoint: "https://s3.amazonaws.com",
+        region: "us-east-1",
+        accessKeyId: "AKIA...",
+        createdAt: "2026-05-02T00:00:00Z",
+        updatedAt: "2026-05-02T00:00:00Z",
       },
     ];
 
-    vi.mocked(useUserClusters).mockReturnValue({
-      data: mockClusters,
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: mockRegions,
       isLoading: false,
       error: null,
       isPending: false,
@@ -100,20 +110,24 @@ describe("FilesHome", () => {
 
     renderWithProviders(<FilesHome />);
 
-    expect(screen.getByText("My Clusters")).toBeInTheDocument();
-    
-    // Link is mocked - check for link wrappers (one per cluster)
+    expect(screen.getByText("My Regions")).toBeInTheDocument();
+
+    // Link is mocked - check for link wrappers (one per region)
     const cardWrappers = screen.queryAllByTestId("link-wrapper");
     expect(cardWrappers.length).toBe(2);
 
-    expect(screen.getByText("Garage v1")).toBeInTheDocument();
-    expect(screen.getByText("AWS S3")).toBeInTheDocument();
+    // Aliases visible
+    expect(screen.getByText("home")).toBeInTheDocument();
+    expect(screen.getByText("work")).toBeInTheDocument();
+    // Endpoint hostnames visible
+    expect(screen.getByText("s3.basement.pq.io")).toBeInTheDocument();
+    expect(screen.getByText("s3.amazonaws.com")).toBeInTheDocument();
   });
 
-  it("renders ErrorBanner when useUserClusters returns an error", async () => {
-    const mockError = new Error("Failed to fetch clusters");
-    
-    vi.mocked(useUserClusters).mockReturnValue({
+  it("renders ErrorBanner when useUserRegions returns an error", async () => {
+    const mockError = new Error("Failed to fetch regions");
+
+    vi.mocked(useUserRegions).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: mockError,
@@ -123,7 +137,9 @@ describe("FilesHome", () => {
 
     renderWithProviders(<FilesHome />);
 
-    expect(screen.getByText("My Clusters")).toBeInTheDocument();
-    expect(screen.getByText("Couldn't connect to backend. Retrying automatically...")).toBeInTheDocument();
+    expect(screen.getByText("My Regions")).toBeInTheDocument();
+    expect(
+      screen.getByText("Couldn't load your regions. Retrying automatically..."),
+    ).toBeInTheDocument();
   });
 });

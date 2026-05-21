@@ -600,3 +600,75 @@ func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// userPresignRegionUploadPartHandler implements POST
+// /api/v1/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/part/{partNum}/presign.
+//
+// Added in v1.1.0c (FE region rewrite) because the upload flow uploads
+// each part directly from the browser to the backend via a presigned
+// PUT — without this handler, multipart uploads under the region tier
+// would have no way to sign individual parts.
+func (s *Server) userPresignRegionUploadPartHandler(w http.ResponseWriter, r *http.Request) {
+	region, _, ok := s.requireOwnedRegion(w, r)
+	if !ok {
+		return
+	}
+	bid := chi.URLParam(r, "bid")
+	uploadID := chi.URLParam(r, "uploadId")
+	partNumStr := chi.URLParam(r, "partNum")
+	if bid == "" || uploadID == "" || partNumStr == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "bucket id, uploadId, and partNum required")
+		return
+	}
+
+	partNum, err := strconv.Atoi(partNumStr)
+	if err != nil || partNum < 1 || partNum > 10000 {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "part number must be between 1 and 10000")
+		return
+	}
+
+	drv, err := s.regionDriver(r, region)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
+		return
+	}
+
+	presign, err := drv.PresignUploadPart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}, partNum)
+	if err != nil {
+		writeDriverError(w, "PresignUploadPart", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, presign)
+}
+
+// userDeleteRegionObjectHandler implements DELETE
+// /api/v1/user/regions/{regionId}/buckets/{bid}/objects/{key}.
+//
+// Added in v1.1.0c so the object browser's delete button can wire to a
+// region-tier endpoint. The region's S3 key is the permission — the
+// backend rejects the DELETE if the key lacks objects:delete on the
+// bucket, surfacing as a 4xx from the driver.
+func (s *Server) userDeleteRegionObjectHandler(w http.ResponseWriter, r *http.Request) {
+	region, _, ok := s.requireOwnedRegion(w, r)
+	if !ok {
+		return
+	}
+	bid := chi.URLParam(r, "bid")
+	key := chi.URLParam(r, "key")
+	if bid == "" || key == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "bucket id and key required")
+		return
+	}
+
+	drv, err := s.regionDriver(r, region)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
+		return
+	}
+
+	if err := drv.DeleteObject(r.Context(), bid, key); err != nil {
+		writeDriverError(w, "DeleteObject", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

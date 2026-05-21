@@ -23,6 +23,14 @@ type SyncSearch = {
 //
 // Default search params let bucket-browser 'Sync in / Sync out'
 // buttons pre-fill the right side: ?mode=push&srcCid=…&srcBid=…
+//
+// TODO(v1.1.0e): migrate sync UI to UserRegion IDs once the sync
+// engine learns to operate region-to-region. v1.1.0c kept this form
+// on cluster-tier hooks deliberately — the backend's sync engine
+// still expects srcConnectionId/dstConnectionId (cluster Connection
+// records), and rewiring both at once was out of scope. The bucket
+// browser at /files/$regionId/b/$bid drops its Sync in/Sync out
+// buttons for the same reason — no region->cluster bridge yet.
 export const Route = createFileRoute("/files/syncs/new")({
   component: NewSyncPage,
   validateSearch: (search): SyncSearch => ({
