@@ -6,15 +6,12 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useCreateUserShare, useRevokeUserShare, useUserClusters, useUserClusterBuckets } from "@/shared/api/queries";
-import { userPage } from "@/shared/layout/userPage";
 
-// Operator design rule: dialogs/popups for 1-2 fields max. Share
-// creation has 6+ (cluster, bucket, prefix/key, expires, limit,
-// password) — needs a page. Plus the CreateShareDialog component
-// was completely unwired (no UI opened it). This route fixes both
-// in one shot.
+// NOTE: do NOT wrap in userPage() — parent layout (shares.tsx)
+// already wraps the Outlet in UserShell. Double-wrap → double-header
+// (caught visually on v0.9.0a screenshot pass).
 export const Route = createFileRoute("/files/shares/new")({
-  component: userPage(NewSharePage),
+  component: NewSharePage,
 });
 
 function NewSharePage() {
