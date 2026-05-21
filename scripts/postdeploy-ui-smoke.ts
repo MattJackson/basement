@@ -1515,7 +1515,7 @@ section("[16] version label under Logo (Fix 7)");
       }
       
       // Assert "Start sync" button is present (for empty state or to create new jobs)
-      const startButton = page!.locator('button:has-text(/Start sync/i)').first();
+      const startButton = page!.locator('button').filter({ hasText: /Start sync/i }).first();
       if (await startButton.count() === 0) {
         throw new Error("'Start sync' button not found on /files/syncs");
       }
