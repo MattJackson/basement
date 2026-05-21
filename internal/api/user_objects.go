@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,10 @@ import (
 )
 
 // userListClusterBucketObjectsHandler handles GET /api/v1/user/clusters/{cid}/buckets/{bid}/objects.
+//
+// Per ADR-0001 v0.9.0f: requires objects:list on bucket:{cid}:{bid},
+// then signs the S3 ListObjects with the user's BucketGrant key so
+// backend audit logs see the right identity.
 func (s *Server) userListClusterBucketObjectsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -28,9 +33,18 @@ func (s *Server) userListClusterBucketObjectsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	userID, ok := s.requireCapability(w, r, "objects:list", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeRegistryForError(w, err)
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 
@@ -51,8 +65,6 @@ func (s *Server) userListClusterBucketObjectsHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// For matthew (UIAdmin), check rolls through directly.
-	// TODO: In future cycles, intersect with user's bucket grant.
 	if page.Objects == nil {
 		page.Objects = []driver.ObjectInfo{}
 	}
@@ -64,6 +76,11 @@ func (s *Server) userListClusterBucketObjectsHandler(w http.ResponseWriter, r *h
 }
 
 // userStatClusterBucketObjectHandler handles GET /api/v1/user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat.
+//
+// Per ADR-0001 v0.9.0f: requires objects:get on bucket:{cid}:{bid}.
+// StatObject is the cheap "object exists / metadata" path used by the
+// UI before issuing a presigned GET, so gating it on objects:get
+// matches what's about to happen with the URL the UI builds next.
 func (s *Server) userStatClusterBucketObjectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -88,9 +105,18 @@ func (s *Server) userStatClusterBucketObjectHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	userID, ok := s.requireCapability(w, r, "objects:get", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeRegistryForError(w, err)
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 
@@ -104,6 +130,11 @@ func (s *Server) userStatClusterBucketObjectHandler(w http.ResponseWriter, r *ht
 }
 
 // userPresignGetClusterBucketObjectHandler handles POST /api/v1/user/clusters/{cid}/buckets/{bid}/objects/{key+}/presign-get.
+//
+// Per ADR-0001 v0.9.0f: requires objects:get on bucket:{cid}:{bid}.
+// The presigned URL inherits the BucketGrant key's identity — the
+// downstream S3 GET is attributed to the user, not to the cluster's
+// shared key, which is the whole point of the per-user runtime path.
 func (s *Server) userPresignGetClusterBucketObjectHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -128,6 +159,11 @@ func (s *Server) userPresignGetClusterBucketObjectHandler(w http.ResponseWriter,
 		return
 	}
 
+	userID, ok := s.requireCapability(w, r, "objects:get", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
 	ttlStr := r.URL.Query().Get("ttl")
 	ttl := 3600 * time.Second // default 1 hour
 	if ttlStr != "" {
@@ -142,9 +178,13 @@ func (s *Server) userPresignGetClusterBucketObjectHandler(w http.ResponseWriter,
 		ttl = maxTtl
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeRegistryForError(w, err)
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 

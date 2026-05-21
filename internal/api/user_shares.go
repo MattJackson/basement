@@ -23,6 +23,11 @@ type UserShareCreateRequest struct {
 }
 
 // userCreateShareHandler handles POST /api/v1/user/shares.
+//
+// Per ADR-0001 v0.9.0f: requires objects:share_create on the bucket
+// scope. The legacy "any-grant-on-this-cluster" check stays as a
+// safety net for the role=admin path, but capability is the new
+// authoritative gate for non-admin callers.
 func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -50,6 +55,14 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if hasPrefix && hasKey {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "Cannot specify both prefix and key")
+		return
+	}
+
+	// Capability gate (the new authoritative check). Role=admin gets
+	// "*:*" via the host_admin seed so this passes for matthew; other
+	// users need an explicit bucket_user assignment that includes
+	// objects:share_create on the requested bucket scope.
+	if _, gateOK := s.requireCapability(w, r, "objects:share_create", scopeBucket(req.ConnectionID, req.BucketID)); !gateOK {
 		return
 	}
 

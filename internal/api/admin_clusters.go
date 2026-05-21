@@ -45,9 +45,18 @@ func (s *Server) listClustersHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // createClusterHandler handles POST /api/v1/admin/clusters.
+//
+// Per ADR-0001 v0.9.0f: gated on cluster:create at "cluster:*"
+// (creating a new cluster has no prior cid to scope to). The legacy
+// admin-role middleware still applies as a coarse defense-in-depth
+// layer per the prompt.
 func (s *Server) createClusterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "cluster:create", "cluster:*"); !ok {
 		return
 	}
 
@@ -121,6 +130,8 @@ func (s *Server) getClusterHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateClusterHandler handles PATCH /api/v1/admin/clusters/{cid}.
+//
+// Per ADR-0001 v0.9.0f: gated on cluster:edit at "cluster:{cid}".
 func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PATCH required")
@@ -130,6 +141,10 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 	cid := chi.URLParam(r, "cid")
 	if cid == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "cluster:edit", scopeCluster(cid)); !ok {
 		return
 	}
 
@@ -211,6 +226,10 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // armDeleteClusterHandler handles POST /api/v1/admin/clusters/{cid}/_arm-delete.
+//
+// Per ADR-0001 v0.9.0f: gated on cluster:delete at "cluster:{cid}".
+// Both the arm and the DELETE check the capability — arming without
+// the right capability should not even hand out a token.
 func (s *Server) armDeleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -220,6 +239,10 @@ func (s *Server) armDeleteClusterHandler(w http.ResponseWriter, r *http.Request)
 	cid := chi.URLParam(r, "cid")
 	if cid == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "cluster:delete", scopeCluster(cid)); !ok {
 		return
 	}
 
@@ -243,6 +266,8 @@ func (s *Server) armDeleteClusterHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // deleteClusterHandler handles DELETE /api/v1/admin/clusters/{cid}.
+//
+// Per ADR-0001 v0.9.0f: gated on cluster:delete at "cluster:{cid}".
 func (s *Server) deleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "DELETE required")
@@ -252,6 +277,10 @@ func (s *Server) deleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 	cid := chi.URLParam(r, "cid")
 	if cid == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "cluster:delete", scopeCluster(cid)); !ok {
 		return
 	}
 
@@ -293,6 +322,8 @@ func (s *Server) deleteClusterHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // testClusterHandler handles POST /api/v1/admin/clusters/{cid}/_test.
+//
+// Per ADR-0001 v0.9.0f: gated on cluster:test at "cluster:{cid}".
 func (s *Server) testClusterHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -302,6 +333,10 @@ func (s *Server) testClusterHandler(w http.ResponseWriter, r *http.Request) {
 	cid := chi.URLParam(r, "cid")
 	if cid == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "cluster:test", scopeCluster(cid)); !ok {
 		return
 	}
 

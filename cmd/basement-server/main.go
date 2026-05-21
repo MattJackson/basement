@@ -207,6 +207,15 @@ func main() {
 		slog.Error("failed to open policy enforcer", "error", err)
 		os.Exit(1)
 	}
+
+	// Per v0.9.0f cycle prompt: ensure the env-seeded admin keeps
+	// host/cluster/bucket access when the new capability gates land.
+	// Idempotent — re-running on each boot is safe.
+	if err := enforcer.SeedEnvAdmin(cfg.Admin.User); err != nil {
+		slog.Error("failed to seed env-admin policy assignments", "error", err)
+		os.Exit(1)
+	}
+
 	srv.SetPolicy(enforcer)
 
 	// Optional: wire up OIDC if BASEMENT_OIDC_ISSUER is set. When unset,

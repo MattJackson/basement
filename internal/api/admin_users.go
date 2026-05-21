@@ -85,9 +85,15 @@ func (s *Server) listAllUsersHandler(w http.ResponseWriter, r *http.Request) {
 
 // createUserHandler handles POST /api/v1/admin/users.
 // Creates a new user for UI Admin only. Supports invite mode.
+//
+// Per ADR-0001 v0.9.0f: gated on host:manage_users at "host:*".
 func (s *Server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "host:manage_users", "host:*"); !ok {
 		return
 	}
 
@@ -185,9 +191,15 @@ func (s *Server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 
 // deleteUserHandler handles DELETE /api/v1/admin/users/{id}.
 // Deletes a user for UI Admin only.
+//
+// Per ADR-0001 v0.9.0f: gated on host:manage_users at "host:*".
 func (s *Server) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "DELETE required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "host:manage_users", "host:*"); !ok {
 		return
 	}
 
