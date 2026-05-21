@@ -18,6 +18,7 @@ import { Route as FilesSharesRouteImport } from "./routes/files/shares"
 import { Route as FilesKeysRouteImport } from "./routes/files/keys"
 import { Route as FilesCidRouteImport } from "./routes/files/$cid"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
+import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
 import { Route as AdminSystemRouteImport } from "./routes/admin/system"
 import { Route as AdminPoliciesRouteImport } from "./routes/admin/policies"
 import { Route as AdminMigrationsRouteImport } from "./routes/admin/migrations"
@@ -86,6 +87,11 @@ const FilesCidRoute = FilesCidRouteImport.update({
 const AdminUsersRoute = AdminUsersRouteImport.update({
   id: "/admin/users",
   path: "/admin/users",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsageRoute = AdminUsageRouteImport.update({
+  id: "/admin/usage",
+  path: "/admin/usage",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminSystemRoute = AdminSystemRouteImport.update({
@@ -218,6 +224,7 @@ export interface FileRoutesByFullPath {
   "/admin/migrations": typeof AdminMigrationsRoute
   "/admin/policies": typeof AdminPoliciesRoute
   "/admin/system": typeof AdminSystemRoute
+  "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRouteWithChildren
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
@@ -253,6 +260,7 @@ export interface FileRoutesByTo {
   "/admin/migrations": typeof AdminMigrationsRoute
   "/admin/policies": typeof AdminPoliciesRoute
   "/admin/system": typeof AdminSystemRoute
+  "/admin/usage": typeof AdminUsageRoute
   "/files/keys": typeof FilesKeysRoute
   "/share/$token": typeof ShareTokenRoute
   "/admin": typeof AdminIndexRoute
@@ -285,6 +293,7 @@ export interface FileRoutesById {
   "/admin/migrations": typeof AdminMigrationsRoute
   "/admin/policies": typeof AdminPoliciesRoute
   "/admin/system": typeof AdminSystemRoute
+  "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRouteWithChildren
   "/files/$cid": typeof FilesCidRouteWithChildren
   "/files/keys": typeof FilesKeysRoute
@@ -322,6 +331,7 @@ export interface FileRouteTypes {
     | "/admin/migrations"
     | "/admin/policies"
     | "/admin/system"
+    | "/admin/usage"
     | "/admin/users"
     | "/files/$cid"
     | "/files/keys"
@@ -357,6 +367,7 @@ export interface FileRouteTypes {
     | "/admin/migrations"
     | "/admin/policies"
     | "/admin/system"
+    | "/admin/usage"
     | "/files/keys"
     | "/share/$token"
     | "/admin"
@@ -388,6 +399,7 @@ export interface FileRouteTypes {
     | "/admin/migrations"
     | "/admin/policies"
     | "/admin/system"
+    | "/admin/usage"
     | "/admin/users"
     | "/files/$cid"
     | "/files/keys"
@@ -424,6 +436,7 @@ export interface RootRouteChildren {
   AdminMigrationsRoute: typeof AdminMigrationsRoute
   AdminPoliciesRoute: typeof AdminPoliciesRoute
   AdminSystemRoute: typeof AdminSystemRoute
+  AdminUsageRoute: typeof AdminUsageRoute
   AdminUsersRoute: typeof AdminUsersRouteWithChildren
   FilesCidRoute: typeof FilesCidRouteWithChildren
   FilesKeysRoute: typeof FilesKeysRoute
@@ -507,6 +520,13 @@ declare module "@tanstack/react-router" {
       path: "/admin/users"
       fullPath: "/admin/users"
       preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/usage": {
+      id: "/admin/usage"
+      path: "/admin/usage"
+      fullPath: "/admin/usage"
+      preLoaderRoute: typeof AdminUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/admin/system": {
@@ -760,6 +780,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminMigrationsRoute: AdminMigrationsRoute,
   AdminPoliciesRoute: AdminPoliciesRoute,
   AdminSystemRoute: AdminSystemRoute,
+  AdminUsageRoute: AdminUsageRoute,
   AdminUsersRoute: AdminUsersRouteWithChildren,
   FilesCidRoute: FilesCidRouteWithChildren,
   FilesKeysRoute: FilesKeysRoute,

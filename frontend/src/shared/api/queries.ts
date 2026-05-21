@@ -965,6 +965,66 @@ export function usePutBucketLifecycle(cid: string, bid: string) {
   });
 }
 
+// OBS.USAGE v0.9.0k — storage overview snapshot.
+//
+// Pure read; the backend aggregates from existing per-cluster reads
+// (no metrics store, no time series — that's a v1.x decision). One
+// big-number-card payload plus two top-N tables. Refetch on a 60s
+// timer so the dashboard reflects real-world activity without
+// hammering the backend's per-cluster fan-out.
+export interface UsageTotals {
+  clusters: number;
+  buckets: number;
+  keys: number;
+  bytes: number;
+  objects: number;
+  grants: number;
+}
+
+export interface UsagePerCluster {
+  id: string;
+  label: string;
+  bytes: number;
+  objects: number;
+  buckets: number;
+  keys: number;
+  healthy: boolean;
+  error?: string;
+}
+
+export interface UsageTopBucket {
+  clusterId: string;
+  clusterLabel: string;
+  bucketId: string;
+  bucketAlias: string;
+  bytes: number;
+  objects: number;
+}
+
+export interface UsageOverviewResponse {
+  totals: UsageTotals;
+  perCluster: UsagePerCluster[];
+  topBucketsByBytes: UsageTopBucket[];
+  topBucketsByObjects: UsageTopBucket[];
+}
+
+export function useUsageOverview() {
+  return useQuery<UsageOverviewResponse>({
+    queryKey: ["admin", "usage", "overview"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/usage/overview", {
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/usage/overview", res.status, body);
+      return body as UsageOverviewResponse;
+    },
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: 1,
+  });
+}
+
 export function useMigrateOrphanCreds() {
   return useMutation({
     mutationFn: async (args: {

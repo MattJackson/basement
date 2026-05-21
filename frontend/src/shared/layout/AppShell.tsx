@@ -48,6 +48,17 @@ export function AppShell({ children }: AppShellProps): ReactNode {
               </Link>
               {isUIAdmin && (
                 <>
+                  {/* OBS.USAGE v0.9.0k — sits between Buckets and */}
+                  {/* Clusters so the operator's natural left-to-right */}
+                  {/* scan hits "what's there" (buckets) → "how much" */}
+                  {/* (usage) → "where it lives" (clusters). */}
+                  <Link
+                    to="/admin/usage"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    Usage
+                  </Link>
                   <Link
                     to="/admin/clusters"
                     className={NAV_LINK}
