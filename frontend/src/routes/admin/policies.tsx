@@ -52,9 +52,11 @@ import {
   useDeleteRole,
   useAssignRole,
   useUnassignRole,
+  useSimulatePolicy,
   type PolicyCapability,
   type PolicyRole,
   type PolicyAssignment,
+  type SimulateResponse,
 } from "@/shared/api/queries";
 
 export const Route = createFileRoute("/admin/policies")({
@@ -98,6 +100,10 @@ function PoliciesPage() {
         <AssignmentsPane
           assignments={data.assignments}
           roles={data.roles}
+        />
+        <SimulatorPane
+          assignments={data.assignments}
+          capabilities={data.capabilities}
         />
       </div>
     </TooltipProvider>
@@ -723,5 +729,236 @@ function AssignmentsPane({
         </Table>
       </div>
     </section>
+  );
+}
+
+// --- Simulator pane (POLICY.SIM, v0.9.0j) -----------------------------
+//
+// "Given this user, can they do X at scope Y, and WHY?" An inline
+// panel — three inputs + Run — because operators staring at the
+// matrix above want the answer in the same view, not a separate
+// route. The popups-max-2-fields doctrine forbids stuffing this into
+// a dialog (three fields would violate it), and a route would push
+// the user away from the matrix they're trying to debug, so an
+// inline section reading from the SAME `data` payload is the right
+// call.
+//
+// The User input is a free-text combobox (a <datalist>) seeded from
+// known assignment user IDs — operators commonly want to test users
+// who have ZERO assignments ("can the new wife account view family-
+// photos before I assign her?") so we don't restrict to enrolled
+// users. The Capability input is a strict <select> from the seeded
+// registry. The Scope input is free text — scope is the most varied
+// axis (host:*, cluster:abc, bucket:cid:bid, …) so a dropdown would
+// be wrong; a placeholder + example chips give the same affordance
+// without the lock-in.
+function SimulatorPane({
+  assignments,
+  capabilities,
+}: {
+  assignments: PolicyAssignment[];
+  capabilities: PolicyCapability[];
+}) {
+  const simulate = useSimulatePolicy();
+
+  // Build the user dropdown source from every userId that appears in
+  // an assignment. De-dup + sort for stable rendering. Operators can
+  // still type a free-text user (e.g. an unassigned account) — this
+  // is just an autocomplete hint, not a strict allowlist.
+  const knownUsers = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of assignments) set.add(a.userId);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [assignments]);
+
+  // Capabilities come back from the API already sorted by id; we keep
+  // that order so the dropdown matches the reference table above.
+  const [userId, setUserId] = useState("");
+  const [capability, setCapability] = useState(capabilities[0]?.id ?? "");
+  const [scope, setScope] = useState("");
+
+  // Remember the last successful result so the answer survives input
+  // edits — operators routinely tweak one field after a deny to see
+  // what would change. Cleared on a fresh Run.
+  const [result, setResult] = useState<SimulateResponse | null>(null);
+
+  const handleSimulate = async () => {
+    if (!userId.trim() || !capability || !scope.trim()) {
+      toast.error("User, capability, and scope are all required");
+      return;
+    }
+    try {
+      const resp = await simulate.mutateAsync({
+        userId: userId.trim(),
+        capability,
+        scope: scope.trim(),
+      });
+      setResult(resp);
+    } catch (e) {
+      setResult(null);
+      toast.error((e as Error).message);
+    }
+  };
+
+  // Example scopes lifted from ADR-0001's "Scope grammar" table. They
+  // double as placeholders AND click-to-fill chips so an operator
+  // unfamiliar with the grammar can prime the form quickly.
+  const exampleScopes = [
+    "host:*",
+    "cluster:cid-abc",
+    "bucket:cid-abc:lsi",
+    "bucket:cid-abc:family-photos",
+    "key:cid-abc:somekey",
+  ];
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-lg font-medium tracking-tight">Simulator</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          What-if inspector: given a user + capability + scope, why does the
+          enforcer allow or deny? Pure analysis — no policy is changed.
+        </p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Run a simulation</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-[2fr_2fr_3fr_auto] sm:items-end">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                User ID
+              </label>
+              <Input
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+                placeholder="e.g. wife"
+                list="sim-known-users"
+              />
+              <datalist id="sim-known-users">
+                {knownUsers.map((u) => (
+                  <option key={u} value={u} />
+                ))}
+              </datalist>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Capability
+              </label>
+              <select
+                value={capability}
+                onChange={(e) => setCapability(e.target.value)}
+                className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm font-mono"
+              >
+                {capabilities.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Scope
+              </label>
+              <Input
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+                placeholder="e.g. bucket:cid-abc:family-photos"
+                className="font-mono"
+              />
+            </div>
+            <Button size="sm" onClick={handleSimulate} disabled={simulate.isPending}>
+              {simulate.isPending ? "Running..." : "Simulate"}
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">Scope examples:</span>
+            {exampleScopes.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setScope(s)}
+                className="rounded-md border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] hover:bg-muted transition-colors"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          {result && <SimulatorResult result={result} />}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function SimulatorResult({ result }: { result: SimulateResponse }) {
+  return (
+    <div className="space-y-3 pt-2 border-t">
+      <div className="flex items-center gap-3">
+        <div
+          className={
+            result.allowed
+              ? "rounded-md bg-green-500/15 text-green-700 dark:text-green-400 px-3 py-1.5 text-sm font-semibold border border-green-500/30"
+              : "rounded-md bg-destructive/15 text-destructive px-3 py-1.5 text-sm font-semibold border border-destructive/30"
+          }
+        >
+          {result.allowed ? "Allowed" : "Denied"}
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {result.reasoning.length} reasoning step
+          {result.reasoning.length === 1 ? "" : "s"}
+          {result.matchingAssignments.length > 0 && (
+            <> · {result.matchingAssignments.length} matching assignment{result.matchingAssignments.length === 1 ? "" : "s"}</>
+          )}
+        </span>
+      </div>
+
+      {result.matchingAssignments.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-muted-foreground mb-1">
+            Matching assignments
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {result.matchingAssignments.map((a, i) => (
+              <Badge
+                key={`${a.userId}|${a.roleId}|${a.scope}|${i}`}
+                variant="outline"
+                className="font-mono text-[10px]"
+              >
+                {a.userId} → {a.roleId} @ {a.scope}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="text-xs font-medium text-muted-foreground mb-1">
+          Reasoning
+        </div>
+        <ol className="space-y-1.5">
+          {result.reasoning.map((step, i) => (
+            <li key={i} className="flex gap-2 text-sm">
+              <span className="shrink-0 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted text-muted-foreground text-[10px] font-mono px-1">
+                {i + 1}
+              </span>
+              <div className="min-w-0">
+                <div className="font-medium">{step.step}</div>
+                {step.detail && (
+                  <div className="text-xs text-muted-foreground font-mono break-words">
+                    {step.detail}
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
   );
 }

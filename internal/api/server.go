@@ -233,6 +233,12 @@ func (s *Server) routes() {
 			uiAdminG.Post("/admin/policies/assignments", s.assignRoleHandler)
 			uiAdminG.Delete("/admin/policies/assignments", s.unassignRoleHandler)
 
+			// POLICY.SIM (v0.9.0j): what-if simulator that walks
+			// Enforcer.CanWithReason and returns the reasoning trail.
+			// Same policy:view_matrix gate as the matrix GET — pure
+			// inspector, no enforcement-logic changes.
+			uiAdminG.Post("/admin/policies/simulate", s.simulatePolicyHandler)
+
 			// Migration helpers (ADR-0001 cycle v0.9.0h). Surfaces
 			// Connections whose config still carries the legacy
 			// access_key_id + secret_key that pre-date the

@@ -9,6 +9,21 @@ import (
 	"sync"
 )
 
+// ReasoningStep is one line in the human-readable explanation a
+// `CanWithReason` call returns. The simulator UI renders these in
+// order so an operator answering "why can/can't user X do Y at Z?"
+// gets a step-by-step trail back to either the matching role (allow
+// path) or the reason the request fell through (deny path).
+//
+// Step is the short headline ("user has assignment", "capability not
+// covered"); Detail is the supporting evidence ("matthew →
+// host_admin@host:*"). The simulator renders Step bold and Detail in
+// muted text.
+type ReasoningStep struct {
+	Step   string `json:"step"`
+	Detail string `json:"detail"`
+}
+
 // Enforcer is the policy decision point. UI gating and API handlers ask
 // Can() / Capabilities(); /admin/policies handlers manage Roles +
 // Assignments via the mutation methods.
@@ -20,6 +35,15 @@ type Enforcer interface {
 	// (after Expand) include `capability`, at an assignment scope that
 	// matches the requested scope per ScopeMatches().
 	Can(userID, capability, scope string) bool
+
+	// CanWithReason returns the same bool as Can plus the matching
+	// assignments (empty on deny) and a sequenced explanation suitable
+	// for the policy simulator UI. The reasoning records every
+	// assignment considered: which ones were dropped (and why) and
+	// which one finally satisfied the request. POLICY.SIM (v0.9.0j) is
+	// the sole caller — production hot paths stay on Can() which skips
+	// the bookkeeping.
+	CanWithReason(userID, capability, scope string) (bool, []RoleAssignment, []ReasoningStep)
 
 	// Capabilities returns the unique, sorted list of leaf capabilities
 	// userID holds at the given scope. Intended for UI gating: "should I
@@ -188,9 +212,28 @@ func (e *fileEnforcer) saveLocked() error {
 // --- Read side -------------------------------------------------------------
 
 func (e *fileEnforcer) Can(userID, capability, scope string) bool {
+	allowed, _, _ := e.CanWithReason(userID, capability, scope)
+	return allowed
+}
+
+// CanWithReason walks the same loop as Can but records every
+// assignment it considered. Returns the final bool, the assignments
+// that contributed to the decision (the single granting assignment
+// on allow; every same-user assignment that was considered on deny),
+// and a sequenced reasoning trail. POLICY.SIM (v0.9.0j) is the only
+// caller — production hot paths use Can() which discards the trail.
+func (e *fileEnforcer) CanWithReason(userID, capability, scope string) (bool, []RoleAssignment, []ReasoningStep) {
+	steps := []ReasoningStep{}
+	matches := []RoleAssignment{}
+
 	if userID == "" || capability == "" || scope == "" {
-		return false
+		steps = append(steps, ReasoningStep{
+			Step:   "invalid request",
+			Detail: "userId, capability, and scope are all required",
+		})
+		return false, matches, steps
 	}
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
@@ -200,28 +243,101 @@ func (e *fileEnforcer) Can(userID, capability, scope string) bool {
 		rolesByID[r.ID] = r
 	}
 
+	// Surface the user's full assignment set up front so deny paths
+	// can show "we considered N assignments for this user" without a
+	// second walk of the slice.
+	userAssignments := []RoleAssignment{}
 	for _, a := range e.assignments {
-		if a.UserID != userID {
-			continue
+		if a.UserID == userID {
+			userAssignments = append(userAssignments, a)
 		}
-		if !ScopeMatches(a.Scope, scope) {
-			continue
-		}
+	}
+
+	if len(userAssignments) == 0 {
+		steps = append(steps, ReasoningStep{
+			Step:   "no assignments",
+			Detail: fmt.Sprintf("user %q has zero role assignments — secure default is deny", userID),
+		})
+		return false, matches, steps
+	}
+
+	steps = append(steps, ReasoningStep{
+		Step: "user has assignments",
+		Detail: fmt.Sprintf("user %q has %d assignment(s); checking each against capability %q at scope %q",
+			userID, len(userAssignments), capability, scope),
+	})
+
+	for _, a := range userAssignments {
 		role, ok := rolesByID[a.RoleID]
 		if !ok {
 			// Dangling assignment (role was deleted out from under it).
 			// Treat as no grant — caller should clean up.
+			steps = append(steps, ReasoningStep{
+				Step:   "skip: dangling assignment",
+				Detail: fmt.Sprintf("%s @ %s references role %q which no longer exists", a.UserID, a.Scope, a.RoleID),
+			})
 			continue
 		}
+
+		if !ScopeMatches(a.Scope, scope) {
+			steps = append(steps, ReasoningStep{
+				Step: "skip: scope mismatch",
+				Detail: fmt.Sprintf("assignment %s @ %s does not cover requested scope %s",
+					a.RoleID, a.Scope, scope),
+			})
+			continue
+		}
+
+		// Scope matches. Check the role's capabilities.
+		matchingExpr := ""
 		for _, capExpr := range role.Capabilities {
 			for _, leaf := range Expand(capExpr) {
 				if leaf == capability {
-					return true
+					matchingExpr = capExpr
+					break
 				}
 			}
+			if matchingExpr != "" {
+				break
+			}
 		}
+
+		if matchingExpr == "" {
+			steps = append(steps, ReasoningStep{
+				Step: "skip: capability not in role",
+				Detail: fmt.Sprintf("scope matched (%s covers %s) but role %q does not grant %s",
+					a.Scope, scope, a.RoleID, capability),
+			})
+			continue
+		}
+
+		// Granted.
+		steps = append(steps, ReasoningStep{
+			Step: "scope matches",
+			Detail: fmt.Sprintf("assignment %s @ %s covers requested scope %s",
+				a.RoleID, a.Scope, scope),
+		})
+		if matchingExpr == capability {
+			steps = append(steps, ReasoningStep{
+				Step: "capability granted",
+				Detail: fmt.Sprintf("role %q lists %s directly", a.RoleID, capability),
+			})
+		} else {
+			steps = append(steps, ReasoningStep{
+				Step: "capability granted via wildcard",
+				Detail: fmt.Sprintf("role %q lists %s which expands to include %s",
+					a.RoleID, matchingExpr, capability),
+			})
+		}
+		matches = append(matches, a)
+		return true, matches, steps
 	}
-	return false
+
+	steps = append(steps, ReasoningStep{
+		Step:   "deny",
+		Detail: fmt.Sprintf("no assignment for %q grants %s at scope %s", userID, capability, scope),
+	})
+	return false, matches, steps
 }
 
 func (e *fileEnforcer) Capabilities(userID, scope string) []string {
