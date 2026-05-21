@@ -543,10 +543,26 @@ func (e *fileEnforcer) UnassignRole(userID, roleID, scope string) error {
 }
 
 // SeedEnvAdmin grants the env-seeded admin (BASEMENT_ADMIN_USER) the
-// three blanket assignments that keep matthew's existing flow on
-// basement.pq.io working when v0.9.0f's capability gates land. The
-// three assignments are independently idempotent so re-running on each
-// boot is safe.
+// blanket assignments that keep matthew's existing flow on
+// basement.pq.io working when v0.9.0f's capability gates land.
+//
+// v0.9.0m.1 adds host_admin @ "*" (true superuser scope) on top of the
+// per-domain seeds. ScopeMatches("*", anything) returns true, so this
+// covers every future gate at any scope domain (key:cid:*, bucket:cid:*,
+// objects:cid:bid:*, etc.) — including domains added in cycles that
+// weren't anticipated when v0.9.0f shipped its seed list.
+//
+// The pre-v0.9.0m.1 seed (host:*, cluster:*, bucket:*) ONLY covered the
+// three named domains; new gates like key:create @ key:cid:* (added
+// v0.9.0f but never live-verified end-to-end) silently blocked the
+// env-admin because no seeded assignment scope matched the key: domain.
+// The * scope is the explicit "owns everything" assignment per ADR-0001
+// and matches host_admin's *:* capability list.
+//
+// All four assignments are independently idempotent via AssignRole so
+// re-running on each boot — including for operators upgrading from
+// pre-v0.9.0m.1 — safely adds the missing * row without touching the
+// existing per-domain rows.
 func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 	if username == "" {
 		return nil
@@ -554,6 +570,10 @@ func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 
 	wants := []RoleAssignment{
 		{UserID: username, RoleID: "host_admin", Scope: "host:*"},
+		// v0.9.0m.1: superuser scope. Covers every domain — key:*,
+		// bucket:*, objects:*, anything future cycles add — so a new
+		// gate per cycle doesn't silently lock out the env-admin.
+		{UserID: username, RoleID: "host_admin", Scope: "*"},
 		{UserID: username, RoleID: "cluster_admin", Scope: "cluster:*"},
 		{UserID: username, RoleID: "bucket_user", Scope: "bucket:*"},
 	}
