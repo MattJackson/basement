@@ -3,15 +3,32 @@
 // Connections are stored in connections.json under BASEMENT_DATA_DIR.
 // Each connection represents a backend driver configuration (garage, garage-v1, aws-s3).
 //
-// Encryption at rest: NOT implemented in v0.2.0. Plain JSON is acceptable given
-// that BASEMENT_DATA_DIR is operator-controlled with filesystem ACLs. This is a
-// hardening pass required before the v0.5.0 release.
+// Encryption at rest: sensitive keys in Connection.Config (admin_token,
+// secret_key, s3_secret_key, auth_token) are AES-GCM encrypted into a
+// per-record ConfigEnc blob via crypto.go using a key derived from the
+// JWT signing secret. Non-sensitive keys (admin_url, region, endpoint,
+// access key IDs) stay in plaintext in Config on disk. In memory and
+// across API boundaries the Config map is unified — callers see one
+// decrypted view and don't need to know the split exists.
+//
+// Migration: on Open, if a Connection has plaintext sensitive keys in
+// Config but ConfigEnc is empty, the load path encrypts those keys
+// into ConfigEnc, drops them from the plaintext Config persisted on
+// disk, and re-saves. Idempotent on repeat runs — once ConfigEnc is
+// populated and Config carries only non-sensitive keys on disk, the
+// scan is a no-op.
+//
+// Back-compat: OpenConnections(dataDir) keeps the v0.2.x signature
+// (no encryption — tests use it). Production wires
+// OpenConnectionsWithKey(dataDir, jwtSecret) from cmd/basement-server to
+// turn on at-rest encryption.
 package store
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,15 +55,59 @@ var SupportedDrivers = map[string]bool{
 	DriverMinio:    true,
 }
 
+// sensitiveConfigKeys classifies which Config keys must be encrypted at
+// rest. Access-key IDs (access_key_id, access_key, s3_access_key) are
+// deliberately NOT in this set — they appear in S3 request headers in
+// clear and only pair with a secret to authenticate, so they're "public-
+// ish" like a username. The secret half (secret_key, s3_secret_key,
+// admin_token, auth_token) is what we must guard.
+//
+// Adding a new sensitive key: extend this map AND ship a follow-up
+// migration test asserting plaintext on disk converts to ciphertext.
+// Removing one is a breaking change — operators upgrading would find
+// their on-disk ConfigEnc still holds the key and we'd merge it back
+// into Config on load; if you must remove, ship a one-shot purge.
+var sensitiveConfigKeys = map[string]bool{
+	"admin_token":   true,
+	"secret_key":    true,
+	"s3_secret_key": true,
+	"auth_token":    true,
+}
+
 // Connection represents a backend connection configuration.
+//
+// ConfigEnc carries the AES-GCM ciphertext of the sensitive subset of
+// Config (per sensitiveConfigKeys). It is `json:"-"` on this public
+// struct so API responses keep the v0.2.x shape callers expect — a
+// single Config map. Disk persistence routes through connectionDisk
+// which DOES marshal the field. See load/save below.
+//
+// Invariant: in-memory Config is the unified view (plaintext + the
+// decrypted sensitive subset). On-disk Config carries only the
+// non-sensitive subset; the rest is in ConfigEnc.
 type Connection struct {
-	ID        string                 `json:"id"`         // UUID
-	Label     string                 `json:"label"`      // operator-set, mutable, unique case-insensitive
-	Driver    string                 `json:"driver"`     // "garage" | "garage-v1" | "aws-s3"
-	Config    map[string]string      `json:"config"`     // per-driver keys: adminUrl, adminToken, region, accessKey, secretKey, endpoint
-	Color     string                 `json:"color,omitempty"` // hex; default "#C9874B" if empty
-	Owner     string                 `json:"owner"`      // "org" always for v0.2.0
-	CreatedAt time.Time              `json:"createdAt"`
+	ID        string            `json:"id"`              // UUID
+	Label     string            `json:"label"`           // operator-set, mutable, unique case-insensitive
+	Driver    string            `json:"driver"`          // "garage" | "garage-v1" | "aws-s3"
+	Config    map[string]string `json:"config"`          // per-driver keys: adminUrl, adminToken, region, accessKey, secretKey, endpoint
+	ConfigEnc []byte            `json:"-"`               // AES-GCM(json(sensitive-subset)); never on the API wire
+	Color     string            `json:"color,omitempty"` // hex; default "#C9874B" if empty
+	Owner     string            `json:"owner"`           // "org" always for v0.2.0
+	CreatedAt time.Time         `json:"createdAt"`
+}
+
+// connectionDisk is the on-disk JSON shape: identical to Connection but
+// with ConfigEnc marshalled. Used only by load/save — never returned to
+// callers. Keeping the struct private keeps the API JSON shape sealed.
+type connectionDisk struct {
+	ID        string            `json:"id"`
+	Label     string            `json:"label"`
+	Driver    string            `json:"driver"`
+	Config    map[string]string `json:"config"`
+	ConfigEnc []byte            `json:"configEnc,omitempty"`
+	Color     string            `json:"color,omitempty"`
+	Owner     string            `json:"owner"`
+	CreatedAt time.Time         `json:"createdAt"`
 }
 
 // Connections interface defines the CRUD operations for connection records.
@@ -62,14 +123,41 @@ type Connections interface {
 
 // store implements Connections using JSON file persistence.
 type store struct {
-	dataDir     string
-	connPath    string
-	connsMu     sync.RWMutex
-	connsCache  []Connection
+	dataDir    string
+	connPath   string
+	jwtSecret  []byte // nil ⇒ encryption disabled (legacy OpenConnections path / tests)
+	connsMu    sync.RWMutex
+	connsCache []Connection
 }
 
-// OpenConnections opens or creates the connections store at dataDir.
+// OpenConnections opens or creates the connections store at dataDir
+// WITHOUT at-rest encryption. Retained for v0.2.x source compat — tests
+// use this path. Production callers must use OpenConnectionsWithKey
+// to turn on AES-GCM encryption of admin_token and secret_key.
 func OpenConnections(dataDir string) (Connections, error) {
+	return openConnections(dataDir, nil)
+}
+
+// OpenConnectionsWithKey opens or creates the connections store at
+// dataDir with at-rest encryption keyed off jwtSecret. The actual
+// AES-256 key is sha256(jwtSecret) — see crypto.go. jwtSecret must be
+// non-empty; cfg validation enforces ≥32 bytes in real deployments.
+//
+// On open this runs a silent migration that encrypts any plaintext
+// sensitive keys discovered in connections.json (left over from
+// pre-v1.0.0a deployments) and rewrites the file. Idempotent on
+// subsequent boots.
+func OpenConnectionsWithKey(dataDir string, jwtSecret []byte) (Connections, error) {
+	if len(jwtSecret) == 0 {
+		return nil, fmt.Errorf("OpenConnectionsWithKey: empty jwtSecret")
+	}
+	return openConnections(dataDir, append([]byte(nil), jwtSecret...))
+}
+
+// openConnections is the shared constructor. jwtSecret may be nil to
+// signal encryption-off mode; load/save degrade to plaintext in that
+// case so the OpenConnections test surface stays green.
+func openConnections(dataDir string, jwtSecret []byte) (Connections, error) {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating data dir: %w", err)
 	}
@@ -77,6 +165,7 @@ func OpenConnections(dataDir string) (Connections, error) {
 	s := &store{
 		dataDir:    dataDir,
 		connPath:   filepath.Join(dataDir, "connections.json"),
+		jwtSecret:  jwtSecret,
 		connsCache: make([]Connection, 0),
 	}
 
@@ -87,37 +176,202 @@ func OpenConnections(dataDir string) (Connections, error) {
 	return s, nil
 }
 
-// load reads all connections from disk into the cache.
+// load reads connections.json into the cache, decrypts ConfigEnc into
+// the in-memory Config map, and (one-shot per record) migrates any
+// plaintext sensitive keys to ConfigEnc by rewriting the file.
+//
+// Encryption-off mode (jwtSecret == nil) skips both decrypt and
+// migration; on-disk shape stays as Connection JSON, plaintext.
 func (s *store) load() error {
-	conns, err := loadJSON[[]Connection](s.connPath)
+	disk, err := loadJSON[[]connectionDisk](s.connPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("loading connections: %w", err)
 	}
 
-	s.connsMu.Lock()
-	defer s.connsMu.Unlock()
-
-	if err == nil {
-		s.connsCache = conns
-	} else {
+	if err != nil { // file missing
+		s.connsMu.Lock()
 		s.connsCache = make([]Connection, 0)
+		s.connsMu.Unlock()
+		return nil
+	}
+
+	cache := make([]Connection, 0, len(disk))
+	migrated := false
+	for _, d := range disk {
+		c := Connection{
+			ID:        d.ID,
+			Label:     d.Label,
+			Driver:    d.Driver,
+			Color:     d.Color,
+			Owner:     d.Owner,
+			CreatedAt: d.CreatedAt,
+			Config:    cloneStringMap(d.Config),
+			ConfigEnc: d.ConfigEnc,
+		}
+		if c.Config == nil {
+			c.Config = map[string]string{}
+		}
+
+		if s.jwtSecret != nil {
+			// Decrypt any existing ConfigEnc into the in-memory Config so
+			// callers see a unified view.
+			if len(c.ConfigEnc) > 0 {
+				dec, derr := decryptSensitiveMap(c.ConfigEnc, s.jwtSecret)
+				if derr != nil {
+					return fmt.Errorf("decrypting ConfigEnc for connection %q: %w", c.ID, derr)
+				}
+				for k, v := range dec {
+					c.Config[k] = v
+				}
+			}
+
+			// Migration: if the on-disk Config (d.Config — BEFORE we
+			// merged decrypted ConfigEnc in) carries plaintext sensitive
+			// keys, flag a rewrite. save() will split them out.
+			//
+			// We use d.Config rather than c.Config so post-merge keys
+			// (which always look "plaintext" in c.Config because
+			// decryption put them there) don't trigger a needless
+			// re-save on every boot. Result: idempotent — second boot
+			// with already-encrypted records is a no-op.
+			for k := range d.Config {
+				if sensitiveConfigKeys[k] {
+					migrated = true
+					break
+				}
+			}
+		}
+
+		cache = append(cache, c)
+	}
+
+	s.connsMu.Lock()
+	s.connsCache = cache
+	s.connsMu.Unlock()
+
+	if migrated {
+		s.connsMu.Lock()
+		err := s.saveLocked()
+		s.connsMu.Unlock()
+		if err != nil {
+			return fmt.Errorf("re-saving connections after at-rest migration: %w", err)
+		}
 	}
 
 	return nil
 }
 
-// save writes the connections cache to disk atomically.
+// save writes the connections cache to disk atomically, encrypting
+// sensitive keys on the way out. Caller must hold connsMu (write).
 func (s *store) save() error {
-	return saveJSON(s.connPath, s.connsCache)
+	return s.saveLocked()
 }
 
-// List returns all connections. Callers receive a deep copy.
+// saveLocked is save assuming connsMu is already held (Lock, not RLock).
+// load() and the mutating ops call this directly; encryption errors
+// surface as a save failure rather than corrupt-data-on-disk.
+func (s *store) saveLocked() error {
+	disk := make([]connectionDisk, 0, len(s.connsCache))
+	for _, c := range s.connsCache {
+		dc, err := s.toDisk(c)
+		if err != nil {
+			return fmt.Errorf("preparing connection %q for disk: %w", c.ID, err)
+		}
+		disk = append(disk, dc)
+	}
+	return saveJSON(s.connPath, disk)
+}
+
+// toDisk splits a Connection's unified Config into the plaintext on-disk
+// subset + an encrypted blob holding the sensitive subset. Encryption-
+// off mode (s.jwtSecret == nil) round-trips the Config plaintext as-is.
+func (s *store) toDisk(c Connection) (connectionDisk, error) {
+	if s.jwtSecret == nil {
+		return connectionDisk{
+			ID:        c.ID,
+			Label:     c.Label,
+			Driver:    c.Driver,
+			Config:    cloneStringMap(c.Config),
+			ConfigEnc: nil,
+			Color:     c.Color,
+			Owner:     c.Owner,
+			CreatedAt: c.CreatedAt,
+		}, nil
+	}
+
+	plain := map[string]string{}
+	sensitive := map[string]string{}
+	for k, v := range c.Config {
+		if sensitiveConfigKeys[k] {
+			sensitive[k] = v
+		} else {
+			plain[k] = v
+		}
+	}
+
+	var enc []byte
+	if len(sensitive) > 0 {
+		raw, err := json.Marshal(sensitive)
+		if err != nil {
+			return connectionDisk{}, fmt.Errorf("marshalling sensitive subset: %w", err)
+		}
+		enc, err = encryptSecret(raw, s.jwtSecret)
+		if err != nil {
+			return connectionDisk{}, fmt.Errorf("encrypting sensitive subset: %w", err)
+		}
+	}
+
+	return connectionDisk{
+		ID:        c.ID,
+		Label:     c.Label,
+		Driver:    c.Driver,
+		Config:    plain,
+		ConfigEnc: enc,
+		Color:     c.Color,
+		Owner:     c.Owner,
+		CreatedAt: c.CreatedAt,
+	}, nil
+}
+
+// decryptSensitiveMap is the inverse of the sensitive-subset
+// marshal+encrypt path in toDisk. Returns the decrypted subset or an
+// error (truncated blob / wrong key / tampered ciphertext).
+func decryptSensitiveMap(enc, key []byte) (map[string]string, error) {
+	if len(enc) == 0 {
+		return map[string]string{}, nil
+	}
+	plain, err := decryptSecret(enc, key)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	if err := json.Unmarshal([]byte(plain), &out); err != nil {
+		return nil, fmt.Errorf("unmarshalling decrypted sensitive subset: %w", err)
+	}
+	return out, nil
+}
+
+// cloneStringMap copies a map; returns an empty non-nil map for a nil
+// input so callers can always range/write safely.
+func cloneStringMap(m map[string]string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// List returns all connections. Callers receive a deep copy with
+// decrypted Config maps.
 func (s *store) List(ctx context.Context) ([]Connection, error) {
 	s.connsMu.RLock()
 	defer s.connsMu.RUnlock()
 
 	result := make([]Connection, len(s.connsCache))
-	copy(result, s.connsCache)
+	for i, c := range s.connsCache {
+		result[i] = c
+		result[i].Config = cloneStringMap(c.Config)
+	}
 	return result, nil
 }
 
@@ -128,7 +382,9 @@ func (s *store) Get(ctx context.Context, id string) (Connection, error) {
 
 	for _, c := range s.connsCache {
 		if c.ID == id {
-			return c, nil
+			out := c
+			out.Config = cloneStringMap(c.Config)
+			return out, nil
 		}
 	}
 
@@ -177,13 +433,25 @@ func (s *store) Create(ctx context.Context, c Connection) (Connection, error) {
 		c.Color = "#C9874B"
 	}
 
+	// Normalise Config to non-nil so cache invariant holds.
+	if c.Config == nil {
+		c.Config = map[string]string{}
+	} else {
+		c.Config = cloneStringMap(c.Config)
+	}
+
 	s.connsCache = append(s.connsCache, c)
 
-	if err := s.save(); err != nil {
+	if err := s.saveLocked(); err != nil {
+		// Roll back the in-memory append so a save failure isn't
+		// observable to subsequent List/Get calls.
+		s.connsCache = s.connsCache[:len(s.connsCache)-1]
 		return Connection{}, fmt.Errorf("persisting connection: %w", err)
 	}
 
-	return c, nil
+	out := c
+	out.Config = cloneStringMap(c.Config)
+	return out, nil
 }
 
 // Update modifies an existing connection by ID. Returns error if not found.
@@ -195,6 +463,10 @@ func (s *store) Update(ctx context.Context, id string, patch Connection) (Connec
 	for i := range s.connsCache {
 		if s.connsCache[i].ID == id {
 			conn := &s.connsCache[i]
+
+			// Snapshot for rollback on save failure.
+			before := *conn
+			before.Config = cloneStringMap(conn.Config)
 
 			// Apply patch fields if non-empty/non-nil
 			if patch.Label != "" {
@@ -220,18 +492,23 @@ func (s *store) Update(ctx context.Context, id string, patch Connection) (Connec
 			}
 
 			if patch.Config != nil {
-				conn.Config = patch.Config
+				conn.Config = cloneStringMap(patch.Config)
 			}
 
 			if patch.Color != "" {
 				conn.Color = patch.Color
 			}
 
-			if err := s.save(); err != nil {
+			if err := s.saveLocked(); err != nil {
+				// Roll back so a save failure leaves the in-memory record
+				// matching disk.
+				*conn = before
 				return Connection{}, fmt.Errorf("persisting update: %w", err)
 			}
 
-			return *conn, nil
+			out := *conn
+			out.Config = cloneStringMap(conn.Config)
+			return out, nil
 		}
 	}
 
@@ -245,8 +522,15 @@ func (s *store) Delete(ctx context.Context, id string) error {
 
 	for i := range s.connsCache {
 		if s.connsCache[i].ID == id {
+			removed := s.connsCache[i]
 			s.connsCache = append(s.connsCache[:i], s.connsCache[i+1:]...)
-			return s.save()
+			if err := s.saveLocked(); err != nil {
+				// Restore so an errored Delete doesn't silently mutate
+				// in-memory state.
+				s.connsCache = append(s.connsCache[:i], append([]Connection{removed}, s.connsCache[i:]...)...)
+				return fmt.Errorf("persisting delete: %w", err)
+			}
+			return nil
 		}
 	}
 

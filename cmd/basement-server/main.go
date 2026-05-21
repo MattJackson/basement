@@ -61,7 +61,12 @@ func main() {
 		}
 	}
 
-	connStore, err := store.OpenConnections(cfg.DataDir)
+	// v1.0.0a: at-rest encryption of admin_token / secret_key /
+	// s3_secret_key / auth_token. Key derived from the JWT signing
+	// secret (same as bucket_grants — see ADR-0001). On first boot
+	// after upgrade, load() silently rewrites connections.json with
+	// the sensitive subset moved into ConfigEnc. Idempotent on reboot.
+	connStore, err := store.OpenConnectionsWithKey(cfg.DataDir, cfg.JWT.Secret)
 	if err != nil {
 		slog.Error("failed to open connections store", "error", err)
 		os.Exit(1)
