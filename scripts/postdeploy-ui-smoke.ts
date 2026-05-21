@@ -1490,10 +1490,20 @@ section("[16] version label under Logo (Fix 7)");
     await check("[NN] /files/syncs renders header + empty state or list", async () => {
       await page!.goto(`${BASE_URL}/files/syncs`, { waitUntil: "networkidle" });
       
+      // Wait for the navigation + render to settle — the previous
+      // smoke check leaves the page on a different route, so we need
+      // both 'networkidle' and an explicit h1 wait.
+      try {
+        await page!.waitForSelector('h1', { timeout: 5000 });
+      } catch {
+        throw new Error("/files/syncs failed to render any h1 — page may have errored");
+      }
+
       // Assert header is present
-      const hasHeader = await page!.locator('h1:has-text("Syncs")').count();
+      const hasHeader = await page!.locator('h1').filter({ hasText: "Syncs" }).count();
       if (hasHeader === 0) {
-        throw new Error("/files/syncs missing 'Syncs' header");
+        const actualH1 = await page!.locator('h1').first().textContent().catch(()=>"<none>");
+        throw new Error(`/files/syncs missing 'Syncs' header (saw h1: ${actualH1})`);
       }
       
       // Assert subhead is present
