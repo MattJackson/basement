@@ -176,33 +176,195 @@ When a Host Admin invites a user at `/admin/users/new`:
   the sync rejects. ADR-0004 candidate; covered partially by
   existing memory `feedback_basement_doesnt_invent_permissions`.
 
+## Flexibility: role/permission matrix, not hardcoded roles
+
+Operator clarification (2026-05-20): *"it needs to be flexible in
+nature where roles and permissions can change. a matrix somewhere."*
+
+Roles + capabilities are **data**, not code. The three tiers above
+(Host Admin / Cluster Admin / User) are **seed presets** the system
+ships with — they're rows in the matrix, not enum values in Go.
+Operator can add, edit, or remove roles; reassign which capabilities
+each role has; reassign which scopes a role covers.
+
+### Capability vocabulary (the columns)
+
+Capability ID is `domain:verb`. Domains map to scopes (next section).
+Initial seeded set:
+
+| Domain | Capabilities |
+|---|---|
+| `host` | `manage_users`, `manage_signup_mode`, `manage_drivers`, `manage_org_caps`, `manage_policies` |
+| `cluster` | `create`, `edit`, `delete`, `test`, `view_layout`, `edit_layout` |
+| `bucket` | `create`, `edit_alias`, `set_quota`, `delete`, `view` |
+| `key` | `create`, `edit_permissions`, `delete`, `view` |
+| `objects` | `list`, `get`, `put`, `delete`, `share_create`, `share_revoke` |
+| `policy` | `view_matrix`, `edit_matrix`, `assign_role` |
+
+New driver capabilities or new product features add rows here. The
+list itself is checked-in code (compiled-in registry — adding a
+capability requires a code change because something has to *implement*
+it). What's data is **which roles get which capabilities**.
+
+### Scope grammar (the resource axis)
+
+Scopes are URI-style strings the enforcer pattern-matches:
+
+| Scope | Means |
+|---|---|
+| `host:*` | basement platform — singular |
+| `cluster:*` | every cluster |
+| `cluster:{cid}` | one specific cluster |
+| `bucket:{cid}:*` | every bucket on a cluster |
+| `bucket:{cid}:{bid}` | one specific bucket |
+| `key:{cid}:*` | every key on a cluster |
+| `key:{cid}:{kid}` | one specific key |
+
+Wildcards (`*`) are explicit, not implicit — a role with
+`cluster:716e…` does NOT auto-cover its buckets unless the role also
+has `bucket:716e…:*`.
+
+### Role definition shape
+
+A Role is `(id, label, capabilities[], description)`:
+
+```json
+{
+  "id": "cluster_admin",
+  "label": "Cluster Admin",
+  "description": "Manages buckets, keys, layout on a cluster they're assigned to.",
+  "capabilities": [
+    "cluster:edit", "cluster:test", "cluster:view_layout", "cluster:edit_layout",
+    "bucket:*", "key:*", "objects:list"
+  ]
+}
+```
+
+The capabilities array can use `domain:*` shorthand for "every verb
+in that domain." `*:*` is reserved for full superuser (only the
+built-in `host_admin` seed gets it; operator can revoke).
+
+### Assignment shape
+
+A RoleAssignment is `(userId, roleId, scope)`:
+
+```json
+{ "userId": "matthew", "roleId": "host_admin",    "scope": "host:*" }
+{ "userId": "matthew", "roleId": "cluster_admin", "scope": "cluster:716e..." }
+{ "userId": "matthew", "roleId": "bucket_user",   "scope": "bucket:716e...:lsi" }
+{ "userId": "wife",    "roleId": "bucket_user",   "scope": "bucket:716e...:family-photos" }
+{ "userId": "father",  "roleId": "cluster_admin", "scope": "cluster:9a8b..." }
+```
+
+A user with no assignments has zero capabilities — secure default.
+
+### Enforcer interface
+
+```go
+// internal/auth/policy/enforcer.go
+type Enforcer interface {
+    Can(userID, capability, scope string) bool
+    Capabilities(userID, scope string) []string  // for UI gating
+    AssignmentsFor(userID string) []RoleAssignment
+}
+```
+
+UI gates render based on `Capabilities(user, scope)` — the
+delete-bucket button doesn't show unless `bucket:delete` is in the
+returned list for that bucket's scope. **No driver-name checks, no
+role-name checks in the UI** — only capability checks. Aligns with
+[[feedback_generic_driver_middleman]].
+
+### Storage
+
+- `policies.json` (NEW) — single file, atomic write:
+  ```json
+  {
+    "roles":      [Role, Role, ...],
+    "assignments":[RoleAssignment, RoleAssignment, ...]
+  }
+  ```
+- Encrypted at rest (same scheme as admin_token — JWT secret as key
+  for v0.9; revisit for v1.0).
+- Capability registry (`internal/auth/policy/capabilities.go`) lives
+  in code — the set of valid `capability` IDs the enforcer accepts.
+  Roles referencing an unknown capability fail validation at write
+  time + warn at read time.
+
+### Built-in seed (immutable rows)
+
+Three roles are seeded on first boot, with the `seed: true` flag.
+They CAN be edited (capabilities added/removed) but CANNOT be
+deleted entirely — that prevents accidental lockout. Operator can
+clone a seed to make a custom role.
+
+| ID | Default capabilities |
+|---|---|
+| `host_admin` | `*:*` (everything) |
+| `cluster_admin` | `cluster:edit|test|view_layout|edit_layout`, `bucket:*`, `key:*`, `objects:list` |
+| `bucket_user` | `objects:list|get|put|share_create|share_revoke`, `bucket:view` |
+
+### UI surface
+
+- **`/admin/policies`** (NEW route, requires `policy:view_matrix`):
+  Three-pane editor.
+  - Left: list of Roles (click to edit capabilities)
+  - Middle: matrix view (roles × capability domains, checkboxes)
+  - Right: list of Assignments (filter by user / role / scope)
+- **`/admin/users/{username}`** (extend existing): show all
+  assignments for that user, allow Host Admin to add/remove.
+- **Capability badges** on relevant UI elements: greyed/hidden if
+  the current user lacks the capability for the visible scope.
+
+### Why a matrix and not RBAC libraries (Casbin etc.)
+
+- basement is single-server / small-org scoped; a 200-line
+  matrix + enforcer is sufficient and auditable
+- No external dep, no policy language to learn
+- Same JSON file the operator backs up everything else with
+- v2.0 can swap in Casbin if multi-tenant SaaS demands it; the
+  Enforcer interface is the seam.
+
 ## Implementation plan
 
 Senior writes the ADR (this file). Then in order:
 
-1. **v0.9.0b** — Add `Grant` schema for `(userId, connectionId,
-   bucketId, accessKeyId, secretKey-encrypted, permissions)` to
-   `internal/store/`. Migration code: on load, no-op for existing
-   data — new grants are explicit.
-2. **v0.9.0c** — Refactor Edit Cluster page: remove `access_key_id`
-   and `secret_key` fields; keep `admin_url` + `admin_token` +
-   `s3_endpoint`. Backend driver build error if user-tier S3 op
-   attempted without a Grant lookup.
-3. **v0.9.0d** — Rewrite `/files/clusters/new` as "Add bucket
+1. **v0.9.0b** — `internal/auth/policy/`: capability registry, Role
+   + RoleAssignment types, Enforcer interface + file-backed impl,
+   `policies.json` seed-on-empty. NO consumer code yet — just the
+   subsystem + tests.
+2. **v0.9.0c** — Add `Grant` schema for `(userId, connectionId,
+   bucketId, accessKeyId, secretKey-encrypted)` to
+   `internal/store/`. Grants store the CREDS; assignments store
+   the POLICY. They're separate concerns linked by `(userId,
+   bucketScope)`.
+3. **v0.9.0d** — Refactor Edit Cluster page: remove
+   `access_key_id` and `secret_key` fields; keep `admin_url` +
+   `admin_token` + `s3_endpoint`. Backend driver returns clear
+   error if user-tier S3 op attempted without a Grant.
+4. **v0.9.0e** — Rewrite `/files/clusters/new` as "Add bucket
    access" — fields: alias, s3_endpoint, access_key_id, secret_key.
-   Creates a Grant for the current user; reuses an existing
-   Connection if `s3_endpoint` matches, else creates a new
-   user-scoped Connection.
-4. **v0.9.0e** — Runtime: user-facing endpoints (`/user/clusters/{cid}/buckets/{bid}/...`)
-   look up the User's Grant for that bucket, build a per-request
-   S3 client with the Grant's key, sign with it. Admin-facing
-   endpoints continue to use the cluster's admin_token.
-5. **v0.9.0f** — Migration helper for basement.pq.io: detect existing
-   Connection with `access_key_id` + `secret_key` in config; offer
-   one-time "Grant these creds to matthew on bucket X?" prompt in
-   the UI on Host Admin login.
+   Creates a Grant + a `bucket_user` RoleAssignment for the
+   current user. Reuses an existing Connection if `s3_endpoint`
+   matches, else creates a user-scoped Connection.
+5. **v0.9.0f** — Runtime: user-facing endpoints
+   (`/user/clusters/{cid}/buckets/{bid}/...`) call
+   `enforcer.Can(user, "objects:list", "bucket:cid:bid")` before
+   acting, then look up the User's Grant for that bucket, build a
+   per-request S3 client with the Grant's key. Admin-facing
+   endpoints similarly gate on `cluster:edit` / `bucket:create`
+   etc. Replace all hardcoded `if isUIAdmin {}` checks with
+   capability checks.
+6. **v0.9.0g** — `/admin/policies` UI: matrix editor for
+   capabilities × roles, assignment list with add/remove. Host
+   Admin only (gated by `policy:edit_matrix`).
+7. **v0.9.0h** — Migration helper: on first boot of v0.9.0g, detect
+   existing Connection with `access_key_id` + `secret_key` in
+   config; offer one-time "Grant these creds to matthew on bucket
+   X with bucket_user role?" prompt in the UI on Host Admin login.
 
-Freshman backlog item to add: each step above is a separate cycle.
+Each step is a separate freshman cycle dispatched against the
+relevant prompt.
 
 ## Relation to existing memory
 
