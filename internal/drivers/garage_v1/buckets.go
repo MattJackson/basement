@@ -12,6 +12,12 @@ import (
 // ListBuckets returns all buckets in the cluster.
 // Endpoint: GET /v1/bucket?list (garage-admin-v1.yml:575-631).
 //
+// ADR-0002 v1.1.0c — when this driver is built for the region tier
+// (user supplies only s3_endpoint + access_key + secret, no admin
+// URL), there is no admin client to talk to. Fall back to the S3
+// ListBuckets API in that case so the user's key can enumerate the
+// buckets it can reach without basement needing admin creds.
+//
 // OPEN: the v1 ListBuckets response items do NOT include a "created"
 // timestamp (garage-admin-v1.yml:611-630), so Bucket.Created is left as the
 // zero time. Callers that need creation time must fetch the bucket
@@ -19,6 +25,33 @@ import (
 // (garage-admin-v1.yml:1277-1328) also doesn't include `created`, so this
 // field is currently always zero for the v1 driver.
 func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
+	// Region-tier fallback: no admin client wired -> use S3 ListBuckets.
+	if d.client == nil || d.client.baseURL == "" {
+		if d.s3Client == nil {
+			return nil, fmt.Errorf("ListBuckets: neither admin client nor S3 client configured")
+		}
+		out, err := d.s3Client.listBucketsS3(ctx)
+		if err != nil {
+			return nil, err
+		}
+		buckets := make([]driverpkg.Bucket, 0, len(out.Buckets))
+		for _, b := range out.Buckets {
+			name := ""
+			if b.Name != nil {
+				name = *b.Name
+			}
+			// At the region tier we don't have a separate bucket ID
+			// (the S3 API only knows names). Use the name as the ID
+			// AND as the only alias so downstream callers can route
+			// /buckets/{bid}/objects requests to the same name.
+			buckets = append(buckets, driverpkg.Bucket{
+				ID:      name,
+				Aliases: []string{name},
+			})
+		}
+		return buckets, nil
+	}
+
 	var resp []listBucketsItemV1
 	if err := d.client.do(ctx, "GET", "/v1/bucket?list", nil, &resp); err != nil {
 		return nil, err
