@@ -183,6 +183,28 @@ function OrgCapabilitiesPage() {
         <Button onClick={handleSave}>Save Changes</Button>
       </div>
 
+      {/* Usage overview link card — OBS.USAGE v0.9.0k surfaces the */}
+      {/* storage snapshot from the System page so the operator's */}
+      {/* "configure the deployment" landing pad also points at the */}
+      {/* "what is the deployment doing right now" view. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Usage Overview</CardTitle>
+          <CardDescription>
+            Snapshot of storage usage across every cluster: totals, per-cluster
+            breakdown, and the top buckets by size and object count.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            to="/admin/usage"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Open the usage overview &rarr;
+          </Link>
+        </CardContent>
+      </Card>
+
       {/* Policies link card — ADR-0001 v0.9.0g surfaces the matrix */}
       {/* editor from the System page too, not just the persona menu. */}
       <Card>

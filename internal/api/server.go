@@ -255,6 +255,12 @@ func (s *Server) routes() {
 			// is the per-handler bucket:view / bucket:edit_alias gate.
 			uiAdminG.Get("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.getBucketLifecycleHandler)
 			uiAdminG.Put("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.putBucketLifecycleHandler)
+
+			// OBS.USAGE (v0.9.0k): storage overview dashboard.
+			// Read-only snapshot aggregated from existing per-cluster
+			// reads; per-handler gate is host:manage_users so any Host
+			// Admin sees it without needing a new capability.
+			uiAdminG.Get("/admin/usage/overview", s.getUsageOverviewHandler)
 		})
 
 		// User routes — authenticated users only. Grants filtered server-side.
