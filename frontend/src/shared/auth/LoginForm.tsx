@@ -18,7 +18,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 
 const loginSchema = z.object({
@@ -118,8 +117,8 @@ export function LoginForm() {
       </div>
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Sign in to basement</CardTitle>
-          <CardDescription>Enter your credentials to access the admin dashboard</CardDescription>
+          <h1 className="text-2xl font-bold tracking-tight leading-none">Sign in to Basement</h1>
+          <CardDescription>Enter your credentials to access your account</CardDescription>
         </CardHeader>
         <CardContent>
           {oidcError && (
