@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/mattjackson/basement/internal/api"
 	"github.com/mattjackson/basement/internal/audit"
@@ -18,6 +19,7 @@ import (
 	_ "github.com/mattjackson/basement/internal/drivers/garage"
 	_ "github.com/mattjackson/basement/internal/drivers/garage_v1"
 	_ "github.com/mattjackson/basement/internal/drivers/minio"
+	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
 )
 
@@ -233,6 +235,15 @@ func main() {
 	auditLogger := audit.NewFileLogger(cfg.DataDir)
 	srv.SetAuditLogger(auditLogger)
 
+	// v1.0.0d: per-bucket bytes+objects snapshots, persisted hourly
+	// to {dataDir}/metrics/YYYY-MM-DD.jsonl. Powers the time-series
+	// chart at /admin/usage. The scheduler runs in its own goroutine
+	// with the lifetime of ctxSignal (below) — graceful shutdown
+	// stops it cleanly. Survives every per-cluster error (logs +
+	// continues) so a flaky backend doesn't crash the server.
+	metricsRec := metrics.NewFileRecorder(cfg.DataDir)
+	srv.SetMetricsRecorder(metricsRec)
+
 	// Optional: wire up OIDC if BASEMENT_OIDC_ISSUER is set. When unset,
 	// local-password remains the only login path.
 	if cfg.OIDC.Issuer != "" {
@@ -247,6 +258,18 @@ func main() {
 
 	ctxSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// v1.0.0d: kick off the hourly metrics snapshot scheduler. Fires
+	// once immediately so first-time deploys get a data point without
+	// waiting an hour, then on Interval + Jitter cadence. The goroutine
+	// returns on ctxSignal cancel.
+	go metrics.RunScheduler(ctxSignal, metrics.SchedulerConfig{
+		Conns:     connStore,
+		Reg:       reg,
+		Recorder:  metricsRec,
+		Interval:  time.Hour,
+		MaxJitter: 90 * time.Second,
+	})
 
 	if err := srv.Start(ctxSignal); err != nil {
 		slog.Error("http server error", "error", err)
