@@ -42,6 +42,12 @@ type testMockDriver struct {
 	completeMultipartFunc func(ctx context.Context, upload driver.MultipartUpload, parts []driver.CompletedPart) error
 	abortMultipartFunc func(ctx context.Context, upload driver.MultipartUpload) error
 	healthCheckErr     error  // custom HealthCheck error for tests
+
+	// v0.9.0i LIFECYCLE.WIZARD hooks. nil-default means tests get
+	// Supported=false (matches Garage v1) and quiet stubs.
+	lifecycleSupportFunc func() driver.LifecycleCapabilities
+	getLifecycleFunc     func(ctx context.Context, bucketID string) ([]driver.LifecycleRule, error)
+	putLifecycleFunc     func(ctx context.Context, bucketID string, rules []driver.LifecycleRule) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -208,6 +214,32 @@ func (m *testMockDriver) PutObjectStream(_ context.Context, _, _ string, _ io.Re
 }
 
 func (m *testMockDriver) ServerSideCopy(_ context.Context, _, _, _, _ string) error {
+	return nil
+}
+
+// v0.9.0i LIFECYCLE.WIZARD additions — overridable funcs so the
+// lifecycle handler tests can plug in custom behaviour without a
+// second mock. Default: Supported=false (matches Garage v1's real
+// behaviour) so admin tests that don't care about lifecycle don't
+// accidentally trigger the editor.
+func (m *testMockDriver) LifecycleSupport() driver.LifecycleCapabilities {
+	if m.lifecycleSupportFunc != nil {
+		return m.lifecycleSupportFunc()
+	}
+	return driver.LifecycleCapabilities{Supported: false}
+}
+
+func (m *testMockDriver) GetLifecycle(ctx context.Context, bucketID string) ([]driver.LifecycleRule, error) {
+	if m.getLifecycleFunc != nil {
+		return m.getLifecycleFunc(ctx, bucketID)
+	}
+	return nil, nil
+}
+
+func (m *testMockDriver) PutLifecycle(ctx context.Context, bucketID string, rules []driver.LifecycleRule) error {
+	if m.putLifecycleFunc != nil {
+		return m.putLifecycleFunc(ctx, bucketID, rules)
+	}
 	return nil
 }
 

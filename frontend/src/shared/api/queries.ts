@@ -861,6 +861,76 @@ export function useOrphanCreds(enabled: boolean) {
   });
 }
 
+// v0.9.0i LIFECYCLE.WIZARD — bucket lifecycle policy hooks.
+//
+// The OpenAPI spec doesn't carry these endpoints yet, so we go around
+// openapi-fetch with bare fetch — same pattern as the v0.9.0g policies
+// and v0.9.0h migrations hooks. Hand-typed shapes match the backend's
+// `internal/driver/driver.go` LifecycleRule + LifecycleCapabilities
+// structs verbatim so the wire is round-trip-safe.
+export interface LifecycleRule {
+  id: string;
+  status: "Enabled" | "Disabled";
+  prefix?: string;
+  expirationDays?: number;
+  transitionDays?: number;
+  transitionTier?: string;
+  noncurrentDays?: number;
+  abortMultipartDays?: number;
+}
+
+export interface LifecycleCapabilities {
+  supported: boolean;
+  expiration: boolean;
+  transition: boolean;
+  transitionTiers: string[];
+  noncurrentDays: boolean;
+  abortMultipartDays: boolean;
+}
+
+export interface LifecycleResponse {
+  rules: LifecycleRule[];
+  capabilities: LifecycleCapabilities;
+}
+
+export function useBucketLifecycle(cid: string, bid: string) {
+  return useQuery<LifecycleResponse>({
+    queryKey: ["admin", "clusters", cid, "buckets", bid, "lifecycle"],
+    queryFn: async () => {
+      const url = `/api/v1/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`bucket-lifecycle/${cid}/${bid}`, res.status, body);
+      // Backend always returns capabilities + rules (even on unsupported
+      // drivers — rules is [] in that case).
+      return body as LifecycleResponse;
+    },
+    enabled: !!cid && !!bid,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+// usePutBucketLifecycle replaces the bucket's lifecycle policy. Pass
+// an empty rules array to clear the policy (backend translates to
+// DeleteBucketLifecycle on S3, empty UpdateBucket on Garage).
+export function usePutBucketLifecycle(cid: string, bid: string) {
+  return useMutation<LifecycleResponse, Error, { rules: LifecycleRule[] }>({
+    mutationFn: async ({ rules }) => {
+      const url = `/api/v1/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rules }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`bucket-lifecycle-put/${cid}/${bid}`, res.status, body);
+      return body as LifecycleResponse;
+    },
+  });
+}
+
 export function useMigrateOrphanCreds() {
   return useMutation({
     mutationFn: async (args: {

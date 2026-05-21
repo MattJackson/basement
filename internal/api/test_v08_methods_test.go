@@ -51,3 +51,49 @@ func (m *fanoutDriver) PutObjectStream(_ context.Context, _, _ string, _ io.Read
 func (m *fanoutDriver) ServerSideCopy(_ context.Context, _, _, _, _ string) error {
 	return nil
 }
+
+// v0.9.0i (LIFECYCLE.WIZARD) shims for the same set of test-only
+// drivers. Default behaviour: report unsupported + return nil/empty
+// from Get/Put so tests that don't exercise lifecycle compile cleanly.
+// Tests that DO exercise lifecycle (admin_lifecycle_test.go) override
+// the methods at call time via embedding.
+
+func (m *layoutDriver) LifecycleSupport() driver.LifecycleCapabilities {
+	return driver.LifecycleCapabilities{Supported: false}
+}
+func (m *layoutDriver) GetLifecycle(_ context.Context, _ string) ([]driver.LifecycleRule, error) {
+	return nil, nil
+}
+func (m *layoutDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
+	return nil
+}
+
+func (m *stubDriver) LifecycleSupport() driver.LifecycleCapabilities {
+	return driver.LifecycleCapabilities{Supported: false}
+}
+func (m *stubDriver) GetLifecycle(_ context.Context, _ string) ([]driver.LifecycleRule, error) {
+	return nil, nil
+}
+func (m *stubDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
+	return nil
+}
+
+func (m *mockDriver) LifecycleSupport() driver.LifecycleCapabilities {
+	return driver.LifecycleCapabilities{Supported: false}
+}
+func (m *mockDriver) GetLifecycle(_ context.Context, _ string) ([]driver.LifecycleRule, error) {
+	return nil, nil
+}
+func (m *mockDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
+	return nil
+}
+
+func (m *fanoutDriver) LifecycleSupport() driver.LifecycleCapabilities {
+	return driver.LifecycleCapabilities{Supported: false}
+}
+func (m *fanoutDriver) GetLifecycle(_ context.Context, _ string) ([]driver.LifecycleRule, error) {
+	return nil, nil
+}
+func (m *fanoutDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
+	return nil
+}

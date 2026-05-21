@@ -19,6 +19,7 @@ import { useUpdateBucket, useDeleteBucket, useUpdateKeyPermissions } from "@/sha
 import { adminPage } from "@/shared/layout/adminPage";
 import { AttachKeyToBucketDialog } from "@/shared/ui/AttachKeyToBucketDialog";
 import { RevokeAccessConfirm } from "@/shared/ui/RevokeAccessConfirm";
+import { LifecycleSection } from "@/shared/ui/LifecycleSection";
 import type { components } from "@/shared/api/types.gen";
 
 export const Route = createFileRoute("/admin/clusters/$cid/buckets/$id")({
@@ -433,7 +434,15 @@ function AdminBucketDetail() {
             )}
           </section>
 
-        {/* Created */}
+        {/* Lifecycle — v0.9.0i. Mounted unconditionally; the section
+            renders its own "Unsupported" pill on drivers without
+            lifecycle CRUD (Garage v1). UI gates the editor on
+            capabilities.supported, not on the cluster's driver name,
+            so a future Garage v1 admin-API extension would light the
+            wizard up without a UI change here. */}
+          <LifecycleSection cid={cid} bid={bucket.id} />
+
+          {/* Created */}
            {bucket.created && humanizeTime(bucket.created) !== "—" && (
              <p className="text-xs text-muted-foreground">Created {humanizeTime(bucket.created)}</p>
            )}

@@ -243,6 +243,12 @@ func (s *Server) routes() {
 			// should be migrating legacy creds.
 			uiAdminG.Get("/admin/migrations/orphan_creds", s.listOrphanCredsHandler)
 			uiAdminG.Post("/admin/migrations/orphan_creds/{cid}/grant", s.migrateOrphanCredsHandler)
+
+			// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). UIAdmin
+			// middleware is belt-and-braces; the actual enforcement
+			// is the per-handler bucket:view / bucket:edit_alias gate.
+			uiAdminG.Get("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.getBucketLifecycleHandler)
+			uiAdminG.Put("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.putBucketLifecycleHandler)
 		})
 
 		// User routes — authenticated users only. Grants filtered server-side.
