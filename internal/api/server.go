@@ -357,8 +357,10 @@ func (s *Server) routes() {
 			userG.Get("/user/regions/{regionId}/buckets/{bid}/objects/{key}/presign-get", s.userPresignGetRegionObjectHandler)
 			userG.Post("/user/regions/{regionId}/buckets/{bid}/objects/{key}/presign-put", s.userPresignPutRegionObjectHandler)
 			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/init", s.userInitRegionMultipartHandler)
+			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/part/{partNum}/presign", s.userPresignRegionUploadPartHandler)
 			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/complete", s.userCompleteRegionMultipartHandler)
 			userG.Delete("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}", s.userAbortRegionMultipartHandler)
+			userG.Delete("/user/regions/{regionId}/buckets/{bid}/objects/{key}", s.userDeleteRegionObjectHandler)
 
 			// User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
 			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)

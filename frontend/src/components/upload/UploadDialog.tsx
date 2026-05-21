@@ -16,17 +16,36 @@ type FileUpload = {
 type UploadDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  cid: string;
+  // Exactly one of cid (cluster-tier, legacy) or regionId (ADR-0002
+  // region-tier, v1.1.0c) must be set. When regionId is set, the
+  // dialog uploads via /api/v1/user/regions/* instead of /user/clusters/*.
+  cid?: string;
+  regionId?: string;
   bid: string;
   prefix: string; // destination folder/prefix
   onSuccess?: () => void;
 };
 
-// Simple upload implementation inline to avoid complex hook state management
+// uploadBaseFor picks the correct /user/{regions|clusters}/{id} prefix
+// for every signed-URL request. Centralised so the inline upload
+// implementation doesn't sprinkle the cid vs regionId branch through
+// every fetch call.
+function uploadBaseFor(opts: { cid?: string; regionId?: string; bid: string }): string {
+  if (opts.regionId) {
+    return `/api/v1/user/regions/${encodeURIComponent(opts.regionId)}/buckets/${encodeURIComponent(opts.bid)}`;
+  }
+  if (opts.cid) {
+    return `/api/v1/user/clusters/${encodeURIComponent(opts.cid)}/buckets/${encodeURIComponent(opts.bid)}`;
+  }
+  throw new Error("UploadDialog requires either cid or regionId");
+}
+
+// Simple upload implementation inline to avoid complex hook state management.
+// `base` is the per-bucket URL prefix — either /api/v1/user/clusters/{cid}/buckets/{bid}
+// (legacy) or /api/v1/user/regions/{regionId}/buckets/{bid} (ADR-0002).
 async function doUpload(
   file: File,
-  cid: string,
-  bid: string,
+  base: string,
   key: string,
   contentType: string,
   onProgress: (event: { type: "progress" | "done" | "error"; fileId: string; percent?: number; error?: string }) => void,
@@ -36,12 +55,13 @@ async function doUpload(
   const RETRYABLE_STATUSES = [500, 502, 503, 504, 429];
 
   try {
-    // Single-shot upload for files ≤ 5 MB
+    // Single-shot upload for files <= 5 MB
     if (file.size <= CHUNK_SIZE && !uploadId) {
       const presignRes = await fetch(
-        `/api/v1/user/clusters/${cid}/buckets/${bid}/objects/${encodeURIComponent(key)}/presign-put?ttl=3600`,
+        `${base}/objects/${encodeURIComponent(key)}/presign-put?ttl=3600`,
         {
           method: "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ contentType }),
         }
@@ -53,9 +73,9 @@ async function doUpload(
       }
 
       const presign: { url: string } = await presignRes.json();
-      
+
       onProgress({ type: "progress", fileId: `${key}-${Date.now()}`, percent: 0 });
-      
+
       const putRes = await fetch(presign.url, {
         method: "PUT",
         body: file,
@@ -73,14 +93,12 @@ async function doUpload(
 
     // Multipart upload for files > 5 MB or if uploadId provided
     if (!uploadId) {
-      const initRes = await fetch(
-        `/api/v1/user/clusters/${cid}/buckets/${bid}/multipart/init`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key, contentType }),
-        }
-      );
+      const initRes = await fetch(`${base}/multipart/init`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, contentType }),
+      });
 
       if (!initRes.ok) {
         const err = await initRes.json().catch(() => ({}));
@@ -103,9 +121,10 @@ async function doUpload(
 
       // Get presigned URL for this part
       const presignRes = await fetch(
-        `/api/v1/user/clusters/${cid}/buckets/${bid}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign?ttl=3600`,
+        `${base}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign?ttl=3600`,
         {
           method: "POST",
+          credentials: "include",
         }
       );
 
@@ -138,7 +157,7 @@ async function doUpload(
         }
 
         const etag = putRes.headers.get("etag")?.replace(/^"|"$/g, "") || "";
-        
+
         if (!etag) {
           throw new Error(`Part ${partNumber} succeeded but no ETag`);
         }
@@ -149,10 +168,11 @@ async function doUpload(
 
       if (!partSuccess) {
         // Abort multipart on failure
-        await fetch(`/api/v1/user/clusters/${cid}/buckets/${bid}/multipart/${encodeURIComponent(uploadId)}`, {
+        await fetch(`${base}/multipart/${encodeURIComponent(uploadId)}`, {
           method: "DELETE",
+          credentials: "include",
         }).catch(() => {});
-        
+
         throw new Error(`Part ${partNumber} failed after retries`);
       }
 
@@ -165,9 +185,10 @@ async function doUpload(
 
     // Complete multipart upload
     const completeRes = await fetch(
-      `/api/v1/user/clusters/${cid}/buckets/${bid}/multipart/${encodeURIComponent(uploadId)}/complete`,
+      `${base}/multipart/${encodeURIComponent(uploadId)}/complete`,
       {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parts: uploadedParts }),
       }
@@ -187,7 +208,8 @@ async function doUpload(
   }
 }
 
-export function UploadDialog({ open, onOpenChange, cid, bid, prefix, onSuccess }: UploadDialogProps) {
+export function UploadDialog({ open, onOpenChange, cid, regionId, bid, prefix, onSuccess }: UploadDialogProps) {
+  const base = uploadBaseFor({ cid, regionId, bid });
   const [files, setFiles] = useState<FileUpload[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
@@ -245,8 +267,7 @@ export function UploadDialog({ open, onOpenChange, cid, bid, prefix, onSuccess }
   const uploadOneFile = async (upload: FileUpload): Promise<void> => {
     await doUpload(
       upload.file,
-      cid,
-      bid,
+      base,
       upload.key,
       upload.file.type,
       (event) => {

@@ -1,144 +1,101 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { userPage } from "@/shared/layout/userPage";
+import { useCreateUserRegion } from "@/shared/api/queries";
 
-// Connect-a-bucket route (ADR-0001, v0.9.0e). Replaces the old
-// /files/clusters/new "Add cluster" page on the user side.
+// Connect-a-region route (ADR-0002, v1.1.0c). Replaces the old
+// /files/buckets/connect "Connect a bucket" page.
 //
-// The mental shift per ADR-0001: users don't add clusters — they bring
-// S3 credentials for a single bucket they're already entitled to.
-// basement resolves or creates a Connection behind the scenes and
-// stores the user's per-bucket key as a Grant.
-export const Route = createFileRoute("/files/buckets/connect")({
-  component: userPage(ConnectBucketPage),
+// Mental shift per ADR-0002: users don't manage buckets or clusters —
+// they own a keychain of (endpoint, key) pairs called Regions. Each
+// region row signs every downstream S3 request for buckets under that
+// endpoint. Bucket visibility comes from the backend (ListBuckets with
+// the user's key), so basement doesn't ask the user which buckets
+// the key can see — it just calls and renders.
+export const Route = createFileRoute("/files/regions/new")({
+  component: userPage(ConnectRegionPage),
 });
 
-type ConnectBody = {
-  alias: string;
-  s3Endpoint: string;
-  accessKeyId: string;
-  secretKey: string;
-  region: string;
-};
-
-type ConnectResponse = {
-  connectionId: string;
-  bucketId: string;
-  alias: string;
-};
-
-type ApiError = {
-  error?: { code?: string; message?: string };
-};
-
-function ConnectBucketPage() {
+function ConnectRegionPage() {
   const navigate = useNavigate();
+  const createRegion = useCreateUserRegion();
 
   const [alias, setAlias] = useState("");
-  const [s3Endpoint, setS3Endpoint] = useState("");
+  const [endpoint, setEndpoint] = useState("");
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [region, setRegion] = useState("us-east-1");
-
-  const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const submitting = createRegion.isPending;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!alias.trim() || !s3Endpoint.trim() || !accessKeyId.trim() || !secretKey.trim()) {
+    if (!alias.trim() || !endpoint.trim() || !accessKeyId.trim() || !secretKey) {
       setErrorMessage("All required fields must be filled in.");
       return;
     }
 
-    setSubmitting(true);
     try {
-      const body: ConnectBody = {
+      await createRegion.mutateAsync({
         alias: alias.trim(),
-        s3Endpoint: s3Endpoint.trim(),
+        endpoint: endpoint.trim(),
         accessKeyId: accessKeyId.trim(),
-        secretKey: secretKey,
+        secretKey,
         region: region.trim() || "us-east-1",
-      };
-
-      const res = await fetch("/api/v1/user/buckets/connect", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify(body),
       });
-
-      if (!res.ok) {
-        let parsed: ApiError | undefined;
-        try {
-          parsed = (await res.json()) as ApiError;
-        } catch {
-          // fall through to generic message
-        }
-        const code = parsed?.error?.code ?? `HTTP_${res.status}`;
-        const msg = parsed?.error?.message ?? `Connect failed (HTTP ${res.status})`;
-        setErrorMessage(`${code}: ${msg}`);
-        return;
-      }
-
-      // 201 with { connectionId, bucketId, alias } — we don't use it
-      // beyond the navigate, but parsing validates the contract.
-      (await res.json()) as ConnectResponse;
       navigate({ to: "/files" });
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Connect failed");
-    } finally {
-      setSubmitting(false);
     }
   };
 
   const canSubmit =
-    !!alias.trim() && !!s3Endpoint.trim() && !!accessKeyId.trim() && !!secretKey.trim() && !submitting;
+    !!alias.trim() && !!endpoint.trim() && !!accessKeyId.trim() && !!secretKey && !submitting;
 
   return (
     <div className="space-y-6">
       <header>
         <a href="/files" className="text-sm text-muted-foreground hover:underline">
-          {"← Back to my buckets"}
+          {"← Back to my regions"}
         </a>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight mt-2">Connect a bucket</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight mt-2">Connect a region</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          You have S3 credentials for a bucket. Add it here and you{"’"}ll see it in your files.
+          Your cluster admin handed you an S3 key. Add the endpoint plus the key here, and every
+          bucket that key can see will show up in your files.
         </p>
       </header>
 
       <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
         <div className="space-y-2">
           <label htmlFor="alias" className="text-sm font-medium">
-            Bucket alias *
+            Region alias *
           </label>
           <input
             id="alias"
             type="text"
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
-            placeholder="lsi"
+            placeholder="home"
             autoComplete="off"
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
           <p className="text-xs text-muted-foreground">
-            The bucket name your operator uses {"—"} shown in your files list.
+            A short label so you can tell this region apart from any others on your keychain.
           </p>
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="s3Endpoint" className="text-sm font-medium">
+          <label htmlFor="endpoint" className="text-sm font-medium">
             S3 endpoint URL *
           </label>
           <input
-            id="s3Endpoint"
+            id="endpoint"
             type="url"
-            value={s3Endpoint}
-            onChange={(e) => setS3Endpoint(e.target.value)}
+            value={endpoint}
+            onChange={(e) => setEndpoint(e.target.value)}
             placeholder="https://s3.example.com"
             autoComplete="off"
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -171,7 +128,7 @@ function ConnectBucketPage() {
               type="password"
               value={secretKey}
               onChange={(e) => setSecretKey(e.target.value)}
-              placeholder="••••••••"
+              placeholder={"••••••••"}
               autoComplete="new-password"
               spellCheck={false}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
@@ -193,7 +150,9 @@ function ConnectBucketPage() {
             spellCheck={false}
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
-          <p className="text-xs text-muted-foreground">Defaults to us-east-1 if your endpoint doesn{"’"}t care.</p>
+          <p className="text-xs text-muted-foreground">
+            Defaults to us-east-1 if your endpoint doesn{"’"}t care.
+          </p>
         </div>
 
         {errorMessage && (
@@ -208,7 +167,7 @@ function ConnectBucketPage() {
             disabled={!canSubmit}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {submitting ? "Connecting..." : "Connect bucket"}
+            {submitting ? "Connecting..." : "Connect region"}
           </button>
           <a
             href="/files"
@@ -222,4 +181,4 @@ function ConnectBucketPage() {
   );
 }
 
-export default ConnectBucketPage;
+export default ConnectRegionPage;

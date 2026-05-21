@@ -1,48 +1,57 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
-import { useUserClusterBuckets, useUserObjects, useUserPresignGet } from "@/shared/api/queries";
+import {
+  useUserRegionBuckets,
+  useUserRegionObjects,
+  useUserRegionPresignGet,
+} from "@/shared/api/queries";
 import { ObjectRow } from "@/components/objects/ObjectRow";
 import { UploadDialog } from "@/components/upload/UploadDialog";
 
-export const Route = createFileRoute("/files/$cid/b/$bid")({
-  component: UserBucketObjects,
+// Object browser for buckets reached via a UserRegion (ADR-0002, v1.1.0c).
+// Same shell + table layout as the old /files/$cid/b/$bid route — the
+// only material difference is that every backend call goes through
+// /api/v1/user/regions/{regionId}/buckets/{bid}/* and is signed with
+// the region's S3 key. We deliberately do NOT call a per-bucket
+// useUserBucket() — there is no per-bucket basement record at the
+// region tier; ListBuckets via the user's key is authoritative.
+export const Route = createFileRoute("/files/$regionId/b/$bid")({
+  component: UserRegionBucketObjects,
 });
 
-function UserBucketObjects() {
-  const { cid, bid } = Route.useParams();
+function UserRegionBucketObjects() {
+  const { regionId, bid } = Route.useParams();
   const navigate = useNavigate();
 
-  // Use window.location.search directly — TanStack Router's
-  // useSearch generic API has stricter type constraints in newer
-  // versions. URL params are simple here so plain URLSearchParams
-  // works and keeps tsc happy across router-major-version bumps.
+  // Plain URLSearchParams keeps tsc happy across TanStack Router majors
+  // (the strict useSearch generic in newer versions broke us before;
+  // see the cluster-tier route note from v0.8.0d.7).
   const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
   const prefix = urlParams.get("prefix") ?? "";
   const token = urlParams.get("token") ?? "";
 
-  const { data: bucketsData, isLoading: bucketsLoading } = useUserClusterBuckets(cid);
+  const { data: bucketsData, isLoading: bucketsLoading } = useUserRegionBuckets(regionId);
   const bucket = bucketsData?.find((b) => b.id === bid);
-  const bucketAlias = bucket?.aliases?.[0] || "(no alias)";
+  const bucketAlias = bucket?.aliases?.[0] || bid;
 
-  const { data: objectsPage, isLoading: objectsLoading, error: objectsError, refetch } = useUserObjects(
-    cid,
-    bid,
-    prefix,
-    token,
-  );
+  const {
+    data: objectsPage,
+    isLoading: objectsLoading,
+    error: objectsError,
+    refetch,
+  } = useUserRegionObjects(regionId, bid, prefix, token);
 
-  const presignMutation = useUserPresignGet(cid, bid);
+  const presignMutation = useUserRegionPresignGet(regionId, bid);
 
   const handleFolderClick = (folderPrefix: string) => {
     navigate({
-      to: "/files/$cid/b/$bid",
-      params: { cid, bid },
+      to: "/files/$regionId/b/$bid",
+      params: { regionId, bid },
       search: { prefix: folderPrefix, token: "" },
     });
   };
@@ -58,14 +67,14 @@ function UserBucketObjects() {
   };
 
   const handleBack = () => {
-    navigate({ to: "/files/$cid", params: { cid } });
+    navigate({ to: "/files/$regionId", params: { regionId } });
   };
 
   const [uploadOpen, setUploadOpen] = useState(false);
 
   const handleUploadSuccess = () => {
     setUploadOpen(false);
-    refetch(); // Invalidate and refresh object list
+    refetch();
   };
 
   if (bucketsLoading) {
@@ -84,7 +93,7 @@ function UserBucketObjects() {
         <EmptyState
           icon="alert-circle"
           title="Bucket not found"
-          description="The bucket you are looking for does not exist or you do not have access to it."
+          description="The bucket you are looking for does not exist or your S3 key cannot see it."
         />
       </div>
     );
@@ -103,55 +112,41 @@ function UserBucketObjects() {
             <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={objectsLoading}>
               Refresh
             </Button>
-            <Button 
-              variant="default" 
-              size="sm" 
+            <Button
+              variant="default"
+              size="sm"
               onClick={() => setUploadOpen(true)}
               disabled={objectsLoading}
             >
               Upload
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate({ to: "/files/syncs/new", search: { mode: "pull" } })}
-              disabled={objectsLoading}
-            >
-              Sync in…
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate({ to: "/files/syncs/new", search: { mode: "push", srcCid: cid, srcBid: bid } })}
-              disabled={objectsLoading}
-            >
-              Sync out…
             </Button>
           </div>
         }
       />
 
       {prefix && (
-        <Breadcrumb prefix={prefix} onNavigate={(p) => navigate({ to: "/files/$cid/b/$bid", params: { cid, bid }, search: { prefix: p, token: "" } })} />
+        <Breadcrumb
+          prefix={prefix}
+          onNavigate={(p) =>
+            navigate({
+              to: "/files/$regionId/b/$bid",
+              params: { regionId, bid },
+              search: { prefix: p, token: "" },
+            })
+          }
+        />
       )}
 
       {objectsLoading ? (
         <BucketListSkeleton />
       ) : objectsError ? (
-        // Surface the backend error directly. Common case: Garage
-        // cluster Connection lacks an s3_endpoint, so ListObjects
-        // returns 501 DRIVER_UNSUPPORTED. Call out that specifically.
         <EmptyState
           icon="alert-circle"
           title="Can't browse objects"
-          description={
-            String(objectsError).includes("DRIVER_UNSUPPORTED") ||
-            String(objectsError).includes("S3 endpoint not configured")
-              ? "This cluster doesn't have an S3 endpoint configured. Open the cluster in /admin/clusters and set the S3 URL (e.g. http://<garage>:3902) on the Edit dialog."
-              : `Backend returned an error: ${String(objectsError)}`
-          }
+          description={`Backend returned an error: ${String(objectsError)}`}
         />
-      ) : objectsPage?.objects.length === 0 && (!objectsPage?.prefixes || objectsPage.prefixes.length === 0) ? (
+      ) : objectsPage?.objects.length === 0 &&
+        (!objectsPage?.prefixes || objectsPage.prefixes.length === 0) ? (
         <EmptyState
           icon="folder-open"
           title="No objects here"
@@ -185,13 +180,10 @@ function UserBucketObjects() {
                 </>
               )}
 
-              {objectsPage?.objects && objectsPage.objects.map((obj) => (
-                <ObjectRow
-                  key={obj.key}
-                  object={obj}
-                  onDownload={handleDownload}
-                />
-              ))}
+              {objectsPage?.objects &&
+                objectsPage.objects.map((obj) => (
+                  <ObjectRow key={obj.key} object={obj} onDownload={handleDownload} />
+                ))}
             </TableBody>
           </Table>
         </div>
@@ -199,7 +191,15 @@ function UserBucketObjects() {
 
       {objectsPage?.isTruncated && (
         <div className="flex justify-center">
-          <Button onClick={() => navigate({ to: "/files/$cid/b/$bid", params: { cid, bid }, search: { prefix, token: objectsPage.nextContinuation ?? "" } })}>
+          <Button
+            onClick={() =>
+              navigate({
+                to: "/files/$regionId/b/$bid",
+                params: { regionId, bid },
+                search: { prefix, token: objectsPage.nextContinuation ?? "" },
+              })
+            }
+          >
             Load more
           </Button>
         </div>
@@ -212,17 +212,24 @@ function UserBucketObjects() {
       <UploadDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
-        cid={cid}
+        regionId={regionId}
         bid={bid}
         prefix={prefix}
         onSuccess={handleUploadSuccess}
       />
-
     </div>
   );
 }
 
-function PageHeader({ title, description, actions }: { title: React.ReactNode; description?: string; actions?: React.ReactNode }) {
+function PageHeader({
+  title,
+  description,
+  actions,
+}: {
+  title: React.ReactNode;
+  description?: string;
+  actions?: React.ReactNode;
+}) {
   return (
     <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
       <div>
@@ -236,7 +243,7 @@ function PageHeader({ title, description, actions }: { title: React.ReactNode; d
 
 function Breadcrumb({ prefix, onNavigate }: { prefix: string; onNavigate: (p: string) => void }) {
   const parts = prefix.split("/").filter(Boolean);
-  
+
   return (
     <nav className="flex items-center gap-2 text-sm text-muted-foreground">
       <button onClick={() => onNavigate("")} className="hover:text-foreground">
@@ -247,7 +254,7 @@ function Breadcrumb({ prefix, onNavigate }: { prefix: string; onNavigate: (p: st
         return (
           <span key={path} className="flex items-center gap-2">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <path d="m9 18 6-6-6-6"/>
+              <path d="m9 18 6-6-6-6" />
             </svg>
             <button onClick={() => onNavigate(path)} className="hover:text-foreground">
               {part}
