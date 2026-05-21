@@ -1477,7 +1477,7 @@ section("[16] version label under Logo (Fix 7)");
       }
       
       // Assert subhead is present
-      const hasSubhead = await page!.locator('p:has-text(/Cross-cluster copy jobs/)').count();
+      const hasSubhead = await page!.locator('p').filter({ hasText: "Cross-cluster copy jobs" }).count();
       if (hasSubhead === 0) {
         throw new Error("/files/syncs missing cross-cluster description");
       }
