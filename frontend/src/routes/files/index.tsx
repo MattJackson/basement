@@ -56,11 +56,11 @@ function FilesHome() {
         canAddCluster ? (
           <EmptyState
             icon="server"
-            title="No clusters yet"
-            description="Add your own storage backend to get started."
+            title="No buckets yet"
+            description="Add a bucket you have S3 credentials for to get started."
             action={
-              <a href="/files/clusters/new" className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                Add cluster →
+              <a href="/files/buckets/connect" className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                + Add bucket access
               </a>
             }
           />

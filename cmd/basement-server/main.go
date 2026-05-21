@@ -10,6 +10,7 @@ import (
 
 	"github.com/mattjackson/basement/internal/api"
 	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/config"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 	_ "github.com/mattjackson/basement/internal/drivers/aws_s3"
@@ -197,6 +198,16 @@ func main() {
 	}
 
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
+
+	// Per ADR-0001 (v0.9.0b/e): policy enforcer + matthew->host_admin
+	// seed assignment. The user-tier "Add bucket access" endpoint and
+	// future RBAC gates depend on this being wired before Start.
+	enforcer, err := policy.Open(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to open policy enforcer", "error", err)
+		os.Exit(1)
+	}
+	srv.SetPolicy(enforcer)
 
 	// Optional: wire up OIDC if BASEMENT_OIDC_ISSUER is set. When unset,
 	// local-password remains the only login path.
