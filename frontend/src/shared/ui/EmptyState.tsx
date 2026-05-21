@@ -20,7 +20,9 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
       {icon === "alert-circle" && (
         <AlertCircleIcon className="mb-4 h-12 w-12 opacity-60" />
       )}
-      <p className="text-lg font-medium">{title}</p>
+      {/* h3 — fits inside whichever h1/h2 the parent page provides; */}
+      {/* gives screen readers + smoke tests a real heading to find. */}
+      <h3 className="text-lg font-medium">{title}</h3>
       <p className="mt-2 text-sm opacity-60 max-w-md">{description}</p>
       {action && <div className="mt-6">{action}</div>}
     </div>

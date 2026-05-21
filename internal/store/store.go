@@ -28,6 +28,7 @@ type Store struct {
 	grantsCache    map[string][]Grant // userID -> grants
 	sharesCache    []Share
 	orgCaps        *OrgCapabilitiesStore
+	bucketGrants   BucketGrants
 }
 
 // Open opens or creates the store at dataDir with the given retention period.
@@ -102,6 +103,34 @@ func (s *Store) loadAll() error {
 // OrgCapabilities returns the org capabilities store.
 func (s *Store) OrgCapabilities() *OrgCapabilitiesStore {
 	return s.orgCaps
+}
+
+// WireBucketGrants opens the per-user per-bucket S3 credential store
+// (ADR-0001, v0.9.0c) and attaches it to this Store. Kept separate
+// from Open() so the long-existing Open(dataDir, retention) signature
+// stays source-compatible with the many test callers in internal/api/
+// that don't need credential grants. main.go calls this once at boot
+// with cfg.JWT.Secret.
+func (s *Store) WireBucketGrants(jwtSecret []byte) error {
+	bg, err := OpenBucketGrants(s.dataDir, jwtSecret)
+	if err != nil {
+		return fmt.Errorf("opening bucket grants: %w", err)
+	}
+	s.bucketGrants = bg
+	return nil
+}
+
+// CredGrants returns the credential-grant store (per-user per-bucket
+// S3 keys, ADR-0001). Returns nil if WireBucketGrants has not been
+// called — callers must nil-check until the v0.9.0d/e cycles wire
+// consumer code.
+//
+// Named CredGrants() rather than BucketGrants() because the legacy
+// Store.BucketGrants(userID string) []string accessor in grants.go
+// owns that method name; the legacy method is a policy artefact
+// scheduled for retirement once the policy package fully replaces it.
+func (s *Store) CredGrants() BucketGrants {
+	return s.bucketGrants
 }
 
 // MigrateLegacyUsers sets uiAdmin=true for existing admin users.
