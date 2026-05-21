@@ -115,6 +115,7 @@ function UsagePage() {
                   <TableHead className="text-right w-[100px]">Buckets</TableHead>
                   <TableHead className="text-right w-[100px]">Keys</TableHead>
                   <TableHead className="w-[120px]">Status</TableHead>
+                  <TableHead className="w-[120px] text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -203,6 +204,21 @@ function PerClusterRow({ row }: { row: UsagePerCluster }) {
           <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
             Error
           </span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        {row.healthy ? (
+          <Link
+            to="/admin/migrate"
+            search={{ srcCid: row.id }}
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs font-medium text-primary hover:underline"
+            title="Bulk-copy every bucket from this cluster to another cluster"
+          >
+            Migrate &rarr;
+          </Link>
+        ) : (
+          <span className="text-xs text-muted-foreground">&mdash;</span>
         )}
       </TableCell>
     </TableRow>

@@ -98,6 +98,14 @@ function ClusterDetailScreen() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
+            title="Bulk-copy every bucket from this cluster to another cluster"
+          >
+            Migrate this cluster
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
             title="Edit label, color, admin token, S3 endpoint…"
           >
