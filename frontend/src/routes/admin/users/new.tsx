@@ -5,8 +5,9 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { client } from "@/shared/api/client";
-import { adminPage } from "@/shared/layout/adminPage";
 import { toast } from "sonner";
+
+// NOTE: do NOT wrap in adminPage() — parent layout (users.tsx) owns chrome.
 
 type Invite = { token: string; expiresAt: string };
 
@@ -15,7 +16,7 @@ type Invite = { token: string; expiresAt: string };
 // fixed-position div instead of the shadcn Dialog component (so it
 // didn't even have proper modal a11y). Migrated to a route here.
 export const Route = createFileRoute("/admin/users/new")({
-  component: adminPage(NewUserPage),
+  component: NewUserPage,
 });
 
 function NewUserPage() {

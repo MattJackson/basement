@@ -5,7 +5,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useUserClusters, useUserClusterBuckets, useCreateUserSync } from "@/shared/api/queries";
-import { userPage } from "@/shared/layout/userPage";
+
+// NOTE: do NOT wrap in userPage() — parent layout (syncs.tsx) owns chrome.
 
 type SyncSearch = {
   mode?: "pull" | "push";
@@ -23,7 +24,7 @@ type SyncSearch = {
 // Default search params let bucket-browser 'Sync in / Sync out'
 // buttons pre-fill the right side: ?mode=push&srcCid=…&srcBid=…
 export const Route = createFileRoute("/files/syncs/new")({
-  component: userPage(NewSyncPage),
+  component: NewSyncPage,
   validateSearch: (search): SyncSearch => ({
     mode: search.mode === "push" ? "push" : "pull",
     srcCid: typeof search.srcCid === "string" ? search.srcCid : undefined,
