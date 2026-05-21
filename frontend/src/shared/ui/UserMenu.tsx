@@ -87,6 +87,9 @@ export function UserMenu() {
           <DropdownMenuLinkItem href="/admin/keys">
             Access keys
           </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem href="/admin/policies">
+            Policies
+          </DropdownMenuLinkItem>
           <DropdownMenuLinkItem href="/admin/system">
             System settings
           </DropdownMenuLinkItem>

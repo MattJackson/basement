@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { client } from "@/shared/api/client";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { adminPage } from "@/shared/layout/adminPage";
 
@@ -181,6 +182,26 @@ function OrgCapabilitiesPage() {
 
         <Button onClick={handleSave}>Save Changes</Button>
       </div>
+
+      {/* Policies link card — ADR-0001 v0.9.0g surfaces the matrix */}
+      {/* editor from the System page too, not just the persona menu. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Policies</CardTitle>
+          <CardDescription>
+            Roles, capabilities, and per-user assignments. The matrix editor
+            controls who can do what, at which scope.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Link
+            to="/admin/policies"
+            className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          >
+            Open the policy matrix editor &rarr;
+          </Link>
+        </CardContent>
+      </Card>
     </div>
   );
 }

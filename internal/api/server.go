@@ -221,6 +221,17 @@ func (s *Server) routes() {
 			uiAdminG.Get("/admin/users", s.listAllUsersHandler)
 			uiAdminG.Post("/admin/users", s.createUserHandler)
 			uiAdminG.Delete("/admin/users/{id}", s.deleteUserHandler)
+
+			// Policy matrix editor (ADR-0001 cycle v0.9.0g). Each
+			// handler runs its own capability gate so the legacy
+			// UIAdmin middleware is purely defense-in-depth; once
+			// the matrix lets operators rebalance assignments,
+			// UIAdmin can retire.
+			uiAdminG.Get("/admin/policies", s.listPoliciesHandler)
+			uiAdminG.Post("/admin/policies/roles", s.upsertRoleHandler)
+			uiAdminG.Delete("/admin/policies/roles/{id}", s.deleteRoleHandler)
+			uiAdminG.Post("/admin/policies/assignments", s.assignRoleHandler)
+			uiAdminG.Delete("/admin/policies/assignments", s.unassignRoleHandler)
 		})
 
 		// User routes — authenticated users only. Grants filtered server-side.
