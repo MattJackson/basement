@@ -55,6 +55,61 @@ func TestListBuckets_403(t *testing.T) {
 	}
 }
 
+// TestListBuckets_S3Fallback_ADR0002 verifies that when the driver is
+// built without an admin URL (the region-tier path introduced by
+// ADR-0002 / v1.1.0c), ListBuckets falls back to the S3 ListBuckets
+// API. Without this fallback, every user-tier region call would 500.
+func TestListBuckets_S3Fallback_ADR0002(t *testing.T) {
+	// Minimal S3-compatible mock: respond to GET / (the AWS SDK's
+	// ListBuckets path) with the canonical XML envelope listing two
+	// buckets. The SDK accepts an empty Owner block.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Owner><ID>x</ID><DisplayName>x</DisplayName></Owner>
+  <Buckets>
+    <Bucket><Name>lsi</Name><CreationDate>2026-01-01T00:00:00.000Z</CreationDate></Bucket>
+    <Bucket><Name>cheshire</Name><CreationDate>2026-01-01T00:00:00.000Z</CreationDate></Bucket>
+  </Buckets>
+</ListAllMyBucketsResult>`))
+	}))
+	defer ts.Close()
+
+	// Build a driver with no admin client (mirrors the region-tier
+	// path in registry_ext.go's ForUserRegion, which omits admin_url).
+	d := &driver{
+		client:     &client{baseURL: "", http: &http.Client{}},
+		s3Endpoint: ts.URL,
+	}
+	s3c, err := newS3Client(map[string]string{
+		"s3_endpoint":   ts.URL,
+		"access_key_id": "AK",
+		"secret_key":    "SK",
+	})
+	if err != nil {
+		t.Fatalf("newS3Client: %v", err)
+	}
+	d.s3Client = s3c
+
+	buckets, err := d.ListBuckets(context.Background())
+	if err != nil {
+		t.Fatalf("ListBuckets fallback: %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("got %d buckets, want 2 (lsi, cheshire); buckets=%+v", len(buckets), buckets)
+	}
+	// At the region tier the S3 API only knows names — ID == Aliases[0] == name.
+	for i, want := range []string{"lsi", "cheshire"} {
+		if buckets[i].ID != want || len(buckets[i].Aliases) != 1 || buckets[i].Aliases[0] != want {
+			t.Errorf("buckets[%d] = %+v, want id=%q alias=[%q]", i, buckets[i], want, want)
+		}
+	}
+}
+
 func TestGetBucket(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/bucket" || r.Method != "GET" {

@@ -163,6 +163,15 @@ func (c *s3Client) presignUploadPart(ctx context.Context, bucket, key, uploadID 
 	return req.URL, nil
 }
 
+// listBucketsS3 invokes the S3 ListBuckets API. Used by ListBuckets()
+// when no admin URL is configured (the ADR-0002 region-tier path,
+// v1.1.0c) so a user with only S3 creds can still see what buckets
+// their key can reach — without us issuing an admin-API call that
+// would fail without admin_token.
+func (c *s3Client) listBucketsS3(ctx context.Context) (*s3.ListBucketsOutput, error) {
+	return c.client.ListBuckets(ctx, &s3.ListBucketsInput{})
+}
+
 // listObjectsV2 lists objects in a bucket with optional prefix and pagination.
 func (c *s3Client) listObjectsV2(ctx context.Context, bucket, prefix, continuation string, limit int) (*s3.ListObjectsV2Output, error) {
 	input := &s3.ListObjectsV2Input{
