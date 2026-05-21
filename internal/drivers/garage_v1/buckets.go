@@ -28,11 +28,24 @@ func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 	// Region-tier fallback: no admin client wired -> use S3 ListBuckets.
 	if d.client == nil || d.client.baseURL == "" {
 		if d.s3Client == nil {
-			return nil, fmt.Errorf("ListBuckets: neither admin client nor S3 client configured")
+			return nil, &driverpkg.Error{
+				Op:      "ListBuckets",
+				Driver:  driverName,
+				Err:     driverpkg.ErrUnsupported,
+				Message: "neither admin client nor S3 client configured",
+			}
 		}
 		out, err := d.s3Client.listBucketsS3(ctx)
 		if err != nil {
-			return nil, err
+			// Wrap so writeDriverError surfaces the real SDK message
+			// (e.g. "dial tcp: i/o timeout", "SignatureDoesNotMatch")
+			// instead of the generic 500 INTERNAL fallback.
+			return nil, &driverpkg.Error{
+				Op:      "ListBuckets",
+				Driver:  driverName,
+				Err:     driverpkg.ErrInvalid,
+				Message: err.Error(),
+			}
 		}
 		buckets := make([]driverpkg.Bucket, 0, len(out.Buckets))
 		for _, b := range out.Buckets {
