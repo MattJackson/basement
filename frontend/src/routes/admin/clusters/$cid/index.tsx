@@ -15,7 +15,6 @@ import { useGetCluster, useNodes, useCapabilities, useTestClusterQuery, useClust
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
-import { EditClusterDialog } from "@/components/clusters/EditClusterDialog";
 import { DriverBadge } from "@/components/clusters/DriverBadge";
 
 export const Route = createFileRoute("/admin/clusters/$cid/")({
@@ -33,7 +32,6 @@ function ClusterDetailScreen() {
   const { data: keys, isLoading: keysLoading } = useClusterKeys(cid);
   const deleteCluster = useDeleteCluster();
 
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   // Test cluster state — auto-fires on mount + caches 60s so the
@@ -330,13 +328,6 @@ function ClusterDetailScreen() {
       {cluster.createdAt && humanizeTime(cluster.createdAt) !== "—" && (
         <p className="text-xs text-muted-foreground">Created {humanizeTime(cluster.createdAt)}</p>
       )}
-
-      {/* Edit Dialog */}
-      <EditClusterDialog
-        open={editDialogOpen}
-        onOpenChange={(open) => !open && setEditDialogOpen(false)}
-        cluster={cluster}
-      />
 
       {/* Danger Zone */}
       <DangerZone description="Deleting this cluster removes the connection configuration. All buckets and keys remain but become inaccessible. Cannot be undone.">
