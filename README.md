@@ -20,28 +20,32 @@ admin (khairul169/garage-webui, Noooste/garage-ui — Garage-only), or
 ship as alpha-quality with security issues (RustFS).
 
 basement is the gap-filler: clean, multi-backend, identity-aware.
-Four drivers ship in v0.5.0 — **Garage v1**, **Garage v2** (first UI
-to support the v2 admin API), **AWS S3**, and **MinIO/OpenMaxIO** —
+Four drivers ship — **Garage v1**, **Garage v2** (first UI to
+support the v2 admin API), **AWS S3**, and **MinIO/OpenMaxIO** —
 with a driver interface that lets the project keep up with the
-ecosystem.
+ecosystem. As of v1.0, basement also ships a flexible policy
+matrix + per-user encrypted bucket credentials, so backend audit
+logs attribute requests to the actual user rather than a shared key.
 
 ## Features
 
 - **Multi-cluster admin** — Add N clusters, manage them side by side
-- **Four drivers** — Garage v1, Garage v2, AWS S3, MinIO / OpenMaxIO
+- **Four drivers** — Garage v1, Garage v2, AWS S3, MinIO / OpenMaxIO; driver-capability-honest UI (no driver-name checks)
 - **First UI to support Garage v2 admin API** — vendored spec, refreshed on upstream updates
-- **OIDC + local password** — Sign in with Authentik / Keycloak /
-  Pocket-ID; local password as break-glass
-- **Bucket + Key admin** — CRUD, quotas, per-bucket permissions,
-  delete protection via two-phase confirm tokens
-- **Layout editor** (Garage) — Stage / apply / revert cluster
-  topology changes
-- **Role split** — admin vs super-admin; destructive ops gated to
-  super-admin
-- **Driver-capability-honest** — UI hides features the backend
-  doesn't support, doesn't fail on click
-- **Single static binary** — Go backend + embedded React frontend;
-  Docker image fits in ~10MB
+- **OIDC + local password** — Sign in with Authentik / Keycloak / Pocket-ID; local password as break-glass
+- **Three-tier role model** — Host Admin / Cluster Admin / User; orthogonal axes, any combo per account
+- **Flexible policy matrix** — 27 capabilities × roles × scopes editable at `/admin/policies`; three seeded roles (host_admin, cluster_admin, bucket_user) plus operator-defined custom roles
+- **Per-user encrypted S3 credentials** — `bucket_grants.json` with AES-GCM keyed off JWT secret; backend audit logs see each user's identity
+- **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
+- **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
+- **Bucket lifecycle wizard** — "After 30 days, delete" without writing JSON; capability-gated per driver
+- **Storage overview dashboard** — per-cluster totals + top buckets by size/objects
+- **Cluster-to-cluster migrate wizard** — 3-step bulk copy across drivers (fans out to existing sync engine)
+- **Cross-backend sync** — Pull/Push between any two clusters; resumable jobs persisted to disk
+- **Bucket + Key admin** — CRUD, quotas, per-bucket permissions, delete protection via two-phase confirm tokens
+- **Layout editor** (Garage) — Stage / apply / revert cluster topology changes
+- **All forms with >2 fields are pages, not dialogs** — operator-confirmed UX rule
+- **Single static binary** — Go backend + embedded React frontend; distroless Docker image runs as UID 65532
 
 ## Screenshots
 
@@ -72,18 +76,22 @@ See `docs/configuration.md` for production env vars.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v0.5 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.0 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
 | AWS S3 admin                         | yes (driver)     | no                      | no                | no              |
 | Multi-cluster from one UI            | yes              | no                      | no                | no              |
 | OIDC / SSO                           | yes              | no                      | yes               | (MinIO-driven)  |
-| Multi-role RBAC (admin / super)      | yes              | no                      | yes (teams)       | (MinIO-driven)  |
+| Flexible role/permission matrix      | yes (27 caps)    | no                      | yes (teams)       | (MinIO-driven)  |
+| Per-user encrypted S3 credentials    | yes              | no                      | no                | no              |
+| Cross-backend sync (Migrate wizard)  | yes              | no                      | no                | no              |
+| Bucket lifecycle wizard              | yes              | no                      | no                | (MinIO-driven)  |
+| Policy simulator (what-if)           | yes              | no                      | no                | no              |
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | MIT              | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-19)            | active v0.5      | active v1.1.0           | active v0.5       | active fork     |
+| Status (as of 2026-05-21)            | active v1.0      | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -91,24 +99,26 @@ Full competitive write-up:
 
 ## Roadmap
 
-v0.5.0 (now): multi-cluster admin + three drivers + OIDC.
-v0.6.x: end-user shell (file browser for non-admin users).
-v0.7.x: end-user sharing + multi-cluster grants.
-v0.8.x: cross-backend sync ("migrate this bucket from MinIO to
-        Garage" with one click).
-v0.9.x: AWS-console-quality wizards (lifecycle, scoped credentials,
-        policy simulator, usage analytics).
-v1.0:   the long-haul "this is THE answer" version.
+- v0.5.0 — multi-cluster admin + 4 drivers + OIDC (shipped)
+- v0.6.x — end-user shell (file browser for non-admin users) (shipped)
+- v0.7.x — end-user sharing + bucket grants (shipped)
+- v0.8.x — cross-backend sync (Pull / Push between any two clusters) (shipped)
+- v0.9.x — operator polish: ADR-0001 three-tier RBAC, lifecycle wizard, policy simulator, usage dashboard, migrate wizard (shipped)
+- **v1.0 (current)** — the production-ready milestone. See [docs/release-notes/v1.0.0.md](docs/release-notes/v1.0.0.md)
+- v1.1+ — at-rest encryption for admin_token, metrics persistence + time-series charts, OIDC group-claim → role auto-mapping, audit log viewer
 
 ## Architecture
 
 - **Backend**: Go 1.23+, chi router, embedded JSON store
-- **Frontend**: React 19 + TanStack Router/Query + shadcn/ui + Tailwind
-- **Auth**: bcrypt + JWT in HttpOnly cookie + OIDC (coreos/go-oidc)
-- **Drivers**: Go interface; per-backend translation layer
-- **Persistence**: JSON files under `BASEMENT_DATA_DIR`
+- **Frontend**: React 19 + TanStack Router/Query + shadcn/ui + Tailwind 4
+- **Auth**: bcrypt + JWT in `__Host-` cookie (SameSite=Strict) + OIDC (coreos/go-oidc)
+- **Drivers**: Go interface; per-backend translation layer; capability flags drive UI gating (no driver-name checks)
+- **Policy enforcer**: `internal/auth/policy/` — capability registry (compiled-in), Role + RoleAssignment store, `Can(user, capability, scope)` primitive plus `CanWithReason()` for the simulator
+- **Per-user S3 credentials**: `internal/store/bucket_grants.go` — AES-GCM encrypted secrets, keyed off JWT signing secret; per-request signing via `Registry.ForUserGrant(connID, accessKeyID, secretKey)`
+- **Persistence**: JSON files under `BASEMENT_DATA_DIR` (default `/var/lib/basement`); atomic write via tmp+fsync+rename
+- **Design contract**: [`docs/adr/0001-rbac-three-tier-creds.md`](docs/adr/0001-rbac-three-tier-creds.md) defines the role / capability / scope model
 
-See `docs/configuration.md` for full env reference.
+See `docs/configuration.md` for env reference and `docs/release-notes/v1.0.0.md` for the v1.0 changelog.
 
 ## Contributing
 
