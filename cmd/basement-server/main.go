@@ -189,6 +189,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Per ADR-0001 (v0.9.0c): per-user per-bucket S3 credential grants,
+	// encrypted at rest with a key derived from the JWT secret.
+	if err := st.WireBucketGrants(cfg.JWT.Secret); err != nil {
+		slog.Error("failed to wire bucket-grant store", "error", err)
+		os.Exit(1)
+	}
+
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
 
 	// Optional: wire up OIDC if BASEMENT_OIDC_ISSUER is set. When unset,
