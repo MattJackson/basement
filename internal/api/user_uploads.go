@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -11,6 +12,11 @@ import (
 )
 
 // userInitMultipartUploadHandler handles POST /api/v1/user/clusters/{cid}/buckets/{bid}/multipart/init.
+//
+// Per ADR-0001 v0.9.0f: requires objects:put on bucket:{cid}:{bid}.
+// Multipart init is the entrypoint to a write — gating it here means
+// the per-user S3 client (and audit trail) carries through the whole
+// upload sequence.
 func (s *Server) userInitMultipartUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -44,9 +50,18 @@ func (s *Server) userInitMultipartUploadHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	userID, ok := s.requireCapability(w, r, "objects:put", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 
@@ -60,6 +75,10 @@ func (s *Server) userInitMultipartUploadHandler(w http.ResponseWriter, r *http.R
 }
 
 // userPresignUploadPartHandler handles POST /api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/part/{partNum}/presign.
+//
+// Per ADR-0001 v0.9.0f: requires objects:put on bucket:{cid}:{bid}.
+// Each part presign re-signs with the user's key — the upload flow
+// goes browser -> presigned URL -> Garage, never the cluster's key.
 func (s *Server) userPresignUploadPartHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -110,9 +129,18 @@ func (s *Server) userPresignUploadPartHandler(w http.ResponseWriter, r *http.Req
 		ttl = maxTtl
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	userID, ok := s.requireCapability(w, r, "objects:put", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 
@@ -131,6 +159,8 @@ func (s *Server) userPresignUploadPartHandler(w http.ResponseWriter, r *http.Req
 }
 
 // userCompleteMultipartUploadHandler handles POST /api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/complete.
+//
+// Per ADR-0001 v0.9.0f: requires objects:put on bucket:{cid}:{bid}.
 func (s *Server) userCompleteMultipartUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -179,9 +209,18 @@ func (s *Server) userCompleteMultipartUploadHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	userID, ok := s.requireCapability(w, r, "objects:put", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 
@@ -199,6 +238,10 @@ func (s *Server) userCompleteMultipartUploadHandler(w http.ResponseWriter, r *ht
 }
 
 // userAbortMultipartUploadHandler handles DELETE /api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}.
+//
+// Per ADR-0001 v0.9.0f: requires objects:put on bucket:{cid}:{bid} —
+// aborting an in-progress upload is part of the write flow, so the
+// same capability that started it owns ending it.
 func (s *Server) userAbortMultipartUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "DELETE required")
@@ -223,9 +266,18 @@ func (s *Server) userAbortMultipartUploadHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	drv, err := s.reg.For(r.Context(), cid)
+	userID, ok := s.requireCapability(w, r, "objects:put", scopeBucket(cid, bid))
+	if !ok {
+		return
+	}
+
+	drv, err := s.userGrantDriver(r.Context(), userID, cid, bid)
 	if err != nil {
-		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
+		if errors.Is(err, ErrNoGrant) {
+			writeNoGrant(w)
+			return
+		}
+		writeGrantInternalError(w, err)
 		return
 	}
 

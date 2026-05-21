@@ -55,11 +55,20 @@ func (s *Server) getKeyHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, key)
 }
 
-// createKeyHandler handles POST /admin/keys.
+// createKeyHandler handles POST /admin/clusters/{cid}/keys.
+//
+// Per ADR-0001 v0.9.0f: gated on key:create at "key:{cid}:*".
 func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "key:create", "key:"+cid+":*"); !ok {
+			return
+		}
 	}
 
 	var spec driver.KeySpec
@@ -92,8 +101,10 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, key)
 }
 
-// updateKeyHandler handles PATCH /admin/keys/{id}.
+// updateKeyHandler handles PATCH /admin/clusters/{cid}/keys/{id}.
 // Supports updating bucketsPermissions (required) and name (returns 501 if only name is set).
+//
+// Per ADR-0001 v0.9.0f: gated on key:edit_permissions at "key:{cid}:{id}".
 func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PATCH required")
@@ -104,6 +115,13 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "key id required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "key:edit_permissions", "key:"+cid+":"+id); !ok {
+			return
+		}
 	}
 
 	var body struct {
@@ -139,10 +157,12 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, key)
 }
 
-// armDeleteKeyHandler handles POST /admin/keys/{id}/_arm-delete.
+// armDeleteKeyHandler handles POST /admin/clusters/{cid}/keys/{id}/_arm-delete.
 // Issues a short-lived HMAC token bound to {keyID, requester} that
 // the matching DELETE must present via X-Confirm-Delete. Two-phase
 // arm/fire pattern — no single curl can destroy a key.
+//
+// Per ADR-0001 v0.9.0f: gated on key:delete at "key:{cid}:{id}".
 func (s *Server) armDeleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -153,6 +173,13 @@ func (s *Server) armDeleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "key id required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "key:delete", "key:"+cid+":"+id); !ok {
+			return
+		}
 	}
 
 	// Confirm the key exists before issuing a token. Avoids handing
@@ -175,12 +202,14 @@ func (s *Server) armDeleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// deleteKeyHandler handles DELETE /admin/keys/{id}.
+// deleteKeyHandler handles DELETE /admin/clusters/{cid}/keys/{id}.
 //
 // Requires X-Confirm-Delete header carrying a token previously minted
-// by POST /admin/keys/{id}/_arm-delete. Token is HMAC-bound to the
-// (key id, user) pair and expires in 60s, so curl-by-hand is
-// two-step and a single leaked URL/path cannot destroy.
+// by POST /admin/clusters/{cid}/keys/{id}/_arm-delete. Token is
+// HMAC-bound to the (key id, user) pair and expires in 60s, so
+// curl-by-hand is two-step and a single leaked URL/path cannot destroy.
+//
+// Per ADR-0001 v0.9.0f: gated on key:delete at "key:{cid}:{id}".
 func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "DELETE required")
@@ -191,6 +220,13 @@ func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "key id required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "key:delete", "key:"+cid+":"+id); !ok {
+			return
+		}
 	}
 
 	confirm := r.Header.Get("X-Confirm-Delete")

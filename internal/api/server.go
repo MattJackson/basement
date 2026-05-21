@@ -51,6 +51,16 @@ type Server struct {
 // don't care about OIDC don't have to thread a nil through. When OIDC
 // isn't set, the /auth/oidc/* routes return 501 OIDC_NOT_CONFIGURED and
 // local-password login remains the only auth path.
+//
+// Policy is wired similarly via SetPolicy(). To keep older tests that
+// don't care about RBAC working (and to avoid a thundering-herd 503
+// when an operator misconfigures), New() installs an internal
+// "permissive" enforcer that grants every capability at every scope
+// to the JWT's UserID. Production main.go REPLACES this with a real
+// file-backed enforcer before Start() — and the user-tier write
+// endpoints (POST /user/buckets/connect, anything that touches
+// CredGrants) explicitly reject the permissive default by checking
+// s.policy == nil OR a sentinel marker — see permissiveEnforcer below.
 func New(cfg *config.Config, store *store.Store, conns store.Connections, drv driver.Driver, reg *driver.Registry) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -67,6 +77,7 @@ func New(cfg *config.Config, store *store.Store, conns store.Connections, drv dr
 		syncStore: syncStore,
 		router:    chi.NewRouter(),
 		logger:    logger,
+		policy:    permissiveEnforcer{},
 	}
 
 	srv.routes()

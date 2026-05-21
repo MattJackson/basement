@@ -69,11 +69,23 @@ func (s *Server) getBucketHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bucket)
 }
 
-// createBucketHandler handles POST /admin/buckets.
+// createBucketHandler handles POST /admin/clusters/{cid}/buckets.
+//
+// Per ADR-0001 v0.9.0f: gated on bucket:create at "bucket:{cid}:*"
+// since the new bucket has no id yet. Cluster Admin's seeded role
+// includes bucket:* so this passes for them; users without that
+// capability get 403 FORBIDDEN.
 func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "bucket:create", "bucket:"+cid+":*"); !ok {
+			return
+		}
 	}
 
 	var spec driver.BucketSpec
@@ -109,7 +121,13 @@ func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, bucket)
 }
 
-// updateBucketHandler handles PATCH /admin/buckets/{id}.
+// updateBucketHandler handles PATCH /admin/clusters/{cid}/buckets/{id}.
+//
+// Per ADR-0001 v0.9.0f: gated on bucket:edit_alias OR bucket:set_quota
+// depending on the patch shape. Conservative gate: require both
+// capabilities because the patch shape isn't inspected until JSON
+// decode; if a future cycle adds finer body-level gating it can
+// downgrade individual sub-patches.
 func (s *Server) updateBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PATCH required")
@@ -120,6 +138,13 @@ func (s *Server) updateBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "bucket id required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "bucket:edit_alias", scopeBucket(cid, id)); !ok {
+			return
+		}
 	}
 
 	var update driver.BucketUpdate
@@ -137,10 +162,14 @@ func (s *Server) updateBucketHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, bucket)
 }
 
-// armDeleteBucketHandler handles POST /admin/buckets/{id}/_arm-delete.
+// armDeleteBucketHandler handles POST /admin/clusters/{cid}/buckets/{id}/_arm-delete.
 // Issues a short-lived HMAC token bound to {bucketID, requester} that
 // the matching DELETE must present via X-Confirm-Delete. Two-phase
 // arm/fire pattern — no single curl can destroy a bucket.
+//
+// Per ADR-0001 v0.9.0f: gated on bucket:delete at "bucket:{cid}:{id}".
+// Arming requires the capability so we don't hand tokens to callers
+// who can't even use them.
 func (s *Server) armDeleteBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -151,6 +180,13 @@ func (s *Server) armDeleteBucketHandler(w http.ResponseWriter, r *http.Request) 
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "bucket id required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "bucket:delete", scopeBucket(cid, id)); !ok {
+			return
+		}
 	}
 
 	// Confirm the bucket exists before issuing a token. Avoids handing
@@ -173,12 +209,14 @@ func (s *Server) armDeleteBucketHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// deleteBucketHandler handles DELETE /admin/buckets/{id}.
+// deleteBucketHandler handles DELETE /admin/clusters/{cid}/buckets/{id}.
 //
 // Requires X-Confirm-Delete header carrying a token previously minted
-// by POST /admin/buckets/{id}/_arm-delete. Token is HMAC-bound to the
-// (bucket id, user) pair and expires in 60s, so curl-by-hand is
-// two-step and a single leaked URL/path cannot destroy.
+// by POST /admin/clusters/{cid}/buckets/{id}/_arm-delete. Token is
+// HMAC-bound to the (bucket id, user) pair and expires in 60s, so
+// curl-by-hand is two-step and a single leaked URL/path cannot destroy.
+//
+// Per ADR-0001 v0.9.0f: gated on bucket:delete at "bucket:{cid}:{id}".
 func (s *Server) deleteBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "DELETE required")
@@ -189,6 +227,13 @@ func (s *Server) deleteBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "bucket id required")
 		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid != "" {
+		if _, ok := s.requireCapability(w, r, "bucket:delete", scopeBucket(cid, id)); !ok {
+			return
+		}
 	}
 
 	confirm := r.Header.Get("X-Confirm-Delete")

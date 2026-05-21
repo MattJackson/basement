@@ -56,6 +56,19 @@ type Enforcer interface {
 	// UnassignRole removes the (userId, roleId, scope) triple if present.
 	// Removing an absent assignment is a no-op (not an error).
 	UnassignRole(userID, roleID, scope string) error
+
+	// SeedEnvAdmin ensures the env-seeded admin (cfg.Admin.User) has the
+	// blanket assignments that keep them functional on first boot of a
+	// policy-aware deployment: host_admin on host:*, cluster_admin on
+	// cluster:*, bucket_user on bucket:*. Idempotent — called from
+	// main.go at boot. Returning early on empty username keeps tests
+	// that don't supply one working with the legacy seedDefaults() pair.
+	//
+	// Per ADR-0001 + v0.9.0f prompt: matthew's existing usage of
+	// basement.pq.io must not break when capability gates land, so the
+	// runtime grants him the three blanket roles up front. Operators
+	// can revoke or narrow these via /admin/policies later.
+	SeedEnvAdmin(username string) error
 }
 
 // fileEnforcer is the file-backed implementation. policies.json lives at
@@ -411,6 +424,30 @@ func (e *fileEnforcer) UnassignRole(userID, roleID, scope string) error {
 		return nil
 	}
 	return e.saveLocked()
+}
+
+// SeedEnvAdmin grants the env-seeded admin (BASEMENT_ADMIN_USER) the
+// three blanket assignments that keep matthew's existing flow on
+// basement.pq.io working when v0.9.0f's capability gates land. The
+// three assignments are independently idempotent so re-running on each
+// boot is safe.
+func (e *fileEnforcer) SeedEnvAdmin(username string) error {
+	if username == "" {
+		return nil
+	}
+
+	wants := []RoleAssignment{
+		{UserID: username, RoleID: "host_admin", Scope: "host:*"},
+		{UserID: username, RoleID: "cluster_admin", Scope: "cluster:*"},
+		{UserID: username, RoleID: "bucket_user", Scope: "bucket:*"},
+	}
+
+	for _, a := range wants {
+		if err := e.AssignRole(a); err != nil {
+			return fmt.Errorf("policy: seeding env-admin %q with %s/%s: %w", username, a.RoleID, a.Scope, err)
+		}
+	}
+	return nil
 }
 
 // --- Scope matching --------------------------------------------------------

@@ -23,9 +23,15 @@ func (s *Server) getOrgCapabilitiesHandler(w http.ResponseWriter, r *http.Reques
 
 // updateOrgCapabilitiesHandler handles PATCH /api/v1/admin/system.
 // Updates OrgCapabilities for UI Admin only. Atomic write.
+//
+// Per ADR-0001 v0.9.0f: gated on host:manage_org_caps at "host:*".
 func (s *Server) updateOrgCapabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PATCH required")
+		return
+	}
+
+	if _, ok := s.requireCapability(w, r, "host:manage_org_caps", "host:*"); !ok {
 		return
 	}
 
