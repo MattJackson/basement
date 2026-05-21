@@ -1332,41 +1332,31 @@ async function main(): Promise<number> {
     // ============================================================
     // 13. Fix 7: version label under Logo wordmark
     // ============================================================
+    // USER.CONNECTBUCKET — v0.9.0e: /files/buckets/connect (replaces
+    // the deleted v0.7.0f /files/clusters/new flow). Mints a
+    // per-bucket Grant per ADR-0001.
     // ============================================================
-    // USER.ADDCLUSTER — v0.7.0f: /files/clusters/new respects OrgCapabilities
-    // ============================================================
-    section("[15a] USER.ADDCLUSTER — /files/clusters/new respects OrgCapabilities (v0.7.0f)");
-    await check("navigate to /files/clusters/new and verify gate behavior", async () => {
-      await page!.goto(`${BASE_URL}/files/clusters/new`, { waitUntil: "networkidle" });
-      
-      // Check that we're not on login or admin pages
+    section("[15a] USER.CONNECTBUCKET — /files/buckets/connect renders the bucket-centric form (v0.9.0e)");
+    await check("navigate to /files/buckets/connect and verify form", async () => {
+      await page!.goto(`${BASE_URL}/files/buckets/connect`, { waitUntil: "networkidle" });
+
       const url = page!.url();
       if (/\/admin/.test(url)) {
         throw new Error("redirected to /admin — should stay in user shell");
       }
 
-      // Look for "Add cluster" heading
-      const hasHeading = await page!.locator('h1').filter({ hasText: /Add cluster/ }).count() > 0;
-      
+      const hasHeading = await page!.locator('h1').filter({ hasText: /Connect a bucket/ }).count() > 0;
       if (!hasHeading) {
-        throw new Error("Could not find 'Add cluster' heading on /files/clusters/new");
+        throw new Error("Could not find 'Connect a bucket' heading on /files/buckets/connect");
       }
 
-      // Since AllowUserBackends is false by default, we should see the disabled message
-      const hasDisabledMessage = await page!.locator('p').filter({ 
-        hasText: /disabled|administrator|contact/i 
-      }).count() > 0;
-
-      if (!hasDisabledMessage) {
-        // If no disabled message, check for form elements (means AllowUserBackends might be true in test env)
-        const hasFormLabel = await page!.locator('label').filter({ hasText: /Label|Driver/i }).count() > 0;
-        if (!hasFormLabel) {
-          throw new Error("Neither disabled message nor form elements found on /files/clusters/new");
-        }
+      // Form should have bucket alias + S3 endpoint + access key fields
+      const inputCount = await page!.locator('input').count();
+      if (inputCount < 4) {
+        throw new Error(`Expected ≥4 inputs (alias, endpoint, access key, secret), got ${inputCount}`);
       }
 
-      // Take a screenshot for visual verification
-      await shot(page!, "15a-add-cluster-page");
+      await shot(page!, "15a-connect-bucket-page");
     });
 
 
@@ -1518,7 +1508,7 @@ section("[16] version label under Logo (Fix 7)");
       
       if (hasEmptyState === 0 && hasJobCards === 0) {
         // Check for "Start sync" button on empty state OR any job card content
-        const hasStartButton = await page!.locator('button:has-text(/Start sync/i)').count();
+        const hasStartButton = await page!.locator('button').filter({ hasText: /Start sync/i }).count();
         if (hasStartButton === 0) {
           throw new Error("/files/syncs shows neither empty state nor job cards");
         }
