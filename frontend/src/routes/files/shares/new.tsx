@@ -5,20 +5,25 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useCreateUserShare, useRevokeUserShare, useUserClusters, useUserClusterBuckets } from "@/shared/api/queries";
+import { useCreateUserShare, useRevokeUserShare, useUserRegions, useUserRegionBuckets } from "@/shared/api/queries";
 
 // NOTE: do NOT wrap in userPage() — parent layout (shares.tsx)
-// already wraps the Outlet in UserShell. Double-wrap → double-header
-// (caught visually on v0.9.0a screenshot pass).
+// already wraps the Outlet in UserShell.
+//
+// ADR-0002 v1.1.0e rebuilds the new-share picker around UserRegions
+// instead of UserClusters. The picker becomes Region -> Bucket ->
+// prefix/key. The underlying POST /user/shares takes connectionId at
+// the wire level; we pass the regionId there as a stop-gap until a
+// later cycle adds an endpoint-resolution layer on the backend.
 export const Route = createFileRoute("/files/shares/new")({
   component: NewSharePage,
 });
 
 function NewSharePage() {
   const navigate = useNavigate();
-  const { data: clusters } = useUserClusters();
+  const { data: regions } = useUserRegions();
 
-  const [connectionId, setConnectionId] = useState("");
+  const [regionId, setRegionId] = useState("");
   const [bucketId, setBucketId] = useState("");
   const [shareType, setShareType] = useState<"prefix" | "object">("prefix");
   const [prefix, setPrefix] = useState("");
@@ -28,12 +33,12 @@ function NewSharePage() {
   const [hasPassword, setHasPassword] = useState(false);
   const [password, setPassword] = useState("");
 
-  const { data: buckets } = useUserClusterBuckets(connectionId);
+  const { data: buckets } = useUserRegionBuckets(regionId || null);
   const createShare = useCreateUserShare();
   const revokeShare = useRevokeUserShare();
 
   const handleSave = () => {
-    if (!connectionId || !bucketId) return;
+    if (!regionId || !bucketId) return;
     const payload: {
       connectionId: string;
       bucketId: string;
@@ -42,7 +47,7 @@ function NewSharePage() {
       expiresAt?: string;
       downloadLimit?: number;
       password?: string;
-    } = { connectionId, bucketId };
+    } = { connectionId: regionId, bucketId };
 
     if (shareType === "prefix") payload.prefix = prefix || "";
     else payload.key = key || "";
@@ -69,9 +74,8 @@ function NewSharePage() {
     revokeShare.mutate(createShare.data.token, { onSuccess: () => navigate({ to: "/files/shares" }) });
   };
 
-  const isCreateDisabled = !connectionId || !bucketId || (shareType === "prefix" && !prefix) || (shareType === "object" && !key) || (hasPassword && password.length < 8) || createShare.isPending;
+  const isCreateDisabled = !regionId || !bucketId || (shareType === "prefix" && !prefix) || (shareType === "object" && !key) || (hasPassword && password.length < 8) || createShare.isPending;
 
-  // Post-creation: show generated link + revoke option
   if (generatedLink) {
     return (
       <div className="space-y-6 max-w-3xl">
@@ -107,7 +111,7 @@ function NewSharePage() {
         <div className="flex items-center gap-2">
           <Button onClick={() => navigate({ to: "/files/shares" })}>Done</Button>
           <Button variant="outline" onClick={handleRevoke} disabled={revokeShare.isPending}>
-            {revokeShare.isPending ? "Revoking…" : "Revoke this link"}
+            {revokeShare.isPending ? "Revoking..." : "Revoke this link"}
           </Button>
         </div>
       </div>
@@ -126,7 +130,7 @@ function NewSharePage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => navigate({ to: "/files/shares" })} disabled={createShare.isPending}>Cancel</Button>
           <Button onClick={handleSave} disabled={isCreateDisabled}>
-            {createShare.isPending ? "Creating…" : "Create link"}
+            {createShare.isPending ? "Creating..." : "Create link"}
           </Button>
         </div>
       </header>
@@ -141,15 +145,15 @@ function NewSharePage() {
         <h2 className="text-sm font-medium text-muted-foreground">Target</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="cluster">Cluster *</Label>
+            <Label htmlFor="region">Region *</Label>
             <select
-              id="cluster"
-              value={connectionId}
-              onChange={(e) => { setConnectionId(e.target.value); setBucketId(""); }}
+              id="region"
+              value={regionId}
+              onChange={(e) => { setRegionId(e.target.value); setBucketId(""); }}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              <option value="">— pick a cluster —</option>
-              {clusters?.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+              <option value="">&mdash; pick a region &mdash;</option>
+              {regions?.map((r) => (<option key={r.id} value={r.id}>{r.alias || r.endpoint}</option>))}
             </select>
           </div>
           <div className="grid gap-2">
@@ -158,10 +162,10 @@ function NewSharePage() {
               id="bucket"
               value={bucketId}
               onChange={(e) => setBucketId(e.target.value)}
-              disabled={!connectionId}
+              disabled={!regionId}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
-              <option value="">— pick a bucket —</option>
+              <option value="">&mdash; pick a bucket &mdash;</option>
               {buckets?.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0,12)}</option>))}
             </select>
           </div>
@@ -221,7 +225,7 @@ function NewSharePage() {
         {hasPassword && (
           <div className="grid gap-2">
             <Label htmlFor="password">Password (8+ characters)</Label>
-            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="**********" />
           </div>
         )}
       </section>
@@ -232,7 +236,7 @@ function NewSharePage() {
 function BackLink() {
   return (
     <Link to="/files/shares" className="inline-flex items-center gap-1 text-sm font-medium hover:underline text-muted-foreground">
-      ← Back to shares
+      &larr; Back to shares
     </Link>
   );
 }

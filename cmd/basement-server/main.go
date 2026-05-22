@@ -198,21 +198,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Per ADR-0001 (v0.9.0c): per-user per-bucket S3 credential grants,
-	// encrypted at rest with a key derived from the JWT secret.
-	if err := st.WireBucketGrants(cfg.JWT.Secret); err != nil {
-		slog.Error("failed to wire bucket-grant store", "error", err)
-		os.Exit(1)
-	}
-
 	// Per ADR-0002 (v1.1.0a): per-user S3 region keychain, AES-GCM
 	// encrypted at rest with a key derived from the JWT secret. The
-	// region-tier abstraction supersedes per-bucket grants at the user
-	// persona; bucket_grants stays wired through v1.1.0d's migration
-	// cycle.
+	// region-tier abstraction supersedes the retired per-bucket grant
+	// model (deleted v1.1.0e).
 	if err := st.WireUserRegions(cfg.JWT.Secret); err != nil {
 		slog.Error("failed to wire user-region store", "error", err)
 		os.Exit(1)
+	}
+
+	// Per ADR-0002 (v1.1.0e): if a deployment still carries the legacy
+	// bucket_grants.json on disk (operators upgrading directly to
+	// v1.1.0e without v1.1.0d's migration), rename it aside so the
+	// forensic trail survives without confusing future readers. No-op
+	// on fresh installs. Failure here is a warning, not fatal — the
+	// legacy file isn't consulted by v1.1.0e+ code paths.
+	if err := store.ArchiveLegacyBucketGrants(cfg.DataDir); err != nil {
+		slog.Warn("failed to archive legacy bucket_grants.json", "error", err)
 	}
 
 	// Per ADR-0002 (v1.1.0b): the driver registry needs a handle to

@@ -259,14 +259,40 @@ export function useTestClusterQuery(cid: string, opts: { auto?: boolean } = {}) 
   });
 }
 
-// User endpoints — filtered by grants (server-side).
-export function useUserClusters() {
-  return useQuery<Connection[]>({
-    queryKey: ["user", "clusters"],
+// User region keychain hooks (ADR-0002, v1.1.0e).
+//
+// Replaces the legacy user-cluster hook set (useUserClusters /
+// useUserClusterBuckets / useUserBucket / useUserObjects /
+// useUserPresign* / useUserMultipart* / useUserKeys /
+// useCreateUserConnect). The user persona now operates on
+// /api/v1/user/regions/* — region IDs replace cluster IDs, and the
+// keychain entry's S3 key signs every request server-side.
+//
+// All hooks go through bare fetch + the API path string rather than
+// openapi-fetch because the OpenAPI YAML doesn't carry /user/regions
+// yet (deferred to v1.1.0f or later). Switch to client.GET once
+// gen:api picks the paths up.
+
+export type UserRegion = {
+  id: string;
+  userId: string;
+  alias: string;
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  createdAt: string;
+  updatedAt?: string;
+  lastUsedAt?: string;
+};
+
+export function useUserRegions() {
+  return useQuery<UserRegion[]>({
+    queryKey: ["user", "regions"],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/user/clusters");
-      if (!response.ok || !data) throw apiError("user/clusters", response.status, error);
-      return (data as unknown[]) as Connection[];
+      const res = await fetch("/api/v1/user/regions", { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/regions", res.status, body);
+      return (body ?? []) as UserRegion[];
     },
     staleTime: 60 * 1000,
     refetchInterval: 60 * 1000,
@@ -274,218 +300,181 @@ export function useUserClusters() {
   });
 }
 
-export function useUserCluster(cid: string) {
-  return useQuery<Connection>({
-    queryKey: ["user", "clusters", cid],
+export function useUserRegion(regionId: string | null) {
+  return useQuery<UserRegion>({
+    queryKey: ["user", "regions", regionId],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/user/clusters/{cid}", {
-        params: { path: { cid } },
-      });
-      if (!response.ok || !data) throw apiError(`user/clusters/${cid}`, response.status, error);
-      return data as Connection;
+      if (!regionId) throw new Error("regionId required");
+      const res = await fetch(`/api/v1/user/regions/${encodeURIComponent(regionId)}`, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/${regionId}`, res.status, body);
+      return body as UserRegion;
     },
-    enabled: !!cid,
-    staleTime: 30_000,
+    enabled: !!regionId,
+    staleTime: 30 * 1000,
+    retry: 1,
   });
 }
 
-export function useUserClusterBuckets(cid: string) {
+export function useUserRegionBuckets(regionId: string | null) {
   return useQuery<Bucket[]>({
-    queryKey: ["user", "clusters", cid, "buckets"],
+    queryKey: ["user", "regions", regionId, "buckets"],
     queryFn: async () => {
-      const { data, error, response } = await client.GET("/user/clusters/{cid}/buckets", {
-        params: { path: { cid } },
-      });
-      if (!response.ok || !data) throw apiError(`user/clusters/${cid}/buckets`, response.status, error);
-      return data as Bucket[];
+      if (!regionId) throw new Error("regionId required");
+      const res = await fetch(`/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets`, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/${regionId}/buckets`, res.status, body);
+      return (body ?? []) as Bucket[];
     },
-    enabled: !!cid,
+    enabled: !!regionId,
     staleTime: 30 * 1000,
-  });
-}
-
-// Single-bucket detail (user persona). Garage v1's ListBuckets
-// doesn't include bytes/objects, so the list view hydrates each row
-// with its own GetBucket call — same pattern as the admin side.
-export function useUserBucket(cid: string, bid: string) {
-  return useQuery<Bucket>({
-    queryKey: ["user", "clusters", cid, "buckets", bid],
-    queryFn: async () => {
-      const { data, error, response } = await client.GET("/user/clusters/{cid}/buckets/{bid}", {
-        params: { path: { cid, bid } },
-      });
-      if (!response.ok || !data) throw apiError(`user/buckets/${bid}`, response.status, error);
-      return data as Bucket;
-    },
-    enabled: !!cid && !!bid,
-    staleTime: 30_000,
     retry: 1,
   });
 }
 
-export function useUserKeys() {
-  return useQuery<components["schemas"]["AggregatedUserKeysResponse"]>({
-    queryKey: ["user", "keys"],
-    queryFn: async () => {
-      const { data, error, response } = await client.GET("/user/keys");
-      if (!response.ok || !data) throw apiError("user/keys", response.status, error);
-      return (data as unknown) as components["schemas"]["AggregatedUserKeysResponse"];
-    },
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
-    retry: 1,
-  });
-}
-
-export function useUserKeysFlat() {
-  const query = useUserKeys();
-  if (query.data) {
-    return {
-      ...query,
-      data: query.data.keys,
-    };
-  }
-  return query;
-}
-
-// v0.7.0d USER.OBJECTBROWSE — object browser hooks.
-export function useUserObjects(cid: string | null, bid: string | null, prefix: string = "", token: string = "") {
+export function useUserRegionObjects(regionId: string | null, bid: string | null, prefix: string = "", token: string = "") {
   return useQuery<components["schemas"]["ObjectPage"]>({
-    queryKey: ["user", "objects", cid, bid, prefix, token],
+    queryKey: ["user", "regions", regionId, "buckets", bid, "objects", prefix, token],
     queryFn: async () => {
-      // Use native fetch — `client.GET(url as any, ...)` (the
-      // openapi-fetch path) silently 404s when the URL isn't a
-      // registered OpenAPI template path. The OpenAPI codegen
-      // hasn't picked up the user-objects endpoint yet, so we go
-      // around it. Switch back to client.GET once gen:api covers it.
+      if (!regionId || !bid) throw new Error("regionId and bid required");
       const params: Record<string, string> = {};
       if (prefix) params.prefix = prefix;
       if (token) params.token = token;
       const qs = new URLSearchParams(params).toString();
-      const url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects${qs ? `?${qs}` : ""}`;
-
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects${qs ? `?${qs}` : ""}`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
-      if (!res.ok) throw apiError(`user/objects/${cid}/${bid}`, res.status, body);
+      if (!res.ok) throw apiError(`user/regions/${regionId}/buckets/${bid}/objects`, res.status, body);
       return body as components["schemas"]["ObjectPage"];
     },
-    enabled: !!cid && !!bid,
+    enabled: !!regionId && !!bid,
     staleTime: 30 * 1000,
     retry: 1,
   });
 }
 
-export function useUserPresignGet(cid: string | null, bid: string | null) {
+export function useCreateUserRegion() {
+  return useMutation({
+    mutationFn: async (input: {
+      alias: string;
+      endpoint: string;
+      accessKeyId: string;
+      secretKey: string;
+      region?: string;
+    }) => {
+      const res = await fetch("/api/v1/user/regions", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/regions/create", res.status, body);
+      return body as UserRegion;
+    },
+  });
+}
+
+export function useDeleteUserRegion() {
+  return useMutation({
+    mutationFn: async (regionId: string) => {
+      const res = await fetch(`/api/v1/user/regions/${encodeURIComponent(regionId)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`user/regions/delete/${regionId}`, res.status, body);
+      }
+      return null;
+    },
+  });
+}
+
+export function useUserRegionPresignGet(regionId: string | null, bid: string | null) {
   return useMutation({
     mutationFn: async ({ key, ttl }: { key: string; ttl: number }) => {
-      if (!cid || !bid || !key) throw new Error("Missing required parameters");
-
-      const params: Record<string, string> = {};
-      params.ttl = String(ttl);
-
-      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects/${encodeURIComponent(key)}/presign-get`;
+      if (!regionId || !bid || !key) throw new Error("Missing required parameters");
+      const params: Record<string, string> = { ttl: String(ttl) };
       const qs = new URLSearchParams(params).toString();
-      if (qs) url += `?${qs}`;
-
-      const { data, error, response } = await client.POST(url as any, { params: { query: params } });
-      if (!response.ok || !data) throw apiError(`user/presign-get/${cid}/${bid}/${key}`, response.status, error);
-      return data as components["schemas"]["PresignedURL"];
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}/presign-get${qs ? `?${qs}` : ""}`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/${regionId}/presign-get`, res.status, body);
+      return body as components["schemas"]["PresignedURL"];
     },
   });
 }
 
-// Upload mutation hooks for v0.7.0e USER.UPLOAD
-
-export function useUserPresignPut(cid: string | null, bid: string | null) {
+export function useUserRegionPresignPut(regionId: string | null, bid: string | null) {
   return useMutation({
     mutationFn: async ({ key, contentType, ttl }: { key: string; contentType?: string; ttl?: number }) => {
-      if (!cid || !bid || !key) throw new Error("Missing required parameters");
-
-      const params: Record<string, string> = {};
-      params.ttl = String(ttl ?? 3600);
-
-      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/objects/${encodeURIComponent(key)}/presign-put`;
+      if (!regionId || !bid || !key) throw new Error("Missing required parameters");
+      const params: Record<string, string> = { ttl: String(ttl ?? 3600) };
       const qs = new URLSearchParams(params).toString();
-      if (qs) url += `?${qs}`;
-
-      const { data, error, response } = await client.POST(url as any, { 
-        params: { query: params },
-        body: { contentType },
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}/presign-put${qs ? `?${qs}` : ""}`;
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType }),
       });
-      if (!response.ok || !data) throw apiError(`user/presign-put/${cid}/${bid}/${key}`, response.status, error);
-      return data as components["schemas"]["PresignedURL"];
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/${regionId}/presign-put`, res.status, body);
+      return body as components["schemas"]["PresignedURL"];
     },
   });
 }
 
-export function useUserMultipartInit(cid: string | null, bid: string | null) {
+export function useUserRegionMultipartInit(regionId: string | null, bid: string | null) {
   return useMutation({
     mutationFn: async ({ key, contentType }: { key: string; contentType?: string }) => {
-      if (!cid || !bid || !key) throw new Error("Missing required parameters");
-
-      const { data, error, response } = await client.POST(
-        "/api/v1/user/clusters/{cid}/buckets/{bid}/multipart/init" as any,
-        { 
-          params: { path: { cid, bid } },
-          body: { key, contentType },
-        }
-      );
-      if (!response.ok || !data) throw apiError(`user/multipart/init/${cid}/${bid}/${key}`, response.status, error);
-      return data as components["schemas"]["MultipartUpload"];
+      if (!regionId || !bid || !key) throw new Error("Missing required parameters");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/init`;
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, contentType }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/${regionId}/multipart/init`, res.status, body);
+      return body as components["schemas"]["MultipartUpload"];
     },
   });
 }
 
-export function useUserMultipartPartPresign(cid: string | null, bid: string | null, uploadId: string | null) {
-  return useMutation({
-    mutationFn: async ({ partNumber, ttl }: { partNumber: number; ttl?: number }) => {
-      if (!cid || !bid || !uploadId) throw new Error("Missing required parameters");
-
-      const params: Record<string, string> = {};
-      params.ttl = String(ttl ?? 3600);
-
-      let url = `/api/v1/user/clusters/${cid}/buckets/${bid}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign`;
-      const qs = new URLSearchParams(params).toString();
-      if (qs) url += `?${qs}`;
-
-      const { data, error, response } = await client.POST(url as any, { params: { query: params } });
-      if (!response.ok || !data) throw apiError(`user/multipart/presign-part/${cid}/${bid}/${uploadId}/${partNumber}`, response.status, error);
-      return data as components["schemas"]["PresignedURL"];
-    },
-  });
-}
-
-export function useUserMultipartComplete(cid: string | null, bid: string | null) {
+export function useUserRegionMultipartComplete(regionId: string | null, bid: string | null) {
   return useMutation({
     mutationFn: async ({ uploadId, parts }: { uploadId: string; parts: { partNumber: number; etag: string }[] }) => {
-      if (!cid || !bid || !uploadId) throw new Error("Missing required parameters");
-
-      const { data, error, response } = await client.POST(
-        "/api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/complete" as any,
-        { 
-          params: { path: { cid, bid, uploadId } },
-          body: { parts },
-        }
-      );
-      if (!response.ok) throw apiError(`user/multipart/complete/${cid}/${bid}/${uploadId}`, response.status, error);
-      return data;
+      if (!regionId || !bid || !uploadId) throw new Error("Missing required parameters");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}/complete`;
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parts }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`user/regions/${regionId}/multipart/complete`, res.status, body);
+      }
+      return null;
     },
   });
 }
 
-export function useUserMultipartAbort(cid: string | null, bid: string | null) {
+export function useUserRegionMultipartAbort(regionId: string | null, bid: string | null) {
   return useMutation({
     mutationFn: async (uploadId: string) => {
-      if (!cid || !bid || !uploadId) throw new Error("Missing required parameters");
-
-      const { data, error, response } = await client.DELETE(
-        "/api/v1/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}" as any,
-        { 
-          params: { path: { cid, bid, uploadId } },
-        }
-      );
-      if (!response.ok) throw apiError(`user/multipart/abort/${cid}/${bid}/${uploadId}`, response.status, error);
-      return data;
+      if (!regionId || !bid || !uploadId) throw new Error("Missing required parameters");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}`;
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`user/regions/${regionId}/multipart/abort`, res.status, body);
+      }
+      return null;
     },
   });
 }

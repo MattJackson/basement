@@ -1,22 +1,19 @@
 // Package api: tests for the v0.9.0f capability gates.
 //
-// Two flavours covered here:
-//
-//   1. User-side: a non-admin user without a BucketGrant gets a clean
-//      403 NO_GRANT when they try to ListObjects on a bucket they
-//      don't have access to. With a grant + a bucket_user assignment,
-//      the per-user driver path activates and the request reaches the
-//      backend.
-//
-//   2. Admin-side: a non-admin user with no host_admin / cluster_admin
-//      assignment gets a 403 FORBIDDEN when they try a mutating admin
-//      op (createBucket / createCluster). With the matching capability,
-//      the request passes the gate.
+// Admin-side: a non-admin user with no host_admin / cluster_admin
+// assignment gets a 403 FORBIDDEN when they try a mutating admin op
+// (createBucket / createCluster). With the matching capability, the
+// request passes the gate.
 //
 // The legacy admin-role middleware would already reject a non-admin
 // caller on /admin/* with 403 INSUFFICIENT_ROLE — the new gate sits
 // behind it as defense in depth, so for admin-side capability tests
 // we use an admin-role token but no policy assignment.
+//
+// The original v0.9.0f user-side gate tests (/user/clusters/.../objects)
+// were retired in ADR-0002 cycle v1.1.0e along with the route tree
+// they exercised. User-tier authentication is now owner-checked at
+// the region keychain layer; see user_regions_test.go.
 package api
 
 import (
@@ -55,10 +52,6 @@ func newGateTestEnv(t *testing.T) (*Server, *testMockConnectionStore, policy.Enf
 		cleanup()
 		t.Fatalf("store.Open: %v", err)
 	}
-	if err := st.WireBucketGrants(cfg.JWT.Secret); err != nil {
-		cleanup()
-		t.Fatalf("WireBucketGrants: %v", err)
-	}
 
 	enf, err := policy.Open(filepath.Join(tmp, "policy"))
 	if err != nil {
@@ -70,68 +63,6 @@ func newGateTestEnv(t *testing.T) (*Server, *testMockConnectionStore, policy.Enf
 	srv := New(cfg, st, conns, nil, nil)
 	srv.SetPolicy(enf)
 	return srv, conns, enf, cleanup
-}
-
-// userCookieReqMethod is like makeUserCookieReq but lets the test
-// choose method + omit body (for GET / DELETE handlers).
-func userCookieReqMethod(method, url string) *http.Request {
-	req := httptest.NewRequest(method, url, nil)
-	req.AddCookie(&http.Cookie{
-		Name:     "__Host-basement_session",
-		Value:    generateUserToken(),
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
-	return req
-}
-
-// TestUserListObjects_NoCapability: a non-admin user with NO policy
-// assignment hits the objects:list gate first and receives 403
-// FORBIDDEN. Verifies the gate fires before any driver call so the
-// nil-driver path is never exercised.
-func TestUserListObjects_NoCapability(t *testing.T) {
-	srv, _, _, cleanup := newGateTestEnv(t)
-	defer cleanup()
-
-	req := userCookieReqMethod(http.MethodGet,
-		"/api/v1/user/clusters/cid-x/buckets/lsi/objects")
-	rr := httptest.NewRecorder()
-	srv.router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d (body=%s)", rr.Code, rr.Body.String())
-	}
-	if !bodyHasCode(rr, "FORBIDDEN") {
-		t.Errorf("expected FORBIDDEN code, got body=%s", rr.Body.String())
-	}
-}
-
-// TestUserListObjects_CapabilityButNoGrant: a non-admin user with
-// objects:list assigned on the bucket scope but NO BucketGrant. The
-// gate passes; the grant lookup fails with 403 NO_GRANT.
-func TestUserListObjects_CapabilityButNoGrant(t *testing.T) {
-	srv, _, enf, cleanup := newGateTestEnv(t)
-	defer cleanup()
-
-	if err := enf.AssignRole(policy.RoleAssignment{
-		UserID: "user", RoleID: "bucket_user", Scope: "bucket:cid-x:lsi",
-	}); err != nil {
-		t.Fatalf("AssignRole: %v", err)
-	}
-
-	req := userCookieReqMethod(http.MethodGet,
-		"/api/v1/user/clusters/cid-x/buckets/lsi/objects")
-	rr := httptest.NewRecorder()
-	srv.router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d (body=%s)", rr.Code, rr.Body.String())
-	}
-	if !bodyHasCode(rr, "NO_GRANT") {
-		t.Errorf("expected NO_GRANT code, got body=%s", rr.Body.String())
-	}
 }
 
 // TestAdminCreateCluster_NoCapability: an admin-role user without the

@@ -1,11 +1,10 @@
 // Package api: user-persona region keychain endpoints (ADR-0002,
-// cycle v1.1.0b).
+// cycle v1.1.0b; legacy /user/clusters tree retired in v1.1.0e).
 //
-// Every endpoint here lives under /api/v1/user/regions/*. They replace
-// the per-bucket Connect-a-bucket flow (still present under
-// /api/v1/user/buckets/connect and /api/v1/user/clusters/*) — both
-// trees run concurrently until cycle v1.1.0d removes the old paths
-// after the frontend migrates in v1.1.0c.
+// Every endpoint here lives under /api/v1/user/regions/*. The legacy
+// per-bucket Connect-a-bucket flow (/api/v1/user/buckets/connect and
+// /api/v1/user/clusters/*) was deleted in cycle v1.1.0e — the
+// region-keychain model is the only user-tier path now.
 //
 // Security model: the region's S3 key IS the permission. basement
 // stops inventing per-bucket access — backends already enforce key
@@ -362,8 +361,7 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 }
 
 // userListRegionBucketObjectsHandler implements GET
-// /api/v1/user/regions/{regionId}/buckets/{bid}/objects — same query
-// params as the legacy /user/clusters/{cid}/buckets/{bid}/objects.
+// /api/v1/user/regions/{regionId}/buckets/{bid}/objects.
 func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -406,8 +404,8 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, page)
 }
 
-// presignTTL parses the ttl query param, applying the same 1h
-// default + 24h cap the legacy /user/clusters handlers used.
+// presignTTL parses the ttl query param, applying a 1h default and a
+// 24h cap to keep presigned URLs from outliving their usefulness.
 func presignTTL(r *http.Request) time.Duration {
 	ttl := 3600 * time.Second
 	if v := r.URL.Query().Get("ttl"); v != "" {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -273,6 +274,16 @@ func generateUserToken() string {
 // newTestConfig returns a config with proper JWT secret for tests.
 func newTestConfig() *config.Config {
 	return &config.Config{Listen: ":8080", JWT: config.JWTConfig{Secret: testSecret}}
+}
+
+// newJSONRequest builds a POST request with a JSON body. Used by the
+// user-tier handler tests in user_regions_test.go and user_shares_test.go.
+// Migrated here from the deleted user_clusters_create_test.go in v1.1.0e.
+func newJSONRequest(url string, body interface{}) *http.Request {
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	return req
 }
 
 // createAuthRequest creates an HTTP request with a valid admin session cookie.

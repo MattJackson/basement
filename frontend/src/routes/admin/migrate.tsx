@@ -41,9 +41,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { humanizeBytes } from "@/shared/lib/format";
 import {
-  useUserClusters,
-  useUserClusterBuckets,
-  useUserBucket,
+  useListClusters,
+  useClusterBuckets,
+  useBucket,
   useCreateUserSync,
 } from "@/shared/api/queries";
 
@@ -81,9 +81,9 @@ function MigrateWizardPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitDone, setSubmitDone] = useState(false);
 
-  const { data: clusters } = useUserClusters();
+  const { data: clusters } = useListClusters();
   const { data: srcBuckets, isLoading: srcBucketsLoading } =
-    useUserClusterBuckets(srcCid);
+    useClusterBuckets(srcCid);
   const createSync = useCreateUserSync();
 
   const srcCluster = clusters?.find((c) => c.id === srcCid);
@@ -513,7 +513,7 @@ function Step2Select({
   );
 }
 
-/** Row fires its own useUserBucket() for size + object count, matching
+/** Row fires its own useBucket() for size + object count, matching
  *  the cluster-detail pattern. The cluster-scoped bucket list returns
  *  just id + aliases on Garage v1 — admin-grade rows need bytes too. */
 function PlanRow({
@@ -527,7 +527,7 @@ function PlanRow({
   onToggle: () => void;
   onRenameDst: (v: string) => void;
 }) {
-  const { data: detail } = useUserBucket(srcCid, plan.srcBucketId);
+  const { data: detail } = useBucket(srcCid, plan.srcBucketId);
   return (
     <TableRow className={plan.selected ? "" : "opacity-50"}>
       <TableCell>

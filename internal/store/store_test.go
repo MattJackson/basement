@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// testKey is a 32-byte secret that satisfies the JWT min-length rule
+// for the encrypted-at-rest stores (UserRegions, the retired
+// BucketGrants). Migrated to this shared file in v1.1.0e along with
+// the bucket_grants_test.go deletion.
+var testKey = []byte("01234567890123456789012345678901")
+
 func TestOpenCreatesDataDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	dataDir := filepath.Join(tmpDir, "nonexistent", "data")
