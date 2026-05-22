@@ -198,18 +198,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Per ADR-0001 (v0.9.0c): per-user per-bucket S3 credential grants,
-	// encrypted at rest with a key derived from the JWT secret.
-	if err := st.WireBucketGrants(cfg.JWT.Secret); err != nil {
-		slog.Error("failed to wire bucket-grant store", "error", err)
-		os.Exit(1)
-	}
-
 	// Per ADR-0002 (v1.1.0a): per-user S3 region keychain, AES-GCM
 	// encrypted at rest with a key derived from the JWT secret. The
 	// region-tier abstraction supersedes per-bucket grants at the user
-	// persona; bucket_grants stays wired through v1.1.0d's migration
-	// cycle.
+	// persona; the legacy bucket_grants.json store retired in v1.1.0e.
 	if err := st.WireUserRegions(cfg.JWT.Secret); err != nil {
 		slog.Error("failed to wire user-region store", "error", err)
 		os.Exit(1)
@@ -222,26 +214,18 @@ func main() {
 	// have os.Exit(1)'d on failure.
 	reg.SetUserRegionsStore(st.UserRegions())
 
-	// Per ADR-0002 (v1.1.0d): one-shot migration of legacy per-bucket
-	// BucketGrants into the new per-(user, endpoint) UserRegions. The
-	// migration is idempotent — on subsequent boots existing UserRegion
-	// rows are skipped — and it does NOT delete bucket_grants.json
-	// (that's v1.1.0e once the legacy user-tier endpoints retire). A
-	// per-row failure is logged and the migration continues, so one
-	// bad grant can't block the rest from migrating.
-	if report, err := st.MigrateBucketGrantsToUserRegions(context.Background(), connStore); err != nil {
-		slog.Error("bucket-grants migration failed", "error", err)
+	// Per ADR-0002 (v1.1.0e): if a legacy bucket_grants.json file is
+	// still present from the pre-region-tier era, rename it aside so
+	// nothing reads it again. The v1.1.0d migration already copied any
+	// rows into user_regions.json; this step retires the source file
+	// without deleting bytes (operators rolling back can rename the
+	// .migrated suffix off and pick up the legacy code from git).
+	// Idempotent: no-op when the source is absent or already archived.
+	if moved, err := st.ArchiveLegacyBucketGrants(); err != nil {
+		slog.Error("failed to archive legacy bucket_grants.json", "error", err)
 		os.Exit(1)
-	} else {
-		slog.Info("migrated BucketGrants to UserRegions",
-			"scanned", report.Scanned,
-			"created", report.Created,
-			"skippedDuplicate", report.SkippedDuplicate,
-			"failed", len(report.Failed))
-		for _, f := range report.Failed {
-			slog.Warn("bucket-grant migration row failed",
-				"grantId", f.GrantID, "userId", f.UserID, "endpoint", f.Endpoint, "error", f.Err.Error())
-		}
+	} else if moved {
+		slog.Info("moved legacy bucket_grants.json aside; data has been migrated to user_regions.json")
 	}
 
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)

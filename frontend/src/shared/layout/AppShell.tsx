@@ -4,7 +4,6 @@ import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
-import { MigrationBanner } from "@/shared/ui/MigrationBanner";
 import { useUser } from "@/shared/auth/useUser";
 
 interface AppShellProps {
@@ -85,7 +84,6 @@ export function AppShell({ children }: AppShellProps): ReactNode {
       </header>
 
       <NewVersionBanner />
-      <MigrationBanner />
 
       <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children ?? <Outlet />}

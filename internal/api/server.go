@@ -61,10 +61,7 @@ type Server struct {
 // when an operator misconfigures), New() installs an internal
 // "permissive" enforcer that grants every capability at every scope
 // to the JWT's UserID. Production main.go REPLACES this with a real
-// file-backed enforcer before Start() — and the user-tier write
-// endpoints (POST /user/buckets/connect, anything that touches
-// CredGrants) explicitly reject the permissive default by checking
-// s.policy == nil OR a sentinel marker — see permissiveEnforcer below.
+// file-backed enforcer before Start().
 func New(cfg *config.Config, store *store.Store, conns store.Connections, drv driver.Driver, reg *driver.Registry) *Server {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -115,9 +112,8 @@ func (s *Server) SetOIDC(p oidcProvider) {
 
 // SetPolicy wires the policy enforcer into the server (ADR-0001).
 // Must be called before Start when the policy subsystem is enabled.
-// Handlers that need RoleAssignments — e.g. POST /user/buckets/connect —
-// nil-check s.policy and return 503 POLICY_NOT_WIRED when this hasn't
-// been called.
+// Handlers that need RoleAssignments nil-check s.policy and return
+// 503 POLICY_NOT_WIRED when this hasn't been called.
 func (s *Server) SetPolicy(p policy.Enforcer) {
 	s.policy = p
 }
@@ -276,17 +272,6 @@ func (s *Server) routes() {
 			// inspector, no enforcement-logic changes.
 			uiAdminG.Post("/admin/policies/simulate", s.simulatePolicyHandler)
 
-			// Migration helpers (ADR-0001 cycle v0.9.0h). Surfaces
-			// Connections whose config still carries the legacy
-			// access_key_id + secret_key that pre-date the
-			// BucketGrant runtime, and offers a one-click "convert
-			// these to a per-user grant + strip them from config"
-			// path. Gated on host:manage_policies — the operator
-			// who controls the matrix is the same persona who
-			// should be migrating legacy creds.
-			uiAdminG.Get("/admin/migrations/orphan_creds", s.listOrphanCredsHandler)
-			uiAdminG.Post("/admin/migrations/orphan_creds/{cid}/grant", s.migrateOrphanCredsHandler)
-
 			// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). UIAdmin
 			// middleware is belt-and-braces; the actual enforcement
 			// is the per-handler bucket:view / bucket:edit_alias gate.
@@ -312,23 +297,10 @@ func (s *Server) routes() {
 			uiAdminG.Get("/admin/audit", s.listAuditHandler)
 		})
 
-		// User routes — authenticated users only. Grants filtered server-side.
+		// User routes — authenticated users only. Visibility derives
+		// from each user's region keychain (ADR-0002); see user_filter.go.
 		apiR.Group(func(userG chi.Router) {
 			userG.Use(auth.Middleware(s.cfg.JWT.Secret))
-
-			userG.Get("/user/clusters", s.userListClustersHandler)
-			userG.Post("/user/clusters", s.createUserClusterHandler)
-			userG.Post("/user/clusters/_test", s.testUserClusterHandler)
-
-			// Per ADR-0001 (v0.9.0e): user-persona "Add bucket access"
-			// flow. The user brings their own S3 creds for a bucket
-			// they're entitled to and basement stores a Grant + a
-			// bucket_user RoleAssignment for them.
-			userG.Post("/user/buckets/connect", s.userBucketsConnectHandler)
-			userG.Get("/user/clusters/{cid}", s.userGetClusterHandler)
-			userG.Get("/user/clusters/{cid}/buckets", s.userListClusterBucketsHandler)
-			userG.Get("/user/clusters/{cid}/buckets/{bid}", s.userGetClusterBucketHandler)
-			userG.Get("/user/keys", s.userListKeysHandler)
 
 			// User shares endpoints (v0.7.0g USER.SHARES).
 			userG.Post("/user/shares", s.userCreateShareHandler)
@@ -361,17 +333,6 @@ func (s *Server) routes() {
 			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/complete", s.userCompleteRegionMultipartHandler)
 			userG.Delete("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}", s.userAbortRegionMultipartHandler)
 			userG.Delete("/user/regions/{regionId}/buckets/{bid}/objects/{key}", s.userDeleteRegionObjectHandler)
-
-			// User object browser endpoints (v0.7.0d USER.OBJECTBROWSE).
-			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects", s.userListClusterBucketObjectsHandler)
-			userG.Get("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/stat", s.userStatClusterBucketObjectHandler)
-			userG.Post("/user/clusters/{cid}/buckets/{bid}/objects/{key+}/presign-get", s.userPresignGetClusterBucketObjectHandler)
-
-			// User upload endpoints (v0.7.0e USER.UPLOAD).
-			userG.Post("/user/clusters/{cid}/buckets/{bid}/multipart/init", s.userInitMultipartUploadHandler)
-			userG.Post("/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/part/{partNum}/presign", s.userPresignUploadPartHandler)
-			userG.Post("/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}/complete", s.userCompleteMultipartUploadHandler)
-			userG.Delete("/user/clusters/{cid}/buckets/{bid}/multipart/{uploadId}", s.userAbortMultipartUploadHandler)
 		})
 	})
 

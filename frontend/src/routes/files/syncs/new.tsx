@@ -4,7 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { useUserClusters, useUserClusterBuckets, useCreateUserSync } from "@/shared/api/queries";
+import {
+  useUserRegions,
+  useUserRegionBuckets,
+  useCreateUserSync,
+} from "@/shared/api/queries";
 
 // NOTE: do NOT wrap in userPage() — parent layout (syncs.tsx) owns chrome.
 
@@ -14,23 +18,15 @@ type SyncSearch = {
   srcBid?: string;
 };
 
-// Popups-max-2-fields: StartSyncDialog had 6 fields (src cluster +
-// bucket + prefix, dst cluster + bucket + prefix) AND its cluster /
-// bucket dropdowns were HARDCODED to fake values ('cluster-1',
-// 'bucket-a' …) — the entire sync feature was non-functional. This
-// page wires up the real query hooks (useUserClusters /
-// useUserClusterBuckets per side) and gives the form room to breathe.
+// ADR-0002 (v1.1.0e): the picker reads from /user/regions instead of
+// the retired /user/clusters tier. The sync engine still expects
+// (srcConnectionId, dstConnectionId) at the cluster layer — we POST
+// the regionId in those fields, and a future v1.1.0g cycle will land
+// region→cluster resolution at the sync engine. Until then the POST
+// returns 500 from the backend; the picker UX is the win for v1.1.0e.
 //
-// Default search params let bucket-browser 'Sync in / Sync out'
-// buttons pre-fill the right side: ?mode=push&srcCid=…&srcBid=…
-//
-// TODO(v1.1.0e): migrate sync UI to UserRegion IDs once the sync
-// engine learns to operate region-to-region. v1.1.0c kept this form
-// on cluster-tier hooks deliberately — the backend's sync engine
-// still expects srcConnectionId/dstConnectionId (cluster Connection
-// records), and rewiring both at once was out of scope. The bucket
-// browser at /files/$regionId/b/$bid drops its Sync in/Sync out
-// buttons for the same reason — no region->cluster bridge yet.
+// TODO(v1.1.0g): wire region→cluster resolution on the backend so
+// useCreateUserSync no longer fails with "cluster not found".
 export const Route = createFileRoute("/files/syncs/new")({
   component: NewSyncPage,
   validateSearch: (search): SyncSearch => ({
@@ -45,30 +41,33 @@ function NewSyncPage() {
   const search = useSearch({ from: "/files/syncs/new" }) as SyncSearch;
 
   const mode = search.mode ?? "pull";
-  const [srcConnectionId, setSrcConnectionId] = useState(search.srcCid ?? "");
+  const [srcRegionId, setSrcRegionId] = useState(search.srcCid ?? "");
   const [srcBucket, setSrcBucket] = useState(search.srcBid ?? "");
   const [srcPrefix, setSrcPrefix] = useState("");
-  const [dstConnectionId, setDstConnectionId] = useState("");
+  const [dstRegionId, setDstRegionId] = useState("");
   const [dstBucket, setDstBucket] = useState("");
   const [dstPrefix, setDstPrefix] = useState("");
 
-  const { data: clusters } = useUserClusters();
-  const { data: srcBuckets } = useUserClusterBuckets(srcConnectionId);
-  const { data: dstBuckets } = useUserClusterBuckets(dstConnectionId);
+  const { data: regions } = useUserRegions();
+  const { data: srcBuckets } = useUserRegionBuckets(srcRegionId || null);
+  const { data: dstBuckets } = useUserRegionBuckets(dstRegionId || null);
   const createSync = useCreateUserSync();
 
   const srcLocked = mode === "push" && !!search.srcCid && !!search.srcBid;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!srcConnectionId || !dstConnectionId || !srcBucket || !dstBucket) return;
+    if (!srcRegionId || !dstRegionId || !srcBucket || !dstBucket) return;
+    // POST will fail until v1.1.0g wires region→cluster resolution at
+    // the sync engine. Keeping the field names so the request shape
+    // matches the existing backend contract; only the values change.
     createSync.mutate(
       {
         mode,
-        srcConnectionId,
+        srcConnectionId: srcRegionId,
         srcBucket,
         srcPrefix: srcPrefix || undefined,
-        dstConnectionId,
+        dstConnectionId: dstRegionId,
         dstBucket,
         dstPrefix: dstPrefix || undefined,
       },
@@ -76,7 +75,7 @@ function NewSyncPage() {
     );
   };
 
-  const isSubmitDisabled = !srcConnectionId || !dstConnectionId || !srcBucket || !dstBucket || createSync.isPending;
+  const isSubmitDisabled = !srcRegionId || !dstRegionId || !srcBucket || !dstBucket || createSync.isPending;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -88,7 +87,7 @@ function NewSyncPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">New sync job</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Copy objects from a source bucket to a destination bucket. Crosses clusters.
+            Copy objects from a source bucket to a destination bucket. Crosses regions.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -98,6 +97,13 @@ function NewSyncPage() {
           </Button>
         </div>
       </header>
+
+      <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm">
+        <p className="font-medium">Heads up</p>
+        <p className="text-muted-foreground mt-1">
+          Sync POST will fail until v1.1.0g wires region→cluster resolution at the sync engine. The picker still lets you stage a job so the form is ready when the backend lands.
+        </p>
+      </div>
 
       <section className="space-y-4 rounded-lg border bg-card p-6">
         <h2 className="text-sm font-medium text-muted-foreground">Mode</h2>
@@ -127,16 +133,18 @@ function NewSyncPage() {
         <h2 className="text-sm font-medium text-muted-foreground">Source</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="srcCluster">Cluster *</Label>
+            <Label htmlFor="srcRegion">Region *</Label>
             <select
-              id="srcCluster"
-              value={srcConnectionId}
+              id="srcRegion"
+              value={srcRegionId}
               disabled={srcLocked}
-              onChange={(e) => { setSrcConnectionId(e.target.value); setSrcBucket(""); }}
+              onChange={(e) => { setSrcRegionId(e.target.value); setSrcBucket(""); }}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
-              <option value="">— pick a cluster —</option>
-              {clusters?.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+              <option value="">— pick a region —</option>
+              {regions?.map((r) => (
+                <option key={r.id} value={r.id}>{r.alias || r.endpoint}</option>
+              ))}
             </select>
           </div>
           <div className="grid gap-2">
@@ -144,7 +152,7 @@ function NewSyncPage() {
             <select
               id="srcBucket"
               value={srcBucket}
-              disabled={srcLocked || !srcConnectionId}
+              disabled={srcLocked || !srcRegionId}
               onChange={(e) => setSrcBucket(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
@@ -163,15 +171,17 @@ function NewSyncPage() {
         <h2 className="text-sm font-medium text-muted-foreground">Destination</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="dstCluster">Cluster *</Label>
+            <Label htmlFor="dstRegion">Region *</Label>
             <select
-              id="dstCluster"
-              value={dstConnectionId}
-              onChange={(e) => { setDstConnectionId(e.target.value); setDstBucket(""); }}
+              id="dstRegion"
+              value={dstRegionId}
+              onChange={(e) => { setDstRegionId(e.target.value); setDstBucket(""); }}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              <option value="">— pick a cluster —</option>
-              {clusters?.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+              <option value="">— pick a region —</option>
+              {regions?.map((r) => (
+                <option key={r.id} value={r.id}>{r.alias || r.endpoint}</option>
+              ))}
             </select>
           </div>
           <div className="grid gap-2">
@@ -179,7 +189,7 @@ function NewSyncPage() {
             <select
               id="dstBucket"
               value={dstBucket}
-              disabled={!dstConnectionId}
+              disabled={!dstRegionId}
               onChange={(e) => setDstBucket(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >

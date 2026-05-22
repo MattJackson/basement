@@ -12,22 +12,46 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 )
 
-// seedShareUserGrant installs a BucketGrant (v1.0.0b: replaces the old
-// legacy store.Grant fixtures). user_shares.go reads visibility via
-// CredGrants now, so the test seed must mirror the production shape.
-func seedShareUserGrant(t *testing.T, st *store.Store, userID, connID, bucketID string) {
+// shareTestEndpoint is the canonical s3 endpoint used by the share test
+// fixtures. Mirrored in both the seeded UserRegion and the test
+// Connection's config so user_shares.go's visibility check
+// (UserRegion.Endpoint match against connection's s3_endpoint) lines up.
+const shareTestEndpoint = "https://s3.test.example"
+
+// seedShareUserRegion installs a UserRegion for the test user pointing
+// at shareTestEndpoint. user_shares.go derives visibility from the
+// region keychain now (ADR-0002, v1.1.0e), so the test seed must mirror
+// the production shape — the legacy BucketGrant fixture retired with
+// the credentials store it relied on.
+func seedShareUserRegion(t *testing.T, st *store.Store, userID string) {
 	t.Helper()
-	if err := st.WireBucketGrants(testSecret); err != nil {
-		t.Fatalf("WireBucketGrants: %v", err)
+	if err := st.WireUserRegions(testSecret); err != nil {
+		t.Fatalf("WireUserRegions: %v", err)
 	}
-	if _, err := st.CredGrants().Create(context.Background(), store.BucketGrantInput{
+	if _, err := st.UserRegions().Create(context.Background(), store.UserRegion{
 		UserID:       userID,
-		ConnectionID: connID,
-		BucketID:     bucketID,
+		Alias:        "test",
+		Endpoint:     shareTestEndpoint,
 		AccessKeyID:  "ak-test",
-		SecretKey:    "sk-test",
+		SecretKeyEnc: []byte("sk-test"), // store.Create encrypts immediately
 	}); err != nil {
-		t.Fatalf("CredGrants.Create: %v", err)
+		t.Fatalf("UserRegions.Create: %v", err)
+	}
+}
+
+// shareTestConns returns a connection-store fixture with one Connection
+// whose s3_endpoint matches shareTestEndpoint, so a seeded UserRegion
+// passes the visibility check in user_shares.go.
+func shareTestConns() *testMockConnectionStore {
+	return &testMockConnectionStore{
+		conns: []store.Connection{
+			{
+				ID:     "conn-123",
+				Label:  "test-cluster",
+				Driver: "garage",
+				Config: map[string]string{"s3_endpoint": shareTestEndpoint},
+			},
+		},
 	}
 }
 
@@ -108,16 +132,13 @@ func TestCreateShare_BothPrefixAndKey(t *testing.T) {
 // TestCreateShare_HappyPath creates a share and returns the token.
 func TestCreateShare_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
-	connsStore := &testMockConnectionStore{
-		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
-		},
-	}
+	connsStore := shareTestConns()
 	tmpDir := t.TempDir()
 	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a bucket grant for the test user.
-	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
+	// Seed a UserRegion at the test endpoint so the visibility check
+	// in user_shares.go passes for the user persona.
+	seedShareUserRegion(t, st, "user")
 
 	srv := New(cfg, st, connsStore, nil, nil)
 
@@ -152,15 +173,11 @@ func TestCreateShare_HappyPath(t *testing.T) {
 // TestCreateShare_WithPassword creates a share with password hash.
 func TestCreateShare_WithPassword(t *testing.T) {
 	cfg := newTestConfig()
-	connsStore := &testMockConnectionStore{
-		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
-		},
-	}
+	connsStore := shareTestConns()
 	tmpDir := t.TempDir()
 	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
+	seedShareUserRegion(t, st, "user")
 
 	srv := New(cfg, st, connsStore, nil, nil)
 
@@ -194,22 +211,17 @@ func TestCreateShare_WithPassword(t *testing.T) {
 // TestListShares_HappyPath returns user's shares.
 func TestListShares_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
-	connsStore := &testMockConnectionStore{
-		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
-		},
-	}
+	connsStore := shareTestConns()
 	tmpDir := t.TempDir()
 	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a bucket grant for the test user.
-	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
+	seedShareUserRegion(t, st, "user")
 
 	// Create some test shares.
 	now := time.Now()
 	expiresAt := now.Add(24 * time.Hour)
 	downloadLimit := 10
-	
+
 	shares := []store.Share{
 		{
 			Token:         "token-abc",
@@ -256,27 +268,22 @@ func TestListShares_HappyPath(t *testing.T) {
 // TestRevokeShare_HappyPath revokes a share.
 func TestRevokeShare_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
-	connsStore := &testMockConnectionStore{
-		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
-		},
-	}
+	connsStore := shareTestConns()
 	tmpDir := t.TempDir()
 	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a bucket grant for the test user.
-	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
+	seedShareUserRegion(t, st, "user")
 
 	// Create a test share.
 	now := time.Now()
 	sh := store.Share{
-		Token:         "token-xyz",
-		OwnerUserID:   "user",
-		ConnectionID:  "conn-123",
-		BucketID:      "bucket-456",
-		Prefix:        "shared/",
-		CreatedAt:     now,
-		Revoked:       false,
+		Token:        "token-xyz",
+		OwnerUserID:  "user",
+		ConnectionID: "conn-123",
+		BucketID:     "bucket-456",
+		Prefix:       "shared/",
+		CreatedAt:    now,
+		Revoked:      false,
 	}
 	if err := st.CreateShare(sh); err != nil {
 		t.Fatalf("failed to create test share: %v", err)
@@ -313,27 +320,22 @@ func TestRevokeShare_HappyPath(t *testing.T) {
 // TestRevokeShare_OwnershipCheck returns 403 for other user's share.
 func TestRevokeShare_OwnershipCheck(t *testing.T) {
 	cfg := newTestConfig()
-	connsStore := &testMockConnectionStore{
-		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
-		},
-	}
+	connsStore := shareTestConns()
 	tmpDir := t.TempDir()
 	st, _ := store.Open(tmpDir, 90*24*time.Hour)
 
-	// Create a bucket grant for the test user.
-	seedShareUserGrant(t, st, "user", "conn-123", "bucket-456")
+	seedShareUserRegion(t, st, "user")
 
 	// Create a test share owned by different user.
 	now := time.Now()
 	sh := store.Share{
-		Token:         "token-abc",
-		OwnerUserID:   "user-other",
-		ConnectionID:  "conn-123",
-		BucketID:      "bucket-456",
-		Prefix:        "shared/",
-		CreatedAt:     now,
-		Revoked:       false,
+		Token:        "token-abc",
+		OwnerUserID:  "user-other",
+		ConnectionID: "conn-123",
+		BucketID:     "bucket-456",
+		Prefix:       "shared/",
+		CreatedAt:    now,
+		Revoked:      false,
 	}
 	if err := st.CreateShare(sh); err != nil {
 		t.Fatalf("failed to create test share: %v", err)

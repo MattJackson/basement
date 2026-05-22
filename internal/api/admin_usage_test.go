@@ -210,10 +210,6 @@ func newUsageTestEnv(t *testing.T, conns []store.Connection, grantHostAdmin bool
 		cleanup()
 		t.Fatalf("store.Open: %v", err)
 	}
-	if err := st.WireBucketGrants(testSecret); err != nil {
-		cleanup()
-		t.Fatalf("WireBucketGrants: %v", err)
-	}
 
 	enf, err := policy.Open(filepath.Join(tmp, "policy"))
 	if err != nil {
