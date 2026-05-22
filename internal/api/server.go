@@ -452,6 +452,11 @@ func (s *Server) routes() {
 			// boot (tests).
 			userG.Post("/user/federated-buckets", s.userCreateFederationHandler)
 			userG.Get("/user/federated-buckets", s.userListFederationsHandler)
+			// v1.6.0e — reverse-lookup endpoint: "is this (region, bucket)
+			// part of a federation I own?" The bucket browser calls this
+			// speculatively to render a federation badge + link. Registered
+			// before the /{id} route so chi matches the literal segment.
+			userG.Get("/user/federated-buckets/by-target", s.userFindFederationByTargetHandler)
 			userG.Get("/user/federated-buckets/{id}", s.userGetFederationHandler)
 			userG.Put("/user/federated-buckets/{id}", s.userUpdateFederationHandler)
 			userG.Delete("/user/federated-buckets/{id}", s.userDeleteFederationHandler)

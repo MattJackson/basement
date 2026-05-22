@@ -618,3 +618,167 @@ func TestUpdateFederation_Happy(t *testing.T) {
 		t.Fatalf("expected TriggerNow after update")
 	}
 }
+
+// TestFindFederationByTarget_PrimaryMatch: hitting /by-target with the
+// primary's (regionId, bucket) returns 200 + the federation record.
+func TestFindFederationByTarget_PrimaryMatch(t *testing.T) {
+	env := newFederationTestEnv(t)
+	primaryID := env.seedRegion(t, "matthew", "garage", "https://s3.home.example.com")
+	replicaID := env.seedRegion(t, "matthew", "b2", "https://s3.us-west-002.backblazeb2.com")
+
+	createReq := newJSONRequest("/api/v1/user/federated-buckets",
+		validFederationBody("lsi", primaryID, replicaID))
+	createReq.AddCookie(fedUserCookie(t, "matthew"))
+	createRR := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+	var created federatedBucketResponse
+	_ = json.NewDecoder(createRR.Body).Decode(&created)
+
+	url := "/api/v1/user/federated-buckets/by-target?regionId=" + primaryID + "&bucket=primary-bucket"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.AddCookie(fedUserCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got federatedBucketResponse
+	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Fatalf("expected federation %q, got %q", created.ID, got.ID)
+	}
+}
+
+// TestFindFederationByTarget_ReplicaMatch: hitting /by-target with a
+// replica's (regionId, bucket) also returns 200 + the federation record.
+func TestFindFederationByTarget_ReplicaMatch(t *testing.T) {
+	env := newFederationTestEnv(t)
+	primaryID := env.seedRegion(t, "matthew", "garage", "https://s3.home.example.com")
+	replicaID := env.seedRegion(t, "matthew", "b2", "https://s3.us-west-002.backblazeb2.com")
+
+	createReq := newJSONRequest("/api/v1/user/federated-buckets",
+		validFederationBody("lsi", primaryID, replicaID))
+	createReq.AddCookie(fedUserCookie(t, "matthew"))
+	createRR := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+	var created federatedBucketResponse
+	_ = json.NewDecoder(createRR.Body).Decode(&created)
+
+	url := "/api/v1/user/federated-buckets/by-target?regionId=" + replicaID + "&bucket=replica-bucket"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.AddCookie(fedUserCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got federatedBucketResponse
+	_ = json.NewDecoder(rr.Body).Decode(&got)
+	if got.ID != created.ID {
+		t.Fatalf("expected federation %q, got %q", created.ID, got.ID)
+	}
+}
+
+// TestFindFederationByTarget_NoMatch: when no federation matches the
+// (regionId, bucket) pair, the endpoint returns 204 No Content (NOT
+// 404) so the bucket browser can speculatively probe without flooding
+// the network panel with 404s.
+func TestFindFederationByTarget_NoMatch(t *testing.T) {
+	env := newFederationTestEnv(t)
+	primaryID := env.seedRegion(t, "matthew", "garage", "https://s3.home.example.com")
+
+	// Probe with no federations defined at all.
+	url := "/api/v1/user/federated-buckets/by-target?regionId=" + primaryID + "&bucket=some-bucket"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.AddCookie(fedUserCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 No Content, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("expected empty body on 204, got %q", rr.Body.String())
+	}
+
+	// Now create a federation but probe a (region, bucket) it doesn't
+	// cover — still 204.
+	replicaID := env.seedRegion(t, "matthew", "b2", "https://s3.us-west-002.backblazeb2.com")
+	createReq := newJSONRequest("/api/v1/user/federated-buckets",
+		validFederationBody("lsi", primaryID, replicaID))
+	createReq.AddCookie(fedUserCookie(t, "matthew"))
+	createRR := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	url2 := "/api/v1/user/federated-buckets/by-target?regionId=" + primaryID + "&bucket=unknown-bucket"
+	req2 := httptest.NewRequest(http.MethodGet, url2, nil)
+	req2.AddCookie(fedUserCookie(t, "matthew"))
+	rr2 := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 No Content after no-match, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+}
+
+// TestFindFederationByTarget_OwnershipScoped: user A's federation is
+// invisible to user B via /by-target — B gets 204 No Content even
+// though the (regionId, bucket) pair matches A's record.
+func TestFindFederationByTarget_OwnershipScoped(t *testing.T) {
+	env := newFederationTestEnv(t)
+	primaryID := env.seedRegion(t, "alice", "garage", "https://s3.alice.example.com")
+	replicaID := env.seedRegion(t, "alice", "b2", "https://s3.us-west-002.backblazeb2.com")
+
+	// Alice creates the federation.
+	createReq := newJSONRequest("/api/v1/user/federated-buckets",
+		validFederationBody("alice-fed", primaryID, replicaID))
+	createReq.AddCookie(fedUserCookie(t, "alice"))
+	createRR := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create as alice: expected 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+
+	// Matthew probes /by-target with alice's (region, bucket) → 204
+	// (never leaks the existence of alice's federation).
+	url := "/api/v1/user/federated-buckets/by-target?regionId=" + primaryID + "&bucket=primary-bucket"
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	req.AddCookie(fedUserCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("cross-owner probe: expected 204, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	// Alice's own probe still hits — sanity check the row exists.
+	req2 := httptest.NewRequest(http.MethodGet, url, nil)
+	req2.AddCookie(fedUserCookie(t, "alice"))
+	rr2 := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("alice's own probe: expected 200, got %d body=%s", rr2.Code, rr2.Body.String())
+	}
+}
+
+// TestFindFederationByTarget_MissingParams: omitting regionId or
+// bucket returns 400 INVALID_REQUEST.
+func TestFindFederationByTarget_MissingParams(t *testing.T) {
+	env := newFederationTestEnv(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/federated-buckets/by-target", nil)
+	req.AddCookie(fedUserCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}

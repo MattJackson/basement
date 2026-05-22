@@ -649,6 +649,57 @@ func (s *Server) userFailoverFederationHandler(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, toFederatedBucketResponse(updated))
 }
 
+// userFindFederationByTargetHandler handles
+// GET /api/v1/user/federated-buckets/by-target?regionId=X&bucket=Y.
+//
+// Returns the federation owned by the caller that references the given
+// (regionID, bucket) pair as EITHER the primary or one of the replicas.
+// Responds 204 No Content when no federation matches — the bucket
+// browser calls this speculatively on every load and a 404 would
+// pollute the dev-tools network panel. 200 with the FederatedBucket
+// record on a hit (same shape as /user/federated-buckets/{id}, with
+// computedHealth decorated).
+//
+// Ownership is enforced by passing the caller's userID into the store
+// lookup — federations owned by other users are simply invisible. No
+// 403 path; this endpoint is best-effort reverse-lookup, not policy
+// enforcement.
+func (s *Server) userFindFederationByTargetHandler(w http.ResponseWriter, r *http.Request) {
+	store := s.userFederationsStore()
+	if store == nil {
+		// 204 — degrade silently so the bucket browser still renders
+		// when the federation subsystem isn't wired (e.g. tests, a
+		// deploy that opted out). The badge just doesn't appear.
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims.UserID == "" {
+		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
+		return
+	}
+	regionID := strings.TrimSpace(r.URL.Query().Get("regionId"))
+	bucket := strings.TrimSpace(r.URL.Query().Get("bucket"))
+	if regionID == "" || bucket == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST",
+			"regionId and bucket query parameters are required")
+		return
+	}
+	fb, err := store.FindByTarget(r.Context(), claims.UserID, regionID, bucket)
+	if err != nil {
+		if errors.Is(err, federation.ErrNotFound) {
+			// 204 — caller (bucket browser) calls speculatively and
+			// expects a "no badge" response, not a 404.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		writeErrorSimple(w, http.StatusInternalServerError, "FEDERATION_STORE_ERROR",
+			"Failed to look up federation: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, toFederatedBucketResponse(fb))
+}
+
 // userResyncFederationHandler handles
 // POST /api/v1/user/federated-buckets/{id}/resync.
 //

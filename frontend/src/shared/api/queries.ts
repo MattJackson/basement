@@ -1847,6 +1847,42 @@ export function useFailoverFederation() {
   });
 }
 
+// useFederationByTarget hits the v1.6.0e reverse-lookup endpoint:
+// "is the (regionId, bucket) currently part of a federation I own?"
+// The bucket browser (/files/$regionId/b/$bid) calls this speculatively
+// on every render — the endpoint returns 204 No Content when no
+// federation matches, surfaced here as `data === null`. A hit returns
+// the full FederatedBucket record (with computedHealth + per-replica
+// health) so the badge can render counts inline.
+//
+// staleTime is 30s because federation membership doesn't change often
+// (operators don't add/remove replicas on the second), but we want a
+// reasonably fresh count when they hop between buckets in the same
+// session. retry: false so a transient 5xx doesn't bury the bucket
+// browser under retries — the badge is best-effort.
+export function useFederationByTarget(
+  regionId: string,
+  bucket: string | undefined,
+) {
+  return useQuery<FederatedBucket | null>({
+    queryKey: ["federation-by-target", regionId, bucket],
+    queryFn: async () => {
+      if (!bucket) return null;
+      const url = `/api/v1/user/federated-buckets/by-target?regionId=${encodeURIComponent(regionId)}&bucket=${encodeURIComponent(bucket)}`;
+      const res = await fetch(url, { credentials: "include" });
+      if (res.status === 204) return null;
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError("federation-by-target", res.status, body);
+      }
+      return (await res.json()) as FederatedBucket;
+    },
+    enabled: !!bucket,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
 export function useResyncFederation() {
   return useMutation<{ id: string; status: string }, Error, string>({
     mutationFn: async (id) => {
