@@ -73,26 +73,39 @@ export function PersonaPill() {
     return () => window.clearInterval(id);
   }, []);
 
-  // Reset the warning latch when expiresAt changes (a fresh elevation
-  // resets the countdown — the next sub-30s tick should re-warn).
-  // setState here is intentional: a new expiresAt IS an external
-  // change we're syncing against.
+  // Reset the warning latch only on RISING-edge mode transitions
+  // (user → admin/elevated, i.e. a fresh elevation). The previous
+  // implementation reset on every expiresAt change, which the server
+  // can perturb on each /auth/me refetch (the downgrade cookie carries
+  // a current-time-ish expiresAt) — that re-armed the "ended" toast
+  // every tick and produced an indefinite toast loop.
+  const prevModeRef = useRef<string>(mode);
   useEffect(() => {
-    warnedRef.current = null;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFlashing(false);
-  }, [expiresAt]);
+    const elevated = mode === "admin" || mode === "elevated";
+    const wasElevated = prevModeRef.current === "admin" || prevModeRef.current === "elevated";
+    // Rising edge: just elevated. Reset the warning latch.
+    if (elevated && !wasElevated) {
+      warnedRef.current = null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFlashing(false);
+    }
+    // Falling edge: admin/elevated → user. Fire the ended toast once,
+    // then leave the latch set so subsequent ticks with mode=user don't
+    // re-fire.
+    if (!elevated && wasElevated) {
+      toast.info("Admin session ended");
+      warnedRef.current = "ended";
+    }
+    prevModeRef.current = mode;
+  }, [mode]);
 
   const remainingMs = expiresAt > 0 ? expiresAt - now : 0;
   const showCountdown = expiresAt > 0 && (mode === "admin" || mode === "elevated");
 
-  // <30s warning + flash. Trigger once per expiry window. Also
-  // surface an "ended" toast when the timer hits zero so the operator
-  // knows the auto-downgrade just fired.
+  // <30s warning + flash. Trigger once per elevation window. The latch
+  // is keyed on expiresAt (a new elevation = new expiresAt = warn again).
   useEffect(() => {
     if (!showCountdown) return;
-
-    // Approaching expiry.
     if (remainingMs > 0 && remainingMs <= 30_000) {
       if (warnedRef.current !== expiresAt) {
         warnedRef.current = expiresAt;
@@ -104,18 +117,7 @@ export function PersonaPill() {
         window.setTimeout(() => setFlashing(false), 2000);
       }
     }
-
-    // Just expired this tick.
-    if (remainingMs <= 0 && expiresAt > 0 && now >= expiresAt) {
-      // Use a sentinel distinct from the warning latch to fire the
-      // ended toast exactly once per expiry window.
-      const endedKey = -expiresAt;
-      if (warnedRef.current !== endedKey) {
-        warnedRef.current = endedKey;
-        toast.info("Admin session ended");
-      }
-    }
-  }, [remainingMs, expiresAt, now, showCountdown]);
+  }, [remainingMs, expiresAt, showCountdown]);
 
   const handleDrop = async () => {
     if (dropping) return;
