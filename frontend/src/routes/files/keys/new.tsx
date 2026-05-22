@@ -1,6 +1,26 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { useCreateUserKey } from "@/shared/api/queries";
+import { useCreateUserKey, useDriverDefaults, type DriverDefaults } from "@/shared/api/queries";
+
+// detectDriverFromEndpoint returns the heuristic match for an endpoint
+// URL the operator just pasted. Used to auto-suggest the region label
+// without overwriting any value the operator has already typed.
+//
+// v1.3.0b: pattern-only detection — no network probe. Matches the
+// hints we curate in internal/driver/defaults.go:
+//   - "amazonaws.com" → aws-s3
+//   - hostnames containing "garage" → garage-v1
+//   - hostnames containing "minio" → minio
+// Returns null when nothing matches; caller treats null as "leave
+// region alone".
+function detectDriverFromEndpoint(endpoint: string): string | null {
+  if (!endpoint) return null;
+  const lower = endpoint.toLowerCase();
+  if (lower.includes("amazonaws.com")) return "aws-s3";
+  if (lower.includes("garage")) return "garage-v1";
+  if (lower.includes("minio")) return "minio";
+  return null;
+}
 
 // Canonical "Add a key" form (ADR-0002, v1.2.0d). Replaces the old
 // "Connect a region" copy. The legacy URL /files/regions/new now
@@ -21,6 +41,7 @@ export const Route = createFileRoute("/files/keys/new")({
 function AddKeyPage() {
   const navigate = useNavigate();
   const createKey = useCreateUserKey();
+  const { data: driverDefaults } = useDriverDefaults();
 
   const [alias, setAlias] = useState("");
   const [endpoint, setEndpoint] = useState("");
@@ -28,8 +49,37 @@ function AddKeyPage() {
   const [secretKey, setSecretKey] = useState("");
   const [region, setRegion] = useState("us-east-1");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [regionTouched, setRegionTouched] = useState(false);
+  const [showCommonEndpoints, setShowCommonEndpoints] = useState(false);
 
   const submitting = createKey.isPending;
+
+  // v1.3.0b: auto-suggest the region label when the operator pastes an
+  // endpoint that matches a known driver pattern — but ONLY if the
+  // operator hasn't already typed a custom region. Never overwrite
+  // operator-entered values silently.
+  const handleEndpointChange = (next: string) => {
+    setEndpoint(next);
+    if (regionTouched) return;
+    const detected = detectDriverFromEndpoint(next);
+    if (!detected) return;
+    const match = driverDefaults?.find((d) => d.driver === detected);
+    if (match?.regionLabel) {
+      setRegion(match.regionLabel);
+    }
+  };
+
+  // applyExample fills both the endpoint AND region from a curated
+  // DriverDefaults row. Triggered ONLY by an explicit "Use this" click
+  // — per cycle constraint, never auto-overwrite. Marks the region as
+  // touched so subsequent endpoint typing doesn't unsettle it.
+  const applyExample = (d: DriverDefaults) => {
+    if (d.s3Endpoint) setEndpoint(d.s3Endpoint);
+    if (d.regionLabel) {
+      setRegion(d.regionLabel);
+      setRegionTouched(true);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +121,59 @@ function AddKeyPage() {
         </p>
       </header>
 
+      {driverDefaults && driverDefaults.length > 0 && (
+        <div className="max-w-2xl rounded-md border bg-card">
+          <button
+            type="button"
+            onClick={() => setShowCommonEndpoints((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/40"
+            aria-expanded={showCommonEndpoints}
+            aria-controls="common-endpoints-panel"
+          >
+            <span>Common endpoints</span>
+            <span aria-hidden="true" className="text-muted-foreground">
+              {showCommonEndpoints ? "−" : "+"}
+            </span>
+          </button>
+          {showCommonEndpoints && (
+            <div id="common-endpoints-panel" className="border-t px-4 py-3 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Quick-fill the endpoint + region for a known driver. Replace the host with yours.
+              </p>
+              <ul className="divide-y">
+                {driverDefaults
+                  .filter((d) => !!d.s3Endpoint)
+                  .map((d) => (
+                    <li
+                      key={d.driver}
+                      className="flex flex-wrap items-center justify-between gap-2 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium">{d.displayName}</div>
+                        <div className="font-mono text-xs text-muted-foreground break-all">
+                          {d.s3Endpoint}
+                          {d.regionLabel ? ` · region: ${d.regionLabel}` : ""}
+                        </div>
+                        {d.s3EndpointHint && (
+                          <div className="text-xs text-muted-foreground">{d.s3EndpointHint}</div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => applyExample(d)}
+                        className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted/40"
+                        data-testid={`use-endpoint-${d.driver}`}
+                      >
+                        Use this
+                      </button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
         <div className="space-y-2">
           <label htmlFor="alias" className="text-sm font-medium">
@@ -99,11 +202,15 @@ function AddKeyPage() {
             id="endpoint"
             type="url"
             value={endpoint}
-            onChange={(e) => setEndpoint(e.target.value)}
+            onChange={(e) => handleEndpointChange(e.target.value)}
             placeholder="https://s3.example.com"
             autoComplete="off"
             className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
+          <p className="text-xs text-muted-foreground">
+            Paste an endpoint with &quot;amazonaws.com&quot;, &quot;garage&quot;, or &quot;minio&quot; in the
+            URL and we&apos;ll suggest a region label.
+          </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -148,7 +255,10 @@ function AddKeyPage() {
             id="region"
             type="text"
             value={region}
-            onChange={(e) => setRegion(e.target.value)}
+            onChange={(e) => {
+              setRegion(e.target.value);
+              setRegionTouched(true);
+            }}
             placeholder="us-east-1"
             autoComplete="off"
             spellCheck={false}

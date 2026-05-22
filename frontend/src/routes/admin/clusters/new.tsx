@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useCreateCluster } from "@/shared/api/mutations";
+import { useDriverDefaults, type DriverDefaults } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
 
@@ -29,6 +30,7 @@ export const Route = createFileRoute("/admin/clusters/new")({
 function AddClusterPage() {
   const navigate = useNavigate();
   const createCluster = useCreateCluster();
+  const { data: driverDefaults } = useDriverDefaults();
 
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("#C9874B");
@@ -39,6 +41,15 @@ function AddClusterPage() {
   const [s3Region, setS3Region] = useState("garage");
   const [s3AccessKey, setS3AccessKey] = useState("");
   const [s3SecretKey, setS3SecretKey] = useState("");
+
+  // v1.3.0b: pluck the EndpointDefaults for the selected driver so the
+  // form can render placeholder text + one-line hints instead of empty
+  // inputs the operator has to remember the format of. Falls back to
+  // an undefined entry when the catalogue hasn't loaded yet — the JSX
+  // tolerates that via the `?.` chain on every field.
+  const defaultsFor = (d: Driver): DriverDefaults | undefined =>
+    driverDefaults?.find((entry) => entry.driver === d);
+  const dDefaults = defaultsFor(driver);
 
   const handleSave = () => {
     if (!label.trim() || label.length < 1 || label.length > 64) return;
@@ -160,11 +171,19 @@ function AddClusterPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="adminUrl">Admin URL *</Label>
-              <Input id="adminUrl" value={adminUrl} onChange={(e) => setAdminUrl(e.target.value)} disabled={createCluster.isPending} placeholder="http://garage:3903" />
+              <Input id="adminUrl" value={adminUrl} onChange={(e) => setAdminUrl(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.adminUrl || "http://garage-host:3903"} />
+              {dDefaults?.adminUrlHint && (
+                <p className="text-xs text-muted-foreground">{dDefaults.adminUrlHint}</p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="adminToken">Admin Token *</Label>
               <Input id="adminToken" type="password" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} disabled={createCluster.isPending} />
+              {dDefaults?.secretUrl && (
+                <a href={dDefaults.secretUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline hover:no-underline">
+                  Where to find your admin token →
+                </a>
+              )}
             </div>
           </div>
         </section>
@@ -181,11 +200,14 @@ function AddClusterPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="s3Url">S3 URL</Label>
-              <Input id="s3Url" value={s3Url} onChange={(e) => setS3Url(e.target.value)} disabled={createCluster.isPending} placeholder="http://garage:3902" />
+              <Input id="s3Url" value={s3Url} onChange={(e) => setS3Url(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.s3Endpoint || "http://garage-host:3902"} />
+              {dDefaults?.s3EndpointHint && (
+                <p className="text-xs text-muted-foreground">{dDefaults.s3EndpointHint}</p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="s3Region">S3 Region</Label>
-              <Input id="s3Region" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder="garage" />
+              <Input id="s3Region" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.regionLabel || "garage"} />
             </div>
           </div>
         </section>
@@ -197,11 +219,16 @@ function AddClusterPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="awsRegion">Region *</Label>
-              <Input id="awsRegion" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder="us-east-1" />
+              <Input id="awsRegion" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.regionLabel || "us-east-1"} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="awsAccessKey">Access Key *</Label>
-              <Input id="awsAccessKey" value={s3AccessKey} onChange={(e) => setS3AccessKey(e.target.value)} disabled={createCluster.isPending} />
+              <Input id="awsAccessKey" value={s3AccessKey} onChange={(e) => setS3AccessKey(e.target.value)} disabled={createCluster.isPending} placeholder="AKIA…" />
+              {dDefaults?.secretUrl && (
+                <a href={dDefaults.secretUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline hover:no-underline">
+                  Where to find your access key →
+                </a>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="awsSecretKey">Secret Key *</Label>
@@ -209,7 +236,10 @@ function AddClusterPage() {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="awsEndpoint">Endpoint (optional)</Label>
-              <Input id="awsEndpoint" value={adminUrl} onChange={(e) => setAdminUrl(e.target.value)} disabled={createCluster.isPending} />
+              <Input id="awsEndpoint" value={adminUrl} onChange={(e) => setAdminUrl(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.s3Endpoint || "https://s3.us-east-1.amazonaws.com"} />
+              {dDefaults?.s3EndpointHint && (
+                <p className="text-xs text-muted-foreground">{dDefaults.s3EndpointHint}</p>
+              )}
             </div>
           </div>
         </section>
@@ -221,11 +251,17 @@ function AddClusterPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="minioEndpoint">Endpoint *</Label>
-              <Input id="minioEndpoint" value={adminUrl} onChange={(e) => setAdminUrl(e.target.value)} disabled={createCluster.isPending} placeholder="http://minio:9000" />
+              <Input id="minioEndpoint" value={adminUrl} onChange={(e) => setAdminUrl(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.s3Endpoint || "http://minio-host:9000"} />
+              {dDefaults?.s3EndpointHint && (
+                <p className="text-xs text-muted-foreground">{dDefaults.s3EndpointHint}</p>
+              )}
+              {dDefaults?.adminUrlHint && (
+                <p className="text-xs text-muted-foreground">{dDefaults.adminUrlHint}</p>
+              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="minioRegion">Region</Label>
-              <Input id="minioRegion" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder="us-east-1" />
+              <Input id="minioRegion" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.regionLabel || "us-east-1"} />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="minioAccessKey">Access Key *</Label>

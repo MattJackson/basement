@@ -20,6 +20,9 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
   return {
     ...(actual as object),
     useCreateUserKey: vi.fn(),
+    // v1.3.0b: form pulls driver defaults for the "Common endpoints"
+    // expandable; stub so the test doesn't fire a real fetch.
+    useDriverDefaults: vi.fn(),
   };
 });
 
@@ -29,7 +32,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import AddKeyPage from "@/routes/files/keys/new";
-import { useCreateUserKey } from "@/shared/api/queries";
+import { useCreateUserKey, useDriverDefaults } from "@/shared/api/queries";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -50,6 +53,30 @@ beforeEach(() => {
   vi.mocked(useCreateUserKey).mockReturnValue({
     mutateAsync: mutateAsyncMock,
     isPending: false,
+    error: null,
+  } as any);
+  vi.mocked(useDriverDefaults).mockReturnValue({
+    data: [
+      {
+        driver: "garage-v1",
+        displayName: "Garage v1",
+        adminUrl: "http://garage-host:3903",
+        adminUrlHint: "Garage admin API, default port 3903.",
+        s3Endpoint: "http://garage-host:3902",
+        s3EndpointHint: "Garage S3 API, default port 3902.",
+        regionLabel: "garage",
+      },
+      {
+        driver: "aws-s3",
+        displayName: "AWS S3",
+        adminUrl: "",
+        adminUrlHint: "AWS S3 has no admin URL — leave blank.",
+        s3Endpoint: "https://s3.us-east-1.amazonaws.com",
+        s3EndpointHint: "AWS S3 regional endpoint; substitute your region.",
+        regionLabel: "us-east-1",
+      },
+    ],
+    isLoading: false,
     error: null,
   } as any);
 });
@@ -122,6 +149,49 @@ describe("AddKeyPage (/files/keys/new)", () => {
       region: "us-east-1",
     });
     expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
+  });
+
+  // v1.3.0b — Common endpoints expandable + endpoint-driven region
+  // auto-suggest. Operator-typed values must never be overwritten
+  // silently; the apply-example button is the only auto-fill path.
+  it("auto-suggests region label when the endpoint matches a known pattern", async () => {
+    renderWithProviders(<AddKeyPage />);
+
+    const regionInput = screen.getByLabelText(/S3 region/) as HTMLInputElement;
+    expect(regionInput.value).toBe("us-east-1");
+
+    await userEvent.type(
+      screen.getByLabelText(/S3 endpoint URL/),
+      "http://garage.lan:3902",
+    );
+    expect(regionInput.value).toBe("garage");
+  });
+
+  it("does not overwrite the region once the operator has typed one", async () => {
+    renderWithProviders(<AddKeyPage />);
+    const regionInput = screen.getByLabelText(/S3 region/) as HTMLInputElement;
+
+    await userEvent.clear(regionInput);
+    await userEvent.type(regionInput, "fr-par");
+
+    await userEvent.type(
+      screen.getByLabelText(/S3 endpoint URL/),
+      "http://garage.lan:3902",
+    );
+    expect(regionInput.value).toBe("fr-par");
+  });
+
+  it("renders a 'Common endpoints' expandable and fills both endpoint + region on Use this", async () => {
+    renderWithProviders(<AddKeyPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Common endpoints/ }));
+    const useGarage = screen.getByTestId("use-endpoint-garage-v1");
+    await userEvent.click(useGarage);
+
+    const endpointInput = screen.getByLabelText(/S3 endpoint URL/) as HTMLInputElement;
+    const regionInput = screen.getByLabelText(/S3 region/) as HTMLInputElement;
+    expect(endpointInput.value).toBe("http://garage-host:3902");
+    expect(regionInput.value).toBe("garage");
   });
 
   it("renders the server error message when the mutation rejects", async () => {
