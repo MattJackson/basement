@@ -16,12 +16,15 @@ import {
 // already wraps the Outlet in UserShell. Double-wrap → double-header
 // (caught visually on v0.9.0a screenshot pass).
 //
-// ADR-0002 (v1.1.0e): the picker reads from /user/regions instead of
-// the retired /user/clusters tier. The backend share record still
-// stores connectionId/bucketId because shares are cluster-side artifacts
-// that survive a user's region churn — we resolve regionId → the
-// owning Connection via the region's canonical endpoint and ship that
-// Connection.ID in the POST body.
+// ADR-0002 (v1.1.0e + v1.1.0g): the picker reads from /user/regions
+// instead of the retired /user/clusters tier. The backend share record
+// still stores connectionId/bucketId because shares are cluster-side
+// artifacts that survive a user's region churn — the connectionId field
+// is now polymorphic (it accepts either a real Connection.ID or a
+// UserRegion.ID owned by the caller), and the backend resolves region
+// IDs to the owning Connection via canonical endpoint match. When the
+// region has no admin bridge the backend returns 400 NO_ADMIN_BRIDGE
+// and the screen renders a targeted error pointing at /admin/clusters/new.
 export const Route = createFileRoute("/files/shares/new")({
   component: NewSharePage,
 });
@@ -45,13 +48,12 @@ function NewSharePage() {
   const revokeShare = useRevokeUserShare();
 
   // The share record still lives at the Connection layer on the
-  // backend. We pass the region's owning Connection.ID through; the
+  // backend. We POST connectionId=regionId; the backend resolves to
+  // the matching admin Connection (v1.1.0g region resolver). The
   // bucket list already came back as the live (cluster-side) Bucket
-  // shape so b.id is the right value to ship. For v1.1.0e we POST
-  // connectionId=regionId — the backend share creation handler
-  // looks up the connection by id, and downstream uses the connection's
-  // own admin key for share-link delivery. A follow-up cycle will wire
-  // the share pipe through the region's user key instead.
+  // shape so b.id is the right value to ship. A follow-up cycle could
+  // wire the share pipe through the region's user key instead of the
+  // resolved admin Connection's admin key.
   const handleSave = () => {
     if (!regionId || !bucketId) return;
     const payload: {
@@ -151,11 +153,7 @@ function NewSharePage() {
         </div>
       </header>
 
-      {createShare.error && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {String(createShare.error.message ?? "Failed to create share")}
-        </div>
-      )}
+      {createShare.error && renderShareError(createShare.error)}
 
       <section className="space-y-4 rounded-lg border bg-card p-6">
         <h2 className="text-sm font-medium text-muted-foreground">Target</h2>
@@ -258,5 +256,28 @@ function BackLink() {
     <Link to="/files/shares" className="inline-flex items-center gap-1 text-sm font-medium hover:underline text-muted-foreground">
       ← Back to shares
     </Link>
+  );
+}
+
+// renderShareError surfaces NO_ADMIN_BRIDGE with the offending endpoint
+// + a pointer to /admin/clusters/new; other errors render as the
+// standard destructive banner.
+function renderShareError(err: unknown) {
+  const e = err as { code?: string; message?: string; details?: { endpoint?: string; field?: string } };
+  if (e?.code === "NO_ADMIN_BRIDGE") {
+    const endpoint = e.details?.endpoint ?? "(unknown)";
+    return (
+      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive space-y-1">
+        <p className="font-medium">No admin bridge for this region</p>
+        <p>
+          The region at <code className="font-mono">{endpoint}</code> has no admin Connection registered. Ask a cluster admin to register this endpoint at <code className="font-mono">/admin/clusters/new</code>, then retry.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      {String(e?.message ?? "Failed to create share")}
+    </div>
   );
 }

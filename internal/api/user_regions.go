@@ -27,6 +27,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
@@ -328,11 +329,13 @@ func (s *Server) userDeleteRegionHandler(w http.ResponseWriter, r *http.Request)
 // region-tier path returns whatever the user's key sees and the
 // bridge is skipped.
 //
-// No audit entry per the cycle spec: object-tier ops are covered by
-// the driver/audit chain already at the cluster admin layer, and
-// recording every per-user list would balloon the audit log without
-// adding accountability the user couldn't get from their own access
-// key on the backend.
+// v1.1.0g: emit a region:list_buckets audit event on success so the
+// "who listed what region with which key" trail is complete. Failures
+// surface as auditFailure with the driver error as detail. The Detail
+// field includes accessKey=... so operator forensics can correlate a
+// basement caller with a backend access log line. Object-tier
+// reads (list/presign-get) still go un-audited per the v1.1.0b spec —
+// the cycle scope was the high-touch region ops only.
 func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -346,6 +349,7 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 				"Region driver subsystem is not configured on this deployment.")
 			return
 		}
+		s.auditFailure(r, "region:list_buckets", regionListResource(region), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED",
 			"Failed to build region driver: "+err.Error())
 		return
@@ -361,6 +365,7 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 		// The bridge picked up an admin Connection but the admin call
 		// failed — surface that rather than silently fall through, so
 		// the operator can fix the cluster wiring.
+		s.auditFailure(r, "region:list_buckets", regionListResource(region), bridgeErr)
 		writeDriverError(w, "ListBuckets", bridgeErr)
 		return
 	}
@@ -368,6 +373,7 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 		// No admin bridge applies — use the user-key driver directly.
 		buckets, err = drv.ListBuckets(r.Context())
 		if err != nil {
+			s.auditFailure(r, "region:list_buckets", regionListResource(region), err)
 			writeDriverError(w, "ListBuckets", err)
 			return
 		}
@@ -383,7 +389,26 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 		_ = regions.TouchLastUsed(r.Context(), region.ID)
 	}
 
+	// Audit: record the successful list with the key used. Detail
+	// carries accessKey=... so an operator correlating a backend
+	// access log entry can map it back to a basement actor.
+	s.auditEmit(r, "region:list_buckets", regionListResource(region), audit.ResultSuccess,
+		"accessKey="+region.AccessKeyID)
+
 	writeJSON(w, http.StatusOK, buckets)
+}
+
+// regionListResource builds the canonical Resource string for
+// region:list_buckets audit events. Shape: region:{id}:{host} — the
+// host suffix is the part of the canonical endpoint after the scheme,
+// so the audit log is greppable by hostname without the operator
+// having to cross-reference region IDs.
+func regionListResource(r store.UserRegion) string {
+	host := r.Endpoint
+	if idx := strings.Index(host, "://"); idx >= 0 {
+		host = host[idx+3:]
+	}
+	return "region:" + r.ID + ":" + host
 }
 
 // garageRegionBucketsBridge looks for an admin Connection whose
