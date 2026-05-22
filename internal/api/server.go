@@ -37,6 +37,11 @@ type oidcProvider interface {
 	// the `auth_time` claim from the ID token; used by the elevation
 	// callback to confirm freshness.
 	VerifyIDTokenWithAuthTime(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, int64, error)
+	// VerifyIDTokenWithAllClaims is like VerifyIDToken but also returns
+	// the full decoded claim map; used by the v1.3.0a OIDC group-claim
+	// -> role auto-mapping sync so the callback can read provider
+	// claims like "groups" / "roles" without re-parsing the JWT.
+	VerifyIDTokenWithAllClaims(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, map[string]interface{}, error)
 	Issuer() string
 	AutoProvision() bool
 }
@@ -296,6 +301,13 @@ func (s *Server) routes() {
 			// Same policy:view_matrix gate as the matrix GET — pure
 			// inspector, no enforcement-logic changes.
 			uiAdminG.Post("/admin/policies/simulate", s.simulatePolicyHandler)
+
+			// v1.3.0a: OIDC group-claim -> role auto-mapping config.
+			// Same persona that owns /admin/policies owns this — gated
+			// on host:manage_policies inside the handler. Mappings
+			// apply on each user's next OIDC login.
+			uiAdminG.Get("/admin/oidc-group-mappings", s.listOIDCGroupMappingsHandler)
+			uiAdminG.Put("/admin/oidc-group-mappings", s.updateOIDCGroupMappingsHandler)
 
 			// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). UIAdmin
 			// middleware is belt-and-braces; the actual enforcement

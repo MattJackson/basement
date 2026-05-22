@@ -901,6 +901,53 @@ export function useSimulatePolicy() {
   });
 }
 
+// v1.3.0a — OIDC group-claim -> role auto-mapping hooks
+// (/admin/oidc-group-mappings).
+//
+// Same bare-fetch pattern as the v0.9.0g policy hooks above because
+// the endpoints aren't in the OpenAPI spec yet. PUT replaces the full
+// list atomically; the GET response is invalidated on every successful
+// mutation so the system page re-renders with the new state.
+export type OIDCGroupMapping = {
+  claim: string;
+  claimValue: string;
+  roleId: string;
+  scope: string;
+};
+export type OIDCGroupMappingsResponse = {
+  mappings: OIDCGroupMapping[];
+  updatedAt?: string;
+};
+
+export function useOIDCGroupMappings() {
+  return useQuery<OIDCGroupMappingsResponse>({
+    queryKey: ["admin", "oidc-group-mappings"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/oidc-group-mappings", { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/oidc-group-mappings", res.status, body);
+      return body as OIDCGroupMappingsResponse;
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useUpdateOIDCGroupMappings() {
+  return useMutation({
+    mutationFn: async (mappings: OIDCGroupMapping[]) => {
+      const res = await fetch("/api/v1/admin/oidc-group-mappings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mappings }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/oidc-group-mappings/put", res.status, body);
+      return body as OIDCGroupMappingsResponse;
+    },
+  });
+}
+
 // v0.9.0i LIFECYCLE.WIZARD — bucket lifecycle policy hooks.
 //
 // The OpenAPI spec doesn't carry these endpoints yet, so we go around
