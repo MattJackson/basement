@@ -176,8 +176,8 @@ See `docs/configuration.md` for production env vars.
 | Policy simulator (what-if)           | yes              | no                      | no                | no              |
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
-| Open source license                  | MIT              | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-22)            | active v1.7      | active v1.1.0           | active v0.5       | active fork     |
+| Open source license                  | AGPL-3.0         | AGPL                    | MIT               | AGPL (fork)     |
+| Status (as of 2026-05-22)            | active v1.8      | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -233,4 +233,6 @@ accept new backends. See `docs/driver-authoring.md` (TODO post-v0.5).
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+GNU Affero General Public License v3.0 (AGPLv3). See [LICENSE](./LICENSE).
+
+For commercial licensing (proprietary embedding, hosted SaaS, modifying without publishing source): contact matthew@pq.io.
