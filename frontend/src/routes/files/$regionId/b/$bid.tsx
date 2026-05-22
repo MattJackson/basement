@@ -57,7 +57,14 @@ type VirtualRow =
 // Fixed row height (px). Matches a comfortable table-row tap target at
 // the default font size. If the design shifts this, the estimateSize
 // callback below must move with it.
-const ROW_HEIGHT = 48;
+//
+// v1.8.0e: mobile breakpoint (<640px) switches to a stacked card
+// layout that needs more vertical room — name on row 1, size + date on
+// row 2, action icon pinned right. 76px accommodates the two-line
+// stack plus comfortable tap padding (each row + chrome ≥44px).
+const ROW_HEIGHT_DESKTOP = 48;
+const ROW_HEIGHT_MOBILE = 76;
+const MOBILE_BREAKPOINT_PX = 640;
 
 function UserRegionBucketObjects() {
   const { regionId, bid } = Route.useParams();
@@ -508,6 +515,35 @@ function UserRegionBucketObjects() {
 // scrollable region that the virtualizer drives. Each row is
 // absolutely positioned by transform so the visible window is
 // constant-DOM-cost regardless of `rows.length`.
+// useIsMobile re-renders the consumer when the viewport crosses the
+// MOBILE_BREAKPOINT_PX threshold. Used by the bucket browser to swap
+// table row layout for a stacked card layout at narrow widths. Returns
+// false in SSR / jsdom contexts so existing tests render the desktop
+// layout (the breakpoint switch is covered by a dedicated mobile test).
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false;
+    }
+    return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`).matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", handler);
+      return () => mql.removeEventListener("change", handler);
+    }
+    // Older Safari fallback
+    mql.addListener(handler);
+    return () => mql.removeListener(handler);
+  }, []);
+  return isMobile;
+}
+
 function VirtualObjectList({
   rows,
   onFolderClick,
@@ -536,11 +572,13 @@ function VirtualObjectList({
   perRowError: Map<string, string>;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
+  const isMobile = useIsMobile();
+  const rowHeight = isMobile ? ROW_HEIGHT_MOBILE : ROW_HEIGHT_DESKTOP;
 
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight,
     overscan: 8,
     // initialRect gives the virtualizer a non-zero viewport before
     // the parent measures (first paint + jsdom in tests). Without
@@ -586,13 +624,23 @@ function VirtualObjectList({
   }, [items, rows.length, isFetchingNextPage, onReachEnd]);
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
+    <div
+      className="rounded-lg border bg-card overflow-hidden"
+      data-testid="virtual-object-list"
+      data-layout={isMobile ? "card" : "table"}
+    >
       {/* Sticky header row. Uses the same column widths as the body so
           the eye doesn't jump between header + first body row. v1.4.0b:
           leading 40px column hosts the per-row checkbox + the
           select-all-visible toggle in the header. Folder rows leave it
-          blank — selection is files-only by design. */}
-      <div className="grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          blank — selection is files-only by design.
+
+          v1.8.0e: header is hidden on mobile (<640px) where rows
+          render as stacked cards with size + date below the name —
+          column headers are meaningless without column alignment. The
+          select-all checkbox lives in the mobile action bar above the
+          list instead (see select-all-mobile below). */}
+      <div className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center" data-testid="select-all-cell">
           <Checkbox
             checked={allVisibleSelected}
@@ -607,6 +655,24 @@ function VirtualObjectList({
         <div className="text-right">Size</div>
         <div className="text-right">Last modified</div>
         <div className="text-right">Actions</div>
+      </div>
+      {/* Mobile select-all strip: dedicated row above the card list
+          so the operator still has bulk-select access without the
+          grid header. ≥44px tap target (the strip is full-width). */}
+      <div
+        className="sm:hidden flex items-center gap-3 border-b bg-muted/30 px-3 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground"
+        data-testid="select-all-cell-mobile"
+      >
+        <Checkbox
+          checked={allVisibleSelected}
+          indeterminate={someVisibleSelected}
+          onCheckedChange={onToggleSelectAllVisible}
+          disabled={!hasSelectableRows}
+          aria-label="Select all visible files"
+          data-testid="select-all-visible-mobile"
+          className="h-5 w-5"
+        />
+        <span>{hasSelectableRows ? "Select all visible" : "No selectable files"}</span>
       </div>
 
       <div
@@ -631,6 +697,9 @@ function VirtualObjectList({
             if (!row) return null;
             const isSelectedFile = row.kind === "file" && selectedKeys.has(row.key);
             const fileError = row.kind === "file" ? perRowError.get(row.key) : undefined;
+            const layoutClass = isMobile
+              ? "flex items-center gap-3"
+              : "grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center";
             return (
               <div
                 key={virtual.key}
@@ -642,35 +711,50 @@ function VirtualObjectList({
                   left: 0,
                   width: "100%",
                   transform: `translateY(${virtual.start}px)`,
-                  height: ROW_HEIGHT,
+                  height: rowHeight,
                 }}
-                className={`grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center border-b px-3 hover:bg-muted/40 ${
+                className={`${layoutClass} border-b px-3 hover:bg-muted/40 ${
                   isSelectedFile ? "bg-primary/5" : ""
                 } ${fileError ? "ring-1 ring-inset ring-destructive/50" : ""}`}
                 data-row-kind={row.kind}
               >
                 {row.kind === "folder" && (
                   <>
-                    {/* Empty cell — folders are not selectable. */}
-                    <div />
-                    <FolderRow prefix={row.key} onFolderClick={onFolderClick} />
+                    {/* Empty cell — folders are not selectable. Hidden
+                        on mobile (no checkbox column there). */}
+                    <div className="hidden sm:block" />
+                    <FolderRow
+                      prefix={row.key}
+                      onFolderClick={onFolderClick}
+                      isMobile={isMobile}
+                    />
                   </>
                 )}
                 {row.kind === "file" && (
                   <>
-                    <div className="flex items-center">
+                    <div className="flex items-center flex-shrink-0">
                       <Checkbox
                         checked={isSelectedFile}
                         onCheckedChange={() => onToggleSelected(row.key)}
                         aria-label={`Select ${row.key}`}
                         data-testid={`file-select-${row.key}`}
+                        className={isMobile ? "h-5 w-5" : undefined}
                       />
                     </div>
-                    <FileRow obj={row.obj} onDownload={onDownload} errorMessage={fileError} />
+                    <FileRow
+                      obj={row.obj}
+                      onDownload={onDownload}
+                      errorMessage={fileError}
+                      isMobile={isMobile}
+                    />
                   </>
                 )}
                 {row.kind === "loadMoreSentinel" && (
-                  <div className="col-span-5 text-center text-xs text-muted-foreground">
+                  <div
+                    className={`text-center text-xs text-muted-foreground ${
+                      isMobile ? "w-full" : "col-span-5"
+                    }`}
+                  >
                     {isFetchingNextPage ? "Loading more..." : "Scroll for more"}
                   </div>
                 )}
@@ -687,15 +771,45 @@ function VirtualObjectList({
 // slash for display so "raw/" reads as "raw" without trailing
 // punctuation; the navigation handler still receives the full prefix
 // (S3's expected shape).
+//
+// v1.8.0e: on mobile (isMobile=true) the size + last-modified columns
+// collapse and the folder is a single full-width tap target. The
+// folder button itself stretches to fill the row so the tap area is
+// the entire 76px-tall row, not just the icon + label.
 function FolderRow({
   prefix,
   onFolderClick,
+  isMobile,
 }: {
   prefix: string;
   onFolderClick: (p: string) => void;
+  isMobile: boolean;
 }) {
   const trimmed = prefix.endsWith("/") ? prefix.slice(0, -1) : prefix;
   const displayName = trimmed.split("/").pop() || trimmed;
+
+  if (isMobile) {
+    return (
+      <button
+        type="button"
+        onClick={() => onFolderClick(prefix)}
+        className="flex items-center gap-3 text-left w-full overflow-hidden min-h-11"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          className="h-6 w-6 text-blue-500 flex-shrink-0"
+        >
+          <path d="M19.5 21a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-15a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h15ZM1.5 10.146V6a3 3 0 0 1 3-3h5.379a2.25 2.25 0 0 1 1.59.659l2.122 2.121c.14.141.331.22.53.22H19.5a3 3 0 0 1 3 3v1.146A4.483 4.483 0 0 0 19.5 9h-15a4.483 4.483 0 0 0-3 1.146Z" />
+        </svg>
+        <div className="flex flex-col min-w-0 flex-1">
+          <span className="font-medium truncate">{displayName}</span>
+          <span className="text-xs text-muted-foreground">Folder</span>
+        </div>
+      </button>
+    );
+  }
 
   return (
     <>
@@ -731,12 +845,91 @@ function FileRow({
   obj,
   onDownload,
   errorMessage,
+  isMobile,
 }: {
   obj: ObjectInfo;
   onDownload: (key: string) => void;
   errorMessage?: string;
+  isMobile: boolean;
 }) {
   const displayName = obj.key.split("/").pop() || obj.key;
+  const sizeText = humanizeBytes(obj.size);
+  const modifiedText = obj.last_modified ? humanizeTime(obj.last_modified) : null;
+
+  // v1.8.0e: mobile card layout — name on row 1, size + modified
+  // joined by a separator on row 2 below; Download is an icon button
+  // pinned to the right with a 44×44 hit area. Folder/select column
+  // gap takes the leading 12px so the visual hierarchy reads
+  // checkbox | (name + metadata) | download.
+  if (isMobile) {
+    return (
+      <>
+        <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
+          <div className="flex items-center gap-2 min-w-0">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              className={`h-5 w-5 flex-shrink-0 ${errorMessage ? "text-destructive" : "text-gray-500"}`}
+              aria-hidden="true"
+            >
+              <path d="M19.5 14.25v-9a3 3 0 0 0-3-3H7.5a3 3 0 0 0-3 3v13.5a3 3 0 0 0 3 3h9a3 3 0 0 0 3-3Z" />
+              <path d="M16.5 7.5h-9v9h9a1.5 1.5 0 0 0 1.5-1.5v-6Z" fillOpacity={0} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span
+              className="font-medium truncate text-sm"
+              title={errorMessage ? `${obj.key} — ${errorMessage}` : obj.key}
+              data-testid={errorMessage ? `file-row-error-${obj.key}` : undefined}
+            >
+              {displayName}
+            </span>
+            {errorMessage && (
+              <span
+                className="text-xs text-destructive whitespace-nowrap flex-shrink-0"
+                data-testid={`file-row-error-label-${obj.key}`}
+              >
+                delete failed
+              </span>
+            )}
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground tabular-nums truncate pl-7">
+            {sizeText}
+            {modifiedText && <span className="mx-1.5">&middot;</span>}
+            {modifiedText}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDownload(obj.key);
+          }}
+          aria-label={`Download ${displayName}`}
+          // 44×44 minimum tap target. Negative margin keeps the row's
+          // 76px height intact while letting the hit area exceed the
+          // visible icon footprint.
+          className="inline-flex h-11 w-11 -my-2 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-5 w-5"
+            aria-hidden="true"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" x2="12" y1="15" y2="3" />
+          </svg>
+        </button>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="flex items-center gap-2 overflow-hidden">
@@ -766,9 +959,9 @@ function FileRow({
           </span>
         )}
       </div>
-      <div className="text-right tabular-nums text-sm">{humanizeBytes(obj.size)}</div>
+      <div className="text-right tabular-nums text-sm">{sizeText}</div>
       <div className="text-right tabular-nums text-sm">
-        {obj.last_modified ? humanizeTime(obj.last_modified) : "—"}
+        {modifiedText ?? "—"}
       </div>
       <div className="text-right">
         <Button
@@ -945,7 +1138,8 @@ function Breadcrumb({
 function ObjectListSkeleton() {
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
-      <div className="grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      {/* v1.8.0e: header hidden on mobile to match the live layout. */}
+      <div className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <div />
         <div>Name</div>
         <div className="text-right">Size</div>
@@ -956,14 +1150,28 @@ function ObjectListSkeleton() {
         {[...Array(8)].map((_, i) => (
           <div
             key={i}
-            className="grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center px-3"
-            style={{ height: ROW_HEIGHT }}
+            className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center px-3"
+            style={{ height: ROW_HEIGHT_DESKTOP }}
           >
             <Skeleton className="h-4 w-4" />
             <Skeleton className="h-4 w-64" />
             <Skeleton className="h-4 w-16 ml-auto" />
             <Skeleton className="h-4 w-32 ml-auto" />
             <Skeleton className="h-8 w-20 ml-auto" />
+          </div>
+        ))}
+        {[...Array(8)].map((_, i) => (
+          <div
+            key={`m-${i}`}
+            className="sm:hidden flex items-center gap-3 px-3"
+            style={{ height: ROW_HEIGHT_MOBILE }}
+          >
+            <Skeleton className="h-5 w-5 flex-shrink-0" />
+            <div className="flex-1 space-y-1">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-24" />
+            </div>
+            <Skeleton className="h-11 w-11 flex-shrink-0" />
           </div>
         ))}
       </div>

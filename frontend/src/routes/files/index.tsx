@@ -5,6 +5,7 @@ import { UserKeyCard } from "@/components/keys/UserKeyCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
+import { InstallToHomeScreenHint } from "@/shared/ui/InstallToHomeScreenHint";
 
 // /files = "My Regions" — heading kept per ADR-0002, but v1.2.0d
 // refines the model: each card is one of the user's ACCESS KEYS. A
@@ -44,6 +45,11 @@ function FilesHome() {
           ) : null
         }
       />
+
+      {/* v1.8.0e: install-to-home-screen hint. Self-gates on mobile
+          viewport + browser display-mode + one-time-dismissed flag,
+          so it never renders for desktop or already-installed PWAs. */}
+      <InstallToHomeScreenHint />
 
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

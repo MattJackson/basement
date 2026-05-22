@@ -225,7 +225,12 @@ export function PersonaPill() {
             disabled={dropping}
             title="Drop privileges back to USER"
             aria-label="Drop privileges"
-            className="inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            // v1.8.0e: tap target hits 44px on touch devices via the
+            // sm-and-down sizing; desktop stays at the compact 20px
+            // chip so the persona pill cluster doesn't blow out the
+            // header height. The icon stays 12px in both cases so the
+            // visual chrome matches.
+            className="inline-flex h-11 w-11 sm:h-5 sm:w-5 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
             data-testid="persona-drop"
           >
             <CrossIcon />

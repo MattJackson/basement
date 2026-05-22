@@ -19,9 +19,21 @@ export function UserShell({ children }: UserShellProps): ReactNode {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 sm:gap-6 min-w-0 flex-1">
             <Logo href="/files" />
-            <nav className="flex items-center gap-5" aria-label="Primary">
+            {/* v1.8.0e: nav scrolls horizontally on mobile (no
+                hamburger). 7 top-level user routes wouldn't fit a
+                380px viewport even at small font sizes, and a
+                hamburger sheet adds friction for a daily-driver
+                surface. overflow-x-auto with scrollbar-hidden gives
+                operators a familiar swipe-the-tabs pattern (iOS
+                Safari / Android Chrome both make this discoverable
+                via the partial overflow cue at the edge). */}
+            <nav
+              className="flex items-center gap-5 overflow-x-auto whitespace-nowrap -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              aria-label="Primary"
+              data-testid="user-nav"
+            >
               <Link
                 to="/files"
                 className={NAV_LINK}
@@ -81,7 +93,7 @@ export function UserShell({ children }: UserShellProps): ReactNode {
               </Link>
             </nav>
           </div>
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             {/* ADR-0003 v1.2.0b: persona pill — same one as AppShell. */}
             {/* Shown in the user shell too so a USER → ADMIN flip */}
             {/* (operator stepping up to do an admin op without */}

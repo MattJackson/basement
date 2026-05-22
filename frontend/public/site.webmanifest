@@ -1,7 +1,7 @@
 {
   "name": "Basement",
   "short_name": "Basement",
-  "description": "Toss your stuff here. Forget about it. A friendly UI for Garage S3.",
+  "description": "Multi-backend storage control plane",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
