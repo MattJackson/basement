@@ -43,7 +43,12 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 		return nil, fmt.Errorf("missing required config key: secret_key")
 	}
 
-	client, err := driverpkg.NewS3PathStyleClient(endpoint, accessKey, secretKey, "")
+	// Honor the operator-supplied region label. Empty defaults to
+	// "us-east-1" inside NewS3PathStyleClient, which Garage rejects with
+	//   AuthorizationHeaderMalformed: unexpected scope: <date>/us-east-1/s3/aws4_request
+	// when the backend's configured region (e.g. "garage") doesn't match.
+	region := cfg["region"]
+	client, err := driverpkg.NewS3PathStyleClient(endpoint, accessKey, secretKey, region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", endpoint, err)
 	}
