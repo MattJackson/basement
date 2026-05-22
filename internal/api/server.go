@@ -75,6 +75,11 @@ type Server struct {
 	// the engine is missing. Production main.go wires both.
 	webhooks      webhook.Store
 	webhookEngine webhookEmitter
+	// v1.9.0a WebDAV gateway. Optional; when nil the /webdav/ tree
+	// returns 503 WEBDAV_NOT_WIRED. Production main.go wires a
+	// *webdav.Handler before Start(); tests that don't care about the
+	// gateway leave the field unset.
+	webdav      http.Handler
 	oidc        oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
@@ -211,6 +216,16 @@ func (s *Server) SetWebhooks(store webhook.Store, engine webhookEmitter) {
 	s.webhookEngine = engine
 }
 
+// SetWebDAVHandler wires the v1.9.0a WebDAV gateway handler. Mounted
+// under /webdav/ on the root chi router. Passing nil disables the
+// route and any request to /webdav/* returns 503 WEBDAV_NOT_WIRED so
+// a Finder probe surfaces an actionable error rather than a silent
+// 404. Production main.go always supplies a non-nil *webdav.Handler;
+// tests that don't exercise WebDAV leave this unset.
+func (s *Server) SetWebDAVHandler(h http.Handler) {
+	s.webdav = h
+}
+
 // SetMetricsRecorder wires the metrics-snapshot recorder into the
 // server (v1.0.0d). The recorder is consumed by /admin/usage/series
 // for the time-series view. Production wires a FileRecorder; tests
@@ -262,15 +277,21 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 // routes registers chi middleware and the /api/v1/* route group.
+//
+// v1.9.0a: the JSON-only AllowContentType middleware moved off the
+// root router into the /api/v1 sub-router so /webdav/* requests (which
+// carry XML on PROPFIND and arbitrary content types on PUT) aren't
+// rejected with 415 before they reach the WebDAV handler. Every
+// /api/v1 endpoint still enforces JSON via the apiR.Use call below.
 func (s *Server) routes() {
 	r := s.router
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(s.logHandler)
-	r.Use(middleware.AllowContentType("application/json"))
 
 	r.Route("/api/v1", func(apiR chi.Router) {
+		apiR.Use(middleware.AllowContentType("application/json"))
 		apiR.Use(xBuildMiddleware)
 
 		// Public routes — no auth required.
@@ -552,7 +573,29 @@ func (s *Server) routes() {
 		})
 	})
 
+	// v1.9.0a WebDAV gateway. Mounted as a sub-tree so chi can dispatch
+	// the full path (including verb-tagged children) into the webdav
+	// handler. When SetWebDAVHandler hasn't been called we return a
+	// typed 503 so a Finder probe surfaces "service not configured"
+	// instead of falling through to the SPA's catchall 404.
+	r.Handle("/webdav", s.webdavRouter())
+	r.Handle("/webdav/*", s.webdavRouter())
+
 	r.Handle("/*", web.Handler())
+}
+
+// webdavRouter returns the wired WebDAV handler if SetWebDAVHandler
+// was called, otherwise a small 503-emitting stub. Centralised so
+// both /webdav and /webdav/* mount points share the same fallback.
+func (s *Server) webdavRouter() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.webdav == nil {
+			writeErrorSimple(w, http.StatusServiceUnavailable, "WEBDAV_NOT_WIRED",
+				"WebDAV gateway is not configured on this deployment.")
+			return
+		}
+		s.webdav.ServeHTTP(w, r)
+	})
 }
 
 // logHandler is a middleware equivalent to chi.Logger using slog.

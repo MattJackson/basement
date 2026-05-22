@@ -4,6 +4,26 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.9.0a — 2026-05-22
+
+WebDAV gateway. New `/webdav/` tree on the same chi router as
+`/api/v1` exposes a user's regions, buckets, and objects to any
+native WebDAV client (macOS Finder, Windows Explorer, Linux
+Nautilus, iOS Files, Android, rclone). Auth is HTTP Basic — either
+`username:password` against the env-admin / store users or a
+service-account `BMNT...:secret` pair in the user/pass slots, so a
+key minted at `/admin/service-accounts` can drive a Finder mount
+without re-authenticating against the JSON login. Implementation
+sits in `internal/webdav` over `golang.org/x/net/webdav`; a custom
+`FileSystem` maps WebDAV paths (`/{alias}/{bucket}/{key}`) onto the
+existing per-user `driver.ForUserRegion` surface so the Garage admin
+bridge that powers `/api/v1/user/regions/{id}/buckets` is honoured
+verbatim on PROPFIND. LOCK/UNLOCK return 501 (most clients are
+read+write without locks); MOVE/COPY use ServerSideCopy; MKCOL on
+a region root creates a bucket. The `AllowContentType` JSON
+middleware moved off the root router into the `/api/v1` sub-router
+so WebDAV PUT/PROPFIND aren't rejected with 415.
+
 ## v1.8.0 — 2026-05-22
 
 MCP server + Mobile PWA + service-account config UX milestone. Six
