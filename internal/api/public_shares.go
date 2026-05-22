@@ -59,7 +59,7 @@ type shareListResponse struct {
 	Objects          []driver.ObjectInfo `json:"objects"`
 	NextContinuation string              `json:"nextContinuation,omitempty"`
 	IsTruncated      bool                `json:"isTruncated"`
-	Prefixes         []string            `json:"prefixes,omitempty"`
+	CommonPrefixes   []string            `json:"commonPrefixes,omitempty"`
 }
 
 // shareGetResponse is the response for /api/v1/share/{token}/get.
@@ -291,7 +291,9 @@ func (s *Server) shareListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, err := drv.ListObjects(r.Context(), sh.BucketID, fullPrefix, "", 100)
+	// Public-share browser is always folder-tier — delimiter="/" so
+	// share viewers see sub-folder rows next to file rows.
+	page, err := drv.ListObjects(r.Context(), sh.BucketID, fullPrefix, "", "/", 100)
 	if err != nil {
 		var de *driver.Error
 		if errors.As(err, &de) {
@@ -311,9 +313,9 @@ func (s *Server) shareListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := shareListResponse{
-		Objects:       cleanedObjects,
-		IsTruncated:   page.IsTruncated,
-		Prefixes:      page.Prefixes,
+		Objects:        cleanedObjects,
+		IsTruncated:    page.IsTruncated,
+		CommonPrefixes: page.CommonPrefixes,
 	}
 	if page.NextContinuation != "" {
 		resp.NextContinuation = page.NextContinuation

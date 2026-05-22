@@ -172,11 +172,18 @@ type BucketPermission struct {
 }
 
 // ObjectPage represents a page of objects in a bucket.
+//
+// CommonPrefixes is the S3 ListObjectsV2 sub-folder list — populated
+// when ListObjects is called with a non-empty delimiter (typically "/").
+// Each entry is a full prefix string ending in the delimiter
+// (e.g. "raw/", "index/broadcom-docid/"); the UI renders these as
+// clickable folder rows that drill in by re-listing with prefix=entry.
+// Empty when delimiter="" (the flat-list mode the sync engine uses).
 type ObjectPage struct {
 	Objects          []ObjectInfo `json:"objects"`
 	NextContinuation string       `json:"nextContinuation,omitempty"`
 	IsTruncated      bool         `json:"isTruncated"`
-	Prefixes         []string     `json:"prefixes,omitempty"`
+	CommonPrefixes   []string     `json:"commonPrefixes,omitempty"`
 }
 
 // ObjectInfo represents metadata about an object.
@@ -282,8 +289,14 @@ type Driver interface {
 	UpdateKeyPermissions(ctx context.Context, keyID string, perms []BucketPermission) error
 	DeleteKey(ctx context.Context, id string) error
 
-	// S3 data plane (admin object browser + end-user UI)
-	ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (ObjectPage, error)
+	// S3 data plane (admin object browser + end-user UI).
+	//
+	// ListObjects: an empty delimiter performs a recursive flat list
+	// (every key under prefix, the shape the sync engine + scripts
+	// want). delimiter="/" performs folder-tier browsing: Objects is
+	// only the keys directly under prefix and CommonPrefixes carries
+	// the distinct sub-folder prefixes (e.g. "raw/", "index/").
+	ListObjects(ctx context.Context, bucket, prefix, continuation, delimiter string, limit int) (ObjectPage, error)
 	StatObject(ctx context.Context, bucket, key string) (ObjectInfo, error)
 	PresignGet(ctx context.Context, bucket, key string, ttl time.Duration) (PresignedURL, error)
 	PresignPut(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (PresignedURL, error)

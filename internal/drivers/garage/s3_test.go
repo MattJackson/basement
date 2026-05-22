@@ -275,7 +275,7 @@ func TestGarage_ListObjects_EmptyEndpoint(t *testing.T) {
 		s3Endpoint: "",
 	}
 
-	_, err := d.ListObjects(context.Background(), "bucket", "", "", 100)
+	_, err := d.ListObjects(context.Background(), "bucket", "", "", "/", 100)
 	if err == nil {
 		t.Fatal("expected error when s3_endpoint is empty")
 	}

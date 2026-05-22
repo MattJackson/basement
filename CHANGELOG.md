@@ -4,6 +4,33 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0c.1 — 2026-05-22
+
+Folder navigation in the bucket browser via S3 `delimiter="/"`. Before
+this cycle, the `/files/{regionId}/b/{bid}` route dumped every key
+under the bucket flat — a hundred-deep `raw/broadcom-docid/...pdf`
+tree looked like a hundred files at the root. Now the user-region
+list-objects handler defaults `delimiter="/"` and returns
+`commonPrefixes` (sub-folder rows) alongside `objects` (files at this
+level). Folder rows render first, alphabetical; file rows after. The
+breadcrumb across the top is the bucket alias + each prefix segment,
+all clickable; an "Up to parent folder" affordance sits beneath. The
+driver interface change (`ListObjects` gains a trailing `delimiter
+string` param) cascades through all four drivers — garage_v1, garage,
+aws_s3, minio — each setting `s3.ListObjectsV2Input.Delimiter` only
+when non-empty. The sync engine + bucket-access probe continue to
+pass `""` for flat recursive listing. Wire-shape rename: the JSON
+field on `ObjectPage` is `commonPrefixes` (matches the S3
+nomenclature), replacing the prior `prefixes`. Driver-level test
+asserts the delimiter rides the wire only when non-empty (both
+aws_s3 and minio); handler-level test asserts the default and the
+explicit-empty paths; FE test asserts folder rows render before file
+rows, clicking a folder navigates to the right prefix, and the empty
+state copy changes inside a sub-folder. Build + race tests green;
+both `prefixes` -> `commonPrefixes` references in the share viewer
+and bucket browser updated together so nothing's left looking at
+the old field.
+
 ## v1.3.0c — 2026-05-22
 
 Per-region S3 addressing toggle + in-place key rotation. Two compact

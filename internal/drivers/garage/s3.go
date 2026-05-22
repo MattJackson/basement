@@ -15,7 +15,9 @@ import (
 )
 
 // ListObjects lists objects in a bucket with optional prefix and pagination.
-func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (driverpkg.ObjectPage, error) {
+// delimiter="" returns a flat recursive listing; delimiter="/" returns
+// folder-tier browsing with CommonPrefixes populated for sub-folders.
+func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation, delimiter string, limit int) (driverpkg.ObjectPage, error) {
 	if d.s3Client == nil {
 		return driverpkg.ObjectPage{}, &driverpkg.Error{
 			Op:      "ListObjects",
@@ -25,7 +27,7 @@ func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation s
 		}
 	}
 
-	resp, err := d.s3Client.listObjectsV2(ctx, bucket, prefix, continuation, limit)
+	resp, err := d.s3Client.listObjectsV2(ctx, bucket, prefix, continuation, delimiter, limit)
 	if err != nil {
 		return driverpkg.ObjectPage{}, &driverpkg.Error{
 			Op:      "ListObjects",
@@ -38,10 +40,10 @@ func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation s
 	objects := make([]driverpkg.ObjectInfo, 0, len(resp.Contents))
 	for _, obj := range resp.Contents {
 		info := driverpkg.ObjectInfo{
-			Key:    keyFromPtr(obj.Key),
-			Size:   sizeFromPtr(obj.Size),
-			ETag:   etagFromPtr(obj.ETag),
-			IsDir:  false,
+			Key:   keyFromPtr(obj.Key),
+			Size:  sizeFromPtr(obj.Size),
+			ETag:  etagFromPtr(obj.ETag),
+			IsDir: false,
 		}
 		if obj.LastModified != nil {
 			info.LastModified = *obj.LastModified
@@ -49,17 +51,17 @@ func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation s
 		objects = append(objects, info)
 	}
 
-	prefixes := make([]string, 0, len(resp.CommonPrefixes))
+	commonPrefixes := make([]string, 0, len(resp.CommonPrefixes))
 	for _, p := range resp.CommonPrefixes {
 		if p.Prefix != nil {
-			prefixes = append(prefixes, *p.Prefix)
+			commonPrefixes = append(commonPrefixes, *p.Prefix)
 		}
 	}
 
 	page := driverpkg.ObjectPage{
-		Objects:     objects,
-		Prefixes:    prefixes,
-		IsTruncated: resp.IsTruncated != nil && *resp.IsTruncated,
+		Objects:        objects,
+		CommonPrefixes: commonPrefixes,
+		IsTruncated:    resp.IsTruncated != nil && *resp.IsTruncated,
 	}
 
 	if resp.NextContinuationToken != nil {

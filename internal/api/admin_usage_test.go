@@ -102,7 +102,7 @@ func (d *usageSizedDriver) UpdateKeyPermissions(_ context.Context, _ string, _ [
 }
 func (d *usageSizedDriver) DeleteKey(_ context.Context, _ string) error { return nil }
 
-func (d *usageSizedDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+func (d *usageSizedDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 	return driver.ObjectPage{}, nil
 }
 func (d *usageSizedDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) {

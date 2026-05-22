@@ -4593,11 +4593,15 @@ components:
           isTruncated:
             type: boolean
             description: Whether there are more results available.
-          prefixes:
+          commonPrefixes:
             type: array
             items:
               type: string
-            description: List of folder prefixes (for hierarchical navigation).
+            description: |
+              S3 CommonPrefixes — distinct sub-folder prefixes returned
+              when ListObjects is called with a non-empty delimiter.
+              Each entry ends in the delimiter (typically "/") and is
+              rendered as a clickable folder row by the bucket browser.
       Grant:
         type: object
         required:

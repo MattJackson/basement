@@ -97,7 +97,7 @@ func (d *schedulerStubDriver) UpdateKeyPermissions(_ context.Context, _ string, 
 }
 func (d *schedulerStubDriver) DeleteKey(_ context.Context, _ string) error { return nil }
 
-func (d *schedulerStubDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+func (d *schedulerStubDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 	return driver.ObjectPage{}, nil
 }
 func (d *schedulerStubDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) {

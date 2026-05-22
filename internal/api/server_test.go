@@ -34,7 +34,7 @@ func (m *mockDriver) GetKey(_ context.Context, _ string) (driver.Key, error) { r
 func (m *mockDriver) CreateKey(_ context.Context, _ driver.KeySpec) (driver.Key, error) { return driver.Key{}, nil }
 func (m *mockDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []driver.BucketPermission) error { return nil }
 func (m *mockDriver) DeleteKey(_ context.Context, _ string) error { return nil }
-func (m *mockDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) { return driver.ObjectPage{}, nil }
+func (m *mockDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) { return driver.ObjectPage{}, nil }
 func (m *mockDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) { return driver.ObjectInfo{}, nil }
 func (m *mockDriver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }
 func (m *mockDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (driver.PresignedURL, error) { return driver.PresignedURL{}, nil }

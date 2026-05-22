@@ -101,7 +101,7 @@ func (*testDriver) AbortMultipart(_ context.Context, _ driverpkg.MultipartUpload
 	return &driverpkg.Error{Op: "AbortMultipart", Driver: driverName, Err: driverpkg.ErrUnsupported, Message: "not implemented"}
 }
 
-func (*testDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driverpkg.ObjectPage, error) {
+func (*testDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driverpkg.ObjectPage, error) {
 	return driverpkg.ObjectPage{}, &driverpkg.Error{Op: "ListObjects", Driver: driverName, Err: driverpkg.ErrUnsupported, Message: "not implemented"}
 }
 
@@ -298,7 +298,7 @@ func TestAbortMultipart_Happy(t *testing.T) {
 // TestListObjects_Happy tests ListObjects returns unsupported.
 func TestListObjects_Happy(t *testing.T) {
 	drv := &testDriver{}
-	_, err := drv.ListObjects(context.Background(), "bucket", "", "", 100)
+	_, err := drv.ListObjects(context.Background(), "bucket", "", "", "", 100)
 	if err == nil {
 		t.Fatal("expected error for unsupported operation")
 	}
@@ -716,7 +716,7 @@ func TestAbortMultipart(t *testing.T) {
 func TestListObjects(t *testing.T) {
 	drv := &testDriver{}
 
-	_, err := drv.ListObjects(context.Background(), "bucket", "prefix", "", 100)
+	_, err := drv.ListObjects(context.Background(), "bucket", "prefix", "", "", 100)
 	if err == nil {
 		t.Fatal("expected error for unsupported operation")
 	}

@@ -68,7 +68,7 @@ func (d *layoutDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []dri
 	return nil
 }
 func (d *layoutDriver) DeleteKey(_ context.Context, _ string) error { return nil }
-func (d *layoutDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+func (d *layoutDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 	return driver.ObjectPage{}, nil
 }
 func (d *layoutDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) {

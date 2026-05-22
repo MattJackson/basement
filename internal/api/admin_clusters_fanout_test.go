@@ -126,7 +126,7 @@ func (d *fanoutDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []dri
 }
 func (d *fanoutDriver) DeleteKey(_ context.Context, _ string) error { return nil }
 
-func (d *fanoutDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+func (d *fanoutDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 	return driver.ObjectPage{}, nil
 }
 func (d *fanoutDriver) StatObject(_ context.Context, _, _ string) (driver.ObjectInfo, error) {

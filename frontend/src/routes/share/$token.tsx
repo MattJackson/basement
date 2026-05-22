@@ -342,7 +342,7 @@ function PrefixBrowserState({
               />
             ))}
             
-            {listQuery.data?.prefixes?.map((folder, idx) => (
+            {listQuery.data?.commonPrefixes?.map((folder, idx) => (
               <FolderRow 
                 key={`folder-${idx}`}
                 folderName={folder}

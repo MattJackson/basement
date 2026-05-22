@@ -703,7 +703,9 @@ func regionKeyCanAccessBucket(ctx context.Context, userDrv driver.Driver, bucket
 	if userDrv == nil || bucket == "" {
 		return false
 	}
-	_, err := userDrv.ListObjects(ctx, bucket, "", "", 1)
+	// delimiter="" + limit=1 — the cheapest call that exercises
+	// bucket-level access without paying to enumerate sub-folders.
+	_, err := userDrv.ListObjects(ctx, bucket, "", "", "", 1)
 	if err == nil {
 		return true
 	}
@@ -763,6 +765,14 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 
 	prefix := r.URL.Query().Get("prefix")
 	token := r.URL.Query().Get("token")
+	// delimiter defaults to "/" so the bucket browser sees folder
+	// rows + only-this-level files (v1.3.0c.1 folder-nav fix).
+	// Callers that want a flat recursive dump (scripts, sync
+	// preview) opt out with ?delimiter= (empty value).
+	delimiter := "/"
+	if v, ok := r.URL.Query()["delimiter"]; ok && len(v) > 0 {
+		delimiter = v[0]
+	}
 	limit := 100
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -770,7 +780,7 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 		}
 	}
 
-	page, err := drv.ListObjects(r.Context(), bid, prefix, token, limit)
+	page, err := drv.ListObjects(r.Context(), bid, prefix, token, delimiter, limit)
 	if err != nil {
 		s.auditFailure(r, "region:list_objects", regionObjectResource(region, bid), err)
 		if isUserKeyRejected(err) {
@@ -783,8 +793,8 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 	if page.Objects == nil {
 		page.Objects = []driver.ObjectInfo{}
 	}
-	if page.Prefixes == nil {
-		page.Prefixes = []string{}
+	if page.CommonPrefixes == nil {
+		page.CommonPrefixes = []string{}
 	}
 
 	s.auditEmit(r, "region:list_objects", regionObjectResource(region, bid),

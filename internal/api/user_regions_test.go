@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -746,7 +747,7 @@ func TestUserRegions_DeleteObject_HappyPath(t *testing.T) {
 // resource=region:{id}:{bucketID}, detail=accessKey=<id>, result=success.
 func TestUserRegions_ListObjects_AuditEvent(t *testing.T) {
 	mock := newRegionMockDriver()
-	mock.listObjectsFunc = func(_ context.Context, bucket, _, _ string, _ int) (driver.ObjectPage, error) {
+	mock.listObjectsFunc = func(_ context.Context, bucket, _, _, _ string, _ int) (driver.ObjectPage, error) {
 		if bucket != "lsi" {
 			t.Errorf("ListObjects got bucket=%q, want lsi", bucket)
 		}
@@ -804,6 +805,107 @@ func TestUserRegions_ListObjects_AuditEvent(t *testing.T) {
 	}
 	if ev.Detail != "accessKey=GK434abc" {
 		t.Errorf("expected detail accessKey=GK434abc, got %q", ev.Detail)
+	}
+}
+
+// TestUserRegions_ListObjects_DelimiterDefault (v1.3.0c.1): the
+// object-tier list handler defaults delimiter="/" so the bucket browser
+// gets folder-tier results (commonPrefixes + only direct files), and
+// faithfully returns whatever CommonPrefixes the driver yields.
+func TestUserRegions_ListObjects_DelimiterDefault(t *testing.T) {
+	mock := newRegionMockDriver()
+	var gotDelim string
+	mock.listObjectsFunc = func(_ context.Context, _, _, _, delim string, _ int) (driver.ObjectPage, error) {
+		gotDelim = delim
+		return driver.ObjectPage{
+			Objects:        []driver.ObjectInfo{{Key: "raw/notes.txt"}},
+			CommonPrefixes: []string{"index/", "raw/"},
+		}, nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	create := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.pq.io",
+		"accessKeyId": "GK_DELIM",
+		"secretKey":   "shh",
+	}
+	rrC := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rrC.Code != http.StatusCreated {
+		t.Fatalf("create region: %d (%s)", rrC.Code, rrC.Body.String())
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrC.Body).Decode(&region)
+
+	// Default invocation — no ?delimiter param, handler picks "/".
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/objects"
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(httptest.NewRequest(http.MethodGet, url, nil)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list-objects: %d (%s)", rr.Code, rr.Body.String())
+	}
+	if gotDelim != "/" {
+		t.Errorf("driver called with delimiter=%q, want %q", gotDelim, "/")
+	}
+	var page driver.ObjectPage
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(page.CommonPrefixes) != 2 || page.CommonPrefixes[0] != "index/" || page.CommonPrefixes[1] != "raw/" {
+		t.Errorf("commonPrefixes=%v, want [index/ raw/]", page.CommonPrefixes)
+	}
+	// Wire-name sanity check: the JSON tag is commonPrefixes (not
+	// prefixes) so the FE binds to the right field.
+	if !strings.Contains(rr.Body.String(), "\"commonPrefixes\":") {
+		t.Errorf("expected response to contain \"commonPrefixes\":, got %s", rr.Body.String())
+	}
+}
+
+// TestUserRegions_ListObjects_DelimiterEmpty (v1.3.0c.1): callers
+// (sync engine preview, scripts) opt out of folder-tier listing by
+// passing ?delimiter= (empty). The handler honors that and asks the
+// driver for a flat recursive listing.
+func TestUserRegions_ListObjects_DelimiterEmpty(t *testing.T) {
+	mock := newRegionMockDriver()
+	var gotDelim = "<unset>"
+	mock.listObjectsFunc = func(_ context.Context, _, _, _, delim string, _ int) (driver.ObjectPage, error) {
+		gotDelim = delim
+		return driver.ObjectPage{
+			Objects: []driver.ObjectInfo{
+				{Key: "raw/notes.txt"},
+				{Key: "raw/sub/deep.txt"},
+			},
+		}, nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	create := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.pq.io",
+		"accessKeyId": "GK_FLAT",
+		"secretKey":   "shh",
+	}
+	rrC := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rrC.Code != http.StatusCreated {
+		t.Fatalf("create region: %d", rrC.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrC.Body).Decode(&region)
+
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/objects?delimiter="
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(httptest.NewRequest(http.MethodGet, url, nil)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list-objects: %d (%s)", rr.Code, rr.Body.String())
+	}
+	if gotDelim != "" {
+		t.Errorf("driver called with delimiter=%q, want empty", gotDelim)
 	}
 }
 
