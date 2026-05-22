@@ -333,30 +333,13 @@ export function useUserBucket(cid: string, bid: string) {
   });
 }
 
-export function useUserKeys() {
-  return useQuery<components["schemas"]["AggregatedUserKeysResponse"]>({
-    queryKey: ["user", "keys"],
-    queryFn: async () => {
-      const { data, error, response } = await client.GET("/user/keys");
-      if (!response.ok || !data) throw apiError("user/keys", response.status, error);
-      return (data as unknown) as components["schemas"]["AggregatedUserKeysResponse"];
-    },
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
-    retry: 1,
-  });
-}
-
-export function useUserKeysFlat() {
-  const query = useUserKeys();
-  if (query.data) {
-    return {
-      ...query,
-      data: query.data.keys,
-    };
-  }
-  return query;
-}
+// useUserKeys / useUserKeysFlat were removed in ADR-0002 v1.1.0d.
+// They fanned out across every cluster-tier Connection and surfaced
+// keys owned by the cluster admin — wrong per the persona split.
+// The /files/keys page now lists the user's own UserRegion entries
+// via useUserRegions; the /user/keys backend endpoint is scheduled
+// for removal in v1.1.0e along with the rest of the cluster-tier
+// user surface.
 
 // v0.7.0d USER.OBJECTBROWSE — object browser hooks.
 export function useUserObjects(cid: string | null, bid: string | null, prefix: string = "", token: string = "") {

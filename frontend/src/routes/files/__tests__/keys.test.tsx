@@ -1,24 +1,37 @@
-// Mock the Link component to avoid needing full router setup
+// Mock the router so links don't need a full router setup.
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
-    Link: ({ children }: any) => <div data-testid="link-wrapper">{children}</div>,
+    Link: ({ children, to }: any) => (
+      <a data-testid="link-wrapper" href={typeof to === "string" ? to : "#"}>
+        {children}
+      </a>
+    ),
+    createFileRoute: () => () => ({}),
+    useRouter: () => ({ invalidate: vi.fn() }),
   };
 });
+
+// userPage wraps the inner component with the user layout chrome;
+// for unit tests we want just the inner page.
+vi.mock("@/shared/layout/userPage", () => ({
+  userPage: (C: any) => C,
+}));
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import KeysHome from "@/routes/files/keys";
-import { useUserKeys } from "@/shared/api/queries";
+import { useUserRegions, useDeleteUserRegion } from "@/shared/api/queries";
 
 vi.mock("@/shared/api/queries", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
-    useUserKeys: vi.fn(),
+    useUserRegions: vi.fn(),
+    useDeleteUserRegion: vi.fn(),
   };
 });
 
@@ -26,9 +39,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: {
-      retry: false,
-    },
+    queries: { retry: false },
   },
 });
 
@@ -40,201 +51,155 @@ function renderWithProviders(component: React.ReactNode) {
   );
 }
 
-describe("KeysHome", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+const mutateAsyncMock = vi.fn().mockResolvedValue(undefined);
 
-  it("renders loading skeletons when keys are loading", async () => {
-    vi.mocked(useUserKeys).mockReturnValue({
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(useDeleteUserRegion).mockReturnValue({
+    mutateAsync: mutateAsyncMock,
+    isPending: false,
+    error: null,
+  } as any);
+});
+
+describe("KeysHome (My Region Keys)", () => {
+  it("renders loading skeletons while regions load", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
-      isPending: false,
-      refetch: vi.fn(),
     } as any);
 
     renderWithProviders(<KeysHome />);
 
-    expect(screen.getByText("My Keys")).toBeInTheDocument();
-    expect(screen.getByText("S3 credentials for the buckets you can access")).toBeInTheDocument();
-    
-    const skeletonCards = screen.getAllByTestId("user-key-pair-card-skeleton");
-    expect(skeletonCards.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("My Region Keys")).toBeInTheDocument();
+    expect(
+      screen.getAllByTestId("region-key-card-skeleton").length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
-  it("renders empty state when keys array is empty", async () => {
-    vi.mocked(useUserKeys).mockReturnValue({
-      data: { keys: [], errors: [] },
+  it("renders the empty state when the user has no regions", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [],
       isLoading: false,
       error: null,
-      isPending: false,
-      refetch: vi.fn(),
     } as any);
 
     renderWithProviders(<KeysHome />);
 
-    expect(screen.getByText("My Keys")).toBeInTheDocument();
-    expect(screen.getByText("No keys yet")).toBeInTheDocument();
-    expect(screen.getByText("Contact your administrator to get one.")).toBeInTheDocument();
+    expect(screen.getByText("My Region Keys")).toBeInTheDocument();
+    expect(screen.getByText("No region keys yet")).toBeInTheDocument();
+    expect(
+      screen.getByText("Connect a region to add one."),
+    ).toBeInTheDocument();
   });
 
-  it("renders error banner when useUserKeys returns an error", async () => {
-    const mockError = new Error("Failed to fetch keys");
-    
-    vi.mocked(useUserKeys).mockReturnValue({
+  it("renders an error banner when the query errors", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
       data: undefined,
       isLoading: false,
-      error: mockError,
-      isPending: false,
-      refetch: vi.fn(),
+      error: new Error("network down"),
     } as any);
 
     renderWithProviders(<KeysHome />);
 
-    expect(screen.getByText("My Keys")).toBeInTheDocument();
-    expect(screen.getByText(/Couldn't connect to backend/)).toBeInTheDocument();
+    expect(screen.getByText("My Region Keys")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Couldn't load your region keys/),
+    ).toBeInTheDocument();
   });
 
-  it("renders one card per key", async () => {
-    const mockKeys = [
-      {
-        id: "key1",
-        connectionId: "cid-abc",
-        name: "My Key 1",
-        accessKeyId: "AKIAKEY1",
-        created: "2026-05-19T00:00:00Z",
-      },
-      {
-        id: "key2",
-        connectionId: "cid-def",
-        name: "My Key 2",
-        accessKeyId: "AKIAKEY2",
-        created: "2026-05-19T00:00:00Z",
-      },
-    ];
-
-    vi.mocked(useUserKeys).mockReturnValue({
-      data: { keys: mockKeys, errors: [] },
+  it("renders one card per region with access key + endpoint", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [
+        {
+          id: "r1",
+          userId: "matthew",
+          alias: "home",
+          endpoint: "https://s3.basement.pq.io",
+          region: "garage",
+          accessKeyId: "GK_ABC123",
+          createdAt: "2026-05-19T00:00:00Z",
+          updatedAt: "2026-05-19T00:00:00Z",
+        },
+        {
+          id: "r2",
+          userId: "matthew",
+          alias: "lab",
+          endpoint: "http://10.1.7.10:3902",
+          region: "garage",
+          accessKeyId: "GK_LAB456",
+          createdAt: "2026-05-20T00:00:00Z",
+          updatedAt: "2026-05-20T00:00:00Z",
+        },
+      ],
       isLoading: false,
       error: null,
-      isPending: false,
-      refetch: vi.fn(),
     } as any);
 
     renderWithProviders(<KeysHome />);
 
-    expect(screen.getByText("My Keys")).toBeInTheDocument();
-    
-    const cardWrappers = screen.getAllByTestId("user-key-pair-card");
-    expect(cardWrappers.length).toBe(2);
+    const cards = screen.getAllByTestId("region-key-card");
+    expect(cards.length).toBe(2);
+    expect(screen.getByText("home")).toBeInTheDocument();
+    expect(screen.getByText("lab")).toBeInTheDocument();
+    expect(screen.getByText("GK_ABC123")).toBeInTheDocument();
+    expect(screen.getByText("GK_LAB456")).toBeInTheDocument();
+    expect(screen.getByText("https://s3.basement.pq.io")).toBeInTheDocument();
   });
 
-  it("displays key name when no alias available", async () => {
-    vi.mocked(useUserKeys).mockReturnValue({
-      data: { 
-        keys: [
-          {
-            id: "key1",
-            connectionId: "cid-abc",
-            name: "Test Key",
-            accessKeyId: "AKIATEST123456",
-            created: null,
-          } as any,
-        ], 
-        errors: [] 
-      },
+  it("copies the access key id to clipboard on Copy click", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [
+        {
+          id: "r1",
+          userId: "matthew",
+          alias: "home",
+          endpoint: "https://s3.basement.pq.io",
+          region: "garage",
+          accessKeyId: "GK_COPY_ME",
+          createdAt: "2026-05-19T00:00:00Z",
+          updatedAt: "2026-05-19T00:00:00Z",
+        },
+      ],
       isLoading: false,
       error: null,
-      isPending: false,
-      refetch: vi.fn(),
     } as any);
 
     renderWithProviders(<KeysHome />);
 
-    expect(screen.getByText(/Key for "Test Key"/)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("copy-region-key-button"));
+    expect(writeText).toHaveBeenCalledWith("GK_COPY_ME");
   });
 
-  // Permissions are not returned by /user/keys API, so we skip permission badge tests for v0.5.6
-
-  it("copies access key ID to clipboard on button click", async () => {
-    const mockClipboardWriteText = vi.fn();
-    Object.assign(navigator, {
-      clipboard: { writeText: mockClipboardWriteText },
-    });
-
-    vi.mocked(useUserKeys).mockReturnValue({
-      data: { 
-        keys: [
-          {
-            id: "key1",
-            connectionId: "cid-abc",
-            bucketId: "bucket-a",
-            name: "Test Key",
-            accessKeyId: "AKIATESTKEY123",
-            permissions: { owner: false, read: true, write: false },
-            created: null,
-          } as any,
-        ], 
-        errors: [] 
-      },
+  it("opens the delete confirmation when Delete is clicked", async () => {
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [
+        {
+          id: "r1",
+          userId: "matthew",
+          alias: "home",
+          endpoint: "https://s3.basement.pq.io",
+          region: "garage",
+          accessKeyId: "GK_ABC",
+          createdAt: "2026-05-19T00:00:00Z",
+          updatedAt: "2026-05-19T00:00:00Z",
+        },
+      ],
       isLoading: false,
       error: null,
-      isPending: false,
-      refetch: vi.fn(),
     } as any);
 
     renderWithProviders(<KeysHome />);
 
-    const copyButton = screen.getByTestId("copy-key-button");
-    await userEvent.click(copyButton);
+    await userEvent.click(screen.getByTestId("delete-region-key-button"));
 
-    expect(mockClipboardWriteText).toHaveBeenCalledWith("AKIATESTKEY123");
-  });
-
-  it("displays created date when available", async () => {
-    vi.mocked(useUserKeys).mockReturnValue({
-      data: { 
-        keys: [
-          {
-            id: "key1",
-            connectionId: "cid-abc",
-            bucketId: "bucket-a",
-            name: "Test Key",
-            accessKeyId: "AKIATEST123",
-            permissions: { owner: false, read: true, write: false },
-            created: "2026-05-19T12:00:00Z",
-          } as any,
-        ], 
-        errors: [] 
-      },
-      isLoading: false,
-      error: null,
-      isPending: false,
-      refetch: vi.fn(),
-    } as any);
-
-    renderWithProviders(<KeysHome />);
-
-    expect(screen.getByText(/Created/)).toBeInTheDocument();
-  });
-
-  it("handles cluster errors gracefully", async () => {
-    const mockErrors = [
-      { connectionId: "cid-bad", message: "Connection failed" },
-    ];
-
-    vi.mocked(useUserKeys).mockReturnValue({
-      data: { keys: [], errors: mockErrors },
-      isLoading: false,
-      error: null,
-      isPending: false,
-      refetch: vi.fn(),
-    } as any);
-
-    renderWithProviders(<KeysHome />);
-
-    // Should show cluster error message when no keys but there are cluster errors
-    expect(screen.getByText(/Couldn't load keys from/)).toBeInTheDocument();
+    expect(screen.getByText("Delete region key?")).toBeInTheDocument();
+    expect(
+      screen.getByText(/revokes basement&apos;s stored key|revokes basement's stored key/i),
+    ).toBeInTheDocument();
   });
 });

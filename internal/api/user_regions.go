@@ -18,6 +18,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -319,6 +320,16 @@ func (s *Server) userDeleteRegionHandler(w http.ResponseWriter, r *http.Request)
 // region's key and returns the live backend response. Bumps
 // LastUsedAt as a side-effect.
 //
+// ADR-0002 v1.1.0d — Garage's S3 data-plane endpoint does NOT
+// implement ListBuckets (returns 404), so for a Garage region the
+// user-key driver returns an empty list. Bridge that gap by looking
+// up an admin Connection at the same endpoint, calling ListBuckets
+// against the admin API with admin_token, then filtering the result
+// down to buckets the user's S3 key can actually reach. AWS S3 +
+// MinIO implement S3 ListBuckets natively, so for those drivers the
+// region-tier path returns whatever the user's key sees and the
+// bridge is skipped.
+//
 // No audit entry per the cycle spec: object-tier ops are covered by
 // the driver/audit chain already at the cluster admin layer, and
 // recording every per-user list would balloon the audit log without
@@ -342,10 +353,26 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	buckets, err := drv.ListBuckets(r.Context())
-	if err != nil {
-		writeDriverError(w, "ListBuckets", err)
+	// Garage admin bridge: when the matched admin Connection is a
+	// Garage backend, prefer its admin ListBuckets and intersect with
+	// what the user's key can reach. Returns nil if no bridge applies
+	// (no matching Connection, or the matched one is a non-Garage
+	// driver where the user-key ListBuckets already works).
+	buckets, bridgeAttempted, bridgeErr := s.garageRegionBucketsBridge(r, region, drv)
+	if bridgeErr != nil {
+		// The bridge picked up an admin Connection but the admin call
+		// failed — surface that rather than silently fall through, so
+		// the operator can fix the cluster wiring.
+		writeDriverError(w, "ListBuckets", bridgeErr)
 		return
+	}
+	if !bridgeAttempted {
+		// No admin bridge applies — use the user-key driver directly.
+		buckets, err = drv.ListBuckets(r.Context())
+		if err != nil {
+			writeDriverError(w, "ListBuckets", err)
+			return
+		}
 	}
 	if buckets == nil {
 		buckets = []driver.Bucket{}
@@ -359,6 +386,139 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 	}
 
 	writeJSON(w, http.StatusOK, buckets)
+}
+
+// garageRegionBucketsBridge looks for an admin Connection whose
+// canonical s3_endpoint matches the user region's endpoint AND whose
+// driver is a Garage variant. When found, lists buckets via the admin
+// driver (admin_token in hand) and filters the result to those the
+// user's S3 key can actually reach.
+//
+// Returns:
+//   - buckets, true, nil — bridge applied successfully
+//   - nil, true, err — bridge applied but the admin call failed (caller
+//     surfaces the error rather than masking it)
+//   - nil, false, nil — no bridge applies; caller should use the
+//     user-key driver's ListBuckets directly
+//
+// For AWS S3 + MinIO the user-key ListBuckets returns a real list
+// already, so the bridge is skipped even if an admin Connection at
+// the same endpoint exists.
+func (s *Server) garageRegionBucketsBridge(r *http.Request, region store.UserRegion, userDrv driver.Driver) ([]driver.Bucket, bool, error) {
+	if s.conns == nil || s.reg == nil {
+		return nil, false, nil
+	}
+
+	conns, err := s.conns.List(r.Context())
+	if err != nil {
+		// Don't fail the user's request because the admin-conns
+		// lookup hiccuped — fall through and let the user driver
+		// answer.
+		s.logger.Warn("garage bridge: failed to list admin connections", "error", err.Error())
+		return nil, false, nil
+	}
+
+	target := region.Endpoint // already canonical per store.NormalizeEndpoint
+	var match *store.Connection
+	for i := range conns {
+		c := &conns[i]
+		raw := connectionS3Endpoint(*c)
+		if raw == "" {
+			continue
+		}
+		canon, err := store.NormalizeEndpoint(raw)
+		if err != nil {
+			continue
+		}
+		if canon != target {
+			continue
+		}
+		// Only Garage drivers need the bridge — for aws-s3/minio the
+		// user's own ListBuckets returns a real list.
+		if c.Driver != store.DriverGarage && c.Driver != store.DriverGarageV1 {
+			continue
+		}
+		match = c
+		break
+	}
+
+	if match == nil {
+		s.logger.Warn("garage region: no admin bridge for endpoint",
+			"endpoint", target, "userId", region.UserID, "regionId", region.ID)
+		return nil, false, nil
+	}
+
+	adminDrv, err := s.reg.For(r.Context(), match.ID)
+	if err != nil {
+		s.logger.Warn("garage bridge: build admin driver failed",
+			"connId", match.ID, "error", err.Error())
+		return nil, true, err
+	}
+
+	adminBuckets, err := adminDrv.ListBuckets(r.Context())
+	if err != nil {
+		s.logger.Warn("garage bridge: admin ListBuckets failed",
+			"connId", match.ID, "error", err.Error())
+		return nil, true, err
+	}
+
+	// Intersect with what the user's S3 key can reach. We use
+	// ListObjects(limit=1) instead of HeadBucket (which isn't on the
+	// Driver interface) — it exercises the same access check via the
+	// user's signed S3 client. 403 / 404 / NoSuchBucket / AccessDenied
+	// errors mean "drop"; anything else means "keep" (we err on the
+	// side of showing the bucket rather than hiding it on a transient
+	// network blip).
+	out := make([]driver.Bucket, 0, len(adminBuckets))
+	for _, b := range adminBuckets {
+		// Probe by the first alias for Garage (S3 paths route by
+		// alias, not by the 32-byte internal ID).
+		probe := b.ID
+		if len(b.Aliases) > 0 {
+			probe = b.Aliases[0]
+		}
+		if !regionKeyCanAccessBucket(r.Context(), userDrv, probe) {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out, true, nil
+}
+
+// connectionS3Endpoint returns the S3 endpoint URL configured on a
+// Connection record, honouring the per-driver config-key convention:
+// Garage variants use "s3_endpoint"; aws-s3 + minio use "endpoint".
+// Returns empty string when neither key is present.
+func connectionS3Endpoint(c store.Connection) string {
+	if v := strings.TrimSpace(c.Config["s3_endpoint"]); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(c.Config["endpoint"]); v != "" {
+		return v
+	}
+	return ""
+}
+
+// regionKeyCanAccessBucket returns true when the user's signed S3
+// client can reach the bucket. Implemented via ListObjects(limit=1)
+// — the cheapest call that exercises the bucket-level access check
+// without depending on a HeadBucket method that isn't on the Driver
+// interface. driver.ErrPermissionDenied / driver.ErrNotFound (the
+// 403/404 cases) drop the bucket; other errors are conservatively
+// treated as "keep" so a transient blip doesn't hide a bucket the
+// user legitimately owns.
+func regionKeyCanAccessBucket(ctx context.Context, userDrv driver.Driver, bucket string) bool {
+	if userDrv == nil || bucket == "" {
+		return false
+	}
+	_, err := userDrv.ListObjects(ctx, bucket, "", "", 1)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, driver.ErrPermissionDenied) || errors.Is(err, driver.ErrNotFound) {
+		return false
+	}
+	return true
 }
 
 // userListRegionBucketObjectsHandler implements GET
