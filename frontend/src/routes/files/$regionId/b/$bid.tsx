@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useLocation } from "@tanstack/react-router";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -28,10 +28,13 @@ function UserRegionBucketObjects() {
   const { regionId, bid } = Route.useParams();
   const navigate = useNavigate();
 
-  // Plain URLSearchParams keeps tsc happy across TanStack Router majors
-  // (the strict useSearch generic in newer versions broke us before;
-  // see the cluster-tier route note from v0.8.0d.7).
-  const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  // Read search params via useLocation() so the component re-renders
+  // when navigate() updates the URL with a new prefix (folder click).
+  // The previous URLSearchParams read at module load was non-reactive,
+  // which broke folder navigation in v1.3.0c.1 — clicking a folder
+  // updated the URL but the prefix stayed at "".
+  const location = useLocation();
+  const urlParams = new URLSearchParams(location.searchStr || "");
   const prefix = urlParams.get("prefix") ?? "";
   const token = urlParams.get("token") ?? "";
 
