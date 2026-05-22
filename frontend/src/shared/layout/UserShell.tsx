@@ -55,6 +55,18 @@ export function UserShell({ children }: UserShellProps): ReactNode {
               >
                 Backups
               </Link>
+              {/* v1.6.0d: federations — multi-backend mirrored buckets, */}
+              {/* the v1.6 differentiator. Lands alongside Backups (sibling */}
+              {/* concept: scheduled one-way copies vs. continuous multi-target */}
+              {/* mirrors) and ahead of v2.0's gateway, which routes inbound */}
+              {/* requests across the federation topology this UI manages. */}
+              <Link
+                to="/files/federated-buckets"
+                className={NAV_LINK}
+                activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+              >
+                Federations
+              </Link>
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
