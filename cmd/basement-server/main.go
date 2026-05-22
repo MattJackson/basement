@@ -208,6 +208,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Per ADR-0005 (v1.6.0a): open the federated-bucket store. This is
+	// the data layer only — the replication engine, API surface and
+	// frontend land in v1.6.0b/c/d. A missing federated_buckets.json
+	// is fine; OpenFederated treats it as an empty store.
+	if err := st.OpenFederated(); err != nil {
+		slog.Error("failed to open federated-bucket store", "error", err)
+		os.Exit(1)
+	}
+
 	// Per ADR-0002 (v1.1.0b): the driver registry needs a handle to
 	// the region keychain so ForUserRegion can refuse to operate when
 	// the store is unwired (returns ErrUnsupported). Production always

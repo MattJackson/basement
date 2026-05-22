@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/mattjackson/basement/internal/federation"
 )
 
 // Store holds all data with per-file mutexes for concurrency safety.
@@ -28,6 +30,7 @@ type Store struct {
 	oidcGroups  *OIDCGroupMappingsStore
 	userRegions UserRegions
 	invites     Invites
+	feds        federation.FederatedBuckets
 }
 
 // Open opens or creates the store at dataDir with the given retention period.
@@ -148,6 +151,28 @@ func (s *Store) UserRegions() UserRegions {
 // list and never errors here.
 func (s *Store) Invites() Invites {
 	return s.invites
+}
+
+// OpenFederated opens the v1.6 federated-bucket store
+// ({dataDir}/federated_buckets.json) and attaches it to this Store.
+// Kept separate from Open() — and parallel to WireUserRegions — for
+// source-compatibility with the many api.New(...) test callers that
+// don't need the federation layer wired up. main.go calls this once at
+// boot right after WireUserRegions.
+func (s *Store) OpenFederated() error {
+	feds, err := federation.Open(s.dataDir)
+	if err != nil {
+		return fmt.Errorf("opening federated buckets: %w", err)
+	}
+	s.feds = feds
+	return nil
+}
+
+// Federated returns the federated-bucket store (v1.6.0a). Returns nil
+// if OpenFederated has not been called — callers must nil-check or
+// rely on production main.go having wired it at boot.
+func (s *Store) Federated() federation.FederatedBuckets {
+	return s.feds
 }
 
 // MigrateLegacyUsers sets uiAdmin=true for existing admin users.
