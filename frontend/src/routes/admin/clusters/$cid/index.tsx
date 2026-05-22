@@ -322,6 +322,38 @@ function ClusterDetailScreen() {
         </Card>
       )}
 
+      {/* Maintenance → Scrub link (v1.4.0c). Always rendered — the
+          page itself surfaces "not supported" for AWS/MinIO drivers
+          rather than hiding the link, so an operator can always learn
+          why scrub isn't available on a backend instead of finding
+          it missing without explanation. */}
+      <Link to="/admin/clusters/$cid/scrub" params={{ cid }}>
+        <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-medium">Maintenance — Scrub</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Inspect block-scrub state and kick off a durability scan.
+                </p>
+              </div>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5 text-muted-foreground"
+              >
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+
       {/* Layout section - gated by capability. Route under cluster
           scope lands with CLUSTER.LAYOUT-EDITOR; for now anchor. */}
       {capabilities?.layout !== "readonly" ? (

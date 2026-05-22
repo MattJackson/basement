@@ -106,3 +106,40 @@ func (m *layoutDriver) PerBucketStatsAvailable() bool { return false }
 func (m *stubDriver) PerBucketStatsAvailable() bool   { return false }
 func (m *mockDriver) PerBucketStatsAvailable() bool   { return false }
 func (m *fanoutDriver) PerBucketStatsAvailable() bool { return false }
+
+// v1.4.0c (SCRUB.MAINT) shims for every test-only driver. Default
+// behaviour: report unsupported + return ErrUnsupported from the
+// state/start methods. Tests that exercise the scrub handler
+// (admin_scrub_test.go) override on a per-fixture basis.
+
+func (m *layoutDriver) ScrubSupport() driver.ScrubCapability {
+	return driver.ScrubCapability{Supported: false}
+}
+func (m *layoutDriver) ScrubState(_ context.Context) (driver.ScrubState, error) {
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+func (m *layoutDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
+
+func (m *stubDriver) ScrubSupport() driver.ScrubCapability {
+	return driver.ScrubCapability{Supported: false}
+}
+func (m *stubDriver) ScrubState(_ context.Context) (driver.ScrubState, error) {
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+func (m *stubDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
+
+func (m *mockDriver) ScrubSupport() driver.ScrubCapability {
+	return driver.ScrubCapability{Supported: false}
+}
+func (m *mockDriver) ScrubState(_ context.Context) (driver.ScrubState, error) {
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+func (m *mockDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
+
+func (m *fanoutDriver) ScrubSupport() driver.ScrubCapability {
+	return driver.ScrubCapability{Supported: false}
+}
+func (m *fanoutDriver) ScrubState(_ context.Context) (driver.ScrubState, error) {
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+func (m *fanoutDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }

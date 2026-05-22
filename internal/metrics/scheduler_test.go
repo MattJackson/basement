@@ -142,6 +142,15 @@ func (d *schedulerStubDriver) PutLifecycle(_ context.Context, _ string, _ []driv
 }
 func (d *schedulerStubDriver) PerBucketStatsAvailable() bool { return false }
 
+// v1.4.0c SCRUB.MAINT — stubs report unsupported.
+func (d *schedulerStubDriver) ScrubSupport() driver.ScrubCapability {
+	return driver.ScrubCapability{Supported: false}
+}
+func (d *schedulerStubDriver) ScrubState(_ context.Context) (driver.ScrubState, error) {
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
+
 // TestRunOneCycle_HappyPath drives one cycle across two clusters
 // with two buckets each and asserts four snapshots were recorded.
 func TestRunOneCycle_HappyPath(t *testing.T) {

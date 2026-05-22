@@ -148,6 +148,15 @@ func (d *usageSizedDriver) PutLifecycle(_ context.Context, _ string, _ []driver.
 }
 func (d *usageSizedDriver) PerBucketStatsAvailable() bool { return true }
 
+// v1.4.0c SCRUB.MAINT — usage stub doesn't exercise scrub; default unsupported.
+func (d *usageSizedDriver) ScrubSupport() driver.ScrubCapability {
+	return driver.ScrubCapability{Supported: false}
+}
+func (d *usageSizedDriver) ScrubState(_ context.Context) (driver.ScrubState, error) {
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
+
 const usageSizedDriverName = "stub-usage-sized"
 
 var usageSizedRegisterOnce sync.Once

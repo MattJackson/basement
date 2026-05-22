@@ -245,6 +245,13 @@ func (s *Server) routes() {
 			adminG.Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
 			adminG.Post("/admin/clusters/{cid}/layout/revert", s.revertLayoutHandler)
 
+			// v1.4.0c SCRUB.MAINT — block-scrub maintenance surface.
+			// Both reads + writes gated on cluster:edit (per-handler)
+			// so admin-role users without cluster:edit on this cluster
+			// can't probe scrub state on a cluster they don't own.
+			adminG.Get("/admin/clusters/{cid}/scrub", s.getClusterScrubHandler)
+			adminG.Post("/admin/clusters/{cid}/scrub", s.postClusterScrubHandler)
+
 			// Connection CRUD
 			adminG.Get("/admin/clusters", s.listClustersHandler)
 			adminG.Post("/admin/clusters", s.createClusterHandler)

@@ -42,3 +42,16 @@ func (m *mockDriver) PutLifecycle(_ context.Context, _ string, _ []LifecycleRule
 func (m *mockDriver) PerBucketStatsAvailable() bool {
 	return false
 }
+
+// v1.4.0c SCRUB.MAINT shims — mock advertises no scrub support.
+func (m *mockDriver) ScrubSupport() ScrubCapability {
+	return ScrubCapability{Supported: false}
+}
+
+func (m *mockDriver) ScrubState(_ context.Context) (ScrubState, error) {
+	return ScrubState{}, ErrUnsupported
+}
+
+func (m *mockDriver) StartScrub(_ context.Context) error {
+	return ErrUnsupported
+}
