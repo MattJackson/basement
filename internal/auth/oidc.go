@@ -191,3 +191,91 @@ func (p *OIDCProvider) VerifyIDTokenWithAuthTime(ctx context.Context, rawIDToken
 		Provider: idToken.Issuer,
 	}, payload.AuthTime, nil
 }
+
+// VerifyIDTokenWithAllClaims is like VerifyIDToken but also returns the
+// full decoded claim map so callers (the OIDC group-mapping sync,
+// v1.3.0a) can inspect provider-specific claims like `groups`,
+// `roles`, or anything else the IdP asserts.
+//
+// The returned map is whatever json.Unmarshal produces for the raw
+// payload — top-level keys are strings, values are whatever JSON
+// shape the IdP emitted (typically string or []string for group-like
+// claims). ClaimStringValues() helps callers normalise a single key
+// to a []string regardless of scalar-vs-array shape.
+//
+// Returns ErrOIDCNonceMismatch on nonce mismatch (same as VerifyIDToken)
+// so the elevation + login paths can both share the same sentinel.
+func (p *OIDCProvider) VerifyIDTokenWithAllClaims(ctx context.Context, rawIDToken, expectedNonce string) (*OIDCClaims, map[string]interface{}, error) {
+	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	if err != nil {
+		return nil, nil, fmt.Errorf("oidc: id_token verification failed: %w", err)
+	}
+
+	if expectedNonce != "" && idToken.Nonce != expectedNonce {
+		return nil, nil, ErrOIDCNonceMismatch
+	}
+
+	all := map[string]interface{}{}
+	if err := idToken.Claims(&all); err != nil {
+		return nil, nil, fmt.Errorf("oidc: parsing all claims failed: %w", err)
+	}
+
+	var payload idTokenPayload
+	if err := idToken.Claims(&payload); err != nil {
+		return nil, nil, fmt.Errorf("oidc: parsing claims failed: %w", err)
+	}
+
+	displayName := payload.Name
+	if displayName == "" {
+		displayName = payload.PreferredUsername
+	}
+
+	return &OIDCClaims{
+		Subject:  idToken.Subject,
+		Email:    payload.Email,
+		Name:     displayName,
+		Provider: idToken.Issuer,
+	}, all, nil
+}
+
+// ClaimStringValues normalises a single top-level claim into a string
+// slice regardless of whether the IdP encoded it as a scalar string or
+// a JSON array of strings. Empty string elements are dropped. Returns
+// an empty slice (not nil) when the claim is missing, of an unexpected
+// shape, or contains no useful values.
+//
+// IdPs vary: Authentik + Keycloak typically emit `groups` as a JSON
+// array; Pocket-ID emits `roles` as a comma-separated string in older
+// configs; some custom OIDC providers emit a single scalar string for
+// the user's primary role. Treat any non-string element as a noop and
+// move on — defensive parsing because the operator can configure any
+// claim name they want.
+func ClaimStringValues(all map[string]interface{}, name string) []string {
+	out := []string{}
+	if all == nil || name == "" {
+		return out
+	}
+	raw, ok := all[name]
+	if !ok || raw == nil {
+		return out
+	}
+	switch v := raw.(type) {
+	case string:
+		if v != "" {
+			out = append(out, v)
+		}
+	case []interface{}:
+		for _, el := range v {
+			if s, ok := el.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}

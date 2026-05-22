@@ -25,6 +25,7 @@ type Store struct {
 	usersCache  []User
 	sharesCache []Share
 	orgCaps     *OrgCapabilitiesStore
+	oidcGroups  *OIDCGroupMappingsStore
 	userRegions UserRegions
 }
 
@@ -57,6 +58,14 @@ func Open(dataDir string, retention time.Duration) (*Store, error) {
 		return nil, fmt.Errorf("opening org capabilities: %w", err)
 	}
 	s.orgCaps = orgCaps
+
+	// v1.3.0a: OIDC group-claim -> role auto-mapping store. Missing
+	// file is fine — first boot starts with an empty mapping list.
+	oidcGroups, err := OpenOIDCGroupMappings(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening oidc group mappings: %w", err)
+	}
+	s.oidcGroups = oidcGroups
 
 	return s, nil
 }
@@ -91,6 +100,14 @@ func (s *Store) loadAll() error {
 // OrgCapabilities returns the org capabilities store.
 func (s *Store) OrgCapabilities() *OrgCapabilitiesStore {
 	return s.orgCaps
+}
+
+// OIDCGroupMappings returns the OIDC group-claim -> role mapping store
+// (v1.3.0a). Returns nil when the Store was created via the zero-value
+// constructor in tests that don't go through Open(); production main.go
+// always uses Open() so this is non-nil at runtime.
+func (s *Store) OIDCGroupMappings() *OIDCGroupMappingsStore {
+	return s.oidcGroups
 }
 
 // WireUserRegions opens the per-user S3 region keychain (ADR-0002,

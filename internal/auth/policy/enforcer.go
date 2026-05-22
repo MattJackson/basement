@@ -74,12 +74,30 @@ type Enforcer interface {
 
 	// AssignRole adds an assignment. Idempotent: re-adding the same
 	// (userId, roleId, scope) triple is a no-op. Validates that the role
-	// exists.
+	// exists. When an existing manual assignment (Source != "oidc")
+	// matches the triple, the existing Source wins — calling AssignRole
+	// with Source="oidc" on top of a manual row leaves it manual so an
+	// operator's explicit grant can't be silently downgraded into a
+	// revocable auto-assignment.
 	AssignRole(a RoleAssignment) error
 
 	// UnassignRole removes the (userId, roleId, scope) triple if present.
 	// Removing an absent assignment is a no-op (not an error).
 	UnassignRole(userID, roleID, scope string) error
+
+	// SyncOIDCAssignments reconciles the user's Source="oidc" assignments
+	// against `wanted` (v1.3.0a):
+	//
+	//   - Every triple in `wanted` not already present gets added with
+	//     Source="oidc"+AutoAssigned=true.
+	//   - Every existing Source="oidc" assignment for the user whose
+	//     (RoleID, Scope) is NOT in `wanted` gets revoked.
+	//   - Manually-assigned rows (Source != "oidc") for the same user are
+	//     never touched, even if they overlap with `wanted`.
+	//
+	// Returns the assignments that were added + revoked so the caller
+	// (the OIDC callback) can emit one audit event per change.
+	SyncOIDCAssignments(userID string, wanted []RoleAssignment) (added, revoked []RoleAssignment, err error)
 
 	// SeedEnvAdmin ensures the env-seeded admin (cfg.Admin.User) has the
 	// blanket assignments that keep them functional on first boot of a
@@ -522,10 +540,22 @@ func (e *fileEnforcer) AssignRole(a RoleAssignment) error {
 
 	for _, existing := range e.assignments {
 		if existing.UserID == a.UserID && existing.RoleID == a.RoleID && existing.Scope == a.Scope {
+			// Manual-source assignments are never silently downgraded
+			// to OIDC-source on re-add: the existing row wins. This
+			// protects an operator's explicit grant from being turned
+			// into a revocable auto-assignment if the same triple
+			// happens to appear in OIDC sync output.
 			return nil // idempotent
 		}
 	}
 
+	// Normalise: an empty Source defaults to "manual" so audit + UI
+	// can rely on a non-empty value everywhere. AutoAssigned is
+	// derived from Source so the two never disagree on disk.
+	if a.Source == "" {
+		a.Source = "manual"
+	}
+	a.AutoAssigned = a.Source == "oidc"
 	e.assignments = append(e.assignments, a)
 	return e.saveLocked()
 }
@@ -553,6 +583,102 @@ func (e *fileEnforcer) UnassignRole(userID, roleID, scope string) error {
 		return nil
 	}
 	return e.saveLocked()
+}
+
+// SyncOIDCAssignments is the per-login reconcile step for OIDC-driven
+// role assignments (v1.3.0a). It walks the user's current Source="oidc"
+// rows and adjusts the persisted set so it exactly matches `wanted`:
+//
+//   - Every triple in wanted that is not already present gets appended
+//     with Source="oidc" + AutoAssigned=true.
+//   - Every persisted Source="oidc" row whose (RoleID, Scope) is NOT
+//     in wanted gets dropped.
+//   - Manual rows (Source != "oidc") are never read or modified — even
+//     if a wanted triple overlaps with a manual row, the operator's
+//     explicit grant survives untouched (no duplicate, no downgrade).
+//
+// One saveLocked at the end keeps the JSON file consistent under
+// concurrent reads; the caller can audit-log the returned added/revoked
+// slices without holding any of the enforcer's mutex state.
+func (e *fileEnforcer) SyncOIDCAssignments(userID string, wanted []RoleAssignment) (added, revoked []RoleAssignment, err error) {
+	if userID == "" {
+		return nil, nil, fmt.Errorf("policy: SyncOIDCAssignments requires userId")
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Build a quick lookup of valid role IDs so we don't persist an
+	// auto-assignment referencing a role that doesn't exist (operator
+	// deleted the role between mapping save + this login).
+	validRole := map[string]bool{}
+	for _, r := range e.roles {
+		validRole[r.ID] = true
+	}
+
+	// Wanted set, keyed by RoleID+Scope, filtered to valid roles.
+	type key struct{ roleID, scope string }
+	wantedSet := map[key]RoleAssignment{}
+	for _, w := range wanted {
+		if w.RoleID == "" || w.Scope == "" {
+			continue
+		}
+		if !validRole[w.RoleID] {
+			continue
+		}
+		wantedSet[key{w.RoleID, w.Scope}] = RoleAssignment{
+			UserID:       userID,
+			RoleID:       w.RoleID,
+			Scope:        w.Scope,
+			Source:       "oidc",
+			AutoAssigned: true,
+		}
+	}
+
+	// Walk the existing assignments. For this user's OIDC rows: keep
+	// those still wanted (and remove from wantedSet so we don't re-add),
+	// drop those no longer wanted. For everything else (other users
+	// + this user's manual rows): keep verbatim.
+	kept := e.assignments[:0]
+	for _, a := range e.assignments {
+		if a.UserID != userID || a.Source != "oidc" {
+			kept = append(kept, a)
+			// A manual row for this user that overlaps with a wanted
+			// triple satisfies the operator's intent — drop the wanted
+			// entry so we don't add a duplicate OIDC row alongside it.
+			if a.UserID == userID && a.Source != "oidc" {
+				delete(wantedSet, key{a.RoleID, a.Scope})
+			}
+			continue
+		}
+		k := key{a.RoleID, a.Scope}
+		if _, ok := wantedSet[k]; ok {
+			// Still wanted — keep + ensure flag fields stay normalised.
+			a.Source = "oidc"
+			a.AutoAssigned = true
+			kept = append(kept, a)
+			delete(wantedSet, k)
+			continue
+		}
+		// No longer wanted — revoke.
+		revoked = append(revoked, a)
+	}
+
+	// Anything left in wantedSet is a new assignment to add.
+	for _, w := range wantedSet {
+		kept = append(kept, w)
+		added = append(added, w)
+	}
+
+	e.assignments = kept
+
+	if len(added) == 0 && len(revoked) == 0 {
+		return added, revoked, nil
+	}
+	if err := e.saveLocked(); err != nil {
+		return nil, nil, fmt.Errorf("policy: persisting OIDC sync: %w", err)
+	}
+	return added, revoked, nil
 }
 
 // SeedEnvAdmin grants the env-seeded admin (BASEMENT_ADMIN_USER) the

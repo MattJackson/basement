@@ -40,10 +40,26 @@ type Role struct {
 //   bucket:{cid}:{bid}       one specific bucket
 //   key:{cid}:*              every key on a cluster
 //   key:{cid}:{kid}          one specific key
+//
+// Source distinguishes how the assignment was created (v1.3.0a):
+//
+//   "manual" or ""           operator created via /admin/policies
+//   "oidc"                   auto-created by OIDC group-claim sync
+//
+// The OIDC sync routine on each login REPLACES the full set of
+// Source="oidc" assignments for the user with what their current
+// claims justify — revoking ones whose claims disappeared and adding
+// new ones whose claims appeared. Manual assignments are sacred and
+// never touched by sync; an operator-granted role survives a user
+// leaving every group in the IdP. AutoAssigned is the legacy boolean
+// echo of (Source == "oidc"); both ship together because the UI
+// already keys off the boolean while audit + sync prefer the string.
 type RoleAssignment struct {
-	UserID string `json:"userId"`
-	RoleID string `json:"roleId"`
-	Scope  string `json:"scope"`
+	UserID       string `json:"userId"`
+	RoleID       string `json:"roleId"`
+	Scope        string `json:"scope"`
+	Source       string `json:"source,omitempty"`
+	AutoAssigned bool   `json:"autoAssigned,omitempty"`
 }
 
 // policyFile is the on-disk shape of policies.json — a single file the

@@ -22,16 +22,17 @@ import (
 // fixed claims from VerifyIDToken so tests can assert end-to-end
 // behaviour without spinning up a real IdP.
 type fakeOIDC struct {
-	authURL          string
-	elevationURL     string
-	lastState        string
-	lastNonce        string
-	lastPrompt       string
-	exchangeFn       func(ctx context.Context, code string) (*oauth2.Token, error)
-	verifyFn         func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, error)
-	verifyAuthTimeFn func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, int64, error)
-	issuer           string
-	autoProvFlag     bool
+	authURL           string
+	elevationURL      string
+	lastState         string
+	lastNonce         string
+	lastPrompt        string
+	exchangeFn        func(ctx context.Context, code string) (*oauth2.Token, error)
+	verifyFn          func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, error)
+	verifyAuthTimeFn  func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, int64, error)
+	verifyAllClaimsFn func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, map[string]interface{}, error)
+	issuer            string
+	autoProvFlag      bool
 }
 
 func (f *fakeOIDC) AuthCodeURL(state, nonce string) string {
@@ -92,6 +93,19 @@ func (f *fakeOIDC) VerifyIDTokenWithAuthTime(ctx context.Context, raw, expectedN
 	// Default fake auth_time is "now" so happy-path callback tests
 	// pass the 60s freshness check without callers having to plumb it.
 	return claims, time.Now().Unix(), nil
+}
+
+func (f *fakeOIDC) VerifyIDTokenWithAllClaims(ctx context.Context, raw, expectedNonce string) (*auth.OIDCClaims, map[string]interface{}, error) {
+	if f.verifyAllClaimsFn != nil {
+		return f.verifyAllClaimsFn(ctx, raw, expectedNonce)
+	}
+	claims, err := f.VerifyIDToken(ctx, raw, expectedNonce)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Default fake: empty claim map. Tests that exercise the v1.3.0a
+	// OIDC group-mapping sync override verifyAllClaimsFn explicitly.
+	return claims, map[string]interface{}{}, nil
 }
 
 func (f *fakeOIDC) Issuer() string        { return f.issuer }

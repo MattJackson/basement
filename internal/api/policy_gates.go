@@ -137,7 +137,10 @@ func (permissiveEnforcer) UpsertRole(_ policy.Role) error                       
 func (permissiveEnforcer) DeleteRole(_ string) error                            { return nil }
 func (permissiveEnforcer) AssignRole(_ policy.RoleAssignment) error             { return nil }
 func (permissiveEnforcer) UnassignRole(_, _, _ string) error                    { return nil }
-func (permissiveEnforcer) SeedEnvAdmin(_ string) error                          { return nil }
+func (permissiveEnforcer) SyncOIDCAssignments(_ string, _ []policy.RoleAssignment) ([]policy.RoleAssignment, []policy.RoleAssignment, error) {
+	return nil, nil, nil
+}
+func (permissiveEnforcer) SeedEnvAdmin(_ string) error { return nil }
 
 // requireCapability resolves the caller, runs s.policy.Can on the
 // requested (capability, scope), and short-circuits the response on

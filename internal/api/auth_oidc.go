@@ -4,13 +4,16 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/store"
 )
 
@@ -154,7 +157,7 @@ func (s *Server) oidcCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claims, err := s.oidc.VerifyIDToken(r.Context(), rawIDToken, cookieNonce)
+	claims, allClaims, err := s.oidc.VerifyIDTokenWithAllClaims(r.Context(), rawIDToken, cookieNonce)
 	if err != nil {
 		writeErrorSimple(w, http.StatusBadRequest, "OIDC_ID_TOKEN_INVALID", "ID token verification failed")
 		return
@@ -188,6 +191,13 @@ func (s *Server) oidcCallbackHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// v1.3.0a: apply the operator-configured OIDC group-claim ->
+	// role mapping. Best-effort: a sync failure logs + audits but
+	// does NOT block the login — falling back to "whatever
+	// assignments existed before this login" is safer than locking
+	// the user out of a deployment they have a valid session for.
+	s.syncOIDCRoleAssignments(r, user.ID, allClaims)
+
 	ttl := s.cfg.SessionTTL
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
@@ -202,6 +212,104 @@ func (s *Server) oidcCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	auth.SetSessionCookie(w, token, ttl)
 
 	http.Redirect(w, r, successRedirectPath, http.StatusFound)
+}
+
+// syncOIDCRoleAssignments runs the v1.3.0a group-claim -> role
+// auto-assignment reconcile for a freshly-logged-in OIDC user.
+//
+// Steps:
+//
+//  1. Load the operator-configured mapping list from the store. If the
+//     store is unwired (tests) or the mapping list is empty, exit early
+//     — no work to do, no audit noise to emit.
+//  2. For each mapping whose claim value appears in the user's ID
+//     token, build a wanted (RoleID, Scope) triple.
+//  3. Hand the wanted set to the enforcer's SyncOIDCAssignments which
+//     atomically reconciles the user's Source="oidc" rows.
+//  4. Audit-log one event per added/revoked assignment so an operator
+//     can trace "alice gained host_admin because she joined the
+//     'platform-admins' group in Authentik" or the inverse.
+//
+// Failures are logged + audited but never block login. Falling back to
+// "no change" is safer than locking the user out of an already-valid
+// session.
+func (s *Server) syncOIDCRoleAssignments(r *http.Request, userID string, allClaims map[string]interface{}) {
+	if s.policy == nil || userID == "" {
+		return
+	}
+	if s.store == nil || s.store.OIDCGroupMappings() == nil {
+		return
+	}
+
+	mappings := s.store.OIDCGroupMappings().Get().Mappings
+	if len(mappings) == 0 {
+		// No mappings configured: still call sync with empty `wanted`
+		// so any stale Source="oidc" assignment from a previously-
+		// removed mapping gets revoked. Without this, deleting every
+		// mapping would leave orphaned auto-assignments behind.
+	}
+
+	// If the user has zero of the configured claims AND zero existing
+	// OIDC assignments to revoke, the sync would be a no-op — skip
+	// per the cycle-spec "If user has 0 group claims, code path is
+	// skipped entirely" rule. We still need to revoke stale rows, so
+	// keep the call when there is anything to potentially revoke.
+	wantedHits := []policy.RoleAssignment{}
+	for _, m := range mappings {
+		if m.Claim == "" || m.ClaimValue == "" || m.RoleID == "" || m.Scope == "" {
+			continue
+		}
+		values := auth.ClaimStringValues(allClaims, m.Claim)
+		for _, v := range values {
+			if v == m.ClaimValue {
+				wantedHits = append(wantedHits, policy.RoleAssignment{
+					UserID: userID,
+					RoleID: m.RoleID,
+					Scope:  m.Scope,
+				})
+				break
+			}
+		}
+	}
+
+	added, revoked, err := s.policy.SyncOIDCAssignments(userID, wantedHits)
+	if err != nil {
+		slog.Warn("oidc: role sync failed", "user", userID, "error", err)
+		s.audit.Log(audit.Event{
+			Actor:     userID,
+			ActorRole: "user",
+			Action:    "auth:oidc_role_sync_failed",
+			Resource:  resourceUser(userID),
+			Result:    audit.ResultFailure,
+			Detail:    err.Error(),
+			IP:        clientIP(r),
+			UserAgent: r.UserAgent(),
+		})
+		return
+	}
+
+	for _, a := range added {
+		s.audit.Log(audit.Event{
+			Actor:     userID,
+			ActorRole: "user",
+			Action:    "auth:oidc_role_assigned",
+			Resource:  resourceAssignment(a.UserID, a.RoleID, a.Scope),
+			Result:    audit.ResultSuccess,
+			IP:        clientIP(r),
+			UserAgent: r.UserAgent(),
+		})
+	}
+	for _, a := range revoked {
+		s.audit.Log(audit.Event{
+			Actor:     userID,
+			ActorRole: "user",
+			Action:    "auth:oidc_role_revoked",
+			Resource:  resourceAssignment(a.UserID, a.RoleID, a.Scope),
+			Result:    audit.ResultSuccess,
+			IP:        clientIP(r),
+			UserAgent: r.UserAgent(),
+		})
+	}
 }
 
 // usernameFromClaims picks a stable display username for a new
