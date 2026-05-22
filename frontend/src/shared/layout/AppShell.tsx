@@ -4,6 +4,7 @@ import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
+import { PersonaPill } from "@/components/layout/PersonaPill";
 import { useUser } from "@/shared/auth/useUser";
 
 interface AppShellProps {
@@ -77,6 +78,12 @@ export function AppShell({ children }: AppShellProps): ReactNode {
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
+            {/* ADR-0003 v1.2.0b: persona pill carries the live sudo */}
+            {/* state (USER / ADMIN / ELEVATED) + a countdown and a */}
+            {/* drop-privileges button. Sits before the user avatar */}
+            {/* so the operator's eye lands on "what mode am I in?" */}
+            {/* before "who am I logged in as?". */}
+            <PersonaPill />
             <ThemeToggle />
             <UserMenu />
           </div>

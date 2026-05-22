@@ -321,6 +321,140 @@ func TestCurrentMode_ExpiredModeAutoDowngrade(t *testing.T) {
 	_ = srv // server unused beyond setup; this test exercises currentMode directly
 }
 
+// TestLogoutElevation_DropsToUser: hitting POST /auth/logout-elevation
+// from ADMIN mints a fresh cookie with mode=user, ModeExpiresAt=0.
+// The user/role/uiAdmin claims and the outer session TTL stay intact —
+// only the elevation collapses. Used by the v1.2.0b "drop privileges"
+// button next to the persona pill countdown.
+func TestLogoutElevation_DropsToUser(t *testing.T) {
+	srv, secret := newElevateTestServer(t)
+	adminExp := time.Now().Add(10 * time.Minute).Unix()
+	tok := tokenWithMode(t, secret, "admin", "admin", adminExp)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout-elevation", nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{
+		Name:     auth.CookieName,
+		Value:    tok,
+		Path:     "/",
+		HttpOnly: true,
+	})
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["mode"] != "user" {
+		t.Errorf("body mode = %v, want user", body["mode"])
+	}
+	if exp, ok := body["mode_expires_at"].(float64); !ok || exp != 0 {
+		t.Errorf("body mode_expires_at = %v, want 0", body["mode_expires_at"])
+	}
+
+	// Verify the Set-Cookie carries a token with mode=user + no
+	// mode-layer expiry.
+	var newCookie *http.Cookie
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == auth.CookieName {
+			newCookie = c
+			break
+		}
+	}
+	if newCookie == nil {
+		t.Fatal("expected Set-Cookie with session cookie")
+	}
+	claims, err := auth.ParseToken(secret, newCookie.Value)
+	if err != nil {
+		t.Fatalf("ParseToken on new cookie: %v", err)
+	}
+	if claims.Mode != "user" {
+		t.Errorf("new cookie Mode = %q, want user", claims.Mode)
+	}
+	if claims.ModeExpiresAt != 0 {
+		t.Errorf("new cookie ModeExpiresAt = %d, want 0", claims.ModeExpiresAt)
+	}
+	if claims.UserID != "admin" {
+		t.Errorf("UserID = %q, want admin (must survive the drop)", claims.UserID)
+	}
+	if claims.Role != "admin" {
+		t.Errorf("Role = %q, want admin (must survive the drop)", claims.Role)
+	}
+	if !claims.UIAdmin {
+		t.Errorf("UIAdmin lost in drop — drop should ONLY downgrade mode, not strip role")
+	}
+}
+
+// TestLogoutElevation_NoSession: missing cookie returns 401, no
+// downgrade attempted. The middleware short-circuits before the
+// handler runs so we get the standard auth/SESSION_REQUIRED message.
+func TestLogoutElevation_NoSession(t *testing.T) {
+	srv, _ := newElevateTestServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout-elevation", nil)
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestMeHandler_IncludesModeAndExpiry: /auth/me must echo the live
+// mode + mode-expires-at so the frontend can hydrate its sudo state
+// machine on first render. A live ADMIN token comes back with the
+// claim's stored expiry; a pre-v1.2 modeless cookie comes back as
+// "admin" inside the grace window (the gate's promotion).
+func TestMeHandler_IncludesModeAndExpiry(t *testing.T) {
+	srv, secret := newElevateTestServer(t)
+
+	t.Run("admin token round-trips mode + expiry", func(t *testing.T) {
+		exp := time.Now().Add(10 * time.Minute).Unix()
+		tok := tokenWithMode(t, secret, "admin", "admin", exp)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+		rr := httptest.NewRecorder()
+		srv.router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		var resp UserResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Mode != "admin" {
+			t.Errorf("Mode = %q, want admin", resp.Mode)
+		}
+		if resp.ModeExpiresAt != exp {
+			t.Errorf("ModeExpiresAt = %d, want %d", resp.ModeExpiresAt, exp)
+		}
+	})
+
+	t.Run("pre-v1.2 cookie surfaces as admin during grace", func(t *testing.T) {
+		tok := mintLegacyModelessToken(t, secret, "matthew")
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+		rr := httptest.NewRecorder()
+		srv.router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+		}
+		var resp UserResponse
+		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+		if resp.Mode != "admin" {
+			t.Errorf("legacy cookie Mode = %q, want admin (grace window promotion)", resp.Mode)
+		}
+		// Legacy claim has no mode-layer expiry — must surface as 0
+		// so the FE doesn't render a misleading countdown.
+		if resp.ModeExpiresAt != 0 {
+			t.Errorf("legacy cookie ModeExpiresAt = %d, want 0", resp.ModeExpiresAt)
+		}
+	})
+}
+
 // TestCurrentMode_PreV12Cookie_TreatedAsAdmin: a token minted by
 // pre-v1.2 code has Mode="" (the field is omitempty). During the
 // 7-day grace window the gate treats it as ADMIN so the existing

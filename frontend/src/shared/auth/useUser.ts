@@ -1,11 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
+import type { AuthMode } from "@/shared/auth/mode";
 
 type UserResponse = {
   id?: string;
   username: string;
   role: "admin" | "user";
   uiAdmin: boolean;
+  // ADR-0003 v1.2.0b: sudo-style mode + expiry pulled off /auth/me so
+  // the FE can hydrate its mode provider without a second roundtrip.
+  // Optional — older backends omit them and the FE falls back to
+  // "user" / 0 (which matches a default post-login state anyway).
+  mode?: AuthMode;
+  modeExpiresAt?: number; // unix SECONDS on the wire
 };
 
 export function useUser() {
@@ -25,12 +32,16 @@ export function useUser() {
         username: string;
         role: "admin" | "user";
         uiAdmin?: boolean;
+        mode?: AuthMode;
+        modeExpiresAt?: number;
       };
       return {
         id: (data as { id?: string }).id,
         username: userData.username,
         role: userData.role,
         uiAdmin: userData.uiAdmin ?? false,
+        mode: userData.mode,
+        modeExpiresAt: userData.modeExpiresAt,
       } as UserResponse;
     },
     staleTime: 5 * 60 * 1000,
