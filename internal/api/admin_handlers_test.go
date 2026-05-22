@@ -51,6 +51,11 @@ type testMockDriver struct {
 
 	// v1.4.0a hook. nil-default returns false (matches Garage v1).
 	perBucketStatsAvailableFunc func() bool
+
+	// v1.4.0c SCRUB.MAINT hooks. nil-default reports unsupported.
+	scrubSupportFunc func() driver.ScrubCapability
+	scrubStateFunc   func(ctx context.Context) (driver.ScrubState, error)
+	startScrubFunc   func(ctx context.Context) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -254,6 +259,29 @@ func (m *testMockDriver) PerBucketStatsAvailable() bool {
 		return m.perBucketStatsAvailableFunc()
 	}
 	return false
+}
+
+// v1.4.0c SCRUB.MAINT — overridable scrub support/state/start.
+// Defaults: unsupported (matches AWS S3 / MinIO posture).
+func (m *testMockDriver) ScrubSupport() driver.ScrubCapability {
+	if m.scrubSupportFunc != nil {
+		return m.scrubSupportFunc()
+	}
+	return driver.ScrubCapability{Supported: false}
+}
+
+func (m *testMockDriver) ScrubState(ctx context.Context) (driver.ScrubState, error) {
+	if m.scrubStateFunc != nil {
+		return m.scrubStateFunc(ctx)
+	}
+	return driver.ScrubState{}, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) StartScrub(ctx context.Context) error {
+	if m.startScrubFunc != nil {
+		return m.startScrubFunc(ctx)
+	}
+	return driver.ErrUnsupported
 }
 
 // testSecret is a 32-byte secret used for JWT token generation in tests.

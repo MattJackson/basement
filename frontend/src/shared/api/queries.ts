@@ -1293,11 +1293,31 @@ export interface UsageSeriesResponse {
   range: string;
 }
 
-export function useUsageSeries(cid: string, bid: string, enabled = true) {
+// v1.4.0c: rangeDays lets the FE switch between 7 / 30 / 90 day
+// windows. Backend already accepts from + to as RFC3339 (capped at 90
+// days server-side); the hook just computes the window from `now`.
+// When rangeDays is omitted the backend default (7d) is used.
+export function useUsageSeries(
+  cid: string,
+  bid: string,
+  enabledOrOpts: boolean | { enabled?: boolean; rangeDays?: number } = true,
+) {
+  const opts =
+    typeof enabledOrOpts === "boolean"
+      ? { enabled: enabledOrOpts }
+      : enabledOrOpts;
+  const enabled = opts.enabled ?? true;
+  const rangeDays = opts.rangeDays;
   return useQuery<UsageSeriesResponse>({
-    queryKey: ["admin", "usage", "series", cid, bid],
+    queryKey: ["admin", "usage", "series", cid, bid, rangeDays ?? "default"],
     queryFn: async () => {
       const params = new URLSearchParams({ cid, bid });
+      if (rangeDays && rangeDays > 0) {
+        const to = new Date();
+        const from = new Date(to.getTime() - rangeDays * 24 * 60 * 60 * 1000);
+        params.set("from", from.toISOString());
+        params.set("to", to.toISOString());
+      }
       const res = await fetch(
         "/api/v1/admin/usage/series?" + params.toString(),
         { credentials: "include" },
@@ -1448,6 +1468,73 @@ export function useRotateInvite() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`admin/invites/rotate/${id}`, res.status, body);
       return body as InviteCreateResponse;
+    },
+  });
+}
+
+// v1.4.0c SCRUB.MAINT — Garage block-scrub controls. The GET payload
+// folds the capability flag into the response so the UI can render
+// the "not supported" branch from the same fetch that drives the
+// state read on supported drivers.
+
+export interface ScrubCapability {
+  supported: boolean;
+  reason?: string;
+}
+
+export interface ScrubState {
+  running: boolean;
+  lastCompleted?: string;
+  blocksScanned?: number;
+  blocksCorrupt?: number;
+  progressPercent?: number;
+  message?: string;
+}
+
+export interface ScrubResponse {
+  capabilities: ScrubCapability;
+  state: ScrubState;
+}
+
+// useClusterScrub polls every 5 seconds while a scrub is running.
+// The interval drops to 30 seconds otherwise so an idle page doesn't
+// hammer the backend.
+export function useClusterScrub(cid: string) {
+  return useQuery<ScrubResponse>({
+    queryKey: ["admin", "clusters", cid, "scrub"],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/scrub`,
+        { credentials: "include" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/clusters/${cid}/scrub`, res.status, body);
+      return body as ScrubResponse;
+    },
+    enabled: !!cid,
+    refetchInterval: (q) => {
+      const d = q.state.data as ScrubResponse | undefined;
+      return d?.state.running ? 5_000 : 30_000;
+    },
+    staleTime: 0,
+    retry: 1,
+  });
+}
+
+export function useStartClusterScrub(cid: string) {
+  return useMutation<ScrubResponse, Error, void>({
+    mutationFn: async () => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/scrub`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/clusters/${cid}/scrub`, res.status, body);
+      return body as ScrubResponse;
     },
   });
 }

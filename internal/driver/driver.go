@@ -262,6 +262,35 @@ type LifecycleCapabilities struct {
 	AbortMultipartDays bool     `json:"abortMultipartDays"`
 }
 
+// ScrubCapability advertises whether this driver exposes block-scrub
+// controls (v1.4.0c). Garage owns its own block store and can perform
+// durability scans on demand; S3-compatible backends (AWS, MinIO) hide
+// the durability machinery from operators, so the UI hides the Run
+// button rather than pretending. Reason is the operator-facing text
+// rendered in the maintenance card when Supported=false.
+type ScrubCapability struct {
+	Supported bool   `json:"supported"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ScrubState carries the live state of a block-scrub operation.
+// Running flips to true the moment a scrub kicks off and back to
+// false once Garage flushes the completion record; the UI polls
+// every 5s while it's true. ProgressPercent is 0..100; backends
+// that don't expose progress leave it at 0 even while running.
+// Message is the free-form text Garage emits ("scanning blocks",
+// "complete: 3 corrupt blocks repaired") — surfaced verbatim so the
+// operator sees the backend's own diagnostic rather than a basement-
+// ui paraphrase.
+type ScrubState struct {
+	Running         bool      `json:"running"`
+	LastCompleted   time.Time `json:"lastCompleted,omitempty"`
+	BlocksScanned   int64     `json:"blocksScanned,omitempty"`
+	BlocksCorrupt   int64     `json:"blocksCorrupt,omitempty"`
+	ProgressPercent int       `json:"progressPercent,omitempty"`
+	Message         string    `json:"message,omitempty"`
+}
+
 // Driver is the interface that all backend drivers must implement.
 type Driver interface {
 	// Identity
@@ -344,4 +373,14 @@ type Driver interface {
 	// renders whatever the bucket carries — zero is a real "this bucket
 	// is empty", not the "we don't know" sentinel).
 	PerBucketStatsAvailable() bool
+
+	// Block-scrub maintenance (v1.4.0c). ScrubSupport is the UI's
+	// gate — drivers that don't advertise scrub (AWS S3, MinIO) hide
+	// the Run button and surface the Reason string instead. ScrubState
+	// / StartScrub return ErrUnsupported on those drivers; the UI's
+	// short-circuit on the capability flag means a direct API caller
+	// is the only path that sees the error.
+	ScrubSupport() ScrubCapability
+	ScrubState(ctx context.Context) (ScrubState, error)
+	StartScrub(ctx context.Context) error
 }
