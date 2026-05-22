@@ -4,6 +4,82 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.5.0 — 2026-05-22
+
+Backup story milestone. Three cycles (v1.5.0a → v1.5.0c) plus the
+v1.5.0c.1 routing hotfix give basement its own scheduled
+bucket-to-bucket backup product end-to-end: named cron-scheduled
+jobs, mirror + snapshot modes, GFS retention with auto-prune, and a
+3-step restore wizard with snapshot-level deep-link. Backup runs
+reuse the existing v0.8.x sync engine via a runner closure — no
+duplication of pull semantics, no new copy code path. Six new
+user-tier endpoints under `/api/v1/user/backups`, atomic JSON store
+at `{dataDir}/backups.json`, panic-recovery in the scheduler so a
+malformed cron expression can't down the goroutine. Mirror mode is
+the default for back-compat with v1.5.0a records; snapshot mode
+writes to `{dstBucket}/{slug(name)}/{YYYY-MM-DD_HH:MM:SS}/` and the
+runner enumerates existing snapshots after every write to apply
+GFS retention via the pure-function `PlanPrune` (17 table-driven
+tests). The restore wizard short-circuits to a "Restore is only
+available for snapshot-mode backups" notice for mirror records so
+the operator never lands on a wizard with nothing to restore from.
+No new env vars, no migrations, no breaking changes. Smoke 49/49
+pass against live; 25 routes screenshot-verified.
+
+Full notes: [`docs/release-notes/v1.5.0.md`](docs/release-notes/v1.5.0.md)
+
+### Cycles
+
+- **v1.5.0a** — Scheduled backup CRUD + cron engine
+  (`internal/backup` package, `backup.Scheduler` wrapping robfig/cron
+  with panic-recovery), 4-step wizard, detail page with run history.
+- **v1.5.0b** — Snapshot mode + GFS retention (5-step wizard with
+  Mode + retention step, `RetentionPolicy{KeepDaily, KeepWeekly,
+  KeepMonthly}`, default `{7, 4, 12}`, auto-prune runner,
+  `GET /user/backups/{id}/snapshots` for the detail page snapshot
+  table).
+- **v1.5.0c** — 3-step restore wizard with overwrite/skip semantics
+  + per-snapshot `?ts=` deep-link from the detail page snapshot
+  table. Mirror-mode short-circuit notice.
+- **v1.5.0c.1** — Hotfix: `frontend/src/routes/files/backups/$id.tsx`
+  renamed to `$id/index.tsx` so the restore route is actually
+  reachable (v0.3.1-class parent-without-Outlet regression caught
+  by the milestone smoke gate).
+
+## v1.5.0c.1 — 2026-05-22
+
+Routing hotfix for v1.5.0c. The backup detail page lived at
+`frontend/src/routes/files/backups/$id.tsx` while the restore wizard
+lived at `frontend/src/routes/files/backups/$id/restore.tsx`. TanStack
+file-based routing treats this as a parent-with-children
+configuration, but `$id.tsx` had no `<Outlet />`, so
+`/files/backups/$id/restore` mounted under the detail content and
+never displayed the wizard — same shape as the v0.3.1 cluster-detail
+bug. Fixed by renaming `$id.tsx` → `$id/index.tsx` so both routes are
+leaves under the `/files/backups` layout. routeTree.gen.ts
+regenerated on build. The milestone smoke gate exercises both
+surfaces (detail + restore) end-to-end and is now 49/49 green.
+
+## v1.5.0c — 2026-05-22
+
+Backup story, cycle 3: point-in-time restore. New endpoint
+`POST /api/v1/user/backups/{id}/restore` (synchronous; request stays
+open until the copy finishes; body
+`{snapshotTimestamp, dstRegionId, dstBucket, dstPrefix?,
+overwriteExisting}`; `snapshotTimestamp = "latest"` resolves at
+request time). New route `/files/backups/$id/restore` — 3-step
+wizard (pick snapshot / pick destination / confirm + run);
+destination defaults to the backup's original source for one-click
+in-place restore; `overwriteExisting` is off by default and the
+confirm step surfaces a destructive-action warning when toggled on.
+Result view renders in place of step 3 once the restore returns,
+with per-object counts, bytes copied, started/completed timestamps,
+and top-10 errors. Detail page's snapshot table gains per-row
+"Restore →" deep-links that pre-fill the wizard via the `?ts=` search
+param. Mirror-mode backups short-circuit to a "Restore is only
+available for snapshot-mode backups" notice instead of mounting the
+wizard.
+
 ## v1.5.0b — 2026-05-22
 
 Backup story, cycle 2: snapshot mode + retention. v1.5.0a backups
