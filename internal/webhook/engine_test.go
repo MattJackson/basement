@@ -445,3 +445,184 @@ func (r *panicOnceRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	return r.inner.RoundTrip(req)
 }
+
+// waitForSubscriberCalls blocks until n >= want or the deadline expires.
+// Used by the Subscribe tests to drain the dispatcher without a fixed
+// sleep that races slow CI runners.
+func waitForSubscriberCalls(t *testing.T, got *atomic.Int64, want int64) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got.Load() >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d subscriber calls, got %d", want, got.Load())
+}
+
+// TestEngine_SubscribeCallback: registering a Subscribe callback fires
+// for every Emit even when no external webhook is configured. The
+// fan-out runs BEFORE per-webhook delivery so subscribers see the
+// envelope synchronously inside the dispatcher.
+func TestEngine_SubscribeCallback(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+
+	var calls atomic.Int64
+	var lastBucket atomic.Value // string
+	unsub := engine.Subscribe("test-sub", func(env EventEnvelope) {
+		calls.Add(1)
+		lastBucket.Store(env.Bucket)
+	})
+	defer unsub()
+
+	if got := engine.SubscriberCount(); got != 1 {
+		t.Fatalf("expected 1 subscriber registered, got %d", got)
+	}
+
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "k1",
+	})
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectDeleted,
+		RegionID: "region-a",
+		Bucket:   "photos",
+		Key:      "k2",
+	})
+
+	waitForSubscriberCalls(t, &calls, 2)
+
+	if got := lastBucket.Load(); got != "photos" {
+		t.Fatalf("expected last bucket = photos, got %v", got)
+	}
+}
+
+// TestEngine_UnsubscribeStopsCallback: calling the returned unsubscribe
+// func stops further callback invocations. Emits after unsubscribe go
+// to no-one.
+func TestEngine_UnsubscribeStopsCallback(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+
+	var calls atomic.Int64
+	unsub := engine.Subscribe("test-sub", func(env EventEnvelope) {
+		calls.Add(1)
+	})
+
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "before-unsub",
+	})
+	waitForSubscriberCalls(t, &calls, 1)
+
+	unsub()
+	if got := engine.SubscriberCount(); got != 0 {
+		t.Fatalf("expected 0 subscribers after unsubscribe, got %d", got)
+	}
+
+	// Calling unsubscribe again is a no-op (must not panic).
+	unsub()
+
+	// Emit after unsubscribe — callback must NOT fire.
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "after-unsub",
+	})
+
+	// Wait a beat so the dispatcher would have run the callback if it
+	// were still registered. Then assert counter unchanged.
+	time.Sleep(30 * time.Millisecond)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("expected 1 call (pre-unsub only), got %d", got)
+	}
+}
+
+// TestEngine_SubscribeMultiple: N subscribers all fire on every emit
+// and stay independent — unsubscribing one doesn't affect the others.
+func TestEngine_SubscribeMultiple(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+
+	var calls1, calls2, calls3 atomic.Int64
+	unsub1 := engine.Subscribe("sub-1", func(EventEnvelope) { calls1.Add(1) })
+	unsub2 := engine.Subscribe("sub-2", func(EventEnvelope) { calls2.Add(1) })
+	unsub3 := engine.Subscribe("sub-3", func(EventEnvelope) { calls3.Add(1) })
+	defer unsub1()
+	defer unsub3()
+
+	if got := engine.SubscriberCount(); got != 3 {
+		t.Fatalf("expected 3 subscribers, got %d", got)
+	}
+
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "k1",
+	})
+	waitForSubscriberCalls(t, &calls1, 1)
+	waitForSubscriberCalls(t, &calls2, 1)
+	waitForSubscriberCalls(t, &calls3, 1)
+
+	// Drop sub-2; sub-1 + sub-3 should still receive the next emit.
+	unsub2()
+	if got := engine.SubscriberCount(); got != 2 {
+		t.Fatalf("expected 2 subscribers after one unsubscribe, got %d", got)
+	}
+
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "k2",
+	})
+	waitForSubscriberCalls(t, &calls1, 2)
+	waitForSubscriberCalls(t, &calls3, 2)
+
+	// Give the dispatcher a beat to (incorrectly) call the dropped
+	// subscriber, then assert it didn't.
+	time.Sleep(20 * time.Millisecond)
+	if got := calls2.Load(); got != 1 {
+		t.Fatalf("dropped subscriber should still be at 1 call, got %d", got)
+	}
+}
+
+// TestEngine_SubscribePanicSafe: a panicking subscriber must not kill
+// the dispatcher — subsequent subscribers + emits still get processed.
+func TestEngine_SubscribePanicSafe(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+
+	var goodCalls atomic.Int64
+	unsubBad := engine.Subscribe("bad", func(EventEnvelope) {
+		panic("synthetic subscriber panic")
+	})
+	defer unsubBad()
+	unsubGood := engine.Subscribe("good", func(EventEnvelope) {
+		goodCalls.Add(1)
+	})
+	defer unsubGood()
+
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "k",
+	})
+
+	waitForSubscriberCalls(t, &goodCalls, 1)
+
+	// Second emit should still flow even though the bad subscriber
+	// panicked on the first.
+	engine.Emit(EventEnvelope{
+		Type:     EventObjectCreated,
+		RegionID: "region-a",
+		Bucket:   "lsi",
+		Key:      "k2",
+	})
+	waitForSubscriberCalls(t, &goodCalls, 2)
+}

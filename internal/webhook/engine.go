@@ -93,6 +93,26 @@ type Engine struct {
 	// envelopes" without sleeping.
 	emitCount     atomic.Int64
 	deliveryCount atomic.Int64
+
+	// subMu guards subs. Held only on Subscribe / unsubscribe / the
+	// dispatcher's per-envelope subscriber fan-out; the fan-out runs a
+	// snapshot under the lock then releases before invoking callbacks
+	// so a misbehaving subscriber can't deadlock the dispatcher.
+	subMu sync.Mutex
+	// subs is the registry of internal subscribers keyed by an
+	// engine-assigned token so unsubscribe is O(1). Callback identity
+	// alone wouldn't work — Go closures aren't comparable.
+	subs map[uint64]subscriberEntry
+	// subSeq is the monotonic counter used to mint subscriber tokens.
+	subSeq uint64
+}
+
+// subscriberEntry is one registered internal subscriber. Name is a
+// human-readable tag carried in dispatcher panic logs so the operator
+// can pin a runaway subscriber to its owning subsystem.
+type subscriberEntry struct {
+	name string
+	cb   func(EventEnvelope)
 }
 
 // eventQueueSize is the buffered capacity of the Engine.events channel.
@@ -129,6 +149,7 @@ func NewEngine(store Store, audit audit.Logger, logger *slog.Logger) *Engine {
 		nowFn:           func() time.Time { return time.Now().UTC() },
 		idFn:            func() string { return uuid.New().String() },
 		quit:            make(chan struct{}),
+		subs:            make(map[uint64]subscriberEntry),
 	}
 }
 
@@ -247,6 +268,80 @@ func (e *Engine) EmitCount() int64 { return e.emitCount.Load() }
 // engine to settle after Emit.
 func (e *Engine) DeliveryCount() int64 { return e.deliveryCount.Load() }
 
+// Subscribe registers a callback that fires for every emitted event,
+// BEFORE per-webhook delivery. Used by internal subsystems (e.g.
+// federation) that want to react to bucket-level events without
+// configuring external HTTP webhooks. Returns an unsubscribe func.
+//
+// Callbacks run in the dispatcher goroutine — they MUST NOT block.
+// Long work should be queued to a separate channel + drained by
+// the subscriber's own workers. The federation engine does exactly
+// this in v1.7.0f: the callback enqueues a single-object replicate
+// task onto a per-federation buffered channel and returns immediately.
+//
+// Name is a human-readable tag (e.g. "federation") carried in panic
+// logs so a runaway subscriber pins to its owning subsystem. The
+// returned function is idempotent — calling it twice is a no-op.
+func (e *Engine) Subscribe(name string, cb func(EventEnvelope)) func() {
+	if cb == nil {
+		return func() {}
+	}
+	e.subMu.Lock()
+	e.subSeq++
+	token := e.subSeq
+	e.subs[token] = subscriberEntry{name: name, cb: cb}
+	e.subMu.Unlock()
+
+	return func() {
+		e.subMu.Lock()
+		delete(e.subs, token)
+		e.subMu.Unlock()
+	}
+}
+
+// SubscriberCount reports the number of currently-registered internal
+// subscribers. Tests use this to assert Subscribe / unsubscribe state
+// without peeking at engine internals.
+func (e *Engine) SubscriberCount() int {
+	e.subMu.Lock()
+	defer e.subMu.Unlock()
+	return len(e.subs)
+}
+
+// fanOutSubscribers invokes every registered subscriber callback for
+// one envelope. Runs synchronously inside the dispatcher goroutine —
+// subscribers are documented as "MUST NOT block". A panic in any one
+// callback is logged + recovered so a buggy subscriber can't kill the
+// dispatcher.
+//
+// Snapshot under the lock then release before invoking: this lets a
+// callback call Subscribe / unsubscribe without deadlocking on the
+// dispatcher's hold of subMu.
+func (e *Engine) fanOutSubscribers(env EventEnvelope) {
+	e.subMu.Lock()
+	if len(e.subs) == 0 {
+		e.subMu.Unlock()
+		return
+	}
+	snapshot := make([]subscriberEntry, 0, len(e.subs))
+	for _, s := range e.subs {
+		snapshot = append(snapshot, s)
+	}
+	e.subMu.Unlock()
+
+	for _, s := range snapshot {
+		func(entry subscriberEntry) {
+			defer func() {
+				if r := recover(); r != nil {
+					e.logger.Error("webhook engine: panic in subscriber",
+						"subscriber", entry.name, "envelopeId", env.ID, "panic", r)
+				}
+			}()
+			entry.cb(env)
+		}(s)
+	}
+}
+
 // runDispatcher is the central event loop. Reads from e.events,
 // looks up matching webhooks, and spawns one delivery goroutine per
 // (envelope, webhook) pair. Recover-shielded so a panic in the
@@ -274,7 +369,16 @@ func (e *Engine) runDispatcher(ctx context.Context) {
 // dispatch resolves matching webhooks for one envelope and spawns a
 // delivery goroutine per match. Skipped silently if no webhook matches
 // — that's the normal case when an operator hasn't subscribed.
+//
+// Internal subscribers (registered via Subscribe) fire FIRST and run
+// synchronously inside the dispatcher. They MUST NOT block: callbacks
+// that need to do real work are required to queue onto their own
+// channel + drain via dedicated workers. v1.7.0f added this path so
+// the federation engine can react to writes immediately instead of
+// waiting for its 10s polling tick.
 func (e *Engine) dispatch(ctx context.Context, env EventEnvelope) {
+	e.fanOutSubscribers(env)
+
 	hooks, err := e.store.ListForBucket(ctx, env.RegionID, env.Bucket)
 	if err != nil {
 		e.logger.Warn("webhook engine: ListForBucket failed", "error", err)

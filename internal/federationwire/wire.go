@@ -136,3 +136,12 @@ func (a *driverAdapter) PutObjectStream(ctx context.Context, bucket, key string,
 func (a *driverAdapter) ServerSideCopy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) error {
 	return a.drv.ServerSideCopy(ctx, srcBucket, srcKey, dstBucket, dstKey)
 }
+
+// DeleteObject is the v1.7.0f addition — the event-driven federation
+// path needs delete propagation to mirror ObjectDeleted envelopes
+// from primary to replicas. Direct pass-through to the production
+// driver; backends that lack delete privileges surface the same 4xx
+// the operator would see from a manual DELETE.
+func (a *driverAdapter) DeleteObject(ctx context.Context, bucket, key string) error {
+	return a.drv.DeleteObject(ctx, bucket, key)
+}
