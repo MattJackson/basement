@@ -1674,12 +1674,26 @@ section("[16] version label under Logo (Fix 7)");
         waitUntil: "networkidle",
       });
 
-      // Either folder rows render (one or more commonPrefixes) or the
-      // empty-state ("This folder is empty" / "No objects here"). Smoke
-      // accepts both — the gate is "page renders without crashing".
-      const hasFolderRow = await page!.locator('text=/\\/$/').count();
+      // v1.4.0a virtualized the object list — rows are no longer
+      // <tbody><tr> but virtualized div containers with
+      // data-row-kind="folder" / "file" / "loadMoreSentinel". The
+      // virtualizer mounts inside [data-testid="virtual-object-list-scroll"].
+      // Either folder rows render (one or more commonPrefixes), file
+      // rows render, or the empty-state ("This folder is empty" / "No
+      // objects here") shows. Smoke accepts all three — gate is "page
+      // renders without crashing".
+      // Playwright doesn't accept a mixed CSS-and-text-engine comma list,
+      // so wait on either selector independently via waitForFunction.
+      await page!.waitForFunction(
+        () =>
+          !!document.querySelector('[data-testid="virtual-object-list-scroll"]') ||
+          /No objects here|This folder is empty/i.test(document.body.innerText),
+        null,
+        { timeout: 10_000 },
+      );
+      const hasFolderRow = await page!.locator('[data-row-kind="folder"]').count();
+      const hasFileRow = await page!.locator('[data-row-kind="file"]').count();
       const hasEmpty = await page!.locator('text=/No objects here|This folder is empty/i').count();
-      const hasFileRow = await page!.locator('tbody tr').count();
       if (hasFolderRow === 0 && hasEmpty === 0 && hasFileRow === 0) {
         throw new Error("object browser shows neither folder rows, file rows, nor empty state");
       }
@@ -1765,6 +1779,178 @@ section("[16] version label under Logo (Fix 7)");
       // checkbox — it's disabled when there are no selectable rows.
       await page!.waitForSelector('[data-testid="select-all-visible"]', { timeout: 10_000 });
       await shot(page!, "v1.4.0b-bucket-batch-select");
+    });
+
+    // ============================================================
+    // [v1.4.0a] virtualized object browser — virtual scroll container mounts
+    // ============================================================
+    section("[v1.4.0a/a] /files/{regionId}/b/{bid} mounts the virtualized list (v1.4.0a)");
+    await check("bucket browser mounts virtual-object-list-scroll container", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.4.0a virtualized scroll", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.4.0a virtualized scroll", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.4.0a virtualized scroll", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.4.0a virtualized scroll", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+
+      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+      // Either the virtualizer mounted OR the empty-state copy shows.
+      // The virtualizer renders even at 0 rows so it's the primary signal.
+      // Mixed CSS+text selectors aren't a Playwright thing — use waitForFunction.
+      await page!.waitForFunction(
+        () =>
+          !!document.querySelector('[data-testid="virtual-object-list-scroll"]') ||
+          /No objects here|This bucket is empty|This folder is empty/i.test(document.body.innerText),
+        null,
+        { timeout: 10_000 },
+      );
+      // Count the visible row containers (folder + file). >10 rows is
+      // the spec's bar; smoke tolerates fewer (the matthew dev bucket
+      // may have <10 objects) but at least asserts the row containers
+      // mount when objects exist.
+      const folderRows = await page!.locator('[data-row-kind="folder"]').count();
+      const fileRows = await page!.locator('[data-row-kind="file"]').count();
+      const totalRows = folderRows + fileRows;
+      info(`virtualized browser rendered ${folderRows} folder + ${fileRows} file row(s)`);
+      // Empty bucket is allowed — but if rows exist, at least one must
+      // render through the virtualizer.
+      const hasEmptyMsg = await page!.locator('text=/No objects here|This bucket is empty|This folder is empty/i').count();
+      if (totalRows === 0 && hasEmptyMsg === 0) {
+        throw new Error("virtualized browser: neither row containers nor empty-state");
+      }
+      await shot(page!, "v1.4.0a-virtualized-browser");
+    });
+
+    // ============================================================
+    // [v1.4.0a] /admin/audit pagination chrome (v1.4.0a)
+    // ============================================================
+    section("[v1.4.0a/b] /admin/audit renders pagination chrome (v1.4.0a)");
+    await check("audit log shows pagination summary + Previous/Next + Export CSV", async () => {
+      await page!.goto(`${BASE_URL}/admin/audit`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1', { timeout: 10_000 });
+      // Export CSV button is always rendered (disabled when zero rows).
+      const hasExport = await page!.locator('button:has-text("Export CSV")').count();
+      if (hasExport === 0) {
+        throw new Error("/admin/audit missing 'Export CSV' button (v1.4.0a)");
+      }
+      // Pagination chrome is conditional on total>0. On any non-empty
+      // deploy the actor's prior elevation alone seeds at least one
+      // row, but tolerate the zero case with a warn rather than a hard
+      // fail so the smoke survives a fresh dev DB.
+      const hasSummary = await page!.locator('[data-testid="audit-pagination-summary"]').count();
+      const hasPrev = await page!.locator('button:has-text("Previous")').count();
+      const hasNext = await page!.locator('button:has-text("Next")').count();
+      if (hasSummary === 0 || hasPrev === 0 || hasNext === 0) {
+        const emptyCopy = await page!.locator('text=No events match the filter').count();
+        if (emptyCopy === 0) {
+          throw new Error(
+            `audit pagination chrome missing (summary=${hasSummary} prev=${hasPrev} next=${hasNext}) and no empty-state`,
+          );
+        }
+        warnLine("audit table is empty — pagination chrome hidden by design");
+      }
+      await shot(page!, "v1.4.0a-audit-pagination");
+    });
+
+    // ============================================================
+    // [v1.4.0c] /admin/clusters/{cid}/scrub — block scrub UI
+    // ============================================================
+    section("[v1.4.0c/a] /admin/clusters/{cid}/scrub renders capabilities + Run/Not-supported (v1.4.0c)");
+    await check("scrub page renders title + either Run scrub button or Not-supported card", async () => {
+      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/admin/clusters`);
+      if (!clustersResp.ok()) {
+        skipLine("v1.4.0c scrub check", `clusters → ${clustersResp.status()}`);
+        return;
+      }
+      const clusters = await clustersResp.json();
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        skipLine("v1.4.0c scrub check", "no clusters configured");
+        return;
+      }
+      const cid = clusters[0].id as string;
+
+      await page!.goto(`${BASE_URL}/admin/clusters/${cid}/scrub`, { waitUntil: "networkidle" });
+      // The page has three render branches:
+      //   1) success → renders <h1>Block scrub</h1> + Run/Not-supported card
+      //   2) error  → renders BackLink + ErrorBanner ("Couldn't load scrub status.")
+      //   3) loading→ skeletons (transitory; networkidle should clear)
+      // Smoke accepts (1) or (2) — the error path is what an operator
+      // sees against a cluster whose admin API doesn't expose the worker
+      // endpoints (e.g. older Garage builds), and the page MUST still
+      // mount the BackLink + error message without crashing.
+      // Give the React shell a beat to render past the skeleton even if
+      // the underlying request returns an error.
+      await page!.waitForFunction(
+        () => {
+          const t = document.body.innerText || "";
+          return /Block scrub/.test(t) || /Couldn.?t load scrub status/i.test(t);
+        },
+        null,
+        { timeout: 15_000 },
+      );
+      const hasTitle = await page!.locator('h1:has-text("Block scrub")').count();
+      const hasError = await page!.locator('text=/Couldn.?t load scrub status/i').count();
+      if (hasTitle === 0 && hasError === 0) {
+        throw new Error("scrub page: neither title nor error banner rendered");
+      }
+      if (hasTitle > 0) {
+        // Supported / unsupported branch — assert one of the two cards is visible.
+        const hasRunBtn = await page!
+          .locator('button')
+          .filter({ hasText: /Run scrub|Running…|Starting…/ })
+          .count();
+        const hasNotSupported = await page!.locator('text=/Not supported/i').count();
+        if (hasRunBtn === 0 && hasNotSupported === 0) {
+          throw new Error("scrub page: title rendered but neither Run-scrub button nor Not-supported card");
+        }
+      } else {
+        warnLine("scrub error branch rendered — backend worker endpoint unavailable on this cluster");
+      }
+      await shot(page!, "v1.4.0c-scrub");
+    });
+
+    // ============================================================
+    // [v1.4.0c] /admin/usage growth column + range selector + anomaly banner
+    // ============================================================
+    section("[v1.4.0c/b] /admin/usage shows Growth column + range selector (v1.4.0c)");
+    await check("usage page renders Growth (Nd) column header + range buttons", async () => {
+      await page!.goto(`${BASE_URL}/admin/usage`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Usage Overview")', { timeout: 10_000 });
+      // Growth (7d) is the default column header — present whenever a
+      // per-cluster table mounts. If the deploy has no clusters,
+      // tolerate the empty state instead.
+      const hasGrowthHeader = await page!.locator('th:has-text("Growth")').count();
+      const hasEmpty = await page!.locator('text=No clusters connected yet').count();
+      if (hasGrowthHeader === 0 && hasEmpty === 0) {
+        throw new Error("/admin/usage missing 'Growth' column and no empty-state");
+      }
+      // Range selector (7d / 30d / 90d). Three buttons or one of them
+      // is always rendered.
+      const has7d = await page!.locator('button:has-text("7d")').count();
+      const has30d = await page!.locator('button:has-text("30d")').count();
+      const has90d = await page!.locator('button:has-text("90d")').count();
+      if (has7d === 0 || has30d === 0 || has90d === 0) {
+        throw new Error(`usage range selector missing buttons (7d=${has7d} 30d=${has30d} 90d=${has90d})`);
+      }
+      await shot(page!, "v1.4.0c-usage-growth");
     });
 
     // ============================================================
