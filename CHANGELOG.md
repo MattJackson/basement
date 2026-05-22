@@ -30,6 +30,25 @@ greppping audit can distinguish human cookie activity from machine
 bearer activity at a glance. SigV4 (the v2.0 gateway path) is still
 out of scope this cycle.
 
+## v1.7.0a.2 — 2026-05-22
+
+Drop-privileges UI sync fix. Clicking the × on the ADMIN persona
+pill hit `/api/v1/auth/logout-elevation` (200 + new cookie with
+mode=user) and called `setAuthMode({mode:"user", expiresAt:0})` —
+but the countdown chip and ADMIN-amber styling stayed on screen.
+Root cause: `AuthModeHydrator` syncs the server-reported mode off
+the cached `["auth","me"]` React Query payload into the provider;
+because the cache still held the pre-drop ADMIN response, the next
+hydrator tick detected `current.mode !== user.mode` and snapped
+the pill back. Fix: `handleDrop` now invalidates the
+`["auth","me"]` query immediately after `setAuthMode`, so the
+follow-up refetch reads the freshly-rotated cookie and the
+hydrator agrees with local state instead of fighting it. Tests
+pin (a) the invalidation call on success, (b) the pill
+mode-flip + countdown removal in the rendered DOM, and (c) that
+a backend rejection neither invalidates the cache nor flips the
+pill.
+
 ## v1.7.0a — 2026-05-22
 
 Service-account data layer + admin API. First cycle of the v1.7
