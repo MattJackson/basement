@@ -222,6 +222,28 @@ func main() {
 	// have os.Exit(1)'d on failure.
 	reg.SetUserRegionsStore(st.UserRegions())
 
+	// Per ADR-0002 (v1.1.0d): one-shot migration of legacy per-bucket
+	// BucketGrants into the new per-(user, endpoint) UserRegions. The
+	// migration is idempotent — on subsequent boots existing UserRegion
+	// rows are skipped — and it does NOT delete bucket_grants.json
+	// (that's v1.1.0e once the legacy user-tier endpoints retire). A
+	// per-row failure is logged and the migration continues, so one
+	// bad grant can't block the rest from migrating.
+	if report, err := st.MigrateBucketGrantsToUserRegions(context.Background(), connStore); err != nil {
+		slog.Error("bucket-grants migration failed", "error", err)
+		os.Exit(1)
+	} else {
+		slog.Info("migrated BucketGrants to UserRegions",
+			"scanned", report.Scanned,
+			"created", report.Created,
+			"skippedDuplicate", report.SkippedDuplicate,
+			"failed", len(report.Failed))
+		for _, f := range report.Failed {
+			slog.Warn("bucket-grant migration row failed",
+				"grantId", f.GrantID, "userId", f.UserID, "endpoint", f.Endpoint, "error", f.Err.Error())
+		}
+	}
+
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
 
 	// Per ADR-0001 (v0.9.0b/e): policy enforcer + matthew->host_admin

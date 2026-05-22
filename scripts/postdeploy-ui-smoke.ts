@@ -1278,35 +1278,38 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
-    // [NN] /files/keys renders pair-cards (or empty state)
+    // [NN] /files/keys renders region-key cards (ADR-0002 v1.1.0d)
     // ============================================================
-    section("[NN] /files/keys renders pair-cards or empty state");
-    await check("/files/keys displays keys grid or empty message", async () => {
+    section("[NN] /files/keys renders region-key cards or empty state");
+    await check("/files/keys is the 'My Region Keys' page", async () => {
       await page!.goto(`${BASE_URL}/files/keys`, { waitUntil: "networkidle" });
 
-      // Wait for the page to render - either cards or empty state
-      const hasCards = await page!.locator('[data-testid="user-key-pair-card"]').count();
-      const hasEmptyState = await page!.locator('text=No keys yet').count();
-
-      if (hasCards === 0 && hasEmptyState === 0) {
-        throw new Error("/files/keys rendered neither key cards nor empty state");
+      // v1.1.0d renames /files/keys from "My Keys" (cluster-tier
+      // aggregation) to "My Region Keys" (the user's UserRegion
+      // keychain). Card test-id changed accordingly.
+      const heading = await page!.locator('h1', { hasText: "My Region Keys" }).count();
+      if (heading === 0) {
+        throw new Error("/files/keys missing 'My Region Keys' heading (v1.1.0d rename)");
       }
 
-      // At least one should be present - permissive check for user matthew
-      if (hasCards > 0) {
-        const cardCount = await page!.locator('[data-testid="user-key-pair-card"]').count();
-        process.stdout.write(`${C.dim}found ${cardCount} key pair card(s)${C.reset}\n`);
-        
-        // Verify card structure
-        const firstCard = page!.locator('[data-testid="user-key-pair-card"]').first();
-        const hasCopyButton = await firstCard.locator('[data-testid="copy-key-button"]').count() > 0;
-        if (!hasCopyButton) {
-          throw new Error("Key card missing copy button");
-        }
+      const hasCards = await page!.locator('[data-testid="region-key-card"]').count();
+      const hasEmptyState = await page!.locator('text=No region keys yet').count();
 
-        await shot(page!, "nn-keys-pair-cards");
-      } else if (hasEmptyState === 1) {
-        process.stdout.write(`${C.dim}empty state shown (no user keys yet)${C.reset}\n`);
+      if (hasCards === 0 && hasEmptyState === 0) {
+        throw new Error("/files/keys rendered neither region-key cards nor empty state");
+      }
+
+      if (hasCards > 0) {
+        process.stdout.write(`${C.dim}found ${hasCards} region-key card(s)${C.reset}\n`);
+        // Verify card structure
+        const firstCard = page!.locator('[data-testid="region-key-card"]').first();
+        const hasCopyButton = await firstCard.locator('[data-testid="copy-region-key-button"]').count() > 0;
+        if (!hasCopyButton) {
+          throw new Error("Region-key card missing copy button");
+        }
+        await shot(page!, "nn-keys-region-cards");
+      } else {
+        process.stdout.write(`${C.dim}empty state shown (no region keys yet)${C.reset}\n`);
         await shot(page!, "nn-keys-empty-state");
       }
     });

@@ -378,14 +378,15 @@ func TestShareListHandler(t *testing.T) {
 			},
 			password:  "correct-password",
 			addCookie: true,
-			// Password flow passes; handler then fails building the
-			// driver (fixture seeds a Share with driver:"garage-v1"
-			// but the test registry doesn't register that driver).
-			// v0.8.0d.27 introduced proper error mapping so this now
-			// surfaces as DRIVER_BUILD_FAILED instead of being
-			// swallowed as CLUSTER_NOT_FOUND.
-			expectedStatus: http.StatusInternalServerError,
-			expectedCode:   "DRIVER_BUILD_FAILED",
+			// Password flow passes; handler reaches the driver and
+			// the test-mock driver (registered for "garage-v1" by
+			// the v1.1.0d bridge tests) returns an empty list so the
+			// happy path is observable as 200 + empty objects array.
+			// (Pre-v1.1.0d this surfaced as 500 DRIVER_BUILD_FAILED
+			// because no driver factory was registered in the test
+			// binary at all.)
+			expectedStatus: http.StatusOK,
+			expectedCode:   "",
 		},
 		{
 			name: "single object share returns 404",
@@ -572,13 +573,13 @@ func TestShareGetHandler(t *testing.T) {
 			password:  "correct-password",
 			addCookie: true,
 			key:       "", // Object shares ignore key param
-			// Same DRIVER_BUILD_FAILED end-state as the LIST handler
-			// test above; the share's driver:"garage-v1" doesn't
-			// resolve in the test registry, so driver build fails
-			// (real production behavior — v0.8.0d.27 stopped hiding
-			// it as CLUSTER_NOT_FOUND).
-			expectedStatus: http.StatusInternalServerError,
-			expectedCode:   "DRIVER_BUILD_FAILED",
+			// Driver builds successfully now (test mock registered
+			// for "garage-v1" by the v1.1.0d bridge tests); the
+			// presigned-URL handler 302s to the empty URL the mock
+			// returns. Pre-v1.1.0d this surfaced as 500
+			// DRIVER_BUILD_FAILED because no factory was registered.
+			expectedStatus: http.StatusFound,
+			expectedCode:   "",
 		},
 		{
 			name: "download limit reached",
