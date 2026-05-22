@@ -83,6 +83,15 @@ export function AdminEntryElevationGuard() {
     // hasn't arrived yet, defer — the hydrator will sync mode and this
     // effect re-runs with the truthful value.
     if (userLoading || !user) return;
+    // Defensive read of the server-reported mode directly off the
+    // /auth/me payload. The AuthModeHydrator copies user.mode into the
+    // provider's state, but the hydrator's setMode runs in a SUBSEQUENT
+    // render — within the render where `user` first becomes available,
+    // `mode` from useAuthMode() is still the conservative USER default.
+    // Both checks together: provider mode === user AND user.mode === user.
+    // If either disagrees, the operator is genuinely in admin/elevated;
+    // suppress the prompt and let the hydrator catch up.
+    if (user.mode === "admin" || user.mode === "elevated") return;
 
     lastPromptedPathRef.current = location.pathname;
     pendingRef.current = true;
