@@ -289,6 +289,18 @@ func (s *Server) routes() {
 			uiAdminG.Post("/admin/users", s.createUserHandler)
 			uiAdminG.Delete("/admin/users/{id}", s.deleteUserHandler)
 
+			// Persistent invite tokens (v1.3.0d). The /admin/users
+			// invite-only flow above writes user records eagerly;
+			// these endpoints manage standalone invite tokens that
+			// only materialize into User records on redemption. Both
+			// surfaces are gated on host:manage_users (per-handler
+			// requireCapability), so the routes can sit next to each
+			// other under uiAdminG.
+			uiAdminG.Get("/admin/invites", s.listInvitesHandler)
+			uiAdminG.Post("/admin/invites", s.createInvitePersistedHandler)
+			uiAdminG.Delete("/admin/invites/{id}", s.revokeInviteHandler)
+			uiAdminG.Post("/admin/invites/{id}/rotate", s.rotateInviteHandler)
+
 			// Policy matrix editor (ADR-0001 cycle v0.9.0g). Each
 			// handler runs its own capability gate so the legacy
 			// UIAdmin middleware is purely defense-in-depth; once
@@ -362,6 +374,10 @@ func (s *Server) routes() {
 			// the backend's own access enforcement, not via
 			// requireCapability. See internal/api/user_regions.go.
 			userG.Post("/user/regions", s.userCreateRegionHandler)
+			// v1.3.0d: bulk-import — create N regions in one call,
+			// per-row error reporting (no abort-on-first). Same USER
+			// auth gate as single create.
+			userG.Post("/user/regions/bulk", s.userBulkCreateRegionsHandler)
 			userG.Get("/user/regions", s.userListRegionsHandler)
 			userG.Get("/user/regions/{regionId}", s.userGetRegionHandler)
 			userG.Post("/user/regions/{regionId}/rotate", s.userRotateRegionHandler)

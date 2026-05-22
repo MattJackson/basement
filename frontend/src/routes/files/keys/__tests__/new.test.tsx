@@ -23,6 +23,8 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
     // v1.3.0b: form pulls driver defaults for the "Common endpoints"
     // expandable; stub so the test doesn't fire a real fetch.
     useDriverDefaults: vi.fn(),
+    // v1.3.0d: bulk-import toggle uses the bulk mutation hook.
+    useBulkCreateUserKeys: vi.fn(),
   };
 });
 
@@ -32,7 +34,11 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import AddKeyPage from "@/routes/files/keys/new";
-import { useCreateUserKey, useDriverDefaults } from "@/shared/api/queries";
+import {
+  useCreateUserKey,
+  useDriverDefaults,
+  useBulkCreateUserKeys,
+} from "@/shared/api/queries";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
@@ -45,13 +51,20 @@ function renderWithProviders(node: React.ReactNode) {
 }
 
 const mutateAsyncMock = vi.fn();
+const bulkMutateAsyncMock = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
   mutateAsyncMock.mockReset();
+  bulkMutateAsyncMock.mockReset();
   navigateMock.mockReset();
   vi.mocked(useCreateUserKey).mockReturnValue({
     mutateAsync: mutateAsyncMock,
+    isPending: false,
+    error: null,
+  } as any);
+  vi.mocked(useBulkCreateUserKeys).mockReturnValue({
+    mutateAsync: bulkMutateAsyncMock,
     isPending: false,
     error: null,
   } as any);
@@ -277,5 +290,58 @@ describe("AddKeyPage (/files/keys/new)", () => {
       "duplicate alias",
     );
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  // v1.3.0d — Bulk-import toggle swaps in the paste panel; pasting
+  // CSV renders a preview table and submit calls the bulk endpoint.
+  it("shows the bulk preview after pasting CSV and submits via the bulk endpoint", async () => {
+    bulkMutateAsyncMock.mockResolvedValueOnce({
+      created: [
+        { id: "r1", alias: "work" },
+        { id: "r2", alias: "home" },
+      ],
+      errors: [],
+    });
+
+    renderWithProviders(<AddKeyPage />);
+
+    await userEvent.click(screen.getByTestId("bulk-mode-toggle"));
+
+    const ta = screen.getByTestId("bulk-input") as HTMLTextAreaElement;
+    // Paste CSV with two valid rows.
+    const csv = `alias,endpoint,accessKeyId,secretKey,region
+work,https://s3.work.example.com,GKW,secW,us-east-1
+home,https://s3.home.example.com,GKH,secH,us-east-1`;
+    // userEvent.type is slow for long strings; use fireEvent-style set
+    // via paste API. The component's onChange listens to native input.
+    await userEvent.click(ta);
+    await userEvent.paste(csv);
+
+    expect(await screen.findByTestId("bulk-detected-format")).toHaveTextContent("csv");
+    expect(screen.getByTestId("bulk-row-count")).toHaveTextContent("2 of 2 rows valid");
+
+    await userEvent.click(screen.getByTestId("bulk-submit"));
+
+    expect(bulkMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(bulkMutateAsyncMock).toHaveBeenCalledWith([
+      expect.objectContaining({ alias: "work", endpoint: "https://s3.work.example.com" }),
+      expect.objectContaining({ alias: "home", endpoint: "https://s3.home.example.com" }),
+    ]);
+  });
+
+  it("disables the bulk submit button when any pasted row has a validation error", async () => {
+    renderWithProviders(<AddKeyPage />);
+    await userEvent.click(screen.getByTestId("bulk-mode-toggle"));
+
+    const ta = screen.getByTestId("bulk-input");
+    // Second row has a malformed endpoint -> rowErrors non-empty.
+    const csv = `alias,endpoint,accessKeyId,secretKey
+ok,https://s3.example.com,GK,sec
+bad,not-a-url,GK,sec`;
+    await userEvent.click(ta);
+    await userEvent.paste(csv);
+
+    expect(screen.getByTestId("bulk-row-count")).toHaveTextContent("1 of 2 rows valid");
+    expect(screen.getByTestId("bulk-submit")).toBeDisabled();
   });
 });
