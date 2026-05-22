@@ -688,6 +688,77 @@ func TestUserRegions_DeleteObject_HappyPath(t *testing.T) {
 	}
 }
 
+// TestUserRegions_ListObjects_AuditEvent verifies the v1.1.0h audit
+// hook on the object-tier ListObjects handler. The other object-tier
+// handlers (presign_get/put, multipart_init/part/complete/abort,
+// delete_object) follow the IDENTICAL template — auditEmit on success
+// with regionObjectResource + regionAuditDetail, auditFailure on each
+// error path — so one assertion across the shared shape covers them
+// all. Asserts: action=region:list_objects, actor=userID,
+// resource=region:{id}:{bucketID}, detail=accessKey=<id>, result=success.
+func TestUserRegions_ListObjects_AuditEvent(t *testing.T) {
+	mock := newRegionMockDriver()
+	mock.listObjectsFunc = func(_ context.Context, bucket, _, _ string, _ int) (driver.ObjectPage, error) {
+		if bucket != "lsi" {
+			t.Errorf("ListObjects got bucket=%q, want lsi", bucket)
+		}
+		return driver.ObjectPage{Objects: []driver.ObjectInfo{{Key: "notes.txt"}}}, nil
+	}
+
+	srv, auditLog, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	// Seed a region — same shape as the audit test for ListBuckets so
+	// the resource + detail assertions stay readable.
+	create := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.pq.io",
+		"accessKeyId": "GK434abc",
+		"secretKey":   "shh",
+	}
+	rrC := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", create)))
+	if rrC.Code != http.StatusCreated {
+		t.Fatalf("create region: %d (%s)", rrC.Code, rrC.Body.String())
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrC.Body).Decode(&region)
+
+	// Fire the handler.
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/objects"
+	rrL := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrL, regionUserCookieReq(httptest.NewRequest(http.MethodGet, url, nil)))
+	if rrL.Code != http.StatusOK {
+		t.Fatalf("list-objects: %d (%s)", rrL.Code, rrL.Body.String())
+	}
+
+	// Find the region:list_objects event.
+	var ev *audit.Event
+	for i, e := range auditLog.snapshot() {
+		if e.Action == "region:list_objects" {
+			snap := auditLog.snapshot()
+			ev = &snap[i]
+			break
+		}
+	}
+	if ev == nil {
+		t.Fatalf("expected region:list_objects audit event, none recorded")
+	}
+	if ev.Actor != "user" {
+		t.Errorf("expected actor=user, got %q", ev.Actor)
+	}
+	if ev.Result != audit.ResultSuccess {
+		t.Errorf("expected ResultSuccess, got %q", ev.Result)
+	}
+	want := "region:" + region.ID + ":lsi"
+	if ev.Resource != want {
+		t.Errorf("expected resource %q, got %q", want, ev.Resource)
+	}
+	if ev.Detail != "accessKey=GK434abc" {
+		t.Errorf("expected detail accessKey=GK434abc, got %q", ev.Detail)
+	}
+}
+
 // TestUserRegions_DeleteObject_OtherUser404 — user B cannot delete an
 // object via user A's region; the owner check returns 404.
 func TestUserRegions_DeleteObject_OtherUser404(t *testing.T) {
