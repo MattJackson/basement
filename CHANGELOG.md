@@ -31,6 +31,21 @@ write-up; this file is the at-a-glance index.
   mm:ss countdown, ELEVATED orange pill + SVG lightning bolt,
   flash + toast at <30s, "drop privileges" button next to the
   countdown chip.
+- **v1.2.0c** — OIDC step-up elevation via `prompt=login`. New
+  `POST /auth/elevate/oidc/start` mints a state token + returns
+  the IdP authorize URL with `prompt=<BASEMENT_OIDC_ELEVATION_PROMPT,
+  default login>` + `max_age=0`; `GET /auth/elevate/oidc/callback`
+  validates state (5min TTL, same-session bound), checks the new
+  ID token's `auth_time` is within 60s (rejects cached IdP sessions
+  that ignore `prompt`), mints the elevated cookie, and 302s the
+  browser to `/?elevated=<mode>`. The v1.2.0a `/auth/elevate`
+  dispatcher now pivots OIDC-only users with `{requires_oidc:true,
+  start_url}` instead of 403; `/auth/me` advertises a new `oidcUser`
+  boolean so the FE renders an "Elevate via SSO" button (no
+  password field) for OIDC accounts. `AuthModeHydrator` picks up
+  the callback's `?elevated=<mode>` query param, fires a success
+  toast, invalidates `/auth/me`, and strips the param from the
+  URL. In-memory state map cleans expired entries on each insert.
 
 ## v1.1.0 — 2026-05-21
 

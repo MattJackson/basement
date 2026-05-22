@@ -38,6 +38,7 @@ type idTokenPayload struct {
 	EmailVerified     bool   `json:"email_verified"`
 	Name              string `json:"name"`
 	PreferredUsername string `json:"preferred_username"`
+	AuthTime          int64  `json:"auth_time"`
 }
 
 // OIDCProvider wraps a coreos/go-oidc Provider + oauth2.Config so
@@ -110,6 +111,30 @@ func (p *OIDCProvider) AuthCodeURL(state, nonce string) string {
 	return p.oauth.AuthCodeURL(state, oidc.Nonce(nonce))
 }
 
+// ElevationAuthCodeURL builds the authorization endpoint URL for the
+// sudo-style elevation flow (ADR-0003, v1.2.0c). On top of the normal
+// state + nonce it appends:
+//
+//   - `prompt=<promptParam>` so the IdP forces a fresh re-auth even
+//     when it has a cached session. Empty disables the prompt
+//     parameter; callers default this from BASEMENT_OIDC_ELEVATION_PROMPT.
+//   - `max_age=0` so the IdP rejects any session whose auth_time is
+//     not strictly fresh — belt-and-braces for IdPs that ignore prompt.
+//
+// The returned URL is what the FE redirects the browser to; the
+// callback handler then verifies the new ID token's auth_time was
+// within ~60s and mints the elevated cookie.
+func (p *OIDCProvider) ElevationAuthCodeURL(state, nonce, promptParam string) string {
+	opts := []oauth2.AuthCodeOption{
+		oidc.Nonce(nonce),
+		oauth2.SetAuthURLParam("max_age", "0"),
+	}
+	if promptParam != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("prompt", promptParam))
+	}
+	return p.oauth.AuthCodeURL(state, opts...)
+}
+
 // Exchange swaps an authorization code for an OAuth2 token. The returned
 // token carries the raw ID token in token.Extra("id_token").
 func (p *OIDCProvider) Exchange(ctx context.Context, code string) (*oauth2.Token, error) {
@@ -131,18 +156,27 @@ func IDTokenFromOAuth2(tok *oauth2.Token) (string, error) {
 // audience, expiry, and the provided expectedNonce. On success it returns
 // the projected OIDCClaims.
 func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken, expectedNonce string) (*OIDCClaims, error) {
+	claims, _, err := p.VerifyIDTokenWithAuthTime(ctx, rawIDToken, expectedNonce)
+	return claims, err
+}
+
+// VerifyIDTokenWithAuthTime is like VerifyIDToken but additionally
+// returns the `auth_time` claim from the ID token (zero if absent).
+// Used by the ADR-0003 v1.2.0c elevation callback to confirm the
+// re-authentication happened recently.
+func (p *OIDCProvider) VerifyIDTokenWithAuthTime(ctx context.Context, rawIDToken, expectedNonce string) (*OIDCClaims, int64, error) {
 	idToken, err := p.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: id_token verification failed: %w", err)
+		return nil, 0, fmt.Errorf("oidc: id_token verification failed: %w", err)
 	}
 
 	if expectedNonce != "" && idToken.Nonce != expectedNonce {
-		return nil, ErrOIDCNonceMismatch
+		return nil, 0, ErrOIDCNonceMismatch
 	}
 
 	var payload idTokenPayload
 	if err := idToken.Claims(&payload); err != nil {
-		return nil, fmt.Errorf("oidc: parsing claims failed: %w", err)
+		return nil, 0, fmt.Errorf("oidc: parsing claims failed: %w", err)
 	}
 
 	displayName := payload.Name
@@ -155,5 +189,5 @@ func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken, expectedNo
 		Email:    payload.Email,
 		Name:     displayName,
 		Provider: idToken.Issuer,
-	}, nil
+	}, payload.AuthTime, nil
 }

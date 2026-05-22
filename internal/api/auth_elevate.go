@@ -23,6 +23,11 @@
 // grace window — so an existing matthew session can elevate to ELEVATED
 // directly through this endpoint without re-logging-in. See
 // policy_gates.go for the grace logic.
+//
+// v1.2.0c update: OIDC-only users no longer 403 here. The dispatcher
+// pivots them into the OIDC elevation flow by returning 200 +
+// {requires_oidc: true, start_url: "/api/v1/auth/elevate/oidc/start"}
+// — the FE then POSTs to that URL and full-page-navigates to the IdP.
 package api
 
 import (
@@ -52,10 +57,18 @@ type elevateRequest struct {
 
 // elevateResponse is the 200 body shape — mirrors what the FE needs to
 // drive the persona pill countdown without parsing the JWT itself.
+//
+// RequiresOIDC + StartURL are populated only on the OIDC pivot
+// (v1.2.0c): when the dispatcher detects an OIDC-only user it returns
+// 200 with RequiresOIDC=true so the FE knows to POST to StartURL and
+// follow the returned redirect_url. Mode + ModeExpiresAt + TTL are
+// zero in that case because no elevation has happened yet.
 type elevateResponse struct {
-	Mode            string `json:"mode"`
-	ModeExpiresAt   int64  `json:"mode_expires_at"` // unix seconds
-	ModeTTLSeconds  int64  `json:"mode_ttl_seconds"`
+	Mode           string `json:"mode,omitempty"`
+	ModeExpiresAt  int64  `json:"mode_expires_at,omitempty"` // unix seconds
+	ModeTTLSeconds int64  `json:"mode_ttl_seconds,omitempty"`
+	RequiresOIDC   bool   `json:"requires_oidc,omitempty"`
+	StartURL       string `json:"start_url,omitempty"`
 }
 
 // elevateHandler handles POST /api/v1/auth/elevate.
@@ -102,32 +115,53 @@ func (s *Server) elevateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// OIDC-only check: a user whose only credential is OIDC has no
-	// password to verify here. v1.2.0c wires the OIDC `prompt=login`
-	// challenge — until then we 403 with a discoverable error code.
+	// OIDC-only pivot (v1.2.0c): a user whose only credential is
+	// OIDC has no password to verify here. Instead of failing, return
+	// 200 + {requires_oidc:true, start_url} so the FE knows to switch
+	// to the OIDC challenge flow (it then POSTs the start URL and
+	// follows the returned redirect_url to the IdP).
+	//
 	// The env-seeded admin (claims.UserID == adminUser) always has a
-	// local password, so it's exempt.
+	// local password and is exempt. If OIDC is configured-but-the-user-
+	// is-OIDC-only AND s.oidc is nil, we 503 OIDC_NOT_CONFIGURED so
+	// the FE renders the "contact your administrator" message.
 	loadAdminCreds(s.cfg)
-	if claims.UserID != adminUser {
-		if s.store != nil {
-			if u, err := s.store.UserByUsername(claims.UserID); err == nil {
-				if u.PasswordHash == "" && u.Provider != "" {
+	if claims.UserID != adminUser && s.store != nil {
+		if u, err := s.store.UserByUsername(claims.UserID); err == nil {
+			if u.PasswordHash == "" && u.Provider != "" {
+				if s.oidc == nil {
 					s.audit.Log(audit.Event{
 						Time:      time.Now().UTC(),
 						Actor:     claims.UserID,
 						ActorRole: string(current),
-						Action:    "auth:elevate_oidc_unsupported",
+						Action:    "auth:elevate_oidc_not_configured",
 						Resource:  "mode:" + string(target),
-						Detail:    "OIDC-only user attempted password elevation (v1.2.0c will wire OIDC challenge)",
+						Detail:    "OIDC-only user requested elevation but OIDC is not configured on this server",
 						Result:    audit.ResultFailure,
 						IP:        clientIP(r),
 						UserAgent: r.UserAgent(),
 					})
-					writeErrorSimple(w, http.StatusForbidden,
-						"OIDC_USER_ELEVATION_NOT_SUPPORTED",
-						"OIDC users cannot elevate via password; OIDC challenge support arrives in v1.2.0c.")
+					writeErrorSimple(w, http.StatusServiceUnavailable,
+						"OIDC_NOT_CONFIGURED",
+						"OIDC is not configured on this server; contact your administrator to enable elevation.")
 					return
 				}
+				s.audit.Log(audit.Event{
+					Time:      time.Now().UTC(),
+					Actor:     claims.UserID,
+					ActorRole: string(current),
+					Action:    "auth:elevate_oidc_pivot",
+					Resource:  "mode:" + string(target),
+					Detail:    "OIDC-only user; FE will be redirected to /api/v1/auth/elevate/oidc/start",
+					Result:    audit.ResultSuccess,
+					IP:        clientIP(r),
+					UserAgent: r.UserAgent(),
+				})
+				writeJSON(w, http.StatusOK, elevateResponse{
+					RequiresOIDC: true,
+					StartURL:     "/api/v1/auth/elevate/oidc/start",
+				})
+				return
 			}
 		}
 	}

@@ -34,6 +34,12 @@ type UserResponse struct {
 	UIAdmin       bool   `json:"uiAdmin,omitempty"`
 	Mode          string `json:"mode,omitempty"`
 	ModeExpiresAt int64  `json:"modeExpiresAt,omitempty"`
+	// OIDCUser is true when this account was provisioned via OIDC
+	// (no local password). The FE branches its elevation modal on
+	// this — OIDC-only users see an "Elevate via SSO" button that
+	// kicks off /auth/elevate/oidc/start instead of the password
+	// form. ADR-0003 v1.2.0c.
+	OIDCUser bool `json:"oidcUser,omitempty"`
 }
 
 var adminCredsOnce sync.Once
@@ -165,6 +171,21 @@ func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
 		UIAdmin:       claims.UIAdmin,
 		Mode:          string(mode),
 		ModeExpiresAt: claims.ModeExpiresAt,
+	}
+
+	// OIDCUser flag: a user with an empty PasswordHash + non-empty
+	// Provider is OIDC-only and must elevate through the OIDC
+	// challenge flow. The env-seeded admin (claims.UserID ==
+	// adminUser) always has a local password, so we never look that
+	// one up. Store may be nil in some test paths — leave the flag
+	// at false in that case.
+	loadAdminCreds(s.cfg)
+	if claims.UserID != adminUser && s.store != nil {
+		if u, err := s.store.UserByUsername(claims.UserID); err == nil {
+			if u.PasswordHash == "" && u.Provider != "" {
+				resp.OIDCUser = true
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
