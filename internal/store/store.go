@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mattjackson/basement/internal/federation"
+	"github.com/mattjackson/basement/internal/serviceaccount"
 )
 
 // Store holds all data with per-file mutexes for concurrency safety.
@@ -31,6 +32,12 @@ type Store struct {
 	userRegions UserRegions
 	invites     Invites
 	feds        federation.FederatedBuckets
+	// v1.7.0a: basement-issued long-lived service-account access
+	// keys for automated clients (CI, k8s, CLI, MCP). Nil until
+	// WireServiceAccounts() runs in production main.go after federation
+	// — tests that don't care leave it unset; handlers nil-check and
+	// return 503 SERVICE_ACCOUNTS_NOT_WIRED when absent.
+	serviceAccounts serviceaccount.ServiceAccounts
 }
 
 // Open opens or creates the store at dataDir with the given retention period.
@@ -173,6 +180,32 @@ func (s *Store) OpenFederated() error {
 // rely on production main.go having wired it at boot.
 func (s *Store) Federated() federation.FederatedBuckets {
 	return s.feds
+}
+
+// WireServiceAccounts opens the v1.7.0a service-account store at
+// {dataDir}/service_accounts.json and attaches it to this Store. Kept
+// separate from Open() — and parallel to WireUserRegions /
+// OpenFederated — for source-compatibility with the many api.New(...)
+// test callers that don't need the SA layer wired up. Production
+// main.go calls this once at boot after OpenFederated.
+//
+// Idempotent at the file level: a missing file is fine, opens an
+// empty in-memory store.
+func (s *Store) WireServiceAccounts() error {
+	sa, err := serviceaccount.Open(s.dataDir)
+	if err != nil {
+		return fmt.Errorf("opening service accounts: %w", err)
+	}
+	s.serviceAccounts = sa
+	return nil
+}
+
+// ServiceAccounts returns the v1.7.0a service-account store. Returns
+// nil if WireServiceAccounts has not been called — handlers nil-check
+// and return 503 SERVICE_ACCOUNTS_NOT_WIRED. Production main.go
+// always wires it before Start.
+func (s *Store) ServiceAccounts() serviceaccount.ServiceAccounts {
+	return s.serviceAccounts
 }
 
 // MigrateLegacyUsers sets uiAdmin=true for existing admin users.

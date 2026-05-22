@@ -4,6 +4,23 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0a — 2026-05-22
+
+Service-account data layer + admin API. First cycle of the v1.7
+service-accounts + webhooks milestone — substrate for v1.8 CLI/MCP
+auth and v2.0 gateway SigV4 routing. New `internal/serviceaccount`
+package with a bcrypt-hashed-secret atomic JSON store at
+`{dataDir}/service_accounts.json`. Access keys carry a `BMNT` prefix
+plus 16 random hex chars so they're greppable in audit logs.
+Plaintext secret is generated server-side, returned exactly once on
+Create + Rotate, never persisted or logged. Six admin endpoints
+under `/api/v1/admin/service-accounts` (list / create / get / update
+/ delete / rotate) gated on `host:manage_users` — cross-user GET /
+PUT / DELETE collapse to 404 so the wire shape can't enumerate IDs
+across owners. Delete is soft (RevokedAt) so audit greps can resolve
+the access key back to a name + owner months after revocation. The
+SigV4 verification middleware lands in v1.7.0b; the FE in v1.7.0c.
+
 ## v1.6.0 — 2026-05-22
 
 Federation + multi-backend replication milestone. Six cycles

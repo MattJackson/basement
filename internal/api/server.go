@@ -358,6 +358,20 @@ func (s *Server) routes() {
 			uiAdminG.Delete("/admin/invites/{id}", s.revokeInviteHandler)
 			uiAdminG.Post("/admin/invites/{id}/rotate", s.rotateInviteHandler)
 
+			// v1.7.0a SERVICE_ACCOUNTS — basement-issued long-lived
+			// access keys for automated clients (CI, k8s, MCP, CLI).
+			// Same host:manage_users gate as the invite family above;
+			// each handler runs its own per-call requireCapability so
+			// the uiAdminG middleware is defense-in-depth only.
+			// Cross-user GET / PUT / DELETE collapse to 404 so the
+			// wire shape doesn't leak IDs across owners.
+			uiAdminG.Get("/admin/service-accounts", s.listServiceAccountsHandler)
+			uiAdminG.Post("/admin/service-accounts", s.createServiceAccountHandler)
+			uiAdminG.Get("/admin/service-accounts/{id}", s.getServiceAccountHandler)
+			uiAdminG.Put("/admin/service-accounts/{id}", s.updateServiceAccountHandler)
+			uiAdminG.Delete("/admin/service-accounts/{id}", s.deleteServiceAccountHandler)
+			uiAdminG.Post("/admin/service-accounts/{id}/rotate", s.rotateServiceAccountHandler)
+
 			// Policy matrix editor (ADR-0001 cycle v0.9.0g). Each
 			// handler runs its own capability gate so the legacy
 			// UIAdmin middleware is purely defense-in-depth; once
