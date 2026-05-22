@@ -31,12 +31,19 @@ persona around a **region-tier keychain** — one credential per
 endpoint, backend authoritative for bucket visibility — so users
 stop seeing the cluster plumbing. v1.2 landed **sudo-style admin
 elevation** plus a **key-first user keychain** that supports
-multiple access keys against the same S3 endpoint. v1.3 is the
-multi-user polish cycle: **OIDC group → role auto-mapping**,
-**driver-aware endpoint hints**, **per-region S3 addressing**
-toggle, **folder navigation** in the bucket browser, **bulk-import**
-of access keys, **per-cluster cluster_admin assignment UI**, and a
-simplified two-mode elevation model with operator-configurable TTL.
+multiple access keys against the same S3 endpoint. v1.3 was the
+multi-user polish cycle: OIDC group → role auto-mapping,
+driver-aware endpoint hints, per-region S3 addressing toggle,
+folder navigation in the bucket browser, bulk-import of access
+keys, per-cluster `cluster_admin` assignment UI, and a simplified
+two-mode elevation model with operator-configurable TTL. v1.4 is
+the **scale + perf** cycle: **virtualized object browser** for
+10K+ row directories, **paginated key permissions** editor with
+filter + sticky Save, **batch object operations** with sticky
+action bar, **growth analytics** on `/admin/usage` (per-cluster
+growth column + top-growing-buckets panel + anomaly banner + 7d /
+30d / 90d range selector), and **Garage block-scrub UI** at
+`/admin/clusters/{cid}/scrub` for live cluster-durability scans.
 
 ## Features
 
@@ -54,6 +61,12 @@ simplified two-mode elevation model with operator-configurable TTL.
 - **Per-region S3 addressing toggle + in-place key rotation** (v1.3) — path-style (default, required for Garage) or virtual-host (preferred by AWS S3); rotate-key flow on `/files/keys` preserves alias / audit trail
 - **Bulk-import access keys** (v1.3) — `/files/keys/new` "Bulk import" toggle accepts CSV / TSV / aws-cli credentials-file profile blocks with a per-row preview and validation
 - **Folder navigation in the bucket browser** (v1.3) — Delimiter-based `commonPrefixes` collapse deep key trees into clickable folder rows with a breadcrumb back to the bucket root
+- **Virtualized bucket browser** (v1.4) — 10K+ row directories scroll smoothly at fixed 48px rows via `@tanstack/react-virtual`; infinite scroll on the S3 continuation token. `Driver.PerBucketStatsAvailable()` capability flag hides Size + Objects columns on backends without per-bucket stats (Garage v1 at the user-region tier) instead of rendering rows of em-dashes
+- **Batch object operations** (v1.4) — Per-file checkboxes + select-all-visible header checkbox + sticky bottom action bar (`N selected | Delete N objects | Cancel`); delete fans out via `Promise.allSettled` with per-row error indicators on partial failure
+- **Paginated key permissions editor** (v1.4) — `/admin/clusters/{cid}/keys/{kid}` Edit mode hydrates the FULL cluster bucket list with a filter input, 50-per-page Prev/Next, "Show only granted" toggle, and a sticky Save bar pinned to the bottom of the card
+- **Paginated audit log + CSV export** (v1.4) — `/admin/audit` switched from 200-row dumps to 50-per-page Prev/Next + "Showing X-Y of Z (Page N of M)" footer + a client-side "Export CSV" button that dumps the currently filtered page
+- **Storage growth analytics** (v1.4) — `/admin/usage` adds a `Growth (Nd)` per-cluster column, a "Buckets growing fastest" panel, an amber anomaly banner for any bucket that more than doubled in the window, and a 7d / 30d / 90d range selector
+- **Block scrub UI for Garage** (v1.4) — `/admin/clusters/{cid}/scrub` renders live scrub state (Running/Idle badge, blocks scanned/corrupt, progress %, last-completed timestamp, free-form driver message) and a Run scrub button. AWS S3 + MinIO advertise "Not supported" with the capability reason
 - **Persistent invite tokens** (v1.3) — `/admin/users` "Pending invites" section: mint, label, revoke, rotate, copy-full-URL; 30-day default expiry; optional label feeds the auto-generated username
 - **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
 - **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
@@ -96,7 +109,7 @@ See `docs/configuration.md` for production env vars.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v1.3 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.4 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
@@ -111,7 +124,7 @@ See `docs/configuration.md` for production env vars.
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | MIT              | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-22)            | active v1.3      | active v1.1.0           | active v0.5       | active fork     |
+| Status (as of 2026-05-22)            | active v1.4      | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -127,8 +140,9 @@ Full competitive write-up:
 - v1.0 — production-ready milestone: at-rest encryption for admin_token + S3 secrets, audit log subsystem, metrics persistence + time-series chart on `/admin/usage` (shipped — see [docs/release-notes/v1.0.0.md](docs/release-notes/v1.0.0.md))
 - v1.1 — region tier replaces cluster-tier at the user persona (ADR-0002); `bucket_user` role deprecated; per-user keychain at `/files/keys`; sync + share become region-aware (shipped — see [docs/release-notes/v1.1.0.md](docs/release-notes/v1.1.0.md))
 - v1.2 — sudo-style admin elevation per [ADR-0003](docs/adr/0003-sudo-style-admin-elevation.md) (USER → ADMIN → ELEVATED state machine with re-auth at each transition); key-first user keychain (multiple access keys per endpoint); `unique(userId, endpoint)` relaxed to `unique(userId, endpoint, alias)` (shipped — see [docs/release-notes/v1.2.0.md](docs/release-notes/v1.2.0.md))
-- **v1.3 (current)** — multi-user polish: OIDC group → role auto-mapping; driver-aware endpoint hints; per-region S3 addressing toggle (path-style / virtual-host); rotate-key flow; folder navigation in the bucket browser; invite-token polish + bulk-import keys; per-cluster `cluster_admin` assignment UI; two-mode elevation (USER / ADMIN) with operator-configurable TTL per [ADR-0003 amendment](docs/adr/0003-sudo-style-admin-elevation.md#amendment-v130a4--two-mode-simplification--operator-configurable-ttl) (shipped — see [docs/release-notes/v1.3.0.md](docs/release-notes/v1.3.0.md))
-- v1.4 — scale + perf: bucket browser virtualization for 10k+ object trees; backup/restore flow for `BASEMENT_DATA_DIR`; B2 / R2 / Wasabi drivers
+- v1.3 — multi-user polish: OIDC group → role auto-mapping; driver-aware endpoint hints; per-region S3 addressing toggle (path-style / virtual-host); rotate-key flow; folder navigation in the bucket browser; invite-token polish + bulk-import keys; per-cluster `cluster_admin` assignment UI; two-mode elevation (USER / ADMIN) with operator-configurable TTL per [ADR-0003 amendment](docs/adr/0003-sudo-style-admin-elevation.md#amendment-v130a4--two-mode-simplification--operator-configurable-ttl) (shipped — see [docs/release-notes/v1.3.0.md](docs/release-notes/v1.3.0.md))
+- **v1.4 (current)** — scale + perf: virtualized bucket browser for 10K+ object directories; `Driver.PerBucketStatsAvailable()` capability gate; paginated audit log + Export CSV; paginated key permissions editor with filter + sticky Save bar; batch object operations + sticky action bar; storage growth analytics (`Growth (Nd)` column, top-growing-buckets panel, anomaly banner, 7d / 30d / 90d range selector); Garage block-scrub UI at `/admin/clusters/{cid}/scrub` (shipped — see [docs/release-notes/v1.4.0.md](docs/release-notes/v1.4.0.md))
+- v1.5 — backup story: cross-backend backup wizard (S3 → S3 with retention policies + "restore bucket from backup"); documented backup path for the basement state directory; multi-select move / copy in the bucket browser; B2 / R2 / Wasabi drivers
 
 ## Architecture
 
@@ -145,10 +159,12 @@ Full competitive write-up:
   - [`docs/adr/0003-sudo-style-admin-elevation.md`](docs/adr/0003-sudo-style-admin-elevation.md) — USER → ADMIN → ELEVATED state machine (v1.2)
 
 See `docs/configuration.md` for env reference,
-`docs/release-notes/v1.3.0.md` for the current release changelog,
-`docs/release-notes/v1.2.0.md` for the v1.2 sudo-elevation + key-first
-write-up, `docs/release-notes/v1.1.0.md` for the v1.1 region-tier
-write-up, and `docs/release-notes/v1.0.0.md` for the v1.0 baseline.
+`docs/release-notes/v1.4.0.md` for the current release changelog,
+`docs/release-notes/v1.3.0.md` for the v1.3 multi-user-onboarding
+write-up, `docs/release-notes/v1.2.0.md` for the v1.2 sudo-elevation +
+key-first write-up, `docs/release-notes/v1.1.0.md` for the v1.1
+region-tier write-up, and `docs/release-notes/v1.0.0.md` for the v1.0
+baseline.
 
 ## Contributing
 
