@@ -4,6 +4,59 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.4.0 — 2026-05-22
+
+Scale + perf milestone. Three cycles (v1.4.0a → v1.4.0c) sharpen
+basement for clusters with real volume — flat directories with
+thousands of objects, key permissions across hundreds of buckets,
+storage growth that needs surfacing before it surprises the operator,
+and Garage block-scrub maintenance with a UI instead of a CLI:
+virtualized bucket browser (`@tanstack/react-virtual`), per-file
+batch select with sticky action bar, paginated + filterable key
+permissions editor with a sticky Save bar, paginated audit log
+with Export CSV, growth-rate column + top-growing-buckets panel +
+anomaly banner on `/admin/usage` with a 7d / 30d / 90d range
+selector, and `/admin/clusters/{cid}/scrub` for Garage block-scrub
+state + kickoff. Driver interface gains `PerBucketStatsAvailable()`,
+`ScrubSupport()`, `ScrubState()`, `StartScrub()` — all four in-tree
+drivers implement, Garage gets the real work, AWS / MinIO advertise
+unsupported with operator-facing reason text. No data migrations;
+`/api/v1/user/regions/{rid}/buckets` envelope tweak is back-compat
+read on the FE. Smoke 42/42 pass against live; 23 routes screenshot-
+verified with zero console errors. Block-scrub status against
+legacy Garage builds without `/v1/worker` renders the error banner
+gracefully — v1.5 will add a feature-detection fallback so the Run
+scrub button hides instead.
+
+Full notes: [`docs/release-notes/v1.4.0.md`](docs/release-notes/v1.4.0.md)
+
+### Cycles
+
+- **v1.4.0a** — Virtualized bucket browser
+  (`@tanstack/react-virtual`, fixed 48px rows, infinite scroll on
+  the continuation token), `Driver.PerBucketStatsAvailable()`
+  capability gate (Garage v1 hides Size/Objects columns at the
+  user-region tier instead of rendering em-dashes), `/admin/audit`
+  pagination (50/page Prev/Next + "Page N of M" + Export CSV).
+- **v1.4.0b** — Paginated key permissions editor at
+  `/admin/clusters/{cid}/keys/{kid}` Edit mode — hydrates the FULL
+  cluster bucket list, filter input, 50-per-page pagination, "Show
+  only granted" toggle, sticky Save bar. Batch object operations in
+  the bucket browser — per-file checkboxes, select-all-visible
+  header checkbox, sticky bottom action bar, delete fans out via
+  `Promise.allSettled` with per-row error indicators on partial
+  failure.
+- **v1.4.0c** — Garage block-scrub UI at
+  `/admin/clusters/{cid}/scrub` (Running/Idle badge, progress %,
+  blocks scanned/corrupt, last-completed timestamp, free-form
+  driver message, Run scrub button + 5s/30s polling); `ScrubSupport`
+  / `ScrubState` / `StartScrub` on the driver interface — Garage v1
+  + v2 implement against the admin worker endpoints, AWS S3 + MinIO
+  advertise unsupported. Storage analytics on `/admin/usage` —
+  Growth (Nd) column on the per-cluster table, "Buckets growing
+  fastest" panel, amber anomaly banner for >100% growth, 7d / 30d /
+  90d range selector feeding the inline trend charts.
+
 ## v1.4.0b — 2026-05-22
 
 Scale + perf cycle 2 of v1.4. Two surfaces that broke down at
