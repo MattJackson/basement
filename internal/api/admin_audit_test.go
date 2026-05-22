@@ -51,11 +51,13 @@ func newAuditTestEnv(t *testing.T, grantHostAdmin bool) (*Server, *audit.FileLog
 	srv.SetAuditLogger(auditLogger)
 
 	if grantHostAdmin {
-		// SeedEnvAdmin grants the four assignments matthew has in
-		// production: host_admin @ host:*, host_admin @ *,
-		// cluster_admin @ cluster:*, bucket_user @ bucket:*. The
-		// superuser "*" scope is what the wiring end-to-end test
-		// needs so cluster:create @ cluster:* passes.
+		// SeedEnvAdmin grants matthew the three assignments needed for
+		// every admin gate: host_admin @ host:*, host_admin @ *,
+		// cluster_admin @ cluster:*. The superuser "*" scope is what
+		// the wiring end-to-end test needs so cluster:create @
+		// cluster:* passes. ADR-0002 (v1.1.0f) dropped the legacy
+		// bucket_user @ bucket:* seed; the superuser row still covers
+		// any bucket-scoped check.
 		if err := enf.SeedEnvAdmin("admin"); err != nil {
 			cleanup()
 			t.Fatalf("SeedEnvAdmin: %v", err)

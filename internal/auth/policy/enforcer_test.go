@@ -478,6 +478,93 @@ func TestScopeMatches(t *testing.T) {
 	}
 }
 
+// TestEnforcer_BucketUser_Deprecated asserts ADR-0002 (v1.1.0f)'s
+// marker: the seed bucket_user role carries Deprecated=true so the UI
+// can render a badge + banner + assignment guardrail. The flag is
+// data-only; the enforcer's Can() does NOT branch on it. Existing
+// bucket_user assignments continue to grant their listed capabilities
+// at their scopes — back-compat is preserved by leaving the role's
+// capability list and Can() logic untouched.
+func TestEnforcer_BucketUser_Deprecated(t *testing.T) {
+	e, _ := newTestEnforcer(t)
+
+	var found bool
+	for _, r := range e.Roles() {
+		if r.ID == "bucket_user" {
+			found = true
+			if !r.Deprecated {
+				t.Errorf("v1.1.0f expects bucket_user.Deprecated=true on the seed, got false")
+			}
+			if !r.Seed {
+				t.Errorf("v1.1.0f: bucket_user must remain a seed role (back-compat)")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("bucket_user seed role missing from Roles()")
+	}
+
+	// Sanity: editing the role through UpsertRole keeps Deprecated=true
+	// even if the caller tries to toggle it. The flag is set in code,
+	// not by API callers.
+	if err := e.UpsertRole(Role{
+		ID:           "bucket_user",
+		Label:        "Re-labelled",
+		Capabilities: []string{"objects:list"},
+		Deprecated:   false, // try to un-deprecate
+	}); err != nil {
+		t.Fatalf("UpsertRole bucket_user: %v", err)
+	}
+	for _, r := range e.Roles() {
+		if r.ID == "bucket_user" && !r.Deprecated {
+			t.Errorf("UpsertRole erased Deprecated=true on bucket_user; expected preservation")
+		}
+	}
+
+	// And new roles can't be born deprecated via UpsertRole — same
+	// pattern as Seed=true. The Deprecated flag is reserved for code.
+	if err := e.UpsertRole(Role{
+		ID:           "fake_deprecated",
+		Capabilities: []string{"objects:list"},
+		Deprecated:   true,
+	}); err != nil {
+		t.Fatalf("UpsertRole fake_deprecated: %v", err)
+	}
+	for _, r := range e.Roles() {
+		if r.ID == "fake_deprecated" && r.Deprecated {
+			t.Errorf("UpsertRole should strip Deprecated=true on new roles")
+		}
+	}
+}
+
+// TestEnforcer_BucketUser_BackCompat: existing bucket_user assignments
+// still grant their listed capabilities at their scopes after v1.1.0f.
+// The role being "deprecated" is a UI signal, not an enforcement
+// change — operators with legacy assignments retain the capability
+// surface they had until they (or basement's housekeeping) revoke
+// the assignment.
+func TestEnforcer_BucketUser_BackCompat(t *testing.T) {
+	e, _ := newTestEnforcer(t)
+
+	if err := e.AssignRole(RoleAssignment{
+		UserID: "legacy_user",
+		RoleID: "bucket_user",
+		Scope:  "bucket:cid-x:family-photos",
+	}); err != nil {
+		t.Fatalf("AssignRole bucket_user: %v", err)
+	}
+
+	// Pre-v1.1.0f behaviour: bucket_user @ bucket:cid-x:family-photos
+	// grants the capabilities in its list at that scope. Capabilities
+	// are unchanged in v1.1.0f.
+	if !e.Can("legacy_user", "objects:list", "bucket:cid-x:family-photos") {
+		t.Errorf("v1.1.0f back-compat: existing bucket_user assignment must still grant objects:list")
+	}
+	if !e.Can("legacy_user", "bucket:view", "bucket:cid-x:family-photos") {
+		t.Errorf("v1.1.0f back-compat: existing bucket_user assignment must still grant bucket:view")
+	}
+}
+
 // TestEnforcer_FileShape sanity-checks the on-disk JSON is what we
 // claim — single object with "roles" + "assignments" arrays. Future
 // migration code reads this file directly so its shape is a contract.

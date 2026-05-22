@@ -89,9 +89,40 @@ func (s *Server) simulatePolicyHandler(w http.ResponseWriter, r *http.Request) {
 		matches = []policy.RoleAssignment{}
 	}
 
+	// ADR-0002 (v1.1.0f): objects:* capabilities on bucket scopes used
+	// to be the bucket_user role's job; post-region-keychain those
+	// gates retired (v1.1.0e) and basement no longer enforces
+	// per-bucket object access. An operator simulating
+	// "objects:list @ bucket:foo:bar" today gets a silent deny that
+	// makes them wonder why their role grant doesn't work — surface
+	// the architectural answer up front so the trail reads as design,
+	// not bug. The reasoning is informational only; the allowed value
+	// still mirrors the enforcer's decision.
+	if isLegacyObjectsBucketCheck(req.Capability, req.Scope) {
+		head := []policy.ReasoningStep{{
+			Step: "objects:* on bucket scope is no longer enforced by basement (ADR-0002)",
+			Detail: "Post-v1.1.0e, bucket-level object access is decided by the backend S3 key " +
+				"attached to the user's UserRegion, not by basement's policy matrix. The " +
+				"bucket_user role and its objects:* capabilities are inert at the gate — they " +
+				"remain in the matrix for back-compat only. To grant a user access to a bucket, " +
+				"have a cluster admin attach their S3 key to the bucket on the cluster side.",
+		}}
+		reasoning = append(head, reasoning...)
+	}
+
 	writeJSON(w, http.StatusOK, simulateResponse{
 		Allowed:             allowed,
 		Reasoning:           reasoning,
 		MatchingAssignments: matches,
 	})
+}
+
+// isLegacyObjectsBucketCheck returns true for capability/scope pairs
+// that USED to be gated by the deprecated bucket_user role: any
+// `objects:*` capability at a `bucket:*` scope. Used by the simulator
+// to prepend an explanatory reasoning step so operators understand
+// the architectural reason for the deny rather than chasing a
+// non-existent gate bug. ADR-0002 (v1.1.0f).
+func isLegacyObjectsBucketCheck(capability, scope string) bool {
+	return strings.HasPrefix(capability, "objects:") && strings.HasPrefix(scope, "bucket:")
 }

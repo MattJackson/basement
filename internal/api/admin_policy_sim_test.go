@@ -181,6 +181,81 @@ func TestSimulatePolicy_DenyCapabilityNotInRole(t *testing.T) {
 	}
 }
 
+// TestSimulatePolicy_ObjectsBucketDeprecationNote asserts ADR-0002
+// (v1.1.0f)'s helper banner: a simulator query for any objects:*
+// capability at a bucket:* scope gets a prepended reasoning step
+// explaining that those gates retired in v1.1.0e and bucket-level
+// object access is now controlled by the backend S3 key. The
+// `allowed` value still reflects the enforcer (it's informational,
+// not a behaviour change). Reasoning trail starts with the
+// deprecation note so operators see the architectural answer first.
+func TestSimulatePolicy_ObjectsBucketDeprecationNote(t *testing.T) {
+	srv, _, cleanup := newPolicyTestEnv(t, true)
+	defer cleanup()
+
+	rr := postSim(t, srv, simulateRequest{
+		UserID:     "wife",
+		Capability: "objects:list",
+		Scope:      "bucket:cid-x:family-photos",
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	resp := decodeSimResponse(t, rr)
+	if resp.Allowed {
+		t.Errorf("expected allowed=false for objects:list on bucket scope with no key, got true")
+	}
+	if len(resp.Reasoning) == 0 {
+		t.Fatalf("expected reasoning steps, got 0")
+	}
+	head := strings.ToLower(resp.Reasoning[0].Step + " " + resp.Reasoning[0].Detail)
+	for _, want := range []string{"adr-0002", "s3 key", "userregion"} {
+		if !strings.Contains(head, want) {
+			t.Errorf("reasoning head missing %q; got %q", want, head)
+		}
+	}
+
+	// Sanity: the trail still includes the underlying enforcer
+	// reasoning after the deprecation note (so operators can still see
+	// WHY the gate would have denied them under the old model).
+	if len(resp.Reasoning) < 2 {
+		t.Errorf("expected at least 2 reasoning steps (note + enforcer trail), got %d", len(resp.Reasoning))
+	}
+}
+
+// TestSimulatePolicy_ObjectsBucketDeprecationNote_NotPrependedOnHostScope
+// is the negative case: a non-bucket / non-objects check (e.g.
+// host:manage_users @ host:*) must NOT get the deprecation note —
+// the helper only applies to the bucket_user surface that retired.
+func TestSimulatePolicy_ObjectsBucketDeprecationNote_NotPrependedOnHostScope(t *testing.T) {
+	srv, enf, cleanup := newPolicyTestEnv(t, true)
+	defer cleanup()
+
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "host:*",
+	}); err != nil {
+		t.Fatalf("seed matthew: %v", err)
+	}
+
+	rr := postSim(t, srv, simulateRequest{
+		UserID:     "matthew",
+		Capability: "host:manage_users",
+		Scope:      "host:*",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	resp := decodeSimResponse(t, rr)
+	if !resp.Allowed {
+		t.Errorf("expected allowed=true for matthew/host_admin, got false")
+	}
+	joined := strings.ToLower(joinSteps(resp.Reasoning))
+	if strings.Contains(joined, "adr-0002") || strings.Contains(joined, "userregion") {
+		t.Errorf("deprecation note must not be prepended on non-bucket/non-objects checks; got %q", joined)
+	}
+}
+
 func TestSimulatePolicy_GateForbidsWithoutCapability(t *testing.T) {
 	srv, _, cleanup := newPolicyTestEnv(t, false) // no host_admin grant
 	defer cleanup()

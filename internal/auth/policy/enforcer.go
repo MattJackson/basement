@@ -83,15 +83,21 @@ type Enforcer interface {
 
 	// SeedEnvAdmin ensures the env-seeded admin (cfg.Admin.User) has the
 	// blanket assignments that keep them functional on first boot of a
-	// policy-aware deployment: host_admin on host:*, cluster_admin on
-	// cluster:*, bucket_user on bucket:*. Idempotent — called from
-	// main.go at boot. Returning early on empty username keeps tests
-	// that don't supply one working with the legacy seedDefaults() pair.
+	// policy-aware deployment: host_admin on host:*, host_admin on "*"
+	// (superuser scope), cluster_admin on cluster:*. Idempotent —
+	// called from main.go at boot. Returning early on empty username
+	// keeps tests that don't supply one working with the legacy
+	// seedDefaults() pair.
 	//
 	// Per ADR-0001 + v0.9.0f prompt: matthew's existing usage of
 	// basement.pq.io must not break when capability gates land, so the
-	// runtime grants him the three blanket roles up front. Operators
+	// runtime grants him the blanket roles up front. Operators
 	// can revoke or narrow these via /admin/policies later.
+	//
+	// ADR-0002 (v1.1.0f) note: the legacy `bucket_user @ bucket:*` seed
+	// is no longer created on fresh deployments — bucket-level user
+	// access flows through the region keychain's S3 key, not policy.
+	// Existing bucket_user assignments survive untouched (back-compat).
 	SeedEnvAdmin(username string) error
 }
 
@@ -440,14 +446,21 @@ func (e *fileEnforcer) UpsertRole(r Role) error {
 			// Preserve Seed flag from the existing record — caller can't
 			// promote nor demote seed status via UpsertRole.
 			r.Seed = existing.Seed
+			// Preserve Deprecated flag too — once a role is sunsetted
+			// (ADR-0002 bucket_user), an operator editing its label or
+			// capabilities can't accidentally un-deprecate it. Removing
+			// the deprecation is a code change, not a UI action.
+			r.Deprecated = existing.Deprecated
 			e.roles[i] = r
 			return e.saveLocked()
 		}
 	}
 
 	// New role — strip any incoming Seed=true; only seeding-at-construction
-	// may create seed roles.
+	// may create seed roles. Same for Deprecated — only code marks roles
+	// deprecated, never the UI / API.
 	r.Seed = false
+	r.Deprecated = false
 	e.roles = append(e.roles, r)
 	return e.saveLocked()
 }
@@ -568,6 +581,14 @@ func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 		return nil
 	}
 
+	// ADR-0002 (v1.1.0f): no longer seed bucket_user @ bucket:*. The
+	// role is deprecated — bucket-level user access flows through the
+	// region keychain's S3 key, not basement policy. Existing
+	// deployments that already have the assignment keep it (back-compat
+	// + cleanup-on-demand); new deployments get nothing for it. Removing
+	// the wants entry is the whole change: AssignRole was already
+	// idempotent, so existing matthew@bucket_user@bucket:* rows survive
+	// untouched.
 	wants := []RoleAssignment{
 		{UserID: username, RoleID: "host_admin", Scope: "host:*"},
 		// v0.9.0m.1: superuser scope. Covers every domain — key:*,
@@ -575,7 +596,6 @@ func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 		// gate per cycle doesn't silently lock out the env-admin.
 		{UserID: username, RoleID: "host_admin", Scope: "*"},
 		{UserID: username, RoleID: "cluster_admin", Scope: "cluster:*"},
-		{UserID: username, RoleID: "bucket_user", Scope: "bucket:*"},
 	}
 
 	for _, a := range wants {
@@ -662,7 +682,7 @@ func seedDefaults() ([]Role, []RoleAssignment) {
 		{
 			ID:          "bucket_user",
 			Label:       "Bucket User",
-			Description: "Reads, writes, and shares objects in a bucket they're granted access to.",
+			Description: "Deprecated as of ADR-0002 (v1.1.0f): user-tier bucket access is now controlled by the S3 key attached to a UserRegion, not by basement policy. New assignments have no effect; existing assignments remain for back-compat and deletable for cleanup.",
 			Capabilities: []string{
 				"bucket:view",
 				"objects:list",
@@ -671,7 +691,8 @@ func seedDefaults() ([]Role, []RoleAssignment) {
 				"objects:share_create",
 				"objects:share_revoke",
 			},
-			Seed: true,
+			Seed:       true,
+			Deprecated: true,
 		},
 	}
 
