@@ -40,6 +40,11 @@ type FederatedBuckets interface {
 	Update(ctx context.Context, id string, patch FederatedBucket) (FederatedBucket, error)
 	Delete(ctx context.Context, id string) error
 	ListForUser(ctx context.Context, userID string) ([]FederatedBucket, error)
+	// All returns every FederatedBucket across every owner. Used by the
+	// v1.6.0b replication engine's boot-time "register every federation"
+	// loop — ListForUser would force one call per user and the engine
+	// has no notion of user identity at boot. Order is unspecified.
+	All(ctx context.Context) ([]FederatedBucket, error)
 	UpdateReplicaHealth(ctx context.Context, fbID, regionID, bucket string, health ReplicaTarget) error
 }
 
@@ -195,6 +200,21 @@ func (fs *fileStore) ListForUser(_ context.Context, userID string) ([]FederatedB
 		if fb.OwnerUserID == userID {
 			out = append(out, fb)
 		}
+	}
+	return out, nil
+}
+
+// All returns a snapshot of every FederatedBucket in the store. The
+// replication engine calls this once at boot to spin up a worker per
+// federation; subsequent CRUD goes through the engine's TriggerNow /
+// Reload path (v1.6.0c). Order is unspecified — the engine treats the
+// slice as a set.
+func (fs *fileStore) All(_ context.Context) ([]FederatedBucket, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	out := make([]FederatedBucket, 0, len(fs.rows))
+	for _, fb := range fs.rows {
+		out = append(out, fb)
 	}
 	return out, nil
 }
