@@ -92,11 +92,16 @@ function KeysHome() {
 
 function PageHeader() {
   return (
-    <header>
-      <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Region Keys</h1>
-      <p className="text-sm text-muted-foreground mt-1">
-        Access keys you&apos;ve registered for each region you&apos;ve connected
-      </p>
+    <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Region Keys</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Access keys you&apos;ve registered for each region you&apos;ve connected
+        </p>
+      </div>
+      <Link to="/files/regions/new">
+        <Button>Add a region</Button>
+      </Link>
     </header>
   );
 }
