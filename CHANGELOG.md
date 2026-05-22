@@ -4,6 +4,21 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0a.1 — 2026-05-21
+
+Graceful handling of backend-revoked user keys. Region endpoints
+(`/api/v1/user/regions/{id}/buckets`, `/objects`, presign-get/put,
+multipart init/part/complete/abort, delete-object) now detect the
+underlying S3 auth-rejection codes (`InvalidAccessKeyId`,
+`SignatureDoesNotMatch`, `AccessDenied`, `Forbidden`,
+`InvalidSignature`) and surface them as 401 `USER_KEY_REJECTED` with
+the offending region + alias + endpoint + accessKeyId in the error
+payload — replacing the bare 500 `INTERNAL` the un-fixed path produced
+for matthew's `lsi` region (key `GK6f4403ea8f6168544d035f4d` was
+deleted on Garage but still cached in the keychain). FE renders an
+inline alert with "Delete this region" + "Add a fresh key" actions
+instead of a generic "internal error" toast.
+
 ## v1.2.0 — 2026-05-21
 
 Sudo-style admin elevation (ADR-0003): USER → ADMIN → ELEVATED
