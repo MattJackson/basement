@@ -1009,7 +1009,7 @@ func (s *Server) userPresignGetRegionObjectHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	bid := chi.URLParam(r, "bid")
-	key := chi.URLParam(r, "key")
+	key, _ := url.PathUnescape(chi.URLParam(r, "key"))
 	if bid == "" || key == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "bucket id and key required")
 		return
@@ -1053,7 +1053,7 @@ func (s *Server) userPresignPutRegionObjectHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	bid := chi.URLParam(r, "bid")
-	key := chi.URLParam(r, "key")
+	key, _ := url.PathUnescape(chi.URLParam(r, "key"))
 	if bid == "" || key == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "bucket id and key required")
 		return
@@ -1310,7 +1310,7 @@ func (s *Server) userDeleteRegionObjectHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	bid := chi.URLParam(r, "bid")
-	key := chi.URLParam(r, "key")
+	key, _ := url.PathUnescape(chi.URLParam(r, "key"))
 	if bid == "" || key == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "bucket id and key required")
 		return
