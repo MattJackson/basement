@@ -24,6 +24,7 @@ import (
 	"github.com/mattjackson/basement/internal/federationwire"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
+	"github.com/mattjackson/basement/internal/webdav"
 	"github.com/mattjackson/basement/internal/webhook"
 )
 
@@ -361,6 +362,26 @@ func main() {
 	srv.SetWebhooks(webhookStore, webhookEngine)
 	webhookEngine.Start(ctxSignal)
 	defer webhookEngine.Stop()
+
+	// v1.9.0a WEBDAV gateway. Mounts under /webdav/ on the same chi
+	// router as /api/v1. Pulls the user store + SA store off the
+	// already-wired *store.Store so a Basic-auth header is resolved
+	// against the same identity surface the JSON login uses. The
+	// admin Connections handle drives the Garage bucket-list bridge
+	// so a Garage-backed region's WebDAV PROPFIND surfaces real
+	// buckets instead of the empty-list that user-key ListBuckets
+	// returns for Garage today.
+	webdavHandler := webdav.New(webdav.Deps{
+		Cfg:         cfg,
+		Regions:     st.UserRegions(),
+		Registry:    reg,
+		Users:       st,
+		SAs:         st.ServiceAccounts(),
+		Audit:       auditLogger,
+		Logger:      slog.Default(),
+		Connections: connStore,
+	})
+	srv.SetWebDAVHandler(webdavHandler)
 
 	// v1.7.0f FEDERATION.EVENT-DRIVEN: subscribe the federation engine
 	// to the webhook event bus so writes hitting the primary trigger
