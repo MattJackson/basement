@@ -14,28 +14,17 @@ const (
 	bucketGrant  = contextKey("bucketGrant")
 )
 
-// Middleware returns an HTTP middleware that validates the session JWT cookie.
-// On success, it stores *Claims in the request context. On failure, it writes a 401 error.
+// Middleware returns an HTTP middleware that validates the session JWT
+// cookie. On success, it stores *Claims in the request context; on
+// failure, it writes a 401 error.
+//
+// This is a thin convenience around MiddlewareWithBearer(secret, nil)
+// for callers that haven't wired the service-account bearer path yet.
+// Production wiring uses MiddlewareWithBearer directly so bearer tokens
+// resolve alongside cookies; tests + legacy call sites keep using
+// Middleware for cookie-only behaviour.
 func Middleware(secret []byte) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			cookie, err := r.Cookie(CookieName)
-			if err != nil {
-				writeError(w, http.StatusUnauthorized, "SESSION_REQUIRED", "Session cookie not found")
-				return
-			}
-
-			claims, err := ParseToken(secret, cookie.Value)
-			if err != nil {
-				writeError(w, http.StatusUnauthorized, "INVALID_SESSION", "Invalid or expired session")
-				return
-			}
-
-			ctx := context.WithValue(r.Context(), claimsKey, claims)
-			ctx = context.WithValue(ctx, uiAdminKey, claims.UIAdmin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
+	return MiddlewareWithBearer(secret, nil)
 }
 
 // FromContext retrieves *Claims from the request context.
