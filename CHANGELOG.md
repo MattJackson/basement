@@ -4,6 +4,29 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0a.1 — 2026-05-22
+
+UX hotfix: auto-elevate on `/admin/*` entry + persistent fallback
+banner. Closes the URL-bar bypass where landing on `/admin/clusters`
+directly rendered the page in USER mode (PersonaPill: USER, URL: admin,
+every destructive click 403'd with `ELEVATION_REQUIRED`). New
+`AdminEntryElevationGuard` sits inside AppShell and opens the
+elevation modal whenever the operator hits `/admin/*` in USER mode —
+mirrors the UserMenu "Switch to admin view" behaviour, but for deep
+links / bookmarks / manual URL entry. Cancel routes to `/files` with
+an info toast (`"Cancelled — staying in user view"`); success leaves
+the page in place with mode = ADMIN. A `useRef` latches the last
+prompted pathname so navigation within `/admin/*` doesn't fire N
+modals. A second new component, `AdminUserModeBanner`, renders as a
+sticky amber banner whenever the operator is on `/admin/*` in USER
+mode — belt-and-braces with the auto-prompt, distinct from the
+v1.3.0a.4 `ElevationExpiredBanner` (which only handles the
+falling-edge admin→user case). Carries "Elevate to admin" and
+"Drop to /files" buttons. 15 new tests cover the guard's debounce,
+cancel-toast-navigate path, success path, ADMIN passthrough, and the
+banner's render rules + button wiring. ADR-0003 amendment section
+appended with the operator quote and behaviour spec.
+
 ## v1.7.0c — 2026-05-22
 
 Service-account admin UI. New `/admin/service-accounts` list page and

@@ -165,3 +165,27 @@ After all three: tag v1.2.0.
 - Backend: drop ELEVATED from `internal/auth/policy/min_mode.go`; add `OrgCapabilities.AdminSessionTTLSec` (default 900, range 60-86400); `/auth/elevate` reads TTL from org config; `requireCapability` gate compares mode (admin-required) without sub-mode logic.
 - Frontend: `UserMenu` "Switch to admin" calls runWithElevation+navigate; `AuthModeHydrator` on expiry shows persistent banner instead of redirect; `/admin/system` adds the TTL setting card (dropdown + custom input).
 - ADR-0003 main body above is the v1.2.0 reference; the model going forward is this amendment.
+
+---
+
+## Amendment: v1.7.0a.1 — Auto-elevate on /admin/* entry + persistent fallback banner
+
+**Date**: 2026-05-22
+**Triggered by**: Operator landed on `/admin/clusters` via URL bar; PersonaPill showed USER, page rendered, every destructive click then 403'd with ELEVATION_REQUIRED. Operator-confirmed quote: *"elevate before you go to the admin console"*. The UserMenu's "Switch to admin view" button already did this; URL-bar nav (deep link, bookmark, manual typing) bypassed it.
+
+### Changes from the v1.3.0a.4 amendment
+
+1. **Auto-prompt on /admin/* entry.** AppShell hosts an `AdminEntryElevationGuard` component that, on mount + on pathname change, opens the elevation modal whenever `mode === user` AND `pathname.startsWith("/admin/")`. Mirrors the UserMenu "Switch to admin" behaviour but for URL-bar entry.
+2. **Cancel = drop to /files + toast.** If the operator dismisses the auto-prompt modal, the guard navigates to `/files` and surfaces an info toast (`"Cancelled — staying in user view"`). Matches the operator's stated preference to bail out of the admin context rather than render a broken page.
+3. **Success = stay on the page.** On successful elevation, the guard does nothing — the page renders normally with the new ADMIN mode. AuthModeHydrator picks up the cookie and flips the provider state.
+4. **Debounce.** A `useRef` latches the last pathname the guard prompted for. Navigation within `/admin/*` does not re-trigger the modal until the operator leaves /admin/* (which resets the latch) or until mode rises to admin (which also resets, so a later expiry+nav cycle prompts again).
+5. **Persistent fallback banner.** A new `AdminUserModeBanner` renders at the top of AppShell whenever the operator is on `/admin/*` in USER mode — belt-and-braces with the auto-prompt. Provides one-click "Elevate to admin" + "Drop to /files" affordances if the auto-prompt was dismissed or somehow skipped. Distinct from `ElevationExpiredBanner` (v1.3.0a.4), which only renders on the falling-edge admin→user transition within a session; AdminUserModeBanner renders for any USER on /admin/*, including the fresh-direct-nav case.
+
+### Implementation in v1.7.0a.1
+
+- `frontend/src/components/auth/AdminEntryElevationGuard.tsx`: side-effect-only component; reads mode + pathname, calls `useElevationPrompt` once per /admin pathname when in USER mode; cancel branch navigates + toasts.
+- `frontend/src/components/auth/AdminUserModeBanner.tsx`: sticky amber banner with elevate + drop buttons.
+- `frontend/src/shared/layout/AppShell.tsx`: mounts both. Order: guard at top of tree (no render output), banner just below the existing ElevationExpiredBanner.
+- Tests:
+  - `frontend/src/shared/layout/__tests__/AppShell-auto-elevate.test.tsx`: USER→prompts, cancel→navigate+toast, success→no nav, ADMIN→no prompt, /files→no prompt, /admin→/files→/admin re-prompts.
+  - `frontend/src/components/auth/__tests__/AdminUserModeBanner.test.tsx`: renders when user+/admin/*, hides when admin, hides on /files, button wiring.

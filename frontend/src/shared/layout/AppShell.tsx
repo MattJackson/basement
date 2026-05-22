@@ -6,6 +6,8 @@ import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
 import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner";
+import { AdminUserModeBanner } from "@/components/auth/AdminUserModeBanner";
+import { AdminEntryElevationGuard } from "@/components/auth/AdminEntryElevationGuard";
 import { useUser } from "@/shared/auth/useUser";
 
 interface AppShellProps {
@@ -22,6 +24,12 @@ export function AppShell({ children }: AppShellProps): ReactNode {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
+      {/* ADR-0003 v1.7.0a.1: auto-elevate on /admin/* entry. Side-effect */}
+      {/* only — opens the elevation modal when the operator lands on an */}
+      {/* admin route in USER mode (typically via URL-bar nav). Cancel */}
+      {/* navigates to /files; success leaves the page in place with the */}
+      {/* freshly-elevated mode. */}
+      <AdminEntryElevationGuard />
       <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
           <div className="flex items-center gap-6">
@@ -92,6 +100,13 @@ export function AppShell({ children }: AppShellProps): ReactNode {
       {/* losing context. The banner self-gates on /admin/* + mode==user */}
       {/* so it's a no-op on /files routes. */}
       <ElevationExpiredBanner />
+
+      {/* ADR-0003 v1.7.0a.1 amendment: persistent fallback when the */}
+      {/* operator is on /admin/* but in USER mode. Belt-and-braces with */}
+      {/* the AdminEntryElevationGuard above — if the auto-prompt was */}
+      {/* dismissed or skipped, this banner keeps the elevate affordance */}
+      {/* one click away. Hidden whenever mode === admin. */}
+      <AdminUserModeBanner />
 
       <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children ?? <Outlet />}
