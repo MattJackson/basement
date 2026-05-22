@@ -1644,13 +1644,63 @@ section("[16] version label under Logo (Fix 7)");
         throw new Error("/files/backups/new step 1 missing Source heading");
       }
 
-      // Step counter present
-      const hasStepText = await page!.locator('text=/Step 1 of 4/i').count();
+      // Step counter present (v1.5.0b grew the wizard to 5 steps:
+      // Source / Destination / Mode+retention / Schedule / Name+review).
+      const hasStepText = await page!.locator('text=/Step 1 of 5/i').count();
       if (hasStepText === 0) {
-        throw new Error("/files/backups/new missing 'Step 1 of 4' indicator");
+        throw new Error("/files/backups/new missing 'Step 1 of 5' indicator");
       }
 
       await shot(page!, "v1.5a-backups-new-step1");
+    });
+
+    // ----- v1.5.0b: Mode + retention surfaces -----
+    section("[v1.5b] /files/backups/new wizard exposes Mode + retention step");
+    await check("[v1.5b] wizard step 3 has Mode radio + GFS retention inputs", async () => {
+      await page!.goto(`${BASE_URL}/files/backups/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1', { timeout: 5000 });
+      // Pick a source region+bucket to enable Next. If the user has
+      // no regions seeded the smoke just records the limitation —
+      // step 3 is still reachable in the DOM by directly walking
+      // the wizard, but the smoke avoids relying on that.
+      const regionSel = page!.locator('select#srcRegion');
+      const regionOptions = await regionSel.locator('option').count();
+      if (regionOptions <= 1) {
+        // No regions configured for this user — skip the deep walk.
+        return;
+      }
+      await regionSel.selectOption({ index: 1 });
+      // Wait for buckets to populate, then pick the first one.
+      const srcBucketSel = page!.locator('select#srcBucket');
+      await srcBucketSel.waitFor({ state: 'visible' });
+      const bucketOptions = await srcBucketSel.locator('option').count();
+      if (bucketOptions > 1) {
+        await srcBucketSel.selectOption({ index: 1 });
+      } else {
+        return;
+      }
+      // Advance to step 2 (Destination).
+      await page!.locator('button', { hasText: /Next/ }).click();
+      // Pick destination region+bucket.
+      const dstRegionSel = page!.locator('select#dstRegion');
+      await dstRegionSel.selectOption({ index: 1 });
+      const dstBucketSel = page!.locator('select#dstBucket');
+      await dstBucketSel.waitFor({ state: 'visible' });
+      const dstBucketOptions = await dstBucketSel.locator('option').count();
+      if (dstBucketOptions > 1) {
+        await dstBucketSel.selectOption({ index: 1 });
+      } else {
+        return;
+      }
+      // Advance to step 3 (Mode + retention).
+      await page!.locator('button', { hasText: /Next/ }).click();
+      await page!.waitForSelector('text=/Mode.*retention/i', { timeout: 5000 });
+      const hasMirror = await page!.locator('text=/Mirror.*overwrite destination/i').count();
+      const hasSnapshot = await page!.locator('text=/Snapshot.*timestamped history/i').count();
+      if (hasMirror === 0 || hasSnapshot === 0) {
+        throw new Error('/files/backups/new step 3 missing Mirror or Snapshot option');
+      }
+      await shot(page!, 'v1.5b-backups-new-step3-mode');
     });
 
     // ============================================================

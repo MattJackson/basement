@@ -148,6 +148,14 @@ func (fs *fileStore) Update(_ context.Context, id string, patch Backup) (Backup,
 	cur.DstPrefix = patch.DstPrefix
 	cur.Schedule = patch.Schedule
 	cur.Disabled = patch.Disabled
+	// v1.5.0b: Mode + Retention are mutable on a per-update basis
+	// too. Mode flips between mirror and snapshot are not
+	// transparent at the destination (mirror writes to DstPrefix;
+	// snapshot writes to {slug(Name)}/{ts}/), but the operator can
+	// still toggle — the next run lands at the new layout, and the
+	// old data sits inert until they remove it by hand.
+	cur.Mode = patch.Mode
+	cur.Retention = patch.Retention
 	cur.UpdatedAt = time.Now().UTC()
 	fs.rows[id] = cur
 	if err := fs.writeLocked(); err != nil {

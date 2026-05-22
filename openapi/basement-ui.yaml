@@ -4053,6 +4053,41 @@ paths:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
 
+  /user/backups/{id}/snapshots:
+      get:
+        operationId: listUserBackupSnapshots
+        summary: List the snapshots currently on disk for a snapshot-mode backup
+        description: |
+          Returns up to the 10 most recent snapshots (newest first) for a
+          snapshot-mode backup, with object count and total bytes for each.
+          Mirror-mode backups always return an empty array.
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Array of snapshot entries
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/BackupSnapshotEntry'
+          '404':
+            description: Not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
       cookieAuth:
@@ -5330,6 +5365,50 @@ components:
             format: date-time
           disabled:
             type: boolean
+          mode:
+            type: string
+            enum: [mirror, snapshot]
+            description: |
+              Mirror (default) overwrites the destination on each run; Snapshot
+              writes each run into a timestamped prefix under {dstBucket}/{slug(name)}/.
+          retention:
+            $ref: '#/components/schemas/RetentionPolicy'
+      RetentionPolicy:
+        type: object
+        description: |
+          Grandfather-Father-Son rotation parameters. Only meaningful when
+          mode == "snapshot". Server substitutes {7,4,12} when all keep
+          counts are zero on a snapshot-mode backup.
+        properties:
+          keepDaily:
+            type: integer
+            minimum: 0
+          keepWeekly:
+            type: integer
+            minimum: 0
+          keepMonthly:
+            type: integer
+            minimum: 0
+      BackupSnapshotEntry:
+        type: object
+        required:
+        - timestamp
+        - prefix
+        - objects
+        - bytes
+        properties:
+          timestamp:
+            type: string
+            format: date-time
+          prefix:
+            type: string
+            description: Destination-bucket-relative prefix, e.g. "lsi-to-cheshire/2026-05-21_03:00:00/"
+          objects:
+            type: integer
+            format: int64
+          bytes:
+            type: integer
+            format: int64
       BackupResult:
         type: object
         required:
@@ -5359,6 +5438,15 @@ components:
             type: boolean
           jobId:
             type: string
+          snapshotPrefix:
+            type: string
+            description: Destination-bucket-relative prefix this run wrote to (snapshot mode only).
+          snapshotsPruned:
+            type: integer
+            format: int64
+          bytesReclaimed:
+            type: integer
+            format: int64
       UserBackupCreateRequest:
         type: object
         required:
@@ -5389,5 +5477,10 @@ components:
             type: string
           disabled:
             type: boolean
+          mode:
+            type: string
+            enum: [mirror, snapshot]
+          retention:
+            $ref: '#/components/schemas/RetentionPolicy'
 security:
 - cookieAuth: []

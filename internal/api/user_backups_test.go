@@ -303,3 +303,157 @@ func TestDeleteBackup_RemovesScheduleEntry(t *testing.T) {
 		t.Fatalf("expected cron entry removed after delete, got %d", srv.backupSched.EntryCount())
 	}
 }
+
+// TestCreateBackup_DefaultMirrorMode: omitting mode + retention on
+// the wire produces a Mirror-mode Backup with a zero retention
+// policy — the back-compat path for v1.5.0a clients.
+func TestCreateBackup_DefaultMirrorMode(t *testing.T) {
+	srv := newBackupTestServer(t)
+	body := map[string]interface{}{
+		"name":        "implicit mirror",
+		"srcRegionId": "r1", "srcBucket": "b1",
+		"dstRegionId": "r2", "dstBucket": "b2",
+		"schedule": backup.ScheduleManual,
+	}
+	req := newJSONRequest("/api/v1/user/backups", body)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got backup.Backup
+	_ = json.NewDecoder(rr.Body).Decode(&got)
+	if got.ResolveMode() != backup.BackupModeMirror {
+		t.Fatalf("expected mode=mirror, got %q", got.Mode)
+	}
+	if !got.Retention.IsZero() {
+		t.Fatalf("expected zero retention on mirror, got %+v", got.Retention)
+	}
+}
+
+// TestCreateBackup_SnapshotModeDefaultsRetention: explicitly choosing
+// snapshot mode without a retention payload backfills the GFS
+// default {7,4,12} so the runner never sees a missing policy.
+func TestCreateBackup_SnapshotModeDefaultsRetention(t *testing.T) {
+	srv := newBackupTestServer(t)
+	body := map[string]interface{}{
+		"name":        "snapshot default",
+		"srcRegionId": "r1", "srcBucket": "b1",
+		"dstRegionId": "r2", "dstBucket": "b2",
+		"schedule":    backup.ScheduleManual,
+		"mode":        "snapshot",
+	}
+	req := newJSONRequest("/api/v1/user/backups", body)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got backup.Backup
+	_ = json.NewDecoder(rr.Body).Decode(&got)
+	if got.Mode != backup.BackupModeSnapshot {
+		t.Fatalf("expected mode=snapshot, got %q", got.Mode)
+	}
+	want := backup.DefaultRetention()
+	if got.Retention != want {
+		t.Fatalf("expected default retention %+v, got %+v", want, got.Retention)
+	}
+}
+
+// TestCreateBackup_SnapshotModeCustomRetention: the operator's
+// non-zero keep counts come back verbatim.
+func TestCreateBackup_SnapshotModeCustomRetention(t *testing.T) {
+	srv := newBackupTestServer(t)
+	body := map[string]interface{}{
+		"name":        "custom retention",
+		"srcRegionId": "r1", "srcBucket": "b1",
+		"dstRegionId": "r2", "dstBucket": "b2",
+		"schedule":    backup.ScheduleManual,
+		"mode":        "snapshot",
+		"retention":   map[string]int{"keepDaily": 3, "keepWeekly": 2, "keepMonthly": 1},
+	}
+	req := newJSONRequest("/api/v1/user/backups", body)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var got backup.Backup
+	_ = json.NewDecoder(rr.Body).Decode(&got)
+	want := backup.RetentionPolicy{KeepDaily: 3, KeepWeekly: 2, KeepMonthly: 1}
+	if got.Retention != want {
+		t.Fatalf("expected retention %+v, got %+v", want, got.Retention)
+	}
+}
+
+// TestCreateBackup_InvalidMode: a mode string outside the enum is
+// rejected with 400 before persisting.
+func TestCreateBackup_InvalidMode(t *testing.T) {
+	srv := newBackupTestServer(t)
+	body := map[string]interface{}{
+		"name":        "bad mode",
+		"srcRegionId": "r1", "srcBucket": "b1",
+		"dstRegionId": "r2", "dstBucket": "b2",
+		"schedule":    backup.ScheduleManual,
+		"mode":        "incremental",
+	}
+	req := newJSONRequest("/api/v1/user/backups", body)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestCreateBackup_NegativeRetentionRejected: keep-counts must be
+// >= 0; a -1 is a client bug we surface eagerly.
+func TestCreateBackup_NegativeRetentionRejected(t *testing.T) {
+	srv := newBackupTestServer(t)
+	body := map[string]interface{}{
+		"name":        "negative",
+		"srcRegionId": "r1", "srcBucket": "b1",
+		"dstRegionId": "r2", "dstBucket": "b2",
+		"schedule":    backup.ScheduleManual,
+		"mode":        "snapshot",
+		"retention":   map[string]int{"keepDaily": -1},
+	}
+	req := newJSONRequest("/api/v1/user/backups", body)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestSnapshotsList_MirrorReturnsEmpty: a mirror-mode backup never
+// has snapshots — the endpoint short-circuits to [] without dialling
+// the destination driver. Important: lets the detail page poll the
+// endpoint unconditionally without producing 5xx on mirror backups.
+func TestSnapshotsList_MirrorReturnsEmpty(t *testing.T) {
+	srv := newBackupTestServer(t)
+	created, err := srv.backups.Create(context.Background(), backup.Backup{
+		OwnerUserID: "matthew",
+		Name:        "mirror",
+		Schedule:    backup.ScheduleManual,
+		Mode:        backup.BackupModeMirror,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/backups/"+created.ID+"/snapshots", nil)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if body != "[]\n" && body != "[]" {
+		t.Fatalf("expected empty array, got %q", body)
+	}
+}

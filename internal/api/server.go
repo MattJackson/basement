@@ -409,6 +409,11 @@ func (s *Server) routes() {
 			userG.Put("/user/backups/{id}", s.userUpdateBackupHandler)
 			userG.Delete("/user/backups/{id}", s.userDeleteBackupHandler)
 			userG.Post("/user/backups/{id}/run", s.userRunBackupHandler)
+			// v1.5.0b: list the snapshot timestamps the backup
+			// currently has on disk. Used by the detail page to
+			// render the "browse this snapshot" table. Returns an
+			// empty array for mirror-mode backups.
+			userG.Get("/user/backups/{id}/snapshots", s.userListBackupSnapshotsHandler)
 
 			// User region keychain endpoints (ADR-0002, cycle
 			// v1.1.0b). The region's S3 key IS the permission —

@@ -4,6 +4,31 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.5.0b — 2026-05-22
+
+Backup story, cycle 2: snapshot mode + retention. v1.5.0a backups
+shipped as a "continuous mirror" — each run overwrote the
+destination. Real backups need point-in-time history. `Backup` gains
+`Mode` (`mirror` | `snapshot`) and `Retention` (`KeepDaily` /
+`KeepWeekly` / `KeepMonthly`); mirror is the default for back-compat
+so existing records keep working untouched. Snapshot runs write to
+`{dstBucket}/{slug(name)}/{YYYY-MM-DD_HH:MM:SS}/`; after the copy
+lands the runner enumerates existing snapshots and applies
+Grandfather-Father-Son retention via `PlanPrune` (pure function in
+`internal/backup/retention.go`, 17 table-driven tests covering empty
+input, multiple snapshots same day, gaps in days, ancient snapshots
+beyond all buckets, GFS union, clock-skew defensive keep, dense
+days, sort invariants). Default policy when none specified is
+`{7,4,12}` — ~14 months of history with 23 stored snapshots.
+`BackupResult` gains `SnapshotPrefix`, `SnapshotsPruned`,
+`BytesReclaimed`. New endpoint
+`GET /api/v1/user/backups/{id}/snapshots` returns the most recent 10
+snapshots with object + byte counts. Wizard grows a 3rd step (Mode +
+retention with the GFS defaults pre-populated); detail page shows
+mode + retention summary, a snapshot table with "Browse →" links to
+the destination bucket browser, and a "pruned" column on the run
+history. Tag + main land at the same commit.
+
 ## v1.5.0a — 2026-05-22
 
 Backup story, cycle 1: scheduled, named bucket-to-bucket backup with

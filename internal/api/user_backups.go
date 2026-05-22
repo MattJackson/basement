@@ -18,27 +18,38 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/backup"
+	"github.com/mattjackson/basement/internal/driver"
 )
 
 // userBackupCreateRequest is the wire shape for POST /user/backups.
 // Field names mirror UserSyncCreateRequest so the wizard can reuse
 // its region/bucket picker components.
+//
+// v1.5.0b added Mode + Retention. Both are optional on the wire:
+// Mode defaults to "mirror" (the v1.5.0a behaviour, so existing
+// clients keep working), Retention defaults to the GFS {7,4,12}
+// rotation when omitted.
 type userBackupCreateRequest struct {
-	Name        string `json:"name"`
-	SrcRegionID string `json:"srcRegionId"`
-	SrcBucket   string `json:"srcBucket"`
-	SrcPrefix   string `json:"srcPrefix,omitempty"`
-	DstRegionID string `json:"dstRegionId"`
-	DstBucket   string `json:"dstBucket"`
-	DstPrefix   string `json:"dstPrefix,omitempty"`
-	Schedule    string `json:"schedule"`
-	Disabled    bool   `json:"disabled,omitempty"`
+	Name        string                  `json:"name"`
+	SrcRegionID string                  `json:"srcRegionId"`
+	SrcBucket   string                  `json:"srcBucket"`
+	SrcPrefix   string                  `json:"srcPrefix,omitempty"`
+	DstRegionID string                  `json:"dstRegionId"`
+	DstBucket   string                  `json:"dstBucket"`
+	DstPrefix   string                  `json:"dstPrefix,omitempty"`
+	Schedule    string                  `json:"schedule"`
+	Disabled    bool                    `json:"disabled,omitempty"`
+	Mode        backup.BackupMode       `json:"mode,omitempty"`
+	Retention   *backup.RetentionPolicy `json:"retention,omitempty"`
 }
 
 // validateBackupRequest returns the first user-visible reason a
@@ -58,6 +69,20 @@ func validateBackupRequest(req userBackupCreateRequest) (code, msg string) {
 	}
 	if req.Schedule == "" {
 		return "INVALID_SCHEDULE", "Schedule is required (use \"manual\" for run-on-demand only)"
+	}
+	// Mode is optional on the wire but must be one of the known
+	// values when provided. Empty string -> Mirror (the back-compat
+	// path); anything else that isn't Snapshot is a client bug.
+	if req.Mode != "" && req.Mode != backup.BackupModeMirror && req.Mode != backup.BackupModeSnapshot {
+		return "INVALID_MODE", fmt.Sprintf("Mode must be %q or %q", backup.BackupModeMirror, backup.BackupModeSnapshot)
+	}
+	// Retention values must be non-negative — keep the check tight
+	// to surface client-side validation bugs early. Zero is allowed
+	// (it disables that bucket).
+	if req.Retention != nil {
+		if req.Retention.KeepDaily < 0 || req.Retention.KeepWeekly < 0 || req.Retention.KeepMonthly < 0 {
+			return "INVALID_RETENTION", "Retention keep counts must be zero or positive"
+		}
 	}
 	return "", ""
 }
@@ -112,6 +137,8 @@ func (s *Server) userCreateBackupHandler(w http.ResponseWriter, r *http.Request)
 		DstPrefix:   req.DstPrefix,
 		Schedule:    req.Schedule,
 		Disabled:    req.Disabled,
+		Mode:        applyBackupMode(req.Mode),
+		Retention:   applyBackupRetention(req.Mode, req.Retention),
 	}
 	created, err := s.backups.Create(r.Context(), b)
 	if err != nil {
@@ -207,6 +234,8 @@ func (s *Server) userUpdateBackupHandler(w http.ResponseWriter, r *http.Request)
 		DstPrefix:   req.DstPrefix,
 		Schedule:    req.Schedule,
 		Disabled:    req.Disabled,
+		Mode:        applyBackupMode(req.Mode),
+		Retention:   applyBackupRetention(req.Mode, req.Retention),
 	}
 	updated, err := s.backups.Update(r.Context(), existing.ID, patch)
 	if err != nil {
@@ -338,3 +367,142 @@ func (s *Server) loadOwnedBackup(w http.ResponseWriter, r *http.Request) (backup
 // doesn't need to know about the optional backup subsystem — the
 // scheme is the same domain:id shape used by every other resource.
 func resourceBackup(id string) string { return "backup:" + id }
+
+// snapshotListEntry is the wire shape the detail page consumes via
+// GET /user/backups/{id}/snapshots. Each row carries the timestamp
+// the runner wrote, the on-disk prefix to drill into, and a size +
+// object count summary so the operator can see at-a-glance how much
+// each snapshot weighs. Size/objects are best-effort — drivers that
+// list lazily may return 0 if a snapshot has a huge tail and the
+// summary times out.
+type snapshotListEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Prefix    string    `json:"prefix"`
+	Objects   int64     `json:"objects"`
+	Bytes     int64     `json:"bytes"`
+}
+
+// userListBackupSnapshotsHandler handles
+// GET /api/v1/user/backups/{id}/snapshots. Lists the timestamps
+// currently on disk for a snapshot-mode backup, oldest-first,
+// capped at the most recent 10 entries (matches the detail page
+// table layout). Mirror-mode backups return [].
+func (s *Server) userListBackupSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
+	b, ok := s.loadOwnedBackup(w, r)
+	if !ok {
+		return
+	}
+	if b.ResolveMode() != backup.BackupModeSnapshot {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]snapshotListEntry{})
+		return
+	}
+	if s.reg == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "DRIVERS_NOT_WIRED", "Driver registry is not wired")
+		return
+	}
+	dstConn, err := s.resolveBackupConn(r.Context(), b.OwnerUserID, b.DstRegionID)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "SNAPSHOT_LIST_FAILED", err.Error())
+		return
+	}
+	drv, err := s.reg.For(r.Context(), dstConn)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "SNAPSHOT_LIST_FAILED", err.Error())
+		return
+	}
+
+	root := backup.SnapshotRoot(b.Name)
+	timestamps, err := listSnapshotTimestamps(r.Context(), drv, b.DstBucket, root)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "SNAPSHOT_LIST_FAILED", err.Error())
+		return
+	}
+	// Newest-first for the UI table — operators usually want the
+	// freshest snapshot at the top.
+	sortTimestampsDescending(timestamps)
+	if len(timestamps) > 10 {
+		timestamps = timestamps[:10]
+	}
+
+	entries := make([]snapshotListEntry, 0, len(timestamps))
+	for _, ts := range timestamps {
+		prefix := backup.SnapshotPrefix(b.Name, ts)
+		objects, bytes := summariseSnapshotPrefix(r.Context(), drv, b.DstBucket, prefix)
+		entries = append(entries, snapshotListEntry{
+			Timestamp: ts,
+			Prefix:    prefix,
+			Objects:   objects,
+			Bytes:     bytes,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(entries)
+}
+
+// summariseSnapshotPrefix counts objects + bytes under a prefix.
+// Errors are swallowed (returns whatever it counted before failing)
+// — the detail page treats 0/0 as "unknown" rather than a fatal
+// error, since a partial summary is more useful than a 500. The
+// page-size is capped at 1000 per the driver contract; very large
+// snapshots may take multiple list pages to summarise fully.
+func summariseSnapshotPrefix(ctx context.Context, drv driver.Driver, bucket, prefix string) (int64, int64) {
+	var objects int64
+	var bytes int64
+	var continuation string
+	for {
+		page, err := drv.ListObjects(ctx, bucket, prefix, continuation, "", 1000)
+		if err != nil {
+			return objects, bytes
+		}
+		for _, o := range page.Objects {
+			if o.IsDir {
+				continue
+			}
+			objects++
+			bytes += o.Size
+		}
+		if !page.IsTruncated || page.NextContinuation == "" {
+			break
+		}
+		continuation = page.NextContinuation
+	}
+	return objects, bytes
+}
+
+// sortTimestampsDescending sorts in-place newest-first.
+func sortTimestampsDescending(ts []time.Time) {
+	sort.Slice(ts, func(i, j int) bool { return ts[i].After(ts[j]) })
+}
+
+// applyBackupMode resolves the on-wire Mode to the persisted Mode
+// value. Empty string -> Mirror (back-compat with v1.5.0a clients);
+// anything else passes through after validation has confirmed it's
+// a known enum value.
+func applyBackupMode(m backup.BackupMode) backup.BackupMode {
+	if m == "" {
+		return backup.BackupModeMirror
+	}
+	return m
+}
+
+// applyBackupRetention picks the persisted RetentionPolicy. Two
+// rules:
+//
+//   - Mirror mode: retention is meaningless, so we persist a
+//     zero-value policy. The runner will ignore it either way.
+//   - Snapshot mode + nil/zero retention: apply DefaultRetention so
+//     a fresh backup still prunes sensibly. A snapshot backup with
+//     an all-zero policy is technically valid (prune everything but
+//     the future-skew guard), but the wizard never produces that
+//     shape so we treat zeros as "operator didn't specify, use the
+//     default".
+func applyBackupRetention(mode backup.BackupMode, r *backup.RetentionPolicy) backup.RetentionPolicy {
+	if applyBackupMode(mode) != backup.BackupModeSnapshot {
+		return backup.RetentionPolicy{}
+	}
+	if r == nil || r.IsZero() {
+		return backup.DefaultRetention()
+	}
+	return *r
+}
