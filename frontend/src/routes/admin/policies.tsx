@@ -58,6 +58,7 @@ import {
   type PolicyAssignment,
   type SimulateResponse,
 } from "@/shared/api/queries";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/policies")({
   component: adminPage(PoliciesPage),
@@ -251,6 +252,9 @@ function AddRoleCard({
 }) {
   const queryClient = useQueryClient();
   const upsert = useUpsertRole();
+  // v1.3.0a.3: policy:edit_matrix is ADMIN-min. Wrap so the modal
+  // opens + the mutation retries on success.
+  const runWithElevation = useElevationGuard();
   const [id, setId] = useState("");
   const [label, setLabel] = useState("");
   const [description, setDescription] = useState("");
@@ -262,16 +266,19 @@ function AddRoleCard({
       return;
     }
     try {
-      await upsert.mutateAsync({
-        id: id.trim(),
-        label: label.trim() || id.trim(),
-        description: description.trim(),
-        capabilities: Array.from(selectedCaps),
-      });
+      await runWithElevation(() =>
+        upsert.mutateAsync({
+          id: id.trim(),
+          label: label.trim() || id.trim(),
+          description: description.trim(),
+          capabilities: Array.from(selectedCaps),
+        }),
+      );
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
       toast.success(`Role ${id} created`);
       onDone();
     } catch (e) {
+      if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error((e as Error).message);
     }
   };
@@ -338,6 +345,9 @@ function RoleCard({
   const queryClient = useQueryClient();
   const upsert = useUpsertRole();
   const del = useDeleteRole();
+  // v1.3.0a.3: policy:edit_matrix is ADMIN-min, policy role delete is
+  // ELEVATED-min. Both go through the same wrapper.
+  const runWithElevation = useElevationGuard();
 
   const [editing, setEditing] = useState(false);
   const [label, setLabel] = useState(role.label);
@@ -351,16 +361,19 @@ function RoleCard({
 
   const handleSave = async () => {
     try {
-      await upsert.mutateAsync({
-        id: role.id,
-        label: label.trim() || role.id,
-        description: description.trim(),
-        capabilities: Array.from(selected),
-      });
+      await runWithElevation(() =>
+        upsert.mutateAsync({
+          id: role.id,
+          label: label.trim() || role.id,
+          description: description.trim(),
+          capabilities: Array.from(selected),
+        }),
+      );
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
       toast.success(`Role ${role.id} saved`);
       setEditing(false);
     } catch (e) {
+      if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error((e as Error).message);
     }
   };
@@ -370,10 +383,11 @@ function RoleCard({
       return;
     }
     try {
-      await del.mutateAsync(role.id);
+      await runWithElevation(() => del.mutateAsync(role.id));
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
       toast.success(`Role ${role.id} deleted`);
     } catch (e) {
+      if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error((e as Error).message);
     }
   };
@@ -586,6 +600,9 @@ function AssignmentsPane({
   const queryClient = useQueryClient();
   const assign = useAssignRole();
   const unassign = useUnassignRole();
+  // v1.3.0a.3: policy:assign_role / unassign_role are ADMIN-min.
+  // Wrap so the modal opens + the mutation retries on success.
+  const runWithElevation = useElevationGuard();
 
   const [userFilter, setUserFilter] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
@@ -633,16 +650,19 @@ function AssignmentsPane({
       return;
     }
     try {
-      await assign.mutateAsync({
-        userId: newUser.trim(),
-        roleId: newRole,
-        scope: newScope.trim(),
-      });
+      await runWithElevation(() =>
+        assign.mutateAsync({
+          userId: newUser.trim(),
+          roleId: newRole,
+          scope: newScope.trim(),
+        }),
+      );
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
       toast.success(`Assigned ${newRole} to ${newUser}`);
       setNewUser("");
       setNewScope("");
     } catch (e) {
+      if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error((e as Error).message);
     }
   };
@@ -656,10 +676,11 @@ function AssignmentsPane({
       return;
     }
     try {
-      await unassign.mutateAsync(a);
+      await runWithElevation(() => unassign.mutateAsync(a));
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
       toast.success("Assignment revoked");
     } catch (e) {
+      if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error((e as Error).message);
     }
   };

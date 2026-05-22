@@ -13,6 +13,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 import { useUser } from "@/shared/auth/useUser";
 import { useVersion } from "@/shared/api/queries";
+import { useElevationPrompt } from "@/shared/auth/elevation";
+import { useAuthMode } from "@/shared/auth/mode";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -28,6 +30,14 @@ export function UserMenu() {
   const queryClient = useQueryClient();
   const { data: user } = useUser();
   const { data: version } = useVersion();
+  // v1.3.0a.3: "Switch to admin view" auto-elevates before navigating.
+  // Operator mental model is "going into admin = entering admin mode";
+  // decoupling URL from mode meant the first action under /admin always
+  // 403'd and required a re-click after the elevate modal. We now pop
+  // the modal up front and only navigate on successful elevation —
+  // already-elevated users skip the prompt and go straight to /admin.
+  const promptForElevation = useElevationPrompt();
+  const { mode } = useAuthMode();
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
@@ -43,6 +53,24 @@ export function UserMenu() {
     // redirects on the next render.
     queryClient.removeQueries({ queryKey: ["auth", "me"] });
     await navigate({ to: "/admin/login" });
+  };
+
+  const handleSwitchToAdmin = async () => {
+    if (mode === "admin" || mode === "elevated") {
+      await navigate({ to: "/admin/clusters" });
+      return;
+    }
+    try {
+      await promptForElevation(
+        "admin",
+        "Switching to the admin console requires admin re-authentication.",
+      );
+      await navigate({ to: "/admin/clusters" });
+    } catch {
+      // ELEVATION_CANCELLED — user dismissed the modal. Stay where we
+      // are; the UserMenu remains open visually only briefly because
+      // Radix closes on item click anyway.
+    }
   };
 
   return (
@@ -71,10 +99,16 @@ export function UserMenu() {
         {/* an admin manually visit the user view + back. Both links */}
         {/* render for now (pre-RBAC, everyone is admin); when RBAC */}
         {/* lands, hide the admin link for non-UIAdmins. */}
+        {/* v1.3.0a.3: admin entry triggers elevation BEFORE navigating */}
+        {/* so the first action under /admin doesn't 403; user entry */}
+        {/* stays a plain link (no elevation needed for /files). */}
         <DropdownMenuGroup>
-          <DropdownMenuLinkItem href="/admin/clusters">
+          <DropdownMenuItem
+            onClick={handleSwitchToAdmin}
+            data-testid="switch-to-admin"
+          >
             Switch to admin view
-          </DropdownMenuLinkItem>
+          </DropdownMenuItem>
           <DropdownMenuLinkItem href="/files">
             Switch to user view
           </DropdownMenuLinkItem>

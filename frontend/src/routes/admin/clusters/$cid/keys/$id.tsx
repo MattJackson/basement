@@ -16,6 +16,7 @@ import type { components } from "@/shared/api/types.gen";
 import { DangerZone } from "@/shared/ui/DangerZone";
 import { GrantBucketAccessDialog } from "@/shared/ui/GrantBucketAccessDialog";
 import { RevokeAccessConfirm } from "@/shared/ui/RevokeAccessConfirm";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/clusters/$cid/keys/$id")({
   component: adminPage(KeyDetailScreen),
@@ -54,6 +55,11 @@ function KeyDetailScreen() {
 
   const updatePermissions = useUpdateKeyPermissions();
   const deleteKey = useDeleteKey();
+  // v1.3.0a.3: key:edit_permissions and key:delete are ADMIN-tier on
+  // the backend. Wrap every destructive / state-changing handler so a
+  // 403 ELEVATION_REQUIRED pops the modal and the mutation re-fires
+  // automatically on success (no second click required).
+  const runWithElevation = useElevationGuard();
 
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -137,9 +143,17 @@ function KeyDetailScreen() {
     setIsEditing(!isEditing);
   };
 
-  const handleSave = () => {
-    updatePermissions.mutate({ cid, id, permissions: editPermissions });
+  const handleSave = async () => {
+    const perms = editPermissions;
     setIsEditing(false);
+    try {
+      await runWithElevation(() =>
+        updatePermissions.mutateAsync({ cid, id, permissions: perms }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing isError banner below.
+    }
   };
 
   const handleCancel = () => {
@@ -376,9 +390,16 @@ function KeyDetailScreen() {
         open={deleteDialogOpen}
         keyName={key.name}
         isDeleting={deleteKey.isPending}
-        onConfirm={() => {
-          deleteKey.mutate({ cid, id });
+        onConfirm={async () => {
           setDeleteDialogOpen(false);
+          try {
+            await runWithElevation(() =>
+              deleteKey.mutateAsync({ cid, id }),
+            );
+          } catch {
+            // ELEVATION_CANCELLED / network errors surface via the
+            // mutation's existing isError state.
+          }
         }}
         onCancel={() => setDeleteDialogOpen(false)}
       />
@@ -401,7 +422,7 @@ function KeyDetailScreen() {
               }));
           })()}
           onCancel={() => setGrantOpen(false)}
-          onSubmit={({ bucketId, read, write, owner }) => {
+          onSubmit={async ({ bucketId, read, write, owner }) => {
             const existing: components["schemas"]["BucketPermission"][] = (key.buckets ?? []).map((b) => ({
               bucketId: b.bucketId,
               read: b.read,
@@ -409,10 +430,15 @@ function KeyDetailScreen() {
               owner: b.owner,
             }));
             const next = [...existing, { bucketId, read, write, owner }];
-            updatePermissions.mutate(
-              { cid, id, permissions: next },
-              { onSuccess: () => setGrantOpen(false) },
-            );
+            try {
+              await runWithElevation(() =>
+                updatePermissions.mutateAsync({ cid, id, permissions: next }),
+              );
+              setGrantOpen(false);
+            } catch {
+              // ELEVATION_CANCELLED / network errors surface via the
+              // dialog's existing errorMessage prop.
+            }
           }}
         />
       )}
@@ -427,23 +453,29 @@ function KeyDetailScreen() {
         target={revokeTarget?.label ?? ""}
         isRevoking={updatePermissions.isPending}
         onCancel={() => setRevokeTarget(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!revokeTarget) return;
-          updatePermissions.mutate(
-            {
-              cid,
-              id,
-              permissions: [
-                {
-                  bucketId: revokeTarget.bucketId,
-                  read: false,
-                  write: false,
-                  owner: false,
-                },
-              ],
-            },
-            { onSuccess: () => setRevokeTarget(null) },
-          );
+          const target = revokeTarget;
+          try {
+            await runWithElevation(() =>
+              updatePermissions.mutateAsync({
+                cid,
+                id,
+                permissions: [
+                  {
+                    bucketId: target.bucketId,
+                    read: false,
+                    write: false,
+                    owner: false,
+                  },
+                ],
+              }),
+            );
+            setRevokeTarget(null);
+          } catch {
+            // ELEVATION_CANCELLED / network errors surface via the
+            // mutation's existing error state.
+          }
         }}
       />
 

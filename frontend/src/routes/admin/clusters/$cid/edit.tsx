@@ -9,6 +9,7 @@ import { useGetCluster, useDriverDefaults, type DriverDefaults } from "@/shared/
 import { useUpdateCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 type Driver = "garage-v1" | "garage" | "aws-s3" | "minio";
 
@@ -34,6 +35,10 @@ function EditClusterPage() {
   const { data: cluster, isLoading, error: loadError } = useGetCluster(cid);
   const updateCluster = useUpdateCluster(cid);
   const { data: driverDefaults } = useDriverDefaults();
+  // v1.3.0a.3: cluster:edit is ADMIN-min on the backend. In USER mode
+  // the first save 403s; wrap so the modal pops + the save retries on
+  // success (one-click instead of double-click).
+  const runWithElevation = useElevationGuard();
 
   // Read driver-canonical snake_case keys; accept legacy camelCase
   // as fallback for any cluster created before v0.8.0d.5.
@@ -87,7 +92,7 @@ function EditClusterPage() {
     (entry) => entry.driver === driver,
   );
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!label.trim() || label.length < 1 || label.length > 64) return;
 
     const config: Record<string, string> = {};
@@ -117,9 +122,13 @@ function EditClusterPage() {
       color: color || undefined,
     };
 
-    updateCluster.mutate(update, {
-      onSuccess: () => navigate({ to: "/admin/clusters/$cid", params: { cid } }),
-    });
+    try {
+      await runWithElevation(() => updateCluster.mutateAsync(update));
+      navigate({ to: "/admin/clusters/$cid", params: { cid } });
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the existing
+      // updateCluster.error banner above the form.
+    }
   };
 
   // ADR-0001 (v0.9.0d): the s3_endpoint+key tri-state guard is gone

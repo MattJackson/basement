@@ -64,8 +64,11 @@ export function PersonaPill() {
   const [flashing, setFlashing] = useState(false);
   // warnedRef tracks whether we've already fired the <30s toast for
   // this particular expiry window — without it the 1Hz tick would
-  // spam toasts every second from t-29 down to t-0.
-  const warnedRef = useRef<number | null>(null);
+  // spam toasts every second from t-29 down to t-0. The "ended"
+  // sentinel is set on the falling edge (admin → user) so the same
+  // ref doubles as the "session ended" latch — both consumers only
+  // ever compare for inequality, so the union type is safe.
+  const warnedRef = useRef<number | "ended" | null>(null);
   const [dropping, setDropping] = useState(false);
 
   useEffect(() => {
