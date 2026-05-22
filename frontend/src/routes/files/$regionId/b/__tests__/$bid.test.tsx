@@ -196,3 +196,154 @@ describe("/files/$regionId/b/$bid — virtualization (v1.4.0a)", () => {
     expect(screen.getByTestId("virtual-object-list-scroll")).toBeInTheDocument();
   });
 });
+
+// v1.4.0b: batch object operations — select + delete. Covers the four
+// scope acceptance gates:
+//
+//   1. Select-all visible toggles every file row (folders excluded).
+//   2. Delete fires N parallel DELETE calls.
+//   3. Partial failure surfaces a per-row error indicator on the
+//      survivors AND leaves them selected for retry.
+//   4. Cancel clears the selection.
+describe("/files/$regionId/b/$bid — batch operations (v1.4.0b)", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  // Restore fetch between tests so other suites' assumptions hold.
+  // Using afterEach via finally inside each test would also work but
+  // this is cleaner across the suite.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const restoreFetch = () => {
+    globalThis.fetch = originalFetch;
+  };
+
+  it("select-all-visible checkbox ticks every file row but not folder rows", async () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [
+          { key: "a.txt", size: 10 },
+          { key: "b.txt", size: 20 },
+          { key: "c.txt", size: 30 },
+        ],
+        commonPrefixes: ["raw/"],
+      }) as any,
+    );
+
+    renderBucket();
+
+    // No action bar yet.
+    expect(screen.queryByTestId("batch-action-bar")).not.toBeInTheDocument();
+
+    // Click select-all-visible.
+    await userEvent.click(screen.getByTestId("select-all-visible"));
+
+    // Action bar mounts with count = 3 (folder NOT selected).
+    expect(screen.getByTestId("batch-action-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("batch-action-bar-count")).toHaveTextContent("3 selected");
+  });
+
+  it("delete confirm fans out N DELETE requests in parallel", async () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [
+          { key: "a.txt", size: 10 },
+          { key: "b.txt", size: 20 },
+          { key: "c.txt", size: 30 },
+        ],
+      }) as any,
+    );
+
+    // Stub fetch to count + verify the URL shape.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(null, { status: 204 }),
+    );
+    globalThis.fetch = fetchMock as any;
+
+    renderBucket();
+
+    // Select all three files, open confirm, confirm.
+    await userEvent.click(screen.getByTestId("select-all-visible"));
+    await userEvent.click(screen.getByTestId("batch-action-bar-delete"));
+    await userEvent.click(screen.getByTestId("batch-delete-confirm-action"));
+
+    // Three DELETEs to the per-key endpoint.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    for (const call of fetchMock.mock.calls) {
+      const [url, init] = call as [string, RequestInit];
+      expect(init.method).toBe("DELETE");
+      expect(url).toMatch(/\/api\/v1\/user\/regions\/lsi-region-id\/buckets\/lsi\/objects\//);
+    }
+    // Each of a.txt / b.txt / c.txt fired exactly once.
+    const urls = fetchMock.mock.calls.map((c: any) => c[0] as string);
+    expect(urls.some((u) => u.endsWith("/objects/a.txt"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/objects/b.txt"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/objects/c.txt"))).toBe(true);
+
+    restoreFetch();
+  });
+
+  it("partial failure surfaces per-row error indicators AND keeps failed rows selected", async () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [
+          { key: "ok.txt", size: 10 },
+          { key: "boom.txt", size: 20 },
+        ],
+      }) as any,
+    );
+
+    // ok.txt → 204, boom.txt → 500.
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => {
+      if (url.endsWith("/objects/boom.txt")) {
+        return new Response(JSON.stringify({ message: "backend exploded" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    renderBucket();
+    await userEvent.click(screen.getByTestId("select-all-visible"));
+    await userEvent.click(screen.getByTestId("batch-action-bar-delete"));
+    await userEvent.click(screen.getByTestId("batch-delete-confirm-action"));
+
+    // The per-row error label appears for boom.txt only.
+    expect(await screen.findByTestId("file-row-error-label-boom.txt")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-row-error-label-ok.txt")).not.toBeInTheDocument();
+
+    // The action bar stays mounted with count = 1 (the survivor).
+    expect(screen.getByTestId("batch-action-bar-count")).toHaveTextContent("1 selected");
+
+    restoreFetch();
+  });
+
+  it("cancel clears the selection without firing any DELETEs", async () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [
+          { key: "a.txt", size: 10 },
+          { key: "b.txt", size: 20 },
+        ],
+      }) as any,
+    );
+
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as any;
+
+    renderBucket();
+    await userEvent.click(screen.getByTestId("select-all-visible"));
+    expect(screen.getByTestId("batch-action-bar")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("batch-action-bar-cancel"));
+
+    expect(screen.queryByTestId("batch-action-bar")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    restoreFetch();
+  });
+});

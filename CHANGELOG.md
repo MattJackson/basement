@@ -4,6 +4,45 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.4.0b — 2026-05-22
+
+Scale + perf cycle 2 of v1.4. Two surfaces that broke down at
+thousand-bucket / thousand-object scale get pagination + selection:
+
+* **Paginated key permissions screen.** `/admin/clusters/{cid}/keys/{kid}`
+  Edit mode now hydrates the FULL cluster bucket list (granted +
+  ungranted) instead of just `key.buckets`, so the operator can grant
+  access to new buckets without bouncing through the "+ Grant access"
+  dialog. Filter input (`Filter buckets...`) narrows by alias substring
+  client-side. Pagination at 50 buckets per page with Previous/Next +
+  "Showing X-Y of Z (page N of M)" indicator. "Show only granted"
+  toggle (default off — shows ALL, on — hides ungranted rows). Sticky
+  Save bar pins to the bottom of the card so the operator never has to
+  scroll a long list to commit. Checkbox state survives pagination —
+  the edit array is mutated in-place, not rebuilt per page.
+
+* **Batch object operations in the bucket browser.** Per-file checkbox
+  column added at the left edge of every file row (folder rows are
+  excluded — recursive deletes need explicit confirmation per folder).
+  "Select all visible" checkbox in the table header with an
+  indeterminate state when some-but-not-all visible files are
+  selected. When ≥1 object is selected a sticky bottom action bar
+  appears with "N selected | Delete N objects | Cancel". Delete fires
+  parallel DELETE requests via `Promise.allSettled` — partial failure
+  surfaces a per-row error indicator (destructive icon + "delete
+  failed" label + title attribute carrying the backend's error
+  message) and leaves the survivors selected for retry. Move/copy
+  punted to v1.5 (needs server-side copy + delete pattern). Row
+  height held at 48px so virtualization perf from v1.4.0a stays
+  intact.
+
+Tests: 4 new for key perms editor (filter narrows, pagination,
+only-granted, state survives pagination), 4 new for batch ops
+(select-all, delete fans out N requests, partial failure surfaces
+per-row errors, cancel clears). 218/218 green. Smoke gains two
+checks: key edit-mode mounts the new filter + sticky-save, bucket
+browser mounts the select-all-visible checkbox.
+
 ## v1.4.0a — 2026-05-22
 
 Scale + perf cycle 1 of v1.4. Bucket browser virtualized via
