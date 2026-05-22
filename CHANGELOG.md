@@ -4,6 +4,32 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0b — 2026-05-22
+
+Bearer-token authentication middleware for service accounts. The
+auth middleware now tries (in order) the existing JWT session cookie,
+then `Authorization: Bearer {AccessKeyID}:{Secret}` against the
+v1.7.0a SA store, then falls back to `SESSION_REQUIRED`. Cookie wins
+when both are present (an attacker who can set the Authorization
+header still can't override an `HttpOnly` `Secure` cookie). Bearer
+matches resolve the SA via `GetByAccessKey`, screen for
+`SERVICE_ACCOUNT_REVOKED` + `SERVICE_ACCOUNT_EXPIRED` before the
+bcrypt compare, then debounce-touch `LastUsedAt` and inject a
+`Claims` whose `UserID` is the SA owner and whose new
+`ServiceAccountID` field is the SA row ID. Policy gates branch on
+`ServiceAccountID`: SA-authed requests route through a new
+`policy.ServiceAccountAllows` pure-function that AND's the SA's
+granted `Capabilities` list against its outer `Scopes` envelope —
+the SA bundle is both floor and ceiling, the JWT user's role
+assignments never apply. A missing capability returns 403
+`ELEVATION_NOT_AVAILABLE` (distinct from `ELEVATION_REQUIRED` —
+bearer tokens cannot elevate to ADMIN, so the FE must not render an
+elevate CTA for M2M callers). Audit attribution rewrites the actor
+field from the SA owner's username to `sa:{SA.ID}` so an operator
+greppping audit can distinguish human cookie activity from machine
+bearer activity at a glance. SigV4 (the v2.0 gateway path) is still
+out of scope this cycle.
+
 ## v1.7.0a — 2026-05-22
 
 Service-account data layer + admin API. First cycle of the v1.7

@@ -158,6 +158,15 @@ func (permissiveEnforcer) SeedEnvAdmin(_ string) error { return nil }
 // 503 POLICY_NOT_WIRED if the enforcer hasn't been set on the server
 // (defense against misconfigured boots — better to fail loud than
 // silently allow). 401 / 403 otherwise.
+//
+// v1.7.0b: when the request authed via a service-account bearer token
+// (claims.ServiceAccountID != ""), the policy check is routed through
+// policy.ServiceAccountAllows on the SA row's capability + scope
+// bundle rather than the user's role assignments. SA tokens cannot
+// elevate (sudo mode requires fresh password/OIDC), so a missing
+// capability returns 403 ELEVATION_NOT_AVAILABLE rather than
+// ELEVATION_REQUIRED — the FE shouldn't render an "elevate" CTA for
+// machine clients.
 func (s *Server) requireCapability(w http.ResponseWriter, r *http.Request, capability, scope string) (userID string, ok bool) {
 	if s.policy == nil {
 		writeErrorSimple(w, http.StatusServiceUnavailable, "POLICY_NOT_WIRED",
@@ -169,6 +178,14 @@ func (s *Server) requireCapability(w http.ResponseWriter, r *http.Request, capab
 	if !ok || claims.UserID == "" {
 		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
 		return "", false
+	}
+
+	// Service-account branch (v1.7.0b). Bearer-authed requests bypass
+	// the JWT mode-elevation machinery entirely — there's no cookie to
+	// upgrade and no sudo flow available — so the entire gate boils
+	// down to "does the SA's capability bundle cover this call?".
+	if claims.ServiceAccountID != "" {
+		return s.requireCapabilityServiceAccount(w, r, claims, capability, scope)
 	}
 
 	if !s.policy.Can(claims.UserID, capability, scope) {
@@ -219,6 +236,90 @@ func (s *Server) requireCapability(w http.ResponseWriter, r *http.Request, capab
 	}
 
 	return claims.UserID, true
+}
+
+// requireCapabilityServiceAccount is the v1.7.0b SA branch of
+// requireCapability. Resolves the SA row from claims.ServiceAccountID,
+// asks policy.ServiceAccountAllows whether the SA's bundle covers
+// (capability, scope), and writes a 403 ELEVATION_NOT_AVAILABLE if not.
+//
+// ELEVATION_NOT_AVAILABLE is a deliberate variant of ELEVATION_REQUIRED
+// for machine clients: the FE shouldn't render an "elevate your
+// session" CTA for a CI runner, and a CLI library shouldn't loop
+// retrying an action it structurally cannot perform. The error code
+// makes the difference machine-readable on the caller side.
+//
+// On a successful gate we audit-attribute the action with actor =
+// "sa:{SA.ID}" so the audit log can distinguish "matthew via
+// service-account ci-prod" from "matthew via cookie" — the resource
+// trail is the same, but the principal is different. The caller of
+// this method returns the userID (SA's OwnerUserID), keeping the
+// downstream handler's "who owns this action" attribution sensible.
+func (s *Server) requireCapabilityServiceAccount(w http.ResponseWriter, r *http.Request, claims *auth.Claims, capability, scope string) (userID string, ok bool) {
+	// Resolve the SA row. The store handle hangs off s.store; tests
+	// that don't wire it up should not be exercising the SA branch
+	// (they'd need ServiceAccountID claims, which only the bearer
+	// middleware sets).
+	if s.store == nil || s.store.ServiceAccounts() == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SERVICE_ACCOUNTS_NOT_WIRED",
+			"Service account subsystem is not configured on this deployment.")
+		return "", false
+	}
+	saRow, getErr := s.store.ServiceAccounts().Get(r.Context(), claims.ServiceAccountID)
+	if getErr != nil {
+		// The middleware already verified the SA exists at request
+		// time, so a Get failure here means the SA was revoked
+		// between auth + gate check (a narrow race). Treat as 401
+		// — the credential is no longer valid for THIS request.
+		writeErrorSimple(w, http.StatusUnauthorized, "SERVICE_ACCOUNT_REVOKED",
+			"Service account is no longer valid")
+		return "", false
+	}
+
+	if !policy.ServiceAccountAllows(saRow, capability, scope) {
+		// Audit the denial. Actor is the SA — gives the operator a
+		// signal of "ci-prod tried to delete bucket X" rather than
+		// "matthew tried..." which would mis-attribute to the human
+		// owner. ActorRole stays "service_account" for the same
+		// reason; differentiating M2M denials from human denials in a
+		// dashboard query needs both axes.
+		s.audit.Log(audit.Event{
+			Time:      nowFunc().UTC(),
+			Actor:     "sa:" + saRow.ID,
+			ActorRole: "service_account",
+			Action:    "auth:elevation_not_available",
+			Resource:  capability + "@" + scope,
+			Detail:    fmt.Sprintf("sa %q lacks %s on %s", saRow.Name, capability, scope),
+			Result:    audit.ResultFailure,
+			IP:        clientIP(r),
+			UserAgent: r.UserAgent(),
+		})
+
+		writeError(w, http.StatusForbidden, "ELEVATION_NOT_AVAILABLE",
+			"This service account cannot perform this action.",
+			map[string]any{
+				"capability":          capability,
+				"scope":               scope,
+				"service_account_id":  saRow.ID,
+			})
+		return "", false
+	}
+
+	return claims.UserID, true
+}
+
+// saActor returns the audit actor string for an authed request: the
+// canonical "sa:{ID}" form when a service-account token authed the
+// call, falling back to claims.UserID for cookie-authed humans. Used
+// by audit_helpers.go so SA-authed mutations attribute correctly.
+func saActor(claims *auth.Claims) string {
+	if claims == nil {
+		return ""
+	}
+	if claims.ServiceAccountID != "" {
+		return "sa:" + claims.ServiceAccountID
+	}
+	return claims.UserID
 }
 
 // scopeBucket builds a "bucket:{cid}:{bid}" scope string. Centralised

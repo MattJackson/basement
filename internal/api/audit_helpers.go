@@ -68,7 +68,11 @@ func (s *Server) auditEmit(r *http.Request, action, resource, result, detail str
 	actor := ""
 	actorRole := ""
 	if claims, ok := auth.FromContext(r.Context()); ok && claims != nil {
-		actor = claims.UserID
+		// v1.7.0b: bearer-authed (service-account) requests attribute
+		// under "sa:{SA.ID}" so an operator can grep audit for M2M
+		// activity distinct from human cookie activity. saActor handles
+		// the branch — falls back to claims.UserID for human callers.
+		actor = saActor(claims)
 		actorRole = claims.Role
 	}
 

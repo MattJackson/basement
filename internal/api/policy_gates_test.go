@@ -18,6 +18,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
+	"github.com/mattjackson/basement/internal/serviceaccount"
 	"github.com/mattjackson/basement/internal/store"
 )
 
@@ -446,5 +448,186 @@ func TestRequireCapability_AdminMode_AdminCapability_Passes(t *testing.T) {
 		"admin", expiresAt, "cluster:edit", "cluster:abc")
 	if !ok {
 		t.Fatalf("expected gate to pass; got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// ---- v1.7.0b: service-account bearer-flow gate tests ---------------
+//
+// These exercise requireCapability's SA branch: when the request's
+// Claims carry a ServiceAccountID, the gate evaluates against the SA's
+// granted capability + scope bundle (via policy.ServiceAccountAllows)
+// rather than the JWT user's role assignments. SA tokens cannot
+// elevate, so a missing capability returns 403 ELEVATION_NOT_AVAILABLE
+// (not the human-tier ELEVATION_REQUIRED).
+//
+// We build the SA in the wired store, then synthesise a *Claims
+// directly into a request context — this lets the test focus on the
+// gate's branch logic without needing to actually run the bearer
+// middleware. The middleware behaviour is covered separately in
+// internal/auth/middleware_bearer_test.go.
+
+// newSATestEnv extends newGateTestEnv by wiring a real SA store onto
+// the server's store so requireCapabilityServiceAccount's GetByID
+// resolves. Returns the server, the policy enforcer, and a cleanup.
+func newSATestEnv(t *testing.T) (*Server, policy.Enforcer, func()) {
+	t.Helper()
+	srv, _, enf, cleanup := newGateTestEnv(t)
+	if err := srv.store.WireServiceAccounts(); err != nil {
+		cleanup()
+		t.Fatalf("WireServiceAccounts: %v", err)
+	}
+	return srv, enf, cleanup
+}
+
+// because we can't directly inject context with the auth package's
+// unexported key, the tests below mint a real JWT for the owner +
+// run through a tiny middleware wrapper that overrides the
+// ServiceAccountID after parse. See callSAGate.
+func callSAGate(t *testing.T, srv *Server, secret []byte, saID, ownerUserID, capability, scope string) (*httptest.ResponseRecorder, string, bool) {
+	t.Helper()
+
+	tok, err := auth.IssueToken(secret, ownerUserID, "service_account", false, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+	rr := httptest.NewRecorder()
+
+	var capturedUID string
+	var capturedOK bool
+	// Inner handler: requireCapability is what we're testing.
+	innerH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedUID, capturedOK = srv.requireCapability(w, r, capability, scope)
+	})
+	// Outer wrap: after auth.Middleware parses the JWT and stuffs
+	// Claims into context, override ServiceAccountID so the gate
+	// takes the SA branch.
+	wrap := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if c, ok := auth.FromContext(r.Context()); ok {
+				c.ServiceAccountID = saID
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	auth.Middleware(secret)(wrap(innerH)).ServeHTTP(rr, req)
+	return rr, capturedUID, capturedOK
+}
+
+// TestRequireCapability_SA_WithCap_Passes: a service account whose
+// bundle includes bucket:view at the right scope passes the gate
+// cleanly. UserID returned is the SA's owner (so downstream
+// attribution works), not the SA ID.
+func TestRequireCapability_SA_WithCap_Passes(t *testing.T) {
+	srv, _, cleanup := newSATestEnv(t)
+	defer cleanup()
+
+	sa, _, err := srv.store.ServiceAccounts().Create(context.Background(), serviceaccount.ServiceAccount{
+		OwnerUserID: "matthew",
+		Name:        "ci-good",
+		Capabilities: []serviceaccount.Capability{
+			{ID: "bucket:view", Scope: "bucket:c1:*"},
+		},
+		Scopes: []string{"bucket:c1:*"},
+	})
+	if err != nil {
+		t.Fatalf("Create SA: %v", err)
+	}
+
+	rr, uid, ok := callSAGate(t, srv, srv.cfg.JWT.Secret, sa.ID, "matthew",
+		"bucket:view", "bucket:c1:lsi")
+	if !ok {
+		t.Fatalf("expected gate to pass; got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if uid != "matthew" {
+		t.Errorf("returned UserID = %q, want matthew (SA owner)", uid)
+	}
+}
+
+// TestRequireCapability_SA_WithoutCap_ElevationNotAvailable: an SA
+// that doesn't carry the required capability gets 403
+// ELEVATION_NOT_AVAILABLE — the FE must NOT render an elevate CTA
+// for M2M clients. Even if the SA's owner has the cap via their
+// role assignment, the SA bundle is the floor + ceiling.
+func TestRequireCapability_SA_WithoutCap_ElevationNotAvailable(t *testing.T) {
+	srv, enf, cleanup := newSATestEnv(t)
+	defer cleanup()
+
+	// Owner has the capability via host_admin@*. The SA bundle does
+	// NOT, so the gate must still refuse — bearer tokens never
+	// inherit owner role assignments.
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "*",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	sa, _, err := srv.store.ServiceAccounts().Create(context.Background(), serviceaccount.ServiceAccount{
+		OwnerUserID: "matthew",
+		Name:        "ci-limited",
+		Capabilities: []serviceaccount.Capability{
+			{ID: "bucket:view", Scope: "bucket:c1:*"},
+		},
+		Scopes: []string{"bucket:c1:*"},
+	})
+	if err != nil {
+		t.Fatalf("Create SA: %v", err)
+	}
+
+	rr, _, ok := callSAGate(t, srv, srv.cfg.JWT.Secret, sa.ID, "matthew",
+		"cluster:delete", "cluster:abc")
+	if ok {
+		t.Fatal("expected gate to deny; got ok=true")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var er struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if er.Error.Code != "ELEVATION_NOT_AVAILABLE" {
+		t.Errorf("error code = %q, want ELEVATION_NOT_AVAILABLE", er.Error.Code)
+	}
+	if got := er.Error.Details["capability"]; got != "cluster:delete" {
+		t.Errorf("details.capability = %v, want cluster:delete", got)
+	}
+	if got := er.Error.Details["scope"]; got != "cluster:abc" {
+		t.Errorf("details.scope = %v, want cluster:abc", got)
+	}
+	if got := er.Error.Details["service_account_id"]; got != sa.ID {
+		t.Errorf("details.service_account_id = %v, want %q", got, sa.ID)
+	}
+}
+
+// TestRequireCapability_JWTPath_UnchangedBySAFlag: a request without
+// ServiceAccountID set on claims continues to flow through the
+// original JWT mode-elevation gate exactly as before. This guards
+// against accidental regression where the SA branch swallows human
+// callers.
+func TestRequireCapability_JWTPath_UnchangedBySAFlag(t *testing.T) {
+	srv, enf, secret, cleanup := newModeGateEnv(t)
+	defer cleanup()
+
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "*",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	expiresAt := time.Now().Add(5 * time.Minute).Unix()
+	rr, uid, ok := callRequireCapabilityWithMode(t, srv, secret,
+		"admin", expiresAt, "cluster:delete", "cluster:abc")
+	if !ok {
+		t.Fatalf("JWT path regressed; got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if uid != "matthew" {
+		t.Errorf("returned UserID = %q, want matthew", uid)
 	}
 }

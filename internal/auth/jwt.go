@@ -26,12 +26,22 @@ var ErrInvalidAlgorithm = errors.New("unsupported algorithm")
 // fields — the policy gate treats those as ADMIN mode for a 7-day grace
 // window so matthew's existing session keeps working across the deploy.
 // See policy_gates.currentMode + ADR-0003 "Backwards compatibility".
+//
+// ServiceAccountID (v1.7.0b): populated by the bearer-auth middleware
+// when the request authed via a service-account access key. UserID is
+// set to the SA's OwnerUserID so audit attribution and existing
+// FromContext-based handlers keep working; ServiceAccountID lets the
+// policy gates and audit layer distinguish human cookie-auth ("UserID
+// alice") from machine bearer-auth ("UserID alice via SA xyz"). Empty
+// for every JWT-cookie request — the field is never serialized into
+// nor read from a JWT, only constructed in-memory by the bearer path.
 type Claims struct {
-	UserID        string `json:"userId"`
-	Role          string `json:"role"`
-	UIAdmin       bool   `json:"uiAdmin"`
-	Mode          string `json:"mode,omitempty"`
-	ModeExpiresAt int64  `json:"mext,omitempty"`
+	UserID           string `json:"userId"`
+	Role             string `json:"role"`
+	UIAdmin          bool   `json:"uiAdmin"`
+	Mode             string `json:"mode,omitempty"`
+	ModeExpiresAt    int64  `json:"mext,omitempty"`
+	ServiceAccountID string `json:"-"`
 	*jwt.RegisteredClaims
 }
 

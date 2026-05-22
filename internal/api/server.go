@@ -206,6 +206,25 @@ func (s *Server) SetMetricsRecorder(r metrics.Recorder) {
 	s.metrics = r
 }
 
+// authMiddleware returns the auth middleware to install on protected
+// route groups. Production wires the v1.7.0b bearer path here by
+// passing the wired service-account store as the BearerVerifier;
+// tests + setups without WireServiceAccounts() get cookie-only auth
+// (verifier is nil, the path silently degrades).
+//
+// Looked up at request time via s.store rather than captured here so
+// a later WireServiceAccounts() call still takes effect — but in
+// production the store is always wired before New() (see main.go).
+func (s *Server) authMiddleware() func(http.Handler) http.Handler {
+	var verifier auth.BearerVerifier
+	if s.store != nil {
+		if sas := s.store.ServiceAccounts(); sas != nil {
+			verifier = sas
+		}
+	}
+	return auth.MiddlewareWithBearer(s.cfg.JWT.Secret, verifier)
+}
+
 // Start starts the HTTP server and blocks until context is canceled or error.
 func (s *Server) Start(ctx context.Context) error {
 	go func() {
@@ -260,7 +279,7 @@ func (s *Server) routes() {
 
 		// Authenticated routes — JWT cookie required.
 		apiR.Group(func(authG chi.Router) {
-			authG.Use(auth.Middleware(s.cfg.JWT.Secret))
+			authG.Use(s.authMiddleware())
 
 			authG.Post("/auth/logout", s.logoutHandler)
 			authG.Get("/auth/me", s.meHandler)
@@ -279,7 +298,7 @@ func (s *Server) routes() {
 
 		// Admin routes — admin role required.
 		apiR.Group(func(adminG chi.Router) {
-			adminG.Use(auth.Middleware(s.cfg.JWT.Secret))
+			adminG.Use(s.authMiddleware())
 			adminG.Use(auth.RequireRole("admin"))
 
 			adminG.Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
@@ -334,7 +353,7 @@ func (s *Server) routes() {
 
 		// UI Admin routes — require uiAdmin=true.
 		apiR.Group(func(uiAdminG chi.Router) {
-			uiAdminG.Use(auth.Middleware(s.cfg.JWT.Secret))
+			uiAdminG.Use(s.authMiddleware())
 			uiAdminG.Use(auth.RequireUIAdmin())
 
 			// Org capabilities management
@@ -424,7 +443,7 @@ func (s *Server) routes() {
 		// User routes — authenticated users only. Visibility derives
 		// from each user's region keychain (ADR-0002); see user_filter.go.
 		apiR.Group(func(userG chi.Router) {
-			userG.Use(auth.Middleware(s.cfg.JWT.Secret))
+			userG.Use(s.authMiddleware())
 
 			// User shares endpoints (v0.7.0g USER.SHARES).
 			userG.Post("/user/shares", s.userCreateShareHandler)
