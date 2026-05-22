@@ -33,8 +33,8 @@ real index lands in v1.9.
 
 `basement-mcp` reads `~/.config/basement/config.yaml` (or
 `$XDG_CONFIG_HOME/basement/config.yaml`, or whatever
-`$BASEMENT_CONFIG` points at). The shape is the same as the
-`basement` CLI — both share `internal/clilib`:
+`$BASEMENT_CONFIG` points at). The schema is defined in
+`internal/clilib`:
 
 ```yaml
 profiles:
@@ -44,9 +44,12 @@ profiles:
     secret_key: redacted-bcrypt-output
 ```
 
-File mode **must** be `0600`. The CLI's `basement login` writes
-this file with the correct permissions; if you're authoring it by
-hand, `chmod 600 ~/.config/basement/config.yaml`.
+File mode **must** be `0600`. The fastest way to generate the file
+is to mint a service account in the web UI at
+`/admin/service-accounts/new` and copy the YAML snippet from the
+"Use with MCP" card on the shown-once dialog (Download config.yaml
+writes the same block with the plaintext secret inlined). If you're
+authoring it by hand, `chmod 600 ~/.config/basement/config.yaml`.
 
 CI environments can override the secret without rewriting the file:
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -285,7 +285,19 @@ function ServiceAccountRow({
 
   return (
     <TableRow data-testid={`sa-row-${sa.id}`}>
-      <TableCell className="font-medium">{sa.name}</TableCell>
+      <TableCell className="font-medium">
+        {/* v1.8.0d — Name links to the detail page so operators can
+            grab the MCP config snippet (Use with MCP card) after the
+            shown-once dialog has closed. */}
+        <Link
+          to="/admin/service-accounts/$id"
+          params={{ id: sa.id }}
+          className="hover:underline"
+          data-testid={`sa-name-link-${sa.id}`}
+        >
+          {sa.name}
+        </Link>
+      </TableCell>
       <TableCell>
         <span className="font-mono text-xs break-all">{sa.accessKeyId}</span>
       </TableCell>
