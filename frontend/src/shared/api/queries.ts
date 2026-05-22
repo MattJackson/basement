@@ -978,6 +978,44 @@ export function useUnassignRole() {
   });
 }
 
+// v1.3.0e CLUSTER.ADMINS — per-cluster admin assignments view.
+//
+// Convenience read for /admin/clusters/{cid}: returns the assignments
+// scoped to this cluster, plus wildcard inheritance (cluster:* and *)
+// marked with `inherited=true`. The display name is joined server-side
+// so the FE doesn't need a second round-trip per row.
+//
+// Same `policy:view_matrix` gate as the global /admin/policies GET.
+// Mutations still go through useAssignRole / useUnassignRole above.
+export type ClusterAdminAssignment = {
+  userId: string;
+  displayName?: string;
+  roleId: string;
+  scope: string;
+  source?: string;
+  inherited: boolean;
+};
+export type ClusterAdminsResponse = {
+  assignments: ClusterAdminAssignment[];
+};
+
+export function useClusterAdmins(cid: string) {
+  return useQuery<ClusterAdminsResponse>({
+    queryKey: ["admin", "clusters", cid, "admins"],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/admins`,
+        { credentials: "include" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/clusters/${cid}/admins`, res.status, body);
+      return body as ClusterAdminsResponse;
+    },
+    staleTime: 30 * 1000,
+    enabled: !!cid,
+  });
+}
+
 // POLICY.SIM v0.9.0j — what-if simulator over the existing matrix.
 //
 // Pure analysis: no side effects, no enforcer mutation. The hook is a
