@@ -23,10 +23,13 @@ import (
 // behaviour without spinning up a real IdP.
 type fakeOIDC struct {
 	authURL          string
+	elevationURL     string
 	lastState        string
 	lastNonce        string
+	lastPrompt       string
 	exchangeFn       func(ctx context.Context, code string) (*oauth2.Token, error)
 	verifyFn         func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, error)
+	verifyAuthTimeFn func(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, int64, error)
 	issuer           string
 	autoProvFlag     bool
 }
@@ -38,6 +41,24 @@ func (f *fakeOIDC) AuthCodeURL(state, nonce string) string {
 		return "https://idp.example.com/authorize?state=" + url.QueryEscape(state) + "&nonce=" + url.QueryEscape(nonce)
 	}
 	return f.authURL + "?state=" + url.QueryEscape(state) + "&nonce=" + url.QueryEscape(nonce)
+}
+
+func (f *fakeOIDC) ElevationAuthCodeURL(state, nonce, prompt string) string {
+	f.lastState = state
+	f.lastNonce = nonce
+	f.lastPrompt = prompt
+	base := f.elevationURL
+	if base == "" {
+		base = f.authURL
+	}
+	if base == "" {
+		base = "https://idp.example.com/authorize"
+	}
+	u := base + "?state=" + url.QueryEscape(state) + "&nonce=" + url.QueryEscape(nonce) + "&max_age=0"
+	if prompt != "" {
+		u += "&prompt=" + url.QueryEscape(prompt)
+	}
+	return u
 }
 
 func (f *fakeOIDC) Exchange(ctx context.Context, code string) (*oauth2.Token, error) {
@@ -58,6 +79,19 @@ func (f *fakeOIDC) VerifyIDToken(ctx context.Context, raw, expectedNonce string)
 		Name:     "New User",
 		Provider: f.issuer,
 	}, nil
+}
+
+func (f *fakeOIDC) VerifyIDTokenWithAuthTime(ctx context.Context, raw, expectedNonce string) (*auth.OIDCClaims, int64, error) {
+	if f.verifyAuthTimeFn != nil {
+		return f.verifyAuthTimeFn(ctx, raw, expectedNonce)
+	}
+	claims, err := f.VerifyIDToken(ctx, raw, expectedNonce)
+	if err != nil {
+		return nil, 0, err
+	}
+	// Default fake auth_time is "now" so happy-path callback tests
+	// pass the 60s freshness check without callers having to plumb it.
+	return claims, time.Now().Unix(), nil
 }
 
 func (f *fakeOIDC) Issuer() string        { return f.issuer }

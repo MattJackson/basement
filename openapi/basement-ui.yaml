@@ -2416,7 +2416,11 @@ paths:
                     enum: [admin, elevated]
         responses:
           '200':
-            description: Elevation successful; cookie re-issued with bumped mode
+            description: |
+              Elevation successful (mode/mode_expires_at/mode_ttl_seconds set
+              + cookie re-issued) OR the dispatcher pivoted an OIDC-only user
+              into the OIDC flow (requires_oidc=true + start_url; no cookie
+              issued yet — FE POSTs start_url to begin the OIDC challenge).
             content:
               application/json:
                 schema:
@@ -2432,6 +2436,18 @@ paths:
                     mode_ttl_seconds:
                       type: integer
                       format: int64
+                    requires_oidc:
+                      type: boolean
+                      description: |
+                        v1.2.0c: true when the dispatcher detected an
+                        OIDC-only user. The FE should POST to start_url to
+                        begin the OIDC step-up challenge instead of
+                        treating this as an error.
+                    start_url:
+                      type: string
+                      description: |
+                        v1.2.0c: relative path the FE POSTs to begin the
+                        OIDC step-up. Always /api/v1/auth/elevate/oidc/start.
           '400':
             description: INVALID_TARGET_MODE / INVALID_JSON
             content:
@@ -2446,6 +2462,126 @@ paths:
                   $ref: '#/components/schemas/ErrorResponse'
           '403':
             description: OIDC_USER_ELEVATION_NOT_SUPPORTED
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: OIDC_NOT_CONFIGURED (OIDC-only user but server has no OIDC provider)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /auth/elevate/oidc/start:
+      post:
+        operationId: elevateOIDCStart
+        summary: Begin OIDC step-up elevation (ADR-0003)
+        description: |
+          For OIDC-only users (no local password): mints a short-lived
+          state token + returns the IdP's authorize URL with
+          `prompt=login` (configurable via BASEMENT_OIDC_ELEVATION_PROMPT)
+          and `max_age=0` so the IdP forces a FRESH re-authentication
+          even if it has a cached session. The FE is expected to
+          window.location.href to the returned redirect_url; the
+          callback handler completes the elevation server-side.
+        tags:
+        - Auth
+        x-basement-since: '1.2.0c'
+        security:
+        - cookieAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - target_mode
+                properties:
+                  target_mode:
+                    type: string
+                    enum: [admin, elevated]
+        responses:
+          '200':
+            description: Elevation flow started; FE must navigate to redirect_url.
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    redirect_url:
+                      type: string
+                      format: uri
+          '400':
+            description: INVALID_TARGET_MODE / INVALID_JSON
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: UNAUTHORIZED
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: OIDC_NOT_CONFIGURED
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /auth/elevate/oidc/callback:
+      get:
+        operationId: elevateOIDCCallback
+        summary: OIDC step-up elevation callback (ADR-0003)
+        description: |
+          Handles the IdP redirect back after a step-up auth. Validates
+          state (CSRF + retrieves target_mode), exchanges the code,
+          verifies the ID token, checks `auth_time` is within 60s
+          (proves fresh login — protects against IdPs that ignore
+          prompt=login + max_age=0), mints the elevated cookie, then
+          302s the browser to `/?elevated=<mode>` so the FE pops a
+          success toast and closes any modal.
+        tags:
+        - Auth
+        x-basement-since: '1.2.0c'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        responses:
+          '302':
+            description: Elevation succeeded; cookie re-issued with bumped mode.
+            headers:
+              Location:
+                schema:
+                  type: string
+              Set-Cookie:
+                schema:
+                  type: string
+          '400':
+            description: OIDC_STATE_MISSING / OIDC_STATE_INVALID / OIDC_CODE_MISSING / OIDC_EXCHANGE_FAILED / OIDC_ID_TOKEN_INVALID
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: OIDC_AUTH_TIME_STALE (IdP returned a cached session)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: OIDC_NOT_CONFIGURED
             content:
               application/json:
                 schema:
@@ -3990,6 +4126,12 @@ components:
             type: string
             nullable: true
             description: OIDC subject claim if provisioned via OIDC (v1.3+).
+          oidcUser:
+            type: boolean
+            description: |
+              True when this account was provisioned via OIDC (no local
+              password) so the elevation modal must use the OIDC
+              challenge flow instead of the password form. v1.2.0c+.
           created_at:
             type: string
             format: date-time

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	stdsync "sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -26,8 +27,16 @@ import (
 // Defined as an interface here so tests can substitute a fake.
 type oidcProvider interface {
 	AuthCodeURL(state, nonce string) string
+	// ElevationAuthCodeURL builds the authorize URL for the ADR-0003
+	// v1.2.0c sudo-style elevation flow — adds `prompt=<promptParam>`
+	// and `max_age=0` so the IdP forces a fresh re-auth.
+	ElevationAuthCodeURL(state, nonce, promptParam string) string
 	Exchange(ctx context.Context, code string) (*oauth2.Token, error)
 	VerifyIDToken(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, error)
+	// VerifyIDTokenWithAuthTime is like VerifyIDToken but also returns
+	// the `auth_time` claim from the ID token; used by the elevation
+	// callback to confirm freshness.
+	VerifyIDTokenWithAuthTime(ctx context.Context, rawIDToken, expectedNonce string) (*auth.OIDCClaims, int64, error)
 	Issuer() string
 	AutoProvision() bool
 }
@@ -47,6 +56,13 @@ type Server struct {
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
+
+	// oidcElevState backs /api/v1/auth/elevate/oidc/start +
+	// /callback (ADR-0003, v1.2.0c). 5min TTL'd, cleaned up on each
+	// insert via the store's own sweep. Allocated lazily so tests
+	// that never touch the OIDC elevation path don't pay for it.
+	oidcElevMu    stdsync.Mutex
+	oidcElevState *oidcElevationStateStore
 }
 
 // New creates a new Server instance with both legacy single-driver (for back-compat) and registry.
@@ -198,6 +214,13 @@ func (s *Server) routes() {
 			authG.Get("/auth/me", s.meHandler)
 			authG.Post("/auth/elevate", s.elevateHandler)
 			authG.Post("/auth/logout-elevation", s.logoutElevationHandler)
+			// ADR-0003 v1.2.0c: OIDC step-up elevation. Start mints
+			// a state token + returns the IdP authorize URL with
+			// `prompt=login` + `max_age=0`; callback exchanges the
+			// code, checks auth_time freshness, and mints the
+			// elevated cookie before redirecting to "/?elevated=...".
+			authG.Post("/auth/elevate/oidc/start", s.elevateOIDCStartHandler)
+			authG.Get("/auth/elevate/oidc/callback", s.elevateOIDCCallbackHandler)
 			authG.Get("/auth/org-capabilities", s.getCurrentOrgCapabilities)
 			authG.Get("/capabilities", s.capabilitiesHandler)
 		})

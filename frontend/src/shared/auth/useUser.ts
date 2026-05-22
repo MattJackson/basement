@@ -13,6 +13,11 @@ type UserResponse = {
   // "user" / 0 (which matches a default post-login state anyway).
   mode?: AuthMode;
   modeExpiresAt?: number; // unix SECONDS on the wire
+  // ADR-0003 v1.2.0c: true when this account was provisioned via OIDC
+  // (no local password). The elevation modal branches on this — OIDC-
+  // only users get an "Elevate via SSO" button that kicks off
+  // /auth/elevate/oidc/start instead of the password form.
+  oidcUser?: boolean;
 };
 
 export function useUser() {
@@ -34,6 +39,7 @@ export function useUser() {
         uiAdmin?: boolean;
         mode?: AuthMode;
         modeExpiresAt?: number;
+        oidcUser?: boolean;
       };
       return {
         id: (data as { id?: string }).id,
@@ -42,6 +48,7 @@ export function useUser() {
         uiAdmin: userData.uiAdmin ?? false,
         mode: userData.mode,
         modeExpiresAt: userData.modeExpiresAt,
+        oidcUser: userData.oidcUser ?? false,
       } as UserResponse;
     },
     staleTime: 5 * 60 * 1000,

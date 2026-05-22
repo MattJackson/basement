@@ -69,12 +69,20 @@ type JWTConfig struct {
 // is the only authentication path. If Issuer is set, ClientID, ClientSecret,
 // and RedirectURL must also be set (RedirectURL falls back to
 // ${PublicURL}/api/v1/auth/oidc/callback when PublicURL is set).
+//
+// ElevationPrompt (ADR-0003, v1.2.0c) is the `prompt` parameter the
+// elevation flow appends to the IdP's authorize URL when an OIDC user
+// elevates their session. Defaults to "login" so the IdP forces a
+// re-authentication even if a session is cached. Operators can set it
+// to "consent" (force the consent screen) or empty (no prompt
+// parameter — relies on the IdP's own freshness policy + max_age=0).
 type OIDCConfig struct {
-	Issuer        string // BASEMENT_OIDC_ISSUER
-	ClientID      string // BASEMENT_OIDC_CLIENT_ID
-	ClientSecret  string // BASEMENT_OIDC_CLIENT_SECRET
-	RedirectURL   string // BASEMENT_OIDC_REDIRECT_URL, defaults to ${PublicURL}/api/v1/auth/oidc/callback
-	AutoProvision bool   // BASEMENT_OIDC_AUTO_PROVISION, default false
+	Issuer          string // BASEMENT_OIDC_ISSUER
+	ClientID        string // BASEMENT_OIDC_CLIENT_ID
+	ClientSecret    string // BASEMENT_OIDC_CLIENT_SECRET
+	RedirectURL     string // BASEMENT_OIDC_REDIRECT_URL, defaults to ${PublicURL}/api/v1/auth/oidc/callback
+	AutoProvision   bool   // BASEMENT_OIDC_AUTO_PROVISION, default false
+	ElevationPrompt string // BASEMENT_OIDC_ELEVATION_PROMPT, default "login"
 }
 
 // Load reads and validates configuration from environment variables.
@@ -154,6 +162,13 @@ func Load() (*Config, error) {
 	cfg.OIDC.ClientID = envOr("BASEMENT_OIDC_CLIENT_ID", "")
 	cfg.OIDC.ClientSecret = envOr("BASEMENT_OIDC_CLIENT_SECRET", "")
 	cfg.OIDC.RedirectURL = envOr("BASEMENT_OIDC_REDIRECT_URL", "")
+
+	// ElevationPrompt: defaults to "login" so an OIDC user elevating
+	// via /auth/elevate/oidc/start gets an IdP-side re-auth prompt
+	// even if the IdP has a cached session. Operators may override
+	// to "consent" or "" (empty disables the prompt parameter; we
+	// then rely solely on max_age=0).
+	cfg.OIDC.ElevationPrompt = envOr("BASEMENT_OIDC_ELEVATION_PROMPT", "login")
 
 	// Parse OIDC AutoProvision (optional, default false)
 	oidcAutoProvEnv := os.Getenv("BASEMENT_OIDC_AUTO_PROVISION")
