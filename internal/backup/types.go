@@ -186,6 +186,65 @@ type BackupResult struct {
 // daily schedule doesn't grow the JSON file without bound.
 const MaxHistory = 10
 
+// RestoreRequest is the wire shape for
+// POST /user/backups/{id}/restore (v1.5.0c).
+//
+// Source is implicit — every restore reads from the backup's own
+// destination bucket under {slug(name)}/{timestamp}/. SnapshotTimestamp
+// is either a literal "latest" (the runner resolves to the newest
+// snapshot at request time) or the on-disk layout string from
+// SnapshotTimestampLayout (e.g. "2026-05-21_03:00:00").
+//
+// Destination is operator-chosen so the same snapshot can land back at
+// its original source, or at a fresh bucket altogether for a "spin up
+// a copy and inspect" workflow. DstPrefix is optional; empty means
+// "root of the destination bucket".
+//
+// OverwriteExisting=false (the default) skips any destination object
+// whose key already exists, regardless of ETag — the operator gets
+// the post-disaster "fill in the missing pieces" behaviour. Setting it
+// to true unconditionally re-writes every object back, which is what
+// you want for "I really did roll back to this snapshot, replace
+// everything".
+type RestoreRequest struct {
+	SnapshotTimestamp string `json:"snapshotTimestamp"`
+	DstRegionID       string `json:"dstRegionId"`
+	DstBucket         string `json:"dstBucket"`
+	DstPrefix         string `json:"dstPrefix,omitempty"`
+	OverwriteExisting bool   `json:"overwriteExisting,omitempty"`
+}
+
+// RestoreLatest is the sentinel SnapshotTimestamp value that tells the
+// runner to resolve to the newest available snapshot for the backup
+// at request time. Kept as a constant so client and server agree on
+// the literal string.
+const RestoreLatest = "latest"
+
+// RestoreResult is the outcome of a single restore run. The shape
+// mirrors BackupResult deliberately so the detail page can render
+// both with the same components if it wants to.
+//
+// ObjectsSkipped counts files that were present at the destination
+// and dropped by the OverwriteExisting=false guard. Without that
+// counter the operator can't tell "nothing copied because everything
+// was already there" apart from "nothing copied because the source
+// was empty".
+type RestoreResult struct {
+	StartedAt         time.Time `json:"startedAt"`
+	CompletedAt       time.Time `json:"completedAt"`
+	ObjectsCopied     int64     `json:"objectsCopied"`
+	ObjectsSkipped    int64     `json:"objectsSkipped"`
+	BytesCopied       int64     `json:"bytesCopied"`
+	Errors            []string  `json:"errors,omitempty"`
+	Success           bool      `json:"success"`
+	// ResolvedSnapshot is the timestamp the runner actually read
+	// from. For SnapshotTimestamp="latest" this is the on-disk
+	// timestamp the runner picked; for an explicit timestamp it's
+	// the same value, normalised. Empty when the restore failed
+	// before a snapshot was selected.
+	ResolvedSnapshot string `json:"resolvedSnapshot,omitempty"`
+}
+
 // maxErrorsPerResult bounds the Errors slice on each BackupResult.
 // Matches the v1.5 prompt's "up to 10 most recent" requirement.
 const maxErrorsPerResult = 10

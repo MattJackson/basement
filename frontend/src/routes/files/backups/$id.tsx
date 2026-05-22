@@ -200,7 +200,7 @@ function BackupDetailPage() {
                     <th className="py-2 pr-4">Timestamp</th>
                     <th className="py-2 pr-4 text-right">Objects</th>
                     <th className="py-2 pr-4 text-right">Size</th>
-                    <th className="py-2 pr-4 text-right">Browse</th>
+                    <th className="py-2 pr-4 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -213,6 +213,19 @@ function BackupDetailPage() {
                 Showing the {snapshots.length} most recent snapshot{snapshots.length === 1 ? "" : "s"}. Older
                 snapshots are pruned automatically by the retention policy.
               </p>
+              <div className="mt-4 flex items-center gap-2">
+                <Link
+                  to="/files/backups/$id/restore"
+                  params={{ id: backup.id }}
+                  search={{ ts: undefined }}
+                  className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+                >
+                  Restore from snapshot…
+                </Link>
+                <span className="text-xs text-muted-foreground">
+                  Copies a chosen snapshot back to a destination of your choice.
+                </span>
+              </div>
             </div>
           )}
         </section>
@@ -296,9 +309,11 @@ function HistoryRow({ r, showPruned }: { r: BackupResult; showPruned: boolean })
 
 function SnapshotRow({ s, backup }: { s: BackupSnapshotEntry; backup: Backup }) {
   const when = new Date(s.timestamp).toLocaleString();
-  // Browse navigates the file browser to the snapshot's own prefix
-  // under the destination region/bucket. Uses the same `prefix` query
-  // param the bucket browser already understands.
+  // Each row gets two actions: Browse (drills into the destination
+  // bucket at this snapshot's prefix) and Restore (pre-fills the
+  // restore wizard with this exact timestamp selected). The wizard
+  // reads `?ts=...` to seed Step 1.
+  const tsParam = isoToSnapshotTimestamp(s.timestamp);
   return (
     <tr>
       <td className="py-2 pr-4 whitespace-nowrap">
@@ -311,13 +326,32 @@ function SnapshotRow({ s, backup }: { s: BackupSnapshotEntry; backup: Backup }) 
           to="/files/$regionId/b/$bid"
           params={{ regionId: backup.dstRegionId, bid: backup.dstBucket }}
           search={{ prefix: s.prefix, token: "" }}
-          className="text-primary hover:underline"
+          className="text-primary hover:underline mr-3"
         >
           Browse →
+        </Link>
+        <Link
+          to="/files/backups/$id/restore"
+          params={{ id: backup.id }}
+          search={{ ts: tsParam }}
+          className="text-primary hover:underline"
+        >
+          Restore →
         </Link>
       </td>
     </tr>
   );
+}
+
+// isoToSnapshotTimestamp converts an ISO-8601 string into the
+// "YYYY-MM-DD_HH:MM:SS" layout the backend wants for the
+// snapshotTimestamp field. We deliberately don't go through
+// toLocaleString — the on-disk layout is UTC, and any locale shift
+// would land the wizard on the wrong snapshot.
+function isoToSnapshotTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}_${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
 function formatRetention(b: Backup): string {

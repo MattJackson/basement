@@ -362,6 +362,70 @@ func (s *Server) loadOwnedBackup(w http.ResponseWriter, r *http.Request) (backup
 	return b, true
 }
 
+// userRestoreBackupHandler handles POST /api/v1/user/backups/{id}/restore.
+//
+// Synchronous (the wizard wants the summary inline). For a huge
+// snapshot the request can take a while; the HTTP server's
+// WriteTimeout is bumped on the route group level for restore +
+// run endpoints alike. Audits run_start before kicking off and
+// run_complete after the result lands (success or otherwise).
+//
+// v1.5.0c only supports snapshot-mode backups — restore from a
+// mirror-mode backup is "your latest copy is already the data", so
+// the wizard hides the entry point and the API surfaces a 400.
+func (s *Server) userRestoreBackupHandler(w http.ResponseWriter, r *http.Request) {
+	existing, ok := s.loadOwnedBackup(w, r)
+	if !ok {
+		return
+	}
+	if s.backupSched == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "BACKUPS_NOT_WIRED", "Backup subsystem is not enabled on this server")
+		return
+	}
+	if existing.ResolveMode() != backup.BackupModeSnapshot {
+		writeErrorSimple(w, http.StatusBadRequest, "RESTORE_REQUIRES_SNAPSHOT", "Restore is only available for snapshot-mode backups")
+		return
+	}
+
+	var req backup.RestoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body")
+		return
+	}
+	// Wire-level validation: at minimum we need to know WHICH
+	// snapshot to read. Everything else has a back-fill.
+	if strings.TrimSpace(req.SnapshotTimestamp) == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_SNAPSHOT", "snapshotTimestamp is required (\"latest\" or a YYYY-MM-DD_HH:MM:SS value)")
+		return
+	}
+
+	s.auditSuccess(r, "backup:restore_start", resourceBackup(existing.ID))
+
+	// Use the request context so a client disconnect cancels the
+	// copy. Restores are interactive — if the operator closes the
+	// tab they don't want a half-finished restore continuing in the
+	// background.
+	result, err := s.runRestore(r.Context(), existing, req)
+
+	// Map common failures to the right HTTP code so the wizard can
+	// render the error inline rather than a generic 500.
+	if err != nil {
+		s.auditFailure(r, "backup:restore_complete", resourceBackup(existing.ID), err)
+		switch {
+		case errors.Is(err, errSnapshotNotFound):
+			writeErrorSimple(w, http.StatusNotFound, "SNAPSHOT_NOT_FOUND", err.Error())
+		default:
+			writeErrorSimple(w, http.StatusInternalServerError, "RESTORE_FAILED", err.Error())
+		}
+		return
+	}
+	s.auditSuccess(r, "backup:restore_complete", resourceBackup(existing.ID))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(result)
+}
+
 // resourceBackup builds the audit Resource string for backup actions.
 // Kept here rather than in audit_helpers.go so the audit_helpers file
 // doesn't need to know about the optional backup subsystem — the
