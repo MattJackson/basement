@@ -4,6 +4,80 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0 — 2026-05-22
+
+Multi-user onboarding + key-first model refinement + sudo elevation
+polish. Six cycles (v1.3.0a → v1.3.0e plus hotfixes) tighten the
+v1.2 architecture into a comfortable-with-multiple-humans deploy:
+OIDC group-claim auto-mapping to basement roles, driver-aware
+endpoint hints in cluster + key forms, per-region S3 addressing
+toggle (path-style / virtual-host) with an in-place rotate-key flow,
+delimiter-based folder navigation in the bucket browser, persistent
+invite tokens with a Pending Invites section on `/admin/users`,
+bulk-import of access keys (CSV / TSV / aws-cli credentials profiles)
+at `/files/keys/new`, and a per-cluster `cluster_admin` assignment
+UI right on the cluster detail page. ADR-0003 simplified to two
+modes (USER / ADMIN dropping ELEVATED — TTL is the safety, not a
+sub-mode); admin TTL is now operator-configurable at `/admin/system`;
+expiry banner replaces the page in-place rather than yanking the
+operator out of an in-progress form. Hotfix stack: graceful
+backend-revoked-key handling (401 USER_KEY_REJECTED instead of bare
+500), region label honored in S3 signing, login lands everyone on
+`/files` instead of admin-only auto-redirect to `/admin`,
+folder-navigation re-render bug, presign URL double-encoding fix.
+No data migrations; `mode="elevated"` cookies silently migrate to
+admin. Smoke 36/36 pass against live; 29 routes screenshot-verified.
+
+Full notes: [`docs/release-notes/v1.3.0.md`](docs/release-notes/v1.3.0.md)
+
+### Cycles
+
+- **v1.3.0a** — OIDC group-claim → role auto-mapping. Operator
+  configures the mapping at `/admin/system`; matching groups
+  auto-assign on every IdP login, stale ones revoke, manual
+  assignments never touched.
+- **v1.3.0a.1** — Graceful handling of backend-revoked user keys.
+  Region endpoints translate S3 auth-rejection codes into 401
+  `USER_KEY_REJECTED` with the offending region + alias + endpoint
+  + accessKeyId so the FE can render an actionable error.
+- **v1.3.0a.2** — Force path-style S3 addressing across every driver
+  via shared `driver.NewS3PathStyleClient` helper. Fixes Garage
+  ListObjects 404 (request was routing to
+  `http://bucket.host:port/` instead of `http://host:port/bucket/`).
+- **v1.3.0a.3** — Elevation UX hotfix: wrap destructive admin
+  handlers with `useElevationGuard()` + auto-elevate on persona
+  switch in the UserMenu.
+- **v1.3.0a.4** — ADR-0003 amendment: drop ELEVATED, two-mode auth
+  (USER / ADMIN), operator-configurable TTL (60s–24h),
+  drop-in-place expiry banner. `ModeElevated` survives as a string
+  alias for one cycle; v1.2-era `mode="elevated"` cookies silently
+  migrate to ADMIN.
+- **v1.3.0b** — Driver-aware endpoint hints in cluster + key forms.
+  Public `GET /api/v1/system/driver-defaults` returns the curated
+  `EndpointDefaults` catalogue; FE caches forever; "Common
+  endpoints" expandable with one-click "Use this" + region
+  auto-suggest.
+- **v1.3.0c** — Per-region S3 addressing toggle
+  (`UserRegion.AddressingStyle`) + `POST
+  /api/v1/user/regions/{regionId}/rotate` for in-place key rotation.
+  IP-host smart default forces path-style regardless of toggle.
+- **v1.3.0c.1** — Folder navigation in the bucket browser via S3
+  `delimiter="/"`. `ObjectPage.commonPrefixes` cascades through all
+  four drivers; FE renders folder rows first, breadcrumb + parent
+  affordance.
+- **v1.3.0d** — Multi-user onboarding: persistent invites at
+  `{dataDir}/invites.json` (bcrypt-hashed, 30-day default TTL,
+  per-invite label) with full create / revoke / rotate / copy-URL
+  UX at `/admin/users`. Bulk-import keys at `/files/keys/new`
+  (CSV / TSV / aws-cli) with per-row preview + non-aborting
+  per-row error reporting via `POST /api/v1/user/regions/bulk`.
+- **v1.3.0e** — Per-cluster `cluster_admin` assignment UI. New
+  "Cluster admins" section above Buckets on the cluster detail
+  page; `GET /api/v1/admin/clusters/{cid}/admins` filters global
+  assignments to scopes matching `cluster:{cid}` (exact, wildcard,
+  superuser). Inherited rows render with an amber badge + disabled
+  Remove (managed from `/admin/policies`).
+
 ## v1.3.0e — 2026-05-22
 
 Per-cluster cluster_admin assignment UI. Before this cycle, granting
