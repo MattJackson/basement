@@ -4,6 +4,21 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.2.0 (in progress) — sudo-style admin elevation (ADR-0003)
+
+### Cycles
+
+- **v1.2.0a** — Backend mode state machine: JWT carries `mode` +
+  `mode_expires_at` claims; `POST /api/v1/auth/elevate` mints
+  ADMIN (15min TTL) or ELEVATED (5min TTL) cookies after
+  password re-auth; gate enforces `MinModeFor(capability)` so
+  destructive ops (cluster:delete, bucket:delete, key:delete,
+  policy:edit_matrix, host:manage_*, cluster:edit_layout) get
+  403 ELEVATION_REQUIRED until the session steps up. Pre-v1.2
+  cookies (no mode claim) treated as ADMIN for a 7-day back-compat
+  grace window so the existing matthew session keeps working
+  across the deploy.
+
 ## v1.1.0 — 2026-05-21
 
 Region tier replaces phantom Connections at the user persona

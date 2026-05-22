@@ -2378,6 +2378,78 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
+  /auth/elevate:
+      post:
+        operationId: elevateSession
+        summary: Sudo-style mode elevation (ADR-0003)
+        description: |
+          Re-authenticate to bump the current session's mode from USER to
+          ADMIN (15min TTL) or from ADMIN to ELEVATED (5min TTL). On
+          success, mints a fresh __Host-basement_session cookie with the
+          new mode + mode_expires_at claims and returns the granted
+          mode + expiry in the body so the frontend can drive its
+          countdown chip without parsing the cookie.
+
+          USER → ELEVATED directly is rejected (400 INVALID_TARGET_MODE);
+          callers must elevate to ADMIN first. OIDC-only users get
+          403 OIDC_USER_ELEVATION_NOT_SUPPORTED — v1.2.0c wires the
+          OIDC `prompt=login` challenge for them.
+        tags:
+        - Auth
+        x-basement-since: '1.2.0a'
+        security:
+        - cookieAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - password
+                - target_mode
+                properties:
+                  password:
+                    type: string
+                  target_mode:
+                    type: string
+                    enum: [admin, elevated]
+        responses:
+          '200':
+            description: Elevation successful; cookie re-issued with bumped mode
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: [admin, elevated]
+                    mode_expires_at:
+                      type: integer
+                      format: int64
+                      description: Unix seconds when the mode reverts.
+                    mode_ttl_seconds:
+                      type: integer
+                      format: int64
+          '400':
+            description: INVALID_TARGET_MODE / INVALID_JSON
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: INVALID_PASSWORD / UNAUTHORIZED
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '403':
+            description: OIDC_USER_ELEVATION_NOT_SUPPORTED
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
   /auth/oidc/callback:
       get:
         operationId: oidcCallback

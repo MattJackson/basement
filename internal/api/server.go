@@ -196,6 +196,7 @@ func (s *Server) routes() {
 
 			authG.Post("/auth/logout", s.logoutHandler)
 			authG.Get("/auth/me", s.meHandler)
+			authG.Post("/auth/elevate", s.elevateHandler)
 			authG.Get("/auth/org-capabilities", s.getCurrentOrgCapabilities)
 			authG.Get("/capabilities", s.capabilitiesHandler)
 		})
