@@ -1,9 +1,9 @@
 # ADR-0004: v2.0 scoping proposal (HALT for operator review)
 
-- **Status**: Proposed — awaiting operator decision
+- **Status**: Resolved — operator picked Option C (hybrid). Federation in v1.6, gateway in v2.0. Full v1.6 → v2.0 sequence appended at bottom.
 - **Date**: 2026-05-22
 - **Author**: Senior (Claude Opus)
-- **Halt**: Per `[[project_long_haul_autonomy]]`, the senior halts here. v2.0 direction is a product decision requiring operator review.
+- **Decision**: Operator chose Option C + expanded the v1.x slots with concrete themes (federation → interaction surface → compliance → MinIO-parity polish → gateway). Roadmap section added at the bottom.
 
 ## Where we are
 
@@ -139,3 +139,38 @@ After your call, I draft ADR-0005 (the chosen v2.0 design) + dispatch the v2.0.0
 ## Halt
 
 Senior is halting per `[[project_long_haul_autonomy]]`. No further dispatches without operator decision.
+
+---
+
+## Resolution (2026-05-22, post-halt)
+
+Operator picked Option C + concretized the v1.x slot themes during the halt conversation. Final roadmap to v2.0:
+
+| Tag | Theme | Highlights |
+|---|---|---|
+| **v1.6** | **Federation + replication** | FederatedBucket type, continuous replication (event-driven or sub-minute poll), lag tracking, unified bucket view, manual failover. Builds DIRECTLY on v1.5's backup engine. Solves DR + multi-backend mirror story. See ADR-0005. |
+| **v1.7** | **Service accounts + webhooks** | M2M auth (basement-issued long-lived keys for CI/k8s/CLI/MCP), bucket event notifications (HTTP webhooks). Auth substrate for v1.8 CLI/MCP + v2.0 gateway. Webhooks enable event-driven federation polling-replacement. |
+| **v1.8** | **CLI + MCP server + Mobile PWA** | `basement` Go binary (uses v1.7 service accounts), MCP server exposing basement as Claude tools, PWA-first mobile (native deferred to v2.x). Interaction surfaces for S3-native users + AI workflows. |
+| **v1.9** | **WebDAV + SMB gateways** | Native network-drive protocols for non-tech users. Finder / Explorer / file managers see basement buckets as folders. Separate ports, separate code paths, shared auth + audit. |
+| **v1.10** | **Compliance + integrity** — Versioning + Object-Lock + SSE | Per-driver versioning capability, S3 object-lock (governance + compliance + legal hold), SSE-S3 + SSE-KMS. Ransomware shield + compliance posture. Versioning + lock are coupled by S3 semantics — ship together. |
+| **v2.0** | **basement IS a backend (S3 gateway)** | basement terminates inbound S3 requests, SigV4 verifies its own keys, routes to backend(s) using federation map from v1.6. Cert mgmt, HTTP/2, streaming pass-through, per-key rate limits. "Migrate AWAY from MinIO entirely" lands here. |
+
+### Threading
+
+- v1.6 federation provides the bucket→backend(s) map that v2.0 gateway routes over
+- v1.7 service accounts ARE the credentials v1.8 CLI/MCP use + v2.0 gateway verifies on inbound requests
+- v1.7 webhooks upgrade v1.6's polling-based federation to event-driven (PUT to primary → webhook → instant replicate)
+- v1.8 interaction surfaces (CLI/MCP/Mobile PWA) hit S3-native + AI workflows
+- v1.9 WebDAV + SMB hit non-tech / family / Finder-Explorer users
+- v1.10 versioning + lock make federated replicas immutable (lock COMPLEMENTS federation — without it, federation just spreads ransomware blast radius)
+- v2.0 ties them together: gateway routes federated traffic, authed by basement-issued service accounts, with versioning + lock guarantees, observable via webhooks, manageable via CLI/MCP, accessible via native S3 + WebDAV + SMB
+
+### Beyond v2.0 (sketch only — not committed)
+
+- v2.1 — Client-side encryption (E2EE) for federated replicas to untrusted backends
+- v2.2 — Search + tags + smart collections (also unlocks MCP search() at full power)
+- v2.3 — WebDAV + SMB + NFS gateways
+- v2.4 — Cost engine + lifecycle v2 (cross-backend tiering)
+- v3.0 — Plugin SDK + multi-site mesh + IPFS / CDN / marketplace
+
+That's a 6-9 month arc to v2.0. Whatever falls out of operator pain-of-the-week may bump these around.
