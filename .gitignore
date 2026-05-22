@@ -48,3 +48,7 @@ internal/web/dist/*
 data/
 *.local.json
 basement
+# v1.8.0a: the new `basement` CLI binary produced by `go build
+# ./cmd/basement/...` lands at the repo root by default — same
+# treatment as basement so we don't commit it.
+/basement

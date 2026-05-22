@@ -4,6 +4,22 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.8.0a — 2026-05-22
+
+`basement` CLI binary. First v1.8 cycle: a standalone Go binary in
+`cmd/basement/` that talks to a running basement deployment via
+the v1.7.0b bearer-auth middleware using service-account credentials.
+Multi-profile config at `~/.config/basement/config.yaml` (mode 0600),
+`$BASEMENT_PROFILE` / `$BASEMENT_SECRET_KEY` env overrides for CI.
+Commands cover login + regions + buckets + objects + service-account
+management. Object get/put go through `/presign-{get,put}` then stream
+bytes directly to/from the backend (CLI never proxies). Tests use
+`httptest` mock servers — no live deployment required. Cobra +
+yaml.v3 added as direct deps; binary builds via
+`go build ./cmd/basement/...`. CI cross-compile deferred (release.yml
+remains Docker-only this cycle); manual GOOS/GOARCH recipes documented
+in `cmd/basement/README.md`. Senior chains v1.8.0b (MCP server) next.
+
 ## v1.7.0 — 2026-05-22
 
 Service accounts + webhooks milestone. Six primary cycles (v1.7.0a
