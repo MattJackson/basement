@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { userPage } from "@/shared/layout/userPage";
-import { useUserClusters, useOrgCapabilities } from "@/shared/api/queries";
-import { UserClusterCard } from "@/components/clusters/UserClusterCard";
+import { useUserRegions } from "@/shared/api/queries";
+import { UserRegionCard } from "@/components/clusters/UserRegionCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
@@ -11,19 +11,19 @@ export const Route = createFileRoute("/files/")({
 });
 
 function FilesHome() {
-  const { data: clustersData, isLoading, error } = useUserClusters();
-  const { data: caps } = useOrgCapabilities();
-  const clusters = clustersData ?? [];
-  const canAddCluster = caps?.allowUserBackends && clusters.length === 0;
+  const { data: regions, isLoading, error } = useUserRegions();
+  const list = regions ?? [];
 
   if (error) {
     return (
       <div className="space-y-6">
-        <header>
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Clusters</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Storage you have access to
-          </p>
+        <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Regions</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Storage endpoints you have S3 credentials for
+            </p>
+          </div>
         </header>
         <ErrorBanner message="Couldn&apos;t connect to backend. Retrying automatically..." />
       </div>
@@ -32,54 +32,57 @@ function FilesHome() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Clusters</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Storage you have access to
-        </p>
+      <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Regions</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Storage endpoints you have S3 credentials for
+          </p>
+        </div>
+        {list.length > 0 && (
+          <Link
+            to="/files/regions/new"
+            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            + Add region
+          </Link>
+        )}
       </header>
 
       {isLoading ? (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {[...Array(3)].map((_, i) => (
             <div key={i} className="rounded-xl border bg-card p-4 space-y-3">
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-3 w-3 rounded-full" />
-                <Skeleton className="h-4 w-32 flex-1" />
-              </div>
+              <Skeleton className="h-4 w-32" />
               <Skeleton className="h-6 w-20" />
               <Skeleton className="h-4 w-16" />
             </div>
           ))}
         </div>
-      ) : clusters.length === 0 ? (
-        canAddCluster ? (
-          <EmptyState
-            icon="server"
-            title="No buckets yet"
-            description="Add a bucket you have S3 credentials for to get started."
-            action={
-              <a href="/files/buckets/connect" className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-                + Add bucket access
-              </a>
-            }
-          />
-        ) : (
-          <EmptyState
-            icon="server"
-            title="No clusters yet"
-            description="Contact your administrator to get access."
-          />
-        )
+      ) : list.length === 0 ? (
+        <EmptyState
+          icon="server"
+          title="No regions yet"
+          description="Add an S3 endpoint and credentials to start browsing buckets."
+          action={
+            <Link
+              to="/files/regions/new"
+              className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              + Add region
+            </Link>
+          }
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {clusters.map((cluster) => (
-            <UserClusterCard
-              key={cluster.id}
-              id={cluster.id}
-              label={cluster.label}
-              driver={cluster.driver}
-              color={cluster.color}
+          {list.map((r) => (
+            <UserRegionCard
+              key={r.id}
+              id={r.id}
+              alias={r.alias}
+              endpoint={r.endpoint}
+              region={r.region}
+              accessKeyId={r.accessKeyId}
             />
           ))}
         </div>
@@ -89,4 +92,3 @@ function FilesHome() {
 }
 
 export default FilesHome;
-

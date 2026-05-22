@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,23 +11,20 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 )
 
-// seedShareUserGrant installs a BucketGrant (v1.0.0b: replaces the old
-// legacy store.Grant fixtures). user_shares.go reads visibility via
-// CredGrants now, so the test seed must mirror the production shape.
+// seedShareUserGrant was historically (pre-v1.1.0e) the place where
+// share tests installed a BucketGrant so the per-bucket visibility
+// filter would let the user create a share. ADR-0002 retired that
+// filter — share creation now relies on capability gating + connection
+// ownership. We keep the function as a no-op shim so the test
+// signatures don't churn; the connection-ownership the test cases need
+// is supplied by the testMockConnectionStore conns slice with
+// owner=userID.
 func seedShareUserGrant(t *testing.T, st *store.Store, userID, connID, bucketID string) {
 	t.Helper()
-	if err := st.WireBucketGrants(testSecret); err != nil {
-		t.Fatalf("WireBucketGrants: %v", err)
-	}
-	if _, err := st.CredGrants().Create(context.Background(), store.BucketGrantInput{
-		UserID:       userID,
-		ConnectionID: connID,
-		BucketID:     bucketID,
-		AccessKeyID:  "ak-test",
-		SecretKey:    "sk-test",
-	}); err != nil {
-		t.Fatalf("CredGrants.Create: %v", err)
-	}
+	_ = st
+	_ = userID
+	_ = connID
+	_ = bucketID
 }
 
 // TestCreateShare_NoAuth returns 401.
@@ -110,7 +106,7 @@ func TestCreateShare_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
 	connsStore := &testMockConnectionStore{
 		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
+			{ID: "conn-123", Label: "test-cluster", Driver: "garage", Owner: "user"},
 		},
 	}
 	tmpDir := t.TempDir()
@@ -154,7 +150,7 @@ func TestCreateShare_WithPassword(t *testing.T) {
 	cfg := newTestConfig()
 	connsStore := &testMockConnectionStore{
 		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
+			{ID: "conn-123", Label: "test-cluster", Driver: "garage", Owner: "user"},
 		},
 	}
 	tmpDir := t.TempDir()
@@ -196,7 +192,7 @@ func TestListShares_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
 	connsStore := &testMockConnectionStore{
 		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
+			{ID: "conn-123", Label: "test-cluster", Driver: "garage", Owner: "user"},
 		},
 	}
 	tmpDir := t.TempDir()
@@ -258,7 +254,7 @@ func TestRevokeShare_HappyPath(t *testing.T) {
 	cfg := newTestConfig()
 	connsStore := &testMockConnectionStore{
 		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
+			{ID: "conn-123", Label: "test-cluster", Driver: "garage", Owner: "user"},
 		},
 	}
 	tmpDir := t.TempDir()
@@ -315,7 +311,7 @@ func TestRevokeShare_OwnershipCheck(t *testing.T) {
 	cfg := newTestConfig()
 	connsStore := &testMockConnectionStore{
 		conns: []store.Connection{
-			{ID: "conn-123", Label: "test-cluster", Driver: "garage"},
+			{ID: "conn-123", Label: "test-cluster", Driver: "garage", Owner: "user"},
 		},
 	}
 	tmpDir := t.TempDir()

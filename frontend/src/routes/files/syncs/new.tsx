@@ -4,30 +4,32 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { useUserClusters, useUserClusterBuckets, useCreateUserSync } from "@/shared/api/queries";
+import { useUserRegions, useUserRegionBuckets, useCreateUserSync } from "@/shared/api/queries";
 
 // NOTE: do NOT wrap in userPage() — parent layout (syncs.tsx) owns chrome.
 
 type SyncSearch = {
   mode?: "pull" | "push";
-  srcCid?: string;
+  srcRid?: string;
   srcBid?: string;
 };
 
-// Popups-max-2-fields: StartSyncDialog had 6 fields (src cluster +
-// bucket + prefix, dst cluster + bucket + prefix) AND its cluster /
-// bucket dropdowns were HARDCODED to fake values ('cluster-1',
-// 'bucket-a' …) — the entire sync feature was non-functional. This
-// page wires up the real query hooks (useUserClusters /
-// useUserClusterBuckets per side) and gives the form room to breathe.
+// ADR-0002 v1.1.0e rebuilds the new-sync form around UserRegions
+// instead of UserClusters. Sync remains a cluster-to-cluster engine
+// at the backend; the picker resolves region IDs server-side to the
+// underlying connection in a future cycle. For now we POST region
+// IDs into srcConnectionId / dstConnectionId — basement.pq.io will
+// 404 SRC_CLUSTER_NOT_FOUND until that backend mapping lands. The
+// UI affordance ships now so the persona shift (Region, not Cluster)
+// is consistent across /files; backend rework is v1.2.
 //
 // Default search params let bucket-browser 'Sync in / Sync out'
-// buttons pre-fill the right side: ?mode=push&srcCid=…&srcBid=…
+// buttons pre-fill the right side: ?mode=push&srcRid=…&srcBid=…
 export const Route = createFileRoute("/files/syncs/new")({
   component: NewSyncPage,
   validateSearch: (search): SyncSearch => ({
     mode: search.mode === "push" ? "push" : "pull",
-    srcCid: typeof search.srcCid === "string" ? search.srcCid : undefined,
+    srcRid: typeof search.srcRid === "string" ? search.srcRid : undefined,
     srcBid: typeof search.srcBid === "string" ? search.srcBid : undefined,
   }),
 });
@@ -37,30 +39,30 @@ function NewSyncPage() {
   const search = useSearch({ from: "/files/syncs/new" }) as SyncSearch;
 
   const mode = search.mode ?? "pull";
-  const [srcConnectionId, setSrcConnectionId] = useState(search.srcCid ?? "");
+  const [srcRegionId, setSrcRegionId] = useState(search.srcRid ?? "");
   const [srcBucket, setSrcBucket] = useState(search.srcBid ?? "");
   const [srcPrefix, setSrcPrefix] = useState("");
-  const [dstConnectionId, setDstConnectionId] = useState("");
+  const [dstRegionId, setDstRegionId] = useState("");
   const [dstBucket, setDstBucket] = useState("");
   const [dstPrefix, setDstPrefix] = useState("");
 
-  const { data: clusters } = useUserClusters();
-  const { data: srcBuckets } = useUserClusterBuckets(srcConnectionId);
-  const { data: dstBuckets } = useUserClusterBuckets(dstConnectionId);
+  const { data: regions } = useUserRegions();
+  const { data: srcBuckets } = useUserRegionBuckets(srcRegionId || null);
+  const { data: dstBuckets } = useUserRegionBuckets(dstRegionId || null);
   const createSync = useCreateUserSync();
 
-  const srcLocked = mode === "push" && !!search.srcCid && !!search.srcBid;
+  const srcLocked = mode === "push" && !!search.srcRid && !!search.srcBid;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!srcConnectionId || !dstConnectionId || !srcBucket || !dstBucket) return;
+    if (!srcRegionId || !dstRegionId || !srcBucket || !dstBucket) return;
     createSync.mutate(
       {
         mode,
-        srcConnectionId,
+        srcConnectionId: srcRegionId,
         srcBucket,
         srcPrefix: srcPrefix || undefined,
-        dstConnectionId,
+        dstConnectionId: dstRegionId,
         dstBucket,
         dstPrefix: dstPrefix || undefined,
       },
@@ -68,25 +70,25 @@ function NewSyncPage() {
     );
   };
 
-  const isSubmitDisabled = !srcConnectionId || !dstConnectionId || !srcBucket || !dstBucket || createSync.isPending;
+  const isSubmitDisabled = !srcRegionId || !dstRegionId || !srcBucket || !dstBucket || createSync.isPending;
 
   return (
     <div className="space-y-6 max-w-4xl">
       <Link to="/files/syncs" className="inline-flex items-center gap-1 text-sm font-medium hover:underline text-muted-foreground">
-        ← Back to syncs
+        &larr; Back to syncs
       </Link>
 
       <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">New sync job</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Copy objects from a source bucket to a destination bucket. Crosses clusters.
+            Copy objects from one region+bucket to another.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => navigate({ to: "/files/syncs" })} disabled={createSync.isPending}>Cancel</Button>
           <Button onClick={(e) => handleSubmit(e as any)} disabled={isSubmitDisabled}>
-            {createSync.isPending ? "Creating…" : "Start sync"}
+            {createSync.isPending ? "Creating..." : "Start sync"}
           </Button>
         </div>
       </header>
@@ -102,14 +104,14 @@ function NewSyncPage() {
             <RadioGroupItem value="pull" className="mt-1" />
             <div>
               <div className="font-medium text-sm">Pull (copy in)</div>
-              <p className="text-xs text-muted-foreground mt-0.5">Copy from a source bucket into a bucket you own.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Copy from a source bucket into a bucket on your destination region.</p>
             </div>
           </label>
           <label className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer hover:bg-muted/30 ${mode === "push" ? "border-ring" : ""}`}>
             <RadioGroupItem value="push" className="mt-1" />
             <div>
               <div className="font-medium text-sm">Push (copy out)</div>
-              <p className="text-xs text-muted-foreground mt-0.5">Copy from a bucket you own to a destination bucket.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Copy from a bucket on your source region to a destination bucket.</p>
             </div>
           </label>
         </RadioGroup>
@@ -119,16 +121,16 @@ function NewSyncPage() {
         <h2 className="text-sm font-medium text-muted-foreground">Source</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="srcCluster">Cluster *</Label>
+            <Label htmlFor="srcRegion">Region *</Label>
             <select
-              id="srcCluster"
-              value={srcConnectionId}
+              id="srcRegion"
+              value={srcRegionId}
               disabled={srcLocked}
-              onChange={(e) => { setSrcConnectionId(e.target.value); setSrcBucket(""); }}
+              onChange={(e) => { setSrcRegionId(e.target.value); setSrcBucket(""); }}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
-              <option value="">— pick a cluster —</option>
-              {clusters?.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+              <option value="">&mdash; pick a region &mdash;</option>
+              {regions?.map((r) => (<option key={r.id} value={r.id}>{r.alias || r.endpoint}</option>))}
             </select>
           </div>
           <div className="grid gap-2">
@@ -136,11 +138,11 @@ function NewSyncPage() {
             <select
               id="srcBucket"
               value={srcBucket}
-              disabled={srcLocked || !srcConnectionId}
+              disabled={srcLocked || !srcRegionId}
               onChange={(e) => setSrcBucket(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
-              <option value="">— pick a bucket —</option>
+              <option value="">&mdash; pick a bucket &mdash;</option>
               {srcBuckets?.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0, 12)}</option>))}
             </select>
           </div>
@@ -155,15 +157,15 @@ function NewSyncPage() {
         <h2 className="text-sm font-medium text-muted-foreground">Destination</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="dstCluster">Cluster *</Label>
+            <Label htmlFor="dstRegion">Region *</Label>
             <select
-              id="dstCluster"
-              value={dstConnectionId}
-              onChange={(e) => { setDstConnectionId(e.target.value); setDstBucket(""); }}
+              id="dstRegion"
+              value={dstRegionId}
+              onChange={(e) => { setDstRegionId(e.target.value); setDstBucket(""); }}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              <option value="">— pick a cluster —</option>
-              {clusters?.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+              <option value="">&mdash; pick a region &mdash;</option>
+              {regions?.map((r) => (<option key={r.id} value={r.id}>{r.alias || r.endpoint}</option>))}
             </select>
           </div>
           <div className="grid gap-2">
@@ -171,11 +173,11 @@ function NewSyncPage() {
             <select
               id="dstBucket"
               value={dstBucket}
-              disabled={!dstConnectionId}
+              disabled={!dstRegionId}
               onChange={(e) => setDstBucket(e.target.value)}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
-              <option value="">— pick a bucket —</option>
+              <option value="">&mdash; pick a bucket &mdash;</option>
               {dstBuckets?.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0, 12)}</option>))}
             </select>
           </div>

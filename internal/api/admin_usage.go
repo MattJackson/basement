@@ -161,29 +161,12 @@ func (s *Server) getUsageOverviewHandler(w http.ResponseWriter, r *http.Request)
 	}
 	wg.Wait()
 
-	// Grant count — read straight from the store. The store nil-checks
-	// gracefully (CredGrants() returns nil if WireBucketGrants wasn't
-	// called); in that case grants=0 and the dashboard stays sensible.
+	// Grant count — retired in ADR-0002 v1.1.0e along with the
+	// BucketGrant model. The dashboard's "Grants" totals field is
+	// preserved on the wire so frontend types don't churn, but it
+	// always reports 0 now. A v1.2 cycle may repurpose this slot for
+	// UserRegion count if operators ask for it.
 	grantCt := 0
-	if s.store != nil && s.store.CredGrants() != nil {
-		// ListForUser("") returns nothing; there's no ListAll on the
-		// interface. Iterate via the same path the migration handler
-		// uses: enumerate users and sum. For OBS.USAGE we don't have
-		// a user list to enumerate, so we sum the per-bucket counts
-		// indirectly: for each (cid, bucket) discovered above, add
-		// the ListForBucket count.
-		for _, r := range results {
-			if r.err != nil {
-				continue
-			}
-			for _, b := range r.buckets {
-				gs, err := s.store.CredGrants().ListForBucket(context.Background(), r.conn.ID, b.ID)
-				if err == nil {
-					grantCt += len(gs)
-				}
-			}
-		}
-	}
 
 	// Build the per-cluster table + aggregate totals + top-N candidates.
 	perCluster := make([]UsagePerCluster, 0, len(results))

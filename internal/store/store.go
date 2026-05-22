@@ -3,6 +3,7 @@ package store
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -25,7 +26,6 @@ type Store struct {
 	usersCache     []User
 	sharesCache    []Share
 	orgCaps        *OrgCapabilitiesStore
-	bucketGrants   BucketGrants
 	userRegions    UserRegions
 }
 
@@ -94,37 +94,11 @@ func (s *Store) OrgCapabilities() *OrgCapabilitiesStore {
 	return s.orgCaps
 }
 
-// WireBucketGrants opens the per-user per-bucket S3 credential store
-// (ADR-0001, v0.9.0c) and attaches it to this Store. Kept separate
-// from Open() so the long-existing Open(dataDir, retention) signature
-// stays source-compatible with the many test callers in internal/api/
-// that don't need credential grants. main.go calls this once at boot
-// with cfg.JWT.Secret.
-func (s *Store) WireBucketGrants(jwtSecret []byte) error {
-	bg, err := OpenBucketGrants(s.dataDir, jwtSecret)
-	if err != nil {
-		return fmt.Errorf("opening bucket grants: %w", err)
-	}
-	s.bucketGrants = bg
-	return nil
-}
-
-// CredGrants returns the credential-grant store (per-user per-bucket
-// S3 keys, ADR-0001). Returns nil if WireBucketGrants has not been
-// called — callers must nil-check.
-//
-// Historically named CredGrants() because the now-retired (v1.0.0b)
-// legacy Store.BucketGrants(userID string) []string accessor owned the
-// BucketGrants() method name. The name is kept for source stability.
-func (s *Store) CredGrants() BucketGrants {
-	return s.bucketGrants
-}
-
 // WireUserRegions opens the per-user S3 region keychain (ADR-0002,
 // v1.1.0a) and attaches it to this Store. Kept separate from Open()
-// for the same source-compatibility reason as WireBucketGrants. main.go
-// calls this once at boot with cfg.JWT.Secret, right after
-// WireBucketGrants.
+// for source-compatibility — the many test callers in internal/api/
+// that don't need the keychain don't have to thread it through. main.go
+// calls this once at boot with cfg.JWT.Secret.
 func (s *Store) WireUserRegions(jwtSecret []byte) error {
 	ur, err := OpenUserRegions(s.dataDir, jwtSecret)
 	if err != nil {
@@ -154,4 +128,41 @@ func (s *Store) MigrateLegacyUsers() error {
 	}
 
 	return saveJSON(s.usersPath, s.usersCache)
+}
+
+// ArchiveLegacyBucketGrants is the boot-time forensic step for the
+// ADR-0002 v1.1.0e retirement of the per-bucket grant model. If
+// {dataDir}/bucket_grants.json still exists (operator never ran the
+// v1.1.0d migration, or simply hasn't booted v1.1.0e yet), it gets
+// renamed to bucket_grants.json.migrated-v1.1.0e so the file stays on
+// disk for forensics + recovery without confusing future readers who
+// expect the legacy file to be dead.
+//
+// Fresh installs that never had bucket_grants.json get a silent no-op
+// (the os.IsNotExist branch). Repeat boots see the archived file
+// already in place and likewise no-op.
+//
+// Returns nil on success, nil-with-no-action when the file is missing,
+// and an error only when the rename itself fails (e.g. permission
+// denied). Callers should log a warning rather than os.Exit on error —
+// the legacy data is unused by v1.1.0e+ code paths, so failure to
+// archive is a forensics inconvenience, not a runtime hazard.
+func ArchiveLegacyBucketGrants(dataDir string) error {
+	src := filepath.Join(dataDir, "bucket_grants.json")
+	dst := filepath.Join(dataDir, "bucket_grants.json.migrated-v1.1.0e")
+
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat bucket_grants.json: %w", err)
+	}
+
+	if err := os.Rename(src, dst); err != nil {
+		return fmt.Errorf("rename bucket_grants.json aside: %w", err)
+	}
+
+	slog.Info("moved legacy bucket_grants.json aside; data has been migrated to user_regions.json",
+		"from", src, "to", dst)
+	return nil
 }

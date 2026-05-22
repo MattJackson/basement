@@ -346,34 +346,8 @@ export function useRevertLayout(cid: string) {
   });
 }
 
-export function useCreateUserCluster() {
-  const queryClient = useQueryClient();
-  const navigate = useNavigate();
-
-  return useMutation<components["schemas"]["Connection"], Error, components["schemas"]["ConnectionSpec"]>({
-    mutationFn: async (body) => {
-      const { data, error, response } = await client.POST("/user/clusters", {
-        body,
-      });
-      if (!response.ok || !data) throw apiError("createUserCluster", response.status, error);
-      return data as components["schemas"]["Connection"];
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["user", "clusters"] });
-      navigate({ to: "/files" });
-    },
-  });
-}
-
-export function useTestUserCluster() {
-  return useMutation<components["schemas"]["HealthReport"], Error, { driver: components["schemas"]["Connection"]["driver"]; config: Record<string, string> }>({
-    mutationFn: async ({ driver, config }) => {
-      const { data, error, response } = await client.POST("/user/clusters/_test", {
-        body: { driver, config },
-      });
-      if (!response.ok || !data) throw apiError("testUserCluster", response.status, error);
-      return data as components["schemas"]["HealthReport"];
-    },
-  });
-}
+// useCreateUserCluster + useTestUserCluster (the user-owned BYO cluster
+// mutations) were retired in ADR-0002 cycle v1.1.0e. The user persona
+// no longer creates Connections — they create UserRegions via
+// useCreateUserRegion in queries.ts.
 

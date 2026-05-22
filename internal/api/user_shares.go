@@ -105,19 +105,12 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	visibleBucketIDs := s.userVisibleBuckets(r.Context(), req.ConnectionID)
-	hasBucketAccess := false
-	for _, id := range visibleBucketIDs {
-		if req.BucketID == id {
-			hasBucketAccess = true
-			break
-		}
-	}
-
-	if !hasBucketAccess && !s.userOwnsConnection(r.Context(), req.ConnectionID) {
-		writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "User does not have access to this bucket")
-		return
-	}
+	// Per ADR-0002 (v1.1.0e): the per-bucket BucketGrant visibility
+	// table is retired. Bucket access for share creation is now gated
+	// by the capability check at the top of this handler
+	// (objects:share_create on bucket:{cid}:{bid}) plus the existing
+	// connection ownership / admin role check above. The backend
+	// enforces final R/W permission when the share is downloaded.
 
 	// Validate expiration time if provided.
 	if req.ExpiresAt != nil && req.ExpiresAt.Before(time.Now()) {

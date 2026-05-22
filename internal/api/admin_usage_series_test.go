@@ -41,9 +41,6 @@ func newUsageSeriesTestEnv(t *testing.T, grantHostAdmin bool) (*Server, *metrics
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	if err := st.WireBucketGrants(testSecret); err != nil {
-		t.Fatalf("WireBucketGrants: %v", err)
-	}
 
 	enf, err := policy.Open(filepath.Join(tmp, "policy"))
 	if err != nil {
