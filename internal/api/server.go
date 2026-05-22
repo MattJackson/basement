@@ -254,6 +254,13 @@ func (s *Server) routes() {
 			adminG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
 			adminG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
 
+			// v1.3.0e CLUSTER.ADMINS — convenience read for the
+			// cluster detail page that filters the global assignment
+			// list down to this cluster (including wildcard
+			// inheritance). Writes still go through the global
+			// /admin/policies/assignments endpoints.
+			adminG.Get("/admin/clusters/{cid}/admins", s.listClusterAdminsHandler)
+
 			// Connection-scoped bucket operations
 			adminG.Get("/admin/clusters/{cid}/buckets", s.listBucketsByClusterHandler)
 			adminG.Post("/admin/clusters/{cid}/buckets", s.createBucketHandler)

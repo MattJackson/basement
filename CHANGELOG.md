@@ -4,6 +4,39 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0e — 2026-05-22
+
+Per-cluster cluster_admin assignment UI. Before this cycle, granting
+someone admin authority over one specific cluster (without giving them
+authority over every cluster) meant hand-editing assignment JSON or
+typing `cluster:{cid}` into the global `/admin/policies` scope field
+from memory. Cluster detail pages now surface a dedicated "Cluster
+admins" section above Buckets — the operator's first question when
+they land on a cluster page ("who runs this?") gets a direct answer.
+Table renders user (display name + username), role, source (manual /
+OIDC / inherited from global), and a Remove button. Wildcard
+inheritance (`cluster:*` or the `*` superuser scope) shows up with an
+amber "inherited from global" badge and a tooltip-explained disabled
+Remove — those have to be managed from `/admin/policies` because they
+affect more than this one cluster. New `+ Add cluster admin` button
+opens a two-field modal (user picker eagerly fetched from
+`/admin/users`, role picker defaulted to `cluster_admin` with other
+non-deprecated roles available) that POSTs to the existing
+`/admin/policies/assignments` endpoint with scope `cluster:{cid}`.
+Backend gets one new convenience endpoint
+`GET /api/v1/admin/clusters/{cid}/admins` gated on `policy:view_matrix`
+@ `host:*`: filters the global assignment list to scopes matching
+`cluster:{cid}` (covers exact, wildcard, and superuser via
+`ScopeMatches`), joins user `Name` from the store server-side, and
+marks inherited rows with a boolean so the FE doesn't have to re-do
+the matching. Returns 404 for stale cluster links so the FE doesn't
+render a misleading empty table. Test surface: four backend tests
+(scoped + wildcard filtering, display-name join, capability gate
+denial, unknown-cluster 404) and four FE tests (inherited row
+disables Remove with tooltip, manual row enables Remove, OIDC row
+renders the OIDC badge, hook URL points at the right endpoint).
+`pnpm build` + `go test -race ./...` both green.
+
 ## v1.3.0d — 2026-05-22
 
 Multi-user onboarding cycle — two related features both about adding
