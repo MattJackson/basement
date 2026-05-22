@@ -4,6 +4,43 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.8.0d — 2026-05-22
+
+CLI removed; aws-cli + web UI cover the use cases. The
+`cmd/basement-cli/` binary that was on the original v1.8 plan never
+landed on main — object-store CRUD is better served by aws-cli
+against the SigV4 endpoint, and the basement-specific control plane
+(clusters, keys, service accounts, webhooks, federation, backups)
+lives in the web UI where the role matrix + elevation flow already
+gate the dangerous bits. Stale references in README,
+`internal/clilib/config.go`, and the v1.7.0 release notes are
+scrubbed. `internal/clilib` keeps its generic shape so any future
+out-of-process client (a `basement-mcp init` subcommand, a homebrew
+script, etc.) can adopt the same YAML + `$BASEMENT_CONFIG`
+precedence without a migration step.
+
+Service-account UI gains a "Use with MCP" affordance for the
+shipped client. New shared component `<McpConfigSection>` renders
+two snippets per service account:
+
+  - `config.yaml` — the same shape `cmd/basement-mcp` reads via
+    `internal/clilib`. Endpoint defaults to `window.location.origin`
+    so an operator standing in front of their own basement gets the
+    right URL without typing. Copy + Download buttons. On the mint-
+    success dialog (`SecretShownOnceDialog`) the YAML inlines the
+    plaintext secret — same shown-once contract the rest of the
+    dialog enforces. On the detail page (no plaintext available) the
+    YAML renders `<SECRET_FROM_ROTATE>` as a placeholder + a hint to
+    rotate the secret to refill it.
+  - Claude Desktop / Claude Code / Cursor JSON config — `command:
+    basement-mcp` with `BASEMENT_CONFIG` pointing at the YAML above.
+    Copy button.
+
+New route `/admin/service-accounts/$id` shows identity, capabilities,
+and the "Use with MCP" card. The list page's name column now links
+to the detail page so operators can grab the snippet after the
+shown-once dialog has closed.
+
 ## v1.8.0c — 2026-05-22
 
 MCP server binary (`basement-mcp`). New stdio-based Model Context

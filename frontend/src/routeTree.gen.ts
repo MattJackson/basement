@@ -49,6 +49,7 @@ import { Route as FilesFederatedBucketsNewRouteImport } from "./routes/files/fed
 import { Route as FilesBackupsNewRouteImport } from "./routes/files/backups/new"
 import { Route as AdminUsersNewRouteImport } from "./routes/admin/users/new"
 import { Route as AdminServiceAccountsNewRouteImport } from "./routes/admin/service-accounts/new"
+import { Route as AdminServiceAccountsIdRouteImport } from "./routes/admin/service-accounts/$id"
 import { Route as AdminClustersNewRouteImport } from "./routes/admin/clusters/new"
 import { Route as FilesWebhooksIdIndexRouteImport } from "./routes/files/webhooks/$id/index"
 import { Route as FilesFederatedBucketsIdIndexRouteImport } from "./routes/files/federated-buckets/$id/index"
@@ -267,6 +268,11 @@ const AdminServiceAccountsNewRoute = AdminServiceAccountsNewRouteImport.update({
   path: "/new",
   getParentRoute: () => AdminServiceAccountsRoute,
 } as any)
+const AdminServiceAccountsIdRoute = AdminServiceAccountsIdRouteImport.update({
+  id: "/$id",
+  path: "/$id",
+  getParentRoute: () => AdminServiceAccountsRoute,
+} as any)
 const AdminClustersNewRoute = AdminClustersNewRouteImport.update({
   id: "/admin/clusters/new",
   path: "/admin/clusters/new",
@@ -363,6 +369,7 @@ export interface FileRoutesByFullPath {
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
+  "/admin/service-accounts/$id": typeof AdminServiceAccountsIdRoute
   "/admin/service-accounts/new": typeof AdminServiceAccountsNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
@@ -410,6 +417,7 @@ export interface FileRoutesByTo {
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
+  "/admin/service-accounts/$id": typeof AdminServiceAccountsIdRoute
   "/admin/service-accounts/new": typeof AdminServiceAccountsNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
@@ -467,6 +475,7 @@ export interface FileRoutesById {
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
+  "/admin/service-accounts/$id": typeof AdminServiceAccountsIdRoute
   "/admin/service-accounts/new": typeof AdminServiceAccountsNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
@@ -525,6 +534,7 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/files/"
     | "/admin/clusters/new"
+    | "/admin/service-accounts/$id"
     | "/admin/service-accounts/new"
     | "/admin/users/new"
     | "/files/backups/new"
@@ -572,6 +582,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/files"
     | "/admin/clusters/new"
+    | "/admin/service-accounts/$id"
     | "/admin/service-accounts/new"
     | "/admin/users/new"
     | "/files/backups/new"
@@ -628,6 +639,7 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/files/"
     | "/admin/clusters/new"
+    | "/admin/service-accounts/$id"
     | "/admin/service-accounts/new"
     | "/admin/users/new"
     | "/files/backups/new"
@@ -979,6 +991,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminServiceAccountsNewRouteImport
       parentRoute: typeof AdminServiceAccountsRoute
     }
+    "/admin/service-accounts/$id": {
+      id: "/admin/service-accounts/$id"
+      path: "/$id"
+      fullPath: "/admin/service-accounts/$id"
+      preLoaderRoute: typeof AdminServiceAccountsIdRouteImport
+      parentRoute: typeof AdminServiceAccountsRoute
+    }
     "/admin/clusters/new": {
       id: "/admin/clusters/new"
       path: "/admin/clusters/new"
@@ -1081,11 +1100,13 @@ declare module "@tanstack/react-router" {
 }
 
 interface AdminServiceAccountsRouteChildren {
+  AdminServiceAccountsIdRoute: typeof AdminServiceAccountsIdRoute
   AdminServiceAccountsNewRoute: typeof AdminServiceAccountsNewRoute
   AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
 }
 
 const AdminServiceAccountsRouteChildren: AdminServiceAccountsRouteChildren = {
+  AdminServiceAccountsIdRoute: AdminServiceAccountsIdRoute,
   AdminServiceAccountsNewRoute: AdminServiceAccountsNewRoute,
   AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
 }

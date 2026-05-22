@@ -1,20 +1,22 @@
 // Package clilib is the shared library for basement's out-of-process
-// clients — currently the `basement-mcp` MCP server (cmd/basement-
-// mcp/), and a future-targeted `basement` CLI (cmd/basement/, see
-// the v1.8.0a backlog item). Both clients want the same two things:
+// clients — the `basement-mcp` MCP server (cmd/basement-mcp/) and,
+// optionally, anything else the operator scripts that needs to talk
+// to basement-server over the bearer-auth path. It bundles the two
+// pieces every such client wants:
 //
 //  1. A profile-backed on-disk config (~/.config/basement/config.yaml)
 //     so the operator doesn't keep re-typing endpoint + credentials.
 //  2. A bearer-auth HTTP client that talks to basement-server's JSON
 //     API through the v1.7.0b service-account middleware.
 //
-// Keeping both in one package — rather than letting cmd/basement and
-// cmd/basement-mcp each grow their own copy — means a bug in
-// "Authorization: Bearer AKID:SECRET" parsing or in $XDG_CONFIG_HOME
-// precedence gets fixed once. The package is deliberately small;
-// anything client-specific (cobra wiring for the CLI, JSON-RPC
-// framing for the MCP server) stays in the cmd/* package that owns
-// it.
+// History: v1.8 was originally scoped with a dedicated `basement`
+// CLI in addition to the MCP server. v1.8.0d dropped that plan —
+// object-store CRUD is covered by aws-cli against the SigV4 endpoint
+// and basement-specific control-plane work belongs in the web UI —
+// so this package now serves the MCP binary alone. The shape stays
+// generic on purpose: any future out-of-process client can adopt
+// the same YAML schema + `$BASEMENT_CONFIG` override without a
+// migration step.
 package clilib
 
 import (
@@ -69,7 +71,9 @@ func ConfigPath() (string, error) {
 
 // LoadConfig reads config.yaml from disk. Missing file returns an
 // empty Config (not an error) — fresh installs need a valid zero
-// value so a future `basement login` can append a profile to it.
+// value so any future client that wants to append a profile (for
+// example a `basement-mcp init` subcommand) has something to start
+// from instead of erroring out on a missing path.
 func LoadConfig() (*Config, error) {
 	path, err := ConfigPath()
 	if err != nil {

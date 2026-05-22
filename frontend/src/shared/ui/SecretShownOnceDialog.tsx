@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
 import type { ServiceAccountWithSecret } from "@/shared/api/queries";
+import { McpConfigSection } from "@/shared/ui/McpConfigSection";
 
 // v1.7.0c — shared shown-once dialog for service-account mint + rotate.
 //
@@ -113,6 +114,13 @@ aws_secret_access_key = ${secret}`;
             testId="sa-aws-snippet"
             multiline
           />
+
+          {/* v1.8.0d — Drop the same service-account into a basement-mcp
+              profile so AI clients can authenticate as this SA. The
+              plaintext secret is available here exactly once, so the
+              YAML inlines it; the detail page surfaces the same
+              section with a <SECRET_FROM_ROTATE> placeholder. */}
+          <McpConfigSection accessKeyId={akid} secret={secret} />
 
           <label
             className="flex items-start gap-2 pt-2 cursor-pointer select-none"
