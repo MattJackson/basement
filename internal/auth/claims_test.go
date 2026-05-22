@@ -87,10 +87,12 @@ func TestIssueTokenWithMode_EmptyModeDefaultsToUser(t *testing.T) {
 	}
 }
 
-// TestIssueTokenWithMode_Elevated covers the ELEVATED branch the
-// destructive-op flow uses. The 5-min TTL is enforced by the caller
-// (auth_elevate.go); here we just verify the claim shape survives.
-func TestIssueTokenWithMode_Elevated(t *testing.T) {
+// TestIssueTokenWithMode_LegacyElevatedRoundTrips: a v1.2-era cookie
+// minted with mode="elevated" must still parse correctly so the gate's
+// silent-migration logic (currentMode in policy_gates.go) can rewrite
+// it to ADMIN on read. The JWT layer itself is mode-agnostic; the
+// canonical-string normalisation happens above this layer.
+func TestIssueTokenWithMode_LegacyElevatedRoundTrips(t *testing.T) {
 	expiresAt := time.Now().Add(5 * time.Minute).Unix()
 
 	token, err := IssueTokenWithMode(testSecret, "matthew", "admin", true,
@@ -103,7 +105,7 @@ func TestIssueTokenWithMode_Elevated(t *testing.T) {
 		t.Fatalf("ParseToken: %v", err)
 	}
 	if claims.Mode != "elevated" {
-		t.Errorf("Mode = %q, want elevated", claims.Mode)
+		t.Errorf("Mode = %q, want elevated (legacy claim must round-trip verbatim)", claims.Mode)
 	}
 	if claims.ModeExpiresAt != expiresAt {
 		t.Errorf("ModeExpiresAt = %d, want %d", claims.ModeExpiresAt, expiresAt)

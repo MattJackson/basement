@@ -5,6 +5,7 @@ import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
+import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner";
 import { useUser } from "@/shared/auth/useUser";
 
 interface AppShellProps {
@@ -84,6 +85,13 @@ export function AppShell({ children }: AppShellProps): ReactNode {
       </header>
 
       <NewVersionBanner />
+
+      {/* ADR-0003 v1.3.0a.4 amendment: when an admin session expires */}
+      {/* in place we surface a banner instead of auto-redirecting, so */}
+      {/* the operator can finish reading / saving / re-elevate without */}
+      {/* losing context. The banner self-gates on /admin/* + mode==user */}
+      {/* so it's a no-op on /files routes. */}
+      <ElevationExpiredBanner />
 
       <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children ?? <Outlet />}

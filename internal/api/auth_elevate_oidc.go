@@ -163,24 +163,19 @@ func (s *Server) elevateOIDCStartHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// v1.3.0a.4: only "admin" is a real target. Legacy "elevated" is
+	// silently rewritten so half-upgraded FE callers keep working.
 	target := policy.Mode(req.TargetMode)
-	if target != policy.ModeAdmin && target != policy.ModeElevated {
+	if target == "elevated" {
+		target = policy.ModeAdmin
+	}
+	if target != policy.ModeAdmin {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_TARGET_MODE",
-			"target_mode must be \"admin\" or \"elevated\"")
+			"target_mode must be \"admin\"")
 		return
 	}
 
 	current := currentMode(r)
-	if current == policy.ModeUser && target == policy.ModeElevated {
-		writeError(w, http.StatusBadRequest, "INVALID_TARGET_MODE",
-			"Cannot elevate directly from user to elevated; elevate to admin first.",
-			map[string]any{
-				"current_mode":  string(current),
-				"target_mode":   string(target),
-				"required_path": []string{"admin", "elevated"},
-			})
-		return
-	}
 
 	state, err := randomHex(16)
 	if err != nil {
@@ -329,14 +324,9 @@ func (s *Server) elevateOIDCCallbackHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Mint the elevated cookie. Same TTL ladder as the password path.
-	var ttl time.Duration
-	switch entry.TargetMode {
-	case policy.ModeAdmin:
-		ttl = adminModeTTL
-	case policy.ModeElevated:
-		ttl = elevatedModeTTL
-	}
+	// Mint the elevated cookie. TTL comes from OrgCapabilities — same
+	// operator-configured value the password path uses (per v1.3.0a.4).
+	ttl := s.adminSessionTTL()
 
 	sessionTTL := s.cfg.SessionTTL
 	if sessionTTL <= 0 {

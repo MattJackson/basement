@@ -2,9 +2,9 @@ package policy
 
 import "testing"
 
-// TestMode_Includes_TruthTable codifies the ADR-0003 mode lattice:
-// ELEVATED >= ADMIN >= USER. Each Includes(other) call answers "does my
-// current mode grant me the privileges other demands?".
+// TestMode_Includes_TruthTable codifies the v1.3.0a.4 two-mode lattice:
+// ADMIN >= USER. Each Includes(other) call answers "does my current
+// mode grant me the privileges other demands?".
 func TestMode_Includes_TruthTable(t *testing.T) {
 	cases := []struct {
 		current Mode
@@ -14,15 +14,9 @@ func TestMode_Includes_TruthTable(t *testing.T) {
 		// USER current
 		{ModeUser, ModeUser, true},
 		{ModeUser, ModeAdmin, false},
-		{ModeUser, ModeElevated, false},
 		// ADMIN current
 		{ModeAdmin, ModeUser, true},
 		{ModeAdmin, ModeAdmin, true},
-		{ModeAdmin, ModeElevated, false},
-		// ELEVATED current
-		{ModeElevated, ModeUser, true},
-		{ModeElevated, ModeAdmin, true},
-		{ModeElevated, ModeElevated, true},
 	}
 	for _, c := range cases {
 		got := c.current.Includes(c.other)
@@ -37,31 +31,28 @@ func TestMode_Includes_TruthTable(t *testing.T) {
 // fail-closed so a missing/empty claim never satisfies a real check.
 func TestMode_Includes_UnknownMode(t *testing.T) {
 	var zero Mode
-	for _, m := range []Mode{ModeUser, ModeAdmin, ModeElevated} {
+	for _, m := range []Mode{ModeUser, ModeAdmin} {
 		if zero.Includes(m) {
 			t.Errorf("zero Mode.Includes(%q) = true, want false (fail-closed)", m)
 		}
 	}
 }
 
-// TestMinModeFor_Elevated covers every capability ADR-0003 elevates.
-// Adding a new destructive capability must also add it here so the
-// table stays the contract.
-func TestMinModeFor_Elevated(t *testing.T) {
-	elevated := []string{
-		"cluster:delete",
-		"bucket:delete",
-		"key:delete",
-		"host:manage_users",
-		"host:manage_policies",
-		"policy:edit_matrix",
-		"policy:assign_role",
-		"cluster:edit_layout",
+// TestModeElevated_AliasesAdmin: v1.3.0a.4 collapsed ELEVATED into
+// ADMIN; the ModeElevated constant is kept as an alias for one release
+// cycle so v1.2-era call sites compile. Confirm the alias is identical
+// to ModeAdmin (same string value, same Includes behaviour).
+func TestModeElevated_AliasesAdmin(t *testing.T) {
+	if ModeElevated != ModeAdmin {
+		t.Errorf("ModeElevated = %q, want it to alias ModeAdmin (%q)",
+			ModeElevated, ModeAdmin)
 	}
-	for _, cap := range elevated {
-		if got := MinModeFor(cap); got != ModeElevated {
-			t.Errorf("MinModeFor(%q) = %q, want %q", cap, got, ModeElevated)
-		}
+	// Includes behaviour identical too.
+	if got := ModeElevated.Includes(ModeUser); !got {
+		t.Errorf("ModeElevated.Includes(ModeUser) = false, want true")
+	}
+	if got := ModeElevated.Includes(ModeAdmin); !got {
+		t.Errorf("ModeElevated.Includes(ModeAdmin) = false, want true")
 	}
 }
 
@@ -85,13 +76,23 @@ func TestMinModeFor_User(t *testing.T) {
 	}
 }
 
-// TestMinModeFor_DefaultAdmin: anything not on the USER or ELEVATED
-// list defaults to ADMIN. Includes a sample of registry caps and one
-// unknown ID — the unknown-default is the load-bearing fail-safe: a
-// new gate added in a future cycle that no one classifies stays
-// callable only from ADMIN, not USER.
-func TestMinModeFor_DefaultAdmin(t *testing.T) {
+// TestMinModeFor_Admin: every admin capability — destructive or not —
+// requires ADMIN under the v1.3.0a.4 amendment. The previously-ELEVATED
+// caps (cluster:delete et al.) collapse into the same tier as the
+// previously-ADMIN caps (cluster:edit et al.). Includes one unknown ID
+// as the load-bearing fail-safe: a new gate added in a future cycle
+// that no one classifies stays callable only from ADMIN, not USER.
+func TestMinModeFor_Admin(t *testing.T) {
 	admin := []string{
+		// Previously-ELEVATED capabilities — same tier now.
+		"cluster:delete",
+		"bucket:delete",
+		"key:delete",
+		"host:manage_users",
+		"host:manage_policies",
+		"policy:edit_matrix",
+		"policy:assign_role",
+		"cluster:edit_layout",
 		// Registry caps that map to ADMIN.
 		"cluster:create",
 		"cluster:edit",

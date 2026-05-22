@@ -82,17 +82,26 @@ func currentMode(r *http.Request) policy.Mode {
 		return policy.ModeUser
 	}
 
-	mode := policy.Mode(claims.Mode)
+	// Silent migration (v1.3.0a.4): v1.2-era cookies carry mode="elevated".
+	// The amendment collapsed ELEVATED into ADMIN; treat the legacy
+	// string as ADMIN on read so an in-flight session doesn't need to
+	// log out across the upgrade. The cookie keeps its original
+	// ModeExpiresAt — the next mint will write the canonical "admin"
+	// string. (ModeElevated is also a string-alias for ModeAdmin, so
+	// downstream comparisons would work either way; this normalisation
+	// is for clarity in audit logs + the FE's mode echo.)
+	rawMode := claims.Mode
+	if rawMode == "elevated" {
+		rawMode = "admin"
+	}
+	mode := policy.Mode(rawMode)
 
-	// Mode expired since the cookie was minted → downgrade this
-	// request. ELEVATED falls back to ADMIN (per ADR-0003: "5 min idle
-	// in ELEVATED" returns to ADMIN, not USER), ADMIN falls back to
-	// USER. USER never expires.
+	// Mode expired since the cookie was minted → downgrade to USER for
+	// this request. The cookie itself is not rewritten here; downstream
+	// handlers that mint a fresh cookie pick up the downgrade. USER
+	// never expires.
 	if claims.ModeExpiresAt > 0 && now.Unix() >= claims.ModeExpiresAt {
-		switch mode {
-		case policy.ModeElevated:
-			return policy.ModeAdmin
-		case policy.ModeAdmin:
+		if mode == policy.ModeAdmin {
 			return policy.ModeUser
 		}
 	}

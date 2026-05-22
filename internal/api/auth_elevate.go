@@ -1,28 +1,29 @@
-// Package api: sudo-style elevation endpoint (ADR-0003, cycle v1.2.0a).
+// Package api: sudo-style elevation endpoint (ADR-0003 + v1.3.0a.4
+// amendment).
 //
 // POST /api/v1/auth/elevate
 //
-//	Request:  {"password": "...", "target_mode": "admin" | "elevated"}
-//	Response: 200 + Set-Cookie with a fresh JWT carrying Mode +
+//	Request:  {"password": "...", "target_mode": "admin"}
+//	          (legacy v1.2 callers may send "elevated"; the dispatcher
+//	          silently treats it as "admin" per the amendment.)
+//	Response: 200 + Set-Cookie with a fresh JWT carrying Mode="admin" +
 //	          ModeExpiresAt. Returns the granted mode + expiry in the
 //	          body so the FE can drive its countdown chip without
 //	          having to parse the cookie.
 //
 // State-machine rules enforced here:
 //
-//   - USER → ADMIN: password re-auth required, 15min TTL.
-//   - ADMIN → ELEVATED: password re-auth required, 5min TTL.
-//   - USER → ELEVATED directly: rejected (400 INVALID_TARGET_MODE).
-//     The operator must elevate through ADMIN first; this matches
-//     Linux sudo's "you can't skip a level" model.
-//   - OIDC-only users: rejected here (403 OIDC_USER_ELEVATION_NOT_SUPPORTED).
-//     v1.2.0c will wire the OIDC `prompt=login` challenge for them.
+//   - USER → ADMIN: password re-auth required. TTL comes from
+//     OrgCapabilities.AdminSessionTTLSec (operator-configurable via
+//     /admin/system; default 15 min, range 60s – 24h).
+//   - target_mode="elevated" (v1.2 wire shape): silently rewritten to
+//     "admin" and the flow proceeds normally.
 //
 // Backwards compatibility: pre-v1.2 cookies with no Mode claim are
 // treated as ADMIN by the gate's currentMode() helper for a 7-day
-// grace window — so an existing matthew session can elevate to ELEVATED
-// directly through this endpoint without re-logging-in. See
-// policy_gates.go for the grace logic.
+// grace window — so an existing matthew session can elevate through
+// this endpoint without re-logging-in. See policy_gates.go for the
+// grace logic.
 //
 // v1.2.0c update: OIDC-only users no longer 403 here. The dispatcher
 // pivots them into the OIDC elevation flow by returning 200 +
@@ -38,16 +39,34 @@ import (
 	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
+	"github.com/mattjackson/basement/internal/store"
 )
 
-// Elevation TTLs. ADR-0003 calls these the "idle timeouts" — they're
-// the maximum mode lifetime, not idle resets (the FE may bump on
-// activity in a later cycle). Defaults in code; future cycles wire
-// BASEMENT_ADMIN_TTL_SEC / BASEMENT_ELEVATED_TTL_SEC env overrides.
-const (
-	adminModeTTL    = 15 * time.Minute
-	elevatedModeTTL = 5 * time.Minute
-)
+// adminModeTTL is the legacy v1.2 hardcoded default. Kept as a
+// fallback when the org capabilities store isn't wired (e.g. tests
+// that build Server with a zero-value Store) so the elevate flow can
+// still stamp a sensible expiry. Production callers go through
+// adminSessionTTLFor() which prefers the operator-configured value.
+const adminModeTTL = time.Duration(store.AdminSessionTTLDefaultSec) * time.Second
+
+// adminSessionTTLFor resolves the operator-configured admin session
+// TTL from OrgCapabilities, clamped into [60s, 24h]. Falls back to
+// adminModeTTL when the store isn't available (test paths) so the
+// caller always gets a usable duration. The clamping uses the same
+// ClampAdminSessionTTL helper Update() uses on the write side, so the
+// floor + ceiling are enforced regardless of how the on-disk file got
+// into its current state.
+func (s *Server) adminSessionTTL() time.Duration {
+	if s.store == nil {
+		return adminModeTTL
+	}
+	caps := s.store.OrgCapabilities()
+	if caps == nil {
+		return adminModeTTL
+	}
+	secs := store.ClampAdminSessionTTL(caps.Get().AdminSessionTTLSec)
+	return time.Duration(secs) * time.Second
+}
 
 // elevateRequest is the POST body shape.
 type elevateRequest struct {
@@ -90,30 +109,21 @@ func (s *Server) elevateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate target mode. Anything outside {admin, elevated} is a
-	// 400; USER as a target is meaningless via this endpoint (there's
-	// a separate "drop privileges" path in v1.2.0b).
+	// Validate target mode. Per the v1.3.0a.4 amendment only "admin"
+	// is a real target — but v1.2-era FE code may still send
+	// "elevated"; we silently rewrite that to "admin" so a half-
+	// upgraded deploy doesn't reject in-flight elevation submits.
 	target := policy.Mode(req.TargetMode)
-	if target != policy.ModeAdmin && target != policy.ModeElevated {
+	if target == "elevated" {
+		target = policy.ModeAdmin
+	}
+	if target != policy.ModeAdmin {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_TARGET_MODE",
-			"target_mode must be \"admin\" or \"elevated\"")
+			"target_mode must be \"admin\"")
 		return
 	}
 
-	// State-machine guard: USER can only step up to ADMIN. USER →
-	// ELEVATED is rejected so the FE never accidentally bypasses the
-	// "are you sure you want admin?" prompt by jumping two levels.
 	current := currentMode(r)
-	if current == policy.ModeUser && target == policy.ModeElevated {
-		writeError(w, http.StatusBadRequest, "INVALID_TARGET_MODE",
-			"Cannot elevate directly from user to elevated; elevate to admin first.",
-			map[string]any{
-				"current_mode":  string(current),
-				"target_mode":   string(target),
-				"required_path": []string{"admin", "elevated"},
-			})
-		return
-	}
 
 	// OIDC-only pivot (v1.2.0c): a user whose only credential is
 	// OIDC has no password to verify here. Instead of failing, return
@@ -186,14 +196,10 @@ func (s *Server) elevateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Pick TTL by target mode + mint a fresh cookie with bumped mode.
-	var ttl time.Duration
-	switch target {
-	case policy.ModeAdmin:
-		ttl = adminModeTTL
-	case policy.ModeElevated:
-		ttl = elevatedModeTTL
-	}
+	// Pick TTL from OrgCapabilities.AdminSessionTTLSec
+	// (operator-configurable per the v1.3.0a.4 amendment). Two modes
+	// only now; target is always ModeAdmin at this point.
+	ttl := s.adminSessionTTL()
 
 	// Session JWT TTL stays at the configured session lifetime — we're
 	// only changing the mode claim + its expiry, not the outer session
