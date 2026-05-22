@@ -31,6 +31,7 @@ import (
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
+	"github.com/mattjackson/basement/internal/webhook"
 )
 
 // isUserKeyRejected returns true if the driver error indicates the
@@ -1353,6 +1354,19 @@ func (s *Server) userDeleteRegionObjectHandler(w http.ResponseWriter, r *http.Re
 
 	s.auditEmit(r, "region:delete_object", regionObjectResource(region, bid),
 		audit.ResultSuccess, regionAuditDetail(region))
+
+	// v1.7.0d: fire the object.deleted webhook event after a successful
+	// server-side delete. Engine + store are nil-safe — the call is a
+	// silent no-op when the webhook subsystem isn't wired (tests + any
+	// deployment that hasn't opted in).
+	if s.webhookEngine != nil {
+		s.webhookEngine.Emit(webhook.EventEnvelope{
+			Type:     webhook.EventObjectDeleted,
+			RegionID: region.ID,
+			Bucket:   bid,
+			Key:      key,
+		})
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }

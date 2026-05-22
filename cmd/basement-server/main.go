@@ -24,6 +24,7 @@ import (
 	"github.com/mattjackson/basement/internal/federationwire"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
+	"github.com/mattjackson/basement/internal/webhook"
 )
 
 func main() {
@@ -344,6 +345,22 @@ func main() {
 
 	fedEngine.Start(ctxSignal)
 	defer fedEngine.Stop()
+
+	// v1.7.0d WEBHOOK.SUBSCRIPTIONS: persistent operator-configured
+	// HTTP POST hooks for bucket events. Store persists to
+	// {dataDir}/webhooks.json; engine fans out per-event deliveries
+	// with HMAC-signed bodies, retries, and audit logging. Wired
+	// before srv.Start so the /user/webhooks handlers have non-nil
+	// dependencies on first request.
+	webhookStore, err := webhook.Open(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to open webhook store", "error", err)
+		os.Exit(1)
+	}
+	webhookEngine := webhook.NewEngine(webhookStore, auditLogger, slog.Default())
+	srv.SetWebhooks(webhookStore, webhookEngine)
+	webhookEngine.Start(ctxSignal)
+	defer webhookEngine.Stop()
 
 	// v1.0.0d: kick off the hourly metrics snapshot scheduler. Fires
 	// once immediately so first-time deploys get a data point without
