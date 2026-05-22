@@ -134,3 +134,34 @@ After all three: tag v1.2.0.
 ## Tags
 
 `rbac`, `auth`, `security`, `v1.2`, `elevation`, `sudo`
+
+---
+
+## Amendment: v1.3.0a.4 — Two-mode simplification + operator-configurable TTL
+
+**Date**: 2026-05-22
+**Triggered by**: Operator session post-v1.2.0 — three-mode model (USER/ADMIN/ELEVATED) proved over-complicated; persona-switch ergonomics were wrong (no auto-elevate); operator wanted return-to-user on timer expiry. Operator-confirmed quotes:
+- *"id say elevate before you go to the admin console, now your an admin for x mins"*
+- *"auto switch back to user after x"*
+- *"ui admin configurable. maybe they allow 2hr or something"*
+
+### Changes from the original ADR-0003
+
+1. **Drop ELEVATED mode.** USER + ADMIN only. ADMIN can do every capability including destructives. The TTL is the safety, not a sub-mode. ELEVATED was over-engineering — adding cognitive overhead without buying real protection.
+2. **Elevate BEFORE entering admin console**, not on first 403. Clicking "Switch to admin" in UserMenu opens the password modal up front. On success, mode = ADMIN, navigate to /admin. Cancel = stay where you are.
+3. **TTL is operator-configurable via `/admin/system`**, not env-only. Host Admin picks 5 min / 15 min / 30 min / 1 hr / 2 hr / 8 hr / custom in the UI. Default 15 min. Range 60s – 24h. Stored in `org_capabilities.json`.
+4. **Timer expiry drops privileges in place, doesn't yank user.** Banner replaces the page rather than navigating away. Operator can finish reading / save form / re-elevate without losing context. Next admin action gets the standard 403 ELEVATION_REQUIRED → modal.
+5. **Ramp warnings**: persona pill amber at <2 min, red at <30s, toast at <30s with "Stay admin" extend button.
+6. **Capability gating** simplifies: every admin capability requires `ADMIN` (no ELEVATED tier). USER capabilities (objects:*, share:*, bucket:view) remain unrestricted.
+
+### Migration from v1.2.0 (ELEVATED → ADMIN collapse)
+
+- Cookies issued with `mode="elevated"` are treated as `mode="admin"` on read (with the original ELEVATED TTL preserved). Silent migration; no logout needed.
+- Code: `MinModeFor()` returns only `ModeUser` or `ModeAdmin`. The `ModeElevated` constant is kept as an alias for ModeAdmin for one cycle then removed.
+- Audit log: `actorRole` values become `user` or `admin` only. Existing entries with `elevated` stay readable (they're historical records).
+
+### Implementation in v1.3.0a.4
+
+- Backend: drop ELEVATED from `internal/auth/policy/min_mode.go`; add `OrgCapabilities.AdminSessionTTLSec` (default 900, range 60-86400); `/auth/elevate` reads TTL from org config; `requireCapability` gate compares mode (admin-required) without sub-mode logic.
+- Frontend: `UserMenu` "Switch to admin" calls runWithElevation+navigate; `AuthModeHydrator` on expiry shows persistent banner instead of redirect; `/admin/system` adds the TTL setting card (dropdown + custom input).
+- ADR-0003 main body above is the v1.2.0 reference; the model going forward is this amendment.
