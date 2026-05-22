@@ -427,7 +427,7 @@ func (s *stubDriver) DeleteKey(_ context.Context, _ string) error {
 	return driver.ErrUnsupported
 }
 
-func (s *stubDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+func (s *stubDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 	return driver.ObjectPage{}, driver.ErrUnsupported
 }
 

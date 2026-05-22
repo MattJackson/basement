@@ -149,7 +149,10 @@ func (c *s3Client) presignUploadPart(ctx context.Context, bucket, key, uploadID 
 }
 
 // listObjectsV2 lists objects in a bucket with optional prefix and pagination.
-func (c *s3Client) listObjectsV2(ctx context.Context, bucket, prefix, continuation string, limit int) (*s3.ListObjectsV2Output, error) {
+// Passing a non-empty delimiter (typically "/") turns flat listing into
+// folder-tier browsing: Contents are objects directly under prefix and
+// CommonPrefixes are sub-folder prefixes.
+func (c *s3Client) listObjectsV2(ctx context.Context, bucket, prefix, continuation, delimiter string, limit int) (*s3.ListObjectsV2Output, error) {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(bucket),
 		Prefix: aws.String(prefix),
@@ -157,6 +160,9 @@ func (c *s3Client) listObjectsV2(ctx context.Context, bucket, prefix, continuati
 
 	if continuation != "" {
 		input.ContinuationToken = aws.String(continuation)
+	}
+	if delimiter != "" {
+		input.Delimiter = aws.String(delimiter)
 	}
 	if limit > 0 {
 		input.MaxKeys = aws.Int32(int32(limit))

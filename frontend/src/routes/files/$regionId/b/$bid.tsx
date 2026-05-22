@@ -126,6 +126,7 @@ function UserRegionBucketObjects() {
 
       {prefix && (
         <Breadcrumb
+          bucketAlias={bucketAlias}
           prefix={prefix}
           onNavigate={(p) =>
             navigate({
@@ -146,10 +147,10 @@ function UserRegionBucketObjects() {
           description={`Backend returned an error: ${String(objectsError)}`}
         />
       ) : objectsPage?.objects.length === 0 &&
-        (!objectsPage?.prefixes || objectsPage.prefixes.length === 0) ? (
+        (!objectsPage?.commonPrefixes || objectsPage.commonPrefixes.length === 0) ? (
         <EmptyState
           icon="folder-open"
-          title="No objects here"
+          title={prefix ? "This folder is empty" : "No objects here"}
           description={prefix ? `No objects found in ${prefix}` : "This bucket is empty"}
         />
       ) : (
@@ -164,19 +165,21 @@ function UserRegionBucketObjects() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {objectsPage?.prefixes && objectsPage.prefixes.length > 0 && (
+              {objectsPage?.commonPrefixes && objectsPage.commonPrefixes.length > 0 && (
                 <>
-                  {objectsPage.prefixes.map((folder) => {
-                    const folderKey = prefix ? `${prefix}${folder}` : folder;
-                    return (
-                      <ObjectRow
-                        key={folderKey}
-                        object={{ key: folderKey, size: 0, last_modified: new Date().toISOString() }}
-                        isFolder
-                        onFolderClick={handleFolderClick}
-                      />
-                    );
-                  })}
+                  {[...objectsPage.commonPrefixes].sort().map((folder) => (
+                    // S3 returns each CommonPrefix as a FULL prefix
+                    // (e.g. "raw/broadcom-docid/" when listing
+                    // "raw/" with delimiter="/"). Pass it through as
+                    // the key — do not concatenate with the current
+                    // prefix or you'll double-up.
+                    <ObjectRow
+                      key={folder}
+                      object={{ key: folder, size: 0, last_modified: new Date().toISOString() }}
+                      isFolder
+                      onFolderClick={handleFolderClick}
+                    />
+                  ))}
                 </>
               )}
 
@@ -190,7 +193,10 @@ function UserRegionBucketObjects() {
       )}
 
       {objectsPage?.isTruncated && (
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-sm text-muted-foreground">
+            Showing first {objectsPage.objects.length} — more available
+          </p>
           <Button
             onClick={() =>
               navigate({
@@ -241,28 +247,76 @@ function PageHeader({
   );
 }
 
-function Breadcrumb({ prefix, onNavigate }: { prefix: string; onNavigate: (p: string) => void }) {
+// Breadcrumb renders bucketAlias > raw > broadcom-docid (clickable),
+// per v1.3.0c.1: each crumb navigates to the prefix ending at that
+// segment. Folder prefixes from S3 always end in "/" so the click
+// emits e.g. "raw/" or "raw/broadcom-docid/".
+function Breadcrumb({
+  bucketAlias,
+  prefix,
+  onNavigate,
+}: {
+  bucketAlias: string;
+  prefix: string;
+  onNavigate: (p: string) => void;
+}) {
   const parts = prefix.split("/").filter(Boolean);
+  const parentPrefix = parts.length > 1 ? parts.slice(0, parts.length - 1).join("/") + "/" : "";
 
   return (
-    <nav className="flex items-center gap-2 text-sm text-muted-foreground">
-      <button onClick={() => onNavigate("")} className="hover:text-foreground">
-        {parts[0] ? ".." : "Root"}
+    <div className="flex flex-col gap-2">
+      <nav className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+        <button onClick={() => onNavigate("")} className="hover:text-foreground font-medium">
+          {bucketAlias}
+        </button>
+        {parts.map((part, idx) => {
+          const path = parts.slice(0, idx + 1).join("/") + "/";
+          const isLast = idx === parts.length - 1;
+          return (
+            <span key={path} className="flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+              >
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+              {isLast ? (
+                <span className="text-foreground">{part}</span>
+              ) : (
+                <button onClick={() => onNavigate(path)} className="hover:text-foreground">
+                  {part}
+                </button>
+              )}
+            </span>
+          );
+        })}
+      </nav>
+      <button
+        type="button"
+        onClick={() => onNavigate(parentPrefix)}
+        className="self-start text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-3.5 w-3.5"
+        >
+          <path d="m15 18-6-6 6-6" />
+        </svg>
+        Up to parent folder
       </button>
-      {parts.map((part, idx) => {
-        const path = parts.slice(0, idx + 1).join("/");
-        return (
-          <span key={path} className="flex items-center gap-2">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-            <button onClick={() => onNavigate(path)} className="hover:text-foreground">
-              {part}
-            </button>
-          </span>
-        );
-      })}
-    </nav>
+    </div>
   );
 }
 

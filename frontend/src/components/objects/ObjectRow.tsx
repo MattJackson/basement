@@ -11,8 +11,11 @@ type ObjectRowProps = {
 };
 
 export function ObjectRow({ object, isFolder = false, onFolderClick, onDownload }: ObjectRowProps) {
-  const displayName = object.key.split("/").pop() || object.key;
-  
+  // Folder prefixes from S3 end in "/" (e.g. "raw/"). Stripping the
+  // trailing slash before pop() yields "raw" instead of an empty string.
+  const trimmed = isFolder && object.key.endsWith("/") ? object.key.slice(0, -1) : object.key;
+  const displayName = trimmed.split("/").pop() || trimmed;
+
   if (isFolder) {
     return (
       <tr className="cursor-pointer hover:bg-muted/50" onClick={() => onFolderClick?.(object.key)}>

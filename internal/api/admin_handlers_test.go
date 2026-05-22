@@ -32,7 +32,7 @@ type testMockDriver struct {
 	createKeyFunc    func(ctx context.Context, spec driver.KeySpec) (driver.Key, error)
 	updateKeyPermissionsFunc func(ctx context.Context, keyID string, perms []driver.BucketPermission) error
 	deleteKeyFunc    func(ctx context.Context, id string) error
-	listObjectsFunc  func(ctx context.Context, bucket, prefix, token string, limit int) (driver.ObjectPage, error)
+	listObjectsFunc  func(ctx context.Context, bucket, prefix, token, delimiter string, limit int) (driver.ObjectPage, error)
 	statObjectFunc   func(ctx context.Context, bucket, key string) (driver.ObjectInfo, error)
 	presignGetFunc   func(ctx context.Context, bucket, key string, ttl time.Duration) (driver.PresignedURL, error)
 	presignPutFunc   func(ctx context.Context, bucket, key string, ttl time.Duration, contentType string) (driver.PresignedURL, error)
@@ -147,9 +147,9 @@ func (m *testMockDriver) DeleteKey(ctx context.Context, id string) error {
 	}
 	return nil
 }
-func (m *testMockDriver) ListObjects(ctx context.Context, bucket, prefix, token string, limit int) (driver.ObjectPage, error) {
+func (m *testMockDriver) ListObjects(ctx context.Context, bucket, prefix, token, delimiter string, limit int) (driver.ObjectPage, error) {
 	if m.listObjectsFunc != nil {
-		return m.listObjectsFunc(ctx, bucket, prefix, token, limit)
+		return m.listObjectsFunc(ctx, bucket, prefix, token, delimiter, limit)
 	}
 	return driver.ObjectPage{}, nil
 }

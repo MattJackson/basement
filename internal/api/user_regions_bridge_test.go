@@ -159,7 +159,7 @@ func TestRegionBuckets_GarageBridge_ReturnsAdminList(t *testing.T) {
 		}, nil
 	}
 	// User key can reach every bucket — ListObjects(limit=1) succeeds.
-	env.regionDrv.testMockDriver.listObjectsFunc = func(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+	env.regionDrv.testMockDriver.listObjectsFunc = func(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 		return driver.ObjectPage{}, nil
 	}
 
@@ -198,7 +198,7 @@ func TestRegionBuckets_GarageBridge_FiltersByUserKey(t *testing.T) {
 			{ID: "cheshire-id", Aliases: []string{"cheshire"}},
 		}, nil
 	}
-	env.regionDrv.testMockDriver.listObjectsFunc = func(_ context.Context, bucket, _, _ string, _ int) (driver.ObjectPage, error) {
+	env.regionDrv.testMockDriver.listObjectsFunc = func(_ context.Context, bucket, _, _, _ string, _ int) (driver.ObjectPage, error) {
 		if bucket == "cheshire" {
 			return driver.ObjectPage{}, &driver.Error{Op: "ListObjects", Err: driver.ErrPermissionDenied}
 		}
@@ -297,7 +297,7 @@ func TestRegionBuckets_BridgeEndpointCanonicalization(t *testing.T) {
 	env.adminDrv.listBucketsFunc = func(_ context.Context) ([]driver.Bucket, error) {
 		return []driver.Bucket{{ID: "canonical", Aliases: []string{"canonical"}}}, nil
 	}
-	env.regionDrv.testMockDriver.listObjectsFunc = func(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+	env.regionDrv.testMockDriver.listObjectsFunc = func(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 		return driver.ObjectPage{}, nil
 	}
 

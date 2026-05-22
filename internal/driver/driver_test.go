@@ -271,7 +271,7 @@ func (m *mockDriver) GetKey(_ context.Context, _ string) (Key, error) { return K
 func (m *mockDriver) CreateKey(_ context.Context, _ KeySpec) (Key, error) { return Key{}, nil }
 func (m *mockDriver) UpdateKeyPermissions(_ context.Context, _ string, _ []BucketPermission) error { return nil }
 func (m *mockDriver) DeleteKey(_ context.Context, _ string) error { return nil }
-func (m *mockDriver) ListObjects(_ context.Context, _, _, _ string, _ int) (ObjectPage, error) { return ObjectPage{}, nil }
+func (m *mockDriver) ListObjects(_ context.Context, _, _, _, _ string, _ int) (ObjectPage, error) { return ObjectPage{}, nil }
 func (m *mockDriver) StatObject(_ context.Context, _, _ string) (ObjectInfo, error) { return ObjectInfo{}, nil }
 func (m *mockDriver) PresignGet(_ context.Context, _, _ string, _ time.Duration) (PresignedURL, error) { return PresignedURL{}, nil }
 func (m *mockDriver) PresignPut(_ context.Context, _, _ string, _ time.Duration, _ string) (PresignedURL, error) { return PresignedURL{}, nil }

@@ -133,7 +133,7 @@ func TestUserRegions_RevokedKey_ListBuckets(t *testing.T) {
 // actionable alert, not a generic 500.
 func TestUserRegions_RevokedKey_ListObjects(t *testing.T) {
 	mock := newRegionMockDriver()
-	mock.listObjectsFunc = func(_ context.Context, _, _, _ string, _ int) (driver.ObjectPage, error) {
+	mock.listObjectsFunc = func(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
 		return driver.ObjectPage{}, revokedKeyErr("ListObjectsV2", "InvalidAccessKeyId")
 	}
 	srv, _, cleanup := newRegionsTestEnv(t, mock)

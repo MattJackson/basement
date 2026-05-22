@@ -15,9 +15,10 @@ import (
 )
 
 // ListObjects lists objects in a bucket with optional prefix and pagination.
-// It uses Delimiter="/" to separate folders (Prefixes) from files (Contents).
-func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation string, limit int) (driverpkg.ObjectPage, error) {
-	resp, err := d.s3Client.listObjectsV2(ctx, bucket, prefix, continuation, limit)
+// delimiter="" returns a flat recursive listing; delimiter="/" returns
+// folder-tier browsing with CommonPrefixes populated for sub-folders.
+func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation, delimiter string, limit int) (driverpkg.ObjectPage, error) {
+	resp, err := d.s3Client.listObjectsV2(ctx, bucket, prefix, continuation, delimiter, limit)
 	if err != nil {
 		return driverpkg.ObjectPage{}, &driverpkg.Error{
 			Op:      "ListObjects",
@@ -30,11 +31,7 @@ func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation s
 	objects := make([]driverpkg.ObjectInfo, 0, len(resp.Contents))
 	for _, obj := range resp.Contents {
 		info := driverpkg.ObjectInfo{
-			Key:          *obj.Key,
-			Size:         *obj.Size,
-			LastModified: *obj.LastModified,
-			ETag:         *obj.ETag,
-			IsDir:        false,
+			IsDir: false,
 		}
 		if obj.Key != nil {
 			info.Key = *obj.Key
@@ -51,17 +48,17 @@ func (d *driver) ListObjects(ctx context.Context, bucket, prefix, continuation s
 		objects = append(objects, info)
 	}
 
-	prefixes := make([]string, 0, len(resp.CommonPrefixes))
+	commonPrefixes := make([]string, 0, len(resp.CommonPrefixes))
 	for _, p := range resp.CommonPrefixes {
 		if p.Prefix != nil {
-			prefixes = append(prefixes, *p.Prefix)
+			commonPrefixes = append(commonPrefixes, *p.Prefix)
 		}
 	}
 
 	page := driverpkg.ObjectPage{
-		Objects:     objects,
-		Prefixes:    prefixes,
-		IsTruncated: resp.IsTruncated != nil && *resp.IsTruncated,
+		Objects:        objects,
+		CommonPrefixes: commonPrefixes,
+		IsTruncated:    resp.IsTruncated != nil && *resp.IsTruncated,
 	}
 
 	if resp.NextContinuationToken != nil {

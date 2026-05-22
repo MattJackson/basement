@@ -547,18 +547,57 @@ func TestRealDriver_ListObjects_Happy(t *testing.T) {
 	defer ts.Close()
 
 	d := makeAwsS3Driver(t, ts)
-	page, err := d.ListObjects(context.Background(), "bkt", "", "", 1000)
+	page, err := d.ListObjects(context.Background(), "bkt", "", "", "/", 1000)
 	if err != nil {
 		t.Fatalf("ListObjects: %v", err)
 	}
 	if len(page.Objects) != 1 {
 		t.Errorf("Objects=%d, want 1", len(page.Objects))
 	}
-	if len(page.Prefixes) != 1 || page.Prefixes[0] != "subdir/" {
-		t.Errorf("Prefixes=%v, want [subdir/]", page.Prefixes)
+	if len(page.CommonPrefixes) != 1 || page.CommonPrefixes[0] != "subdir/" {
+		t.Errorf("CommonPrefixes=%v, want [subdir/]", page.CommonPrefixes)
 	}
 	if page.IsTruncated {
 		t.Error("IsTruncated should be false")
+	}
+}
+
+// TestRealDriver_ListObjects_DelimiterPassthrough asserts the delimiter
+// argument lands on the wire (v1.3.0c.1). Folder-tier nav passes "/",
+// the sync engine passes "" — the test inspects the inbound query
+// string for the delimiter param both ways.
+func TestRealDriver_ListObjects_DelimiterPassthrough(t *testing.T) {
+	type call struct{ delim string; present bool }
+	var got call
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.delim = r.URL.Query().Get("delimiter")
+		_, got.present = r.URL.Query()["delimiter"]
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+  <Name>bkt</Name>
+  <Prefix></Prefix>
+  <KeyCount>0</KeyCount>
+  <MaxKeys>1000</MaxKeys>
+  <IsTruncated>false</IsTruncated>
+</ListBucketResult>`))
+	}))
+	defer ts.Close()
+
+	d := makeAwsS3Driver(t, ts)
+	if _, err := d.ListObjects(context.Background(), "bkt", "", "", "/", 100); err != nil {
+		t.Fatalf("ListObjects(delim=/): %v", err)
+	}
+	if !got.present || got.delim != "/" {
+		t.Errorf("delim=/: got present=%v value=%q, want present=true value=/", got.present, got.delim)
+	}
+
+	got = call{}
+	if _, err := d.ListObjects(context.Background(), "bkt", "", "", "", 100); err != nil {
+		t.Fatalf("ListObjects(delim=\"\"): %v", err)
+	}
+	if got.present {
+		t.Errorf("delim=\"\": expected no delimiter on the wire, got value=%q", got.delim)
 	}
 }
 
@@ -570,7 +609,7 @@ func TestRealDriver_ListObjects_Error(t *testing.T) {
 	defer ts.Close()
 
 	d := makeAwsS3Driver(t, ts)
-	_, err := d.ListObjects(context.Background(), "bkt", "", "", 100)
+	_, err := d.ListObjects(context.Background(), "bkt", "", "", "/", 100)
 	if err == nil {
 		t.Fatal("expected error")
 	}

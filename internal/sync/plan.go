@@ -31,7 +31,9 @@ func Plan(ctx context.Context, srcDriver driver.Driver, dstDriver driver.Driver,
 	}
 
 	for {
-		page, err := srcDriver.ListObjects(ctx, srcBucket, srcPrefix, continuation, 1000)
+		// Sync engine wants a flat recursive list across every key
+		// under srcPrefix, so we pass delimiter="" (the disable signal).
+		page, err := srcDriver.ListObjects(ctx, srcBucket, srcPrefix, continuation, "", 1000)
 		if err != nil {
 			return nil, fmt.Errorf("listing source objects: %w", err)
 		}
