@@ -89,7 +89,7 @@ func newBridgeTestEnv(t *testing.T) *bridgeTestEnv {
 
 	reg := driver.NewRegistry(conns)
 	reg.SetUserRegionsStore(st.UserRegions())
-	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (driver.Driver, error) {
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
 		return regionDrv, nil
 	})
 

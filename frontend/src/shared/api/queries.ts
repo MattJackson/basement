@@ -309,6 +309,14 @@ export interface UserRegion {
   endpoint: string;
   region: string;
   accessKeyId: string;
+  // v1.3.0c: per-region S3 addressing toggle. "path" (the default for
+  // every UserRegion shipped before this cycle) addresses requests as
+  // endpoint/bucket/key; "virtual_host" routes as bucket.endpoint/key.
+  // The server's wire format always populates this field after read
+  // (via store.applyReadDefaults), so the FE can render the
+  // per-card "via path-style" / "via virtual-host" subtitle without
+  // null-checking.
+  addressingStyle: "path" | "virtual_host";
   createdAt: string;
   updatedAt: string;
   lastUsedAt?: string;
@@ -400,6 +408,10 @@ export interface CreateUserKeyRequest {
   accessKeyId: string;
   secretKey: string;
   region?: string;
+  // v1.3.0c: optional per-region addressing toggle. Omitted / undefined
+  // sends nothing and the backend defaults to "path" for compatibility
+  // with every UserRegion shipped before this cycle.
+  addressingStyle?: "path" | "virtual_host";
 }
 
 // v1.2.0d: renamed from useCreateUserRegion. Still POSTs to
@@ -417,6 +429,36 @@ export function useCreateUserKey() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("user/regions/create", res.status, body);
+      return body as UserRegion;
+    },
+  });
+}
+
+// v1.3.0c: rotate the access key + secret on an existing UserRegion
+// in place. Alias / endpoint / region / addressingStyle / lastUsedAt
+// history all survive — only the credential pair flips. Server-side
+// audits as region:rotate and invalidates the cached S3 client so the
+// next ListBuckets uses the fresh secret.
+export interface RotateUserRegionRequest {
+  regionId: string;
+  accessKeyId: string;
+  secretKey: string;
+}
+
+export function useRotateUserRegion() {
+  return useMutation<UserRegion, Error, RotateUserRegionRequest>({
+    mutationFn: async ({ regionId, accessKeyId, secretKey }) => {
+      const res = await fetch(
+        `/api/v1/user/regions/${encodeURIComponent(regionId)}/rotate`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accessKeyId, secretKey }),
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/rotate/${regionId}`, res.status, body);
       return body as UserRegion;
     },
   });

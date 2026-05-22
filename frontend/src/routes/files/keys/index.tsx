@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   useUserRegions,
   useDeleteUserRegion,
+  useRotateUserRegion,
   type UserRegion,
 } from "@/shared/api/queries";
 import {
@@ -110,10 +111,37 @@ function PageHeader() {
   );
 }
 
+// addressingStyleLabel renders the per-card subtitle phrase. Defaults
+// to "path-style" when the field is missing — defensive against an
+// in-flight server upgrade where the FE may briefly see a stale wire
+// shape with no addressingStyle.
+function addressingStyleLabel(style: UserRegion["addressingStyle"]): string {
+  if (style === "virtual_host") return "via virtual-host";
+  return "via path-style";
+}
+
+// rotationRecentlyHappened returns true when updatedAt is within the
+// last 24h AND meaningfully after createdAt — the v1.3.0c "Last
+// rotated 2h ago" hint is only useful for the immediate post-rotate
+// window. A 60s slop on the createdAt comparison absorbs millisecond
+// drift between Create's timestamp and its first persisted row.
+function rotationRecentlyHappened(region: UserRegion): boolean {
+  if (!region.updatedAt) return false;
+  const updated = new Date(region.updatedAt).getTime();
+  const created = new Date(region.createdAt).getTime();
+  if (!Number.isFinite(updated) || !Number.isFinite(created)) return false;
+  if (updated - created < 60_000) return false;
+  return Date.now() - updated < 24 * 60 * 60 * 1000;
+}
+
 function RegionKeyCard({ region }: { region: UserRegion }) {
   const router = useRouter();
   const deleteRegion = useDeleteUserRegion();
+  const rotateRegion = useRotateUserRegion();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const [rotateAccessKey, setRotateAccessKey] = useState("");
+  const [rotateSecret, setRotateSecret] = useState("");
   const [copied, setCopied] = useState(false);
 
   const onCopy = async () => {
@@ -133,6 +161,21 @@ function RegionKeyCard({ region }: { region: UserRegion }) {
     router.invalidate();
   };
 
+  const onRotate = async () => {
+    if (!rotateAccessKey.trim() || !rotateSecret) return;
+    await rotateRegion.mutateAsync({
+      regionId: region.id,
+      accessKeyId: rotateAccessKey.trim(),
+      secretKey: rotateSecret,
+    });
+    setRotateOpen(false);
+    setRotateAccessKey("");
+    setRotateSecret("");
+    router.invalidate();
+  };
+
+  const recentlyRotated = rotationRecentlyHappened(region);
+
   return (
     <Card data-testid="region-key-card">
       <CardHeader>
@@ -140,6 +183,12 @@ function RegionKeyCard({ region }: { region: UserRegion }) {
         <CardDescription className="font-mono text-xs truncate">
           {region.endpoint}
         </CardDescription>
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="region-addressing-style"
+        >
+          {addressingStyleLabel(region.addressingStyle)}
+        </p>
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
@@ -168,7 +217,24 @@ function RegionKeyCard({ region }: { region: UserRegion }) {
             : "Never used"}
         </p>
 
-        <div className="pt-2 border-t flex justify-end">
+        {recentlyRotated && (
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="region-last-rotated"
+          >
+            {`Last rotated ${humanizeTime(region.updatedAt)}`}
+          </p>
+        )}
+
+        <div className="pt-2 border-t flex justify-end gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setRotateOpen(true)}
+            data-testid="rotate-region-key-button"
+          >
+            Rotate key
+          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -206,6 +272,80 @@ function RegionKeyCard({ region }: { region: UserRegion }) {
               disabled={deleteRegion.isPending}
             >
               {deleteRegion.isPending ? "Deleting..." : "Delete key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rotateOpen} onOpenChange={setRotateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rotate key?</DialogTitle>
+            <DialogDescription>
+              Paste a freshly-minted access key for{" "}
+              <span className="font-mono">{region.endpoint}</span>. Your alias,
+              region, and history all stay; only the credentials flip.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label
+                htmlFor={`rotate-ak-${region.id}`}
+                className="text-sm font-medium"
+              >
+                New access key ID
+              </label>
+              <input
+                id={`rotate-ak-${region.id}`}
+                type="text"
+                value={rotateAccessKey}
+                onChange={(e) => setRotateAccessKey(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="GK..."
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                data-testid="rotate-region-access-key"
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor={`rotate-sk-${region.id}`}
+                className="text-sm font-medium"
+              >
+                New secret access key
+              </label>
+              <input
+                id={`rotate-sk-${region.id}`}
+                type="password"
+                value={rotateSecret}
+                onChange={(e) => setRotateSecret(e.target.value)}
+                autoComplete="new-password"
+                spellCheck={false}
+                placeholder={"••••••••"}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                data-testid="rotate-region-secret"
+              />
+            </div>
+          </div>
+          {rotateRegion.error ? (
+            <p className="text-sm text-destructive" data-testid="rotate-error">
+              {rotateRegion.error.message}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setRotateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={onRotate}
+              disabled={
+                rotateRegion.isPending ||
+                !rotateAccessKey.trim() ||
+                !rotateSecret
+              }
+              data-testid="rotate-region-submit"
+            >
+              {rotateRegion.isPending ? "Rotating..." : "Rotate"}
             </Button>
           </DialogFooter>
         </DialogContent>
