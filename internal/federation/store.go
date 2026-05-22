@@ -149,12 +149,21 @@ func (fs *fileStore) Create(_ context.Context, fb FederatedBucket) (FederatedBuc
 	now := time.Now().UTC()
 	fb.CreatedAt = now
 	fb.UpdatedAt = now
-	fs.rows[fb.ID] = fb
+	// Defensive copy: the caller-supplied Replicas slice must not back
+	// the stored record, otherwise a concurrent reader (engine watchdog
+	// v1.6.0f) racing the caller's lingering reference would see a
+	// shifting slice. The same protection applies on the Update path.
+	stored := fb
+	if len(fb.Replicas) > 0 {
+		stored.Replicas = make([]ReplicaTarget, len(fb.Replicas))
+		copy(stored.Replicas, fb.Replicas)
+	}
+	fs.rows[stored.ID] = stored
 	if err := fs.writeLocked(); err != nil {
-		delete(fs.rows, fb.ID)
+		delete(fs.rows, stored.ID)
 		return FederatedBucket{}, err
 	}
-	return fb, nil
+	return cloneFederatedBucket(stored), nil
 }
 
 func (fs *fileStore) Get(_ context.Context, id string) (FederatedBucket, error) {
@@ -164,7 +173,7 @@ func (fs *fileStore) Get(_ context.Context, id string) (FederatedBucket, error) 
 	if !ok {
 		return FederatedBucket{}, ErrNotFound
 	}
-	return fb, nil
+	return cloneFederatedBucket(fb), nil
 }
 
 // Update applies the mutable fields of patch (Name, Primary, Replicas,
@@ -184,14 +193,23 @@ func (fs *fileStore) Update(_ context.Context, id string, patch FederatedBucket)
 	}
 	cur.Name = patch.Name
 	cur.Primary = patch.Primary
-	cur.Replicas = patch.Replicas
+	// Defensive copy of the patch's Replicas slice so the caller can't
+	// retain a reference and mutate the in-memory map under us. The
+	// engine's watchdog (v1.6.0f) writes via Update with a freshly-built
+	// slice anyway, but other call sites might not.
+	if len(patch.Replicas) > 0 {
+		cur.Replicas = make([]ReplicaTarget, len(patch.Replicas))
+		copy(cur.Replicas, patch.Replicas)
+	} else {
+		cur.Replicas = nil
+	}
 	cur.Policy = patch.Policy
 	cur.UpdatedAt = time.Now().UTC()
 	fs.rows[id] = cur
 	if err := fs.writeLocked(); err != nil {
 		return FederatedBucket{}, err
 	}
-	return cur, nil
+	return cloneFederatedBucket(cur), nil
 }
 
 func (fs *fileStore) Delete(_ context.Context, id string) error {
@@ -210,7 +228,7 @@ func (fs *fileStore) ListForUser(_ context.Context, userID string) ([]FederatedB
 	out := make([]FederatedBucket, 0)
 	for _, fb := range fs.rows {
 		if fb.OwnerUserID == userID {
-			out = append(out, fb)
+			out = append(out, cloneFederatedBucket(fb))
 		}
 	}
 	return out, nil
@@ -226,7 +244,7 @@ func (fs *fileStore) All(_ context.Context) ([]FederatedBucket, error) {
 	defer fs.mu.RUnlock()
 	out := make([]FederatedBucket, 0, len(fs.rows))
 	for _, fb := range fs.rows {
-		out = append(out, fb)
+		out = append(out, cloneFederatedBucket(fb))
 	}
 	return out, nil
 }
@@ -245,15 +263,32 @@ func (fs *fileStore) FindByTarget(_ context.Context, userID, regionID, bucket st
 			continue
 		}
 		if fb.Primary.RegionID == regionID && fb.Primary.Bucket == bucket {
-			return fb, nil
+			return cloneFederatedBucket(fb), nil
 		}
 		for _, rep := range fb.Replicas {
 			if rep.RegionID == regionID && rep.Bucket == bucket {
-				return fb, nil
+				return cloneFederatedBucket(fb), nil
 			}
 		}
 	}
 	return FederatedBucket{}, ErrNotFound
+}
+
+// cloneFederatedBucket returns a deep copy of fb whose Replicas slice
+// has its own backing array. Used by every read path on the store so a
+// concurrent caller (engine watchdog vs replication loop, v1.6.0f) can
+// read its result without racing the in-memory map's slice. Cheap —
+// replica count per federation is bounded by the API layer's
+// maxReplicasPerFederation cap.
+func cloneFederatedBucket(fb FederatedBucket) FederatedBucket {
+	out := fb
+	if len(fb.Replicas) > 0 {
+		out.Replicas = make([]ReplicaTarget, len(fb.Replicas))
+		copy(out.Replicas, fb.Replicas)
+	} else {
+		out.Replicas = nil
+	}
+	return out
 }
 
 // UpdateReplicaHealth mutates the LastSync / Health / LagBytes /

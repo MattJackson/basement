@@ -217,4 +217,33 @@ describe("FederationDetailPage", () => {
 
     confirmSpy.mockRestore();
   });
+
+  it("'Auto-failover armed' badge is hidden when policy.autoFailover is false", () => {
+    renderDetail();
+    expect(
+      screen.queryByTestId("auto-failover-armed-badge"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("'Auto-failover armed' badge renders with the policy window when enabled", () => {
+    vi.mocked(useFederation).mockReturnValue({
+      data: {
+        ...baseFederation,
+        policy: {
+          ...baseFederation.policy,
+          autoFailover: true,
+          autoFailoverSec: 120,
+        },
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderDetail();
+
+    const badge = screen.getByTestId("auto-failover-armed-badge");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("Auto-failover armed");
+    expect(badge).toHaveTextContent("2m");
+  });
 });

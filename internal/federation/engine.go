@@ -141,6 +141,14 @@ const (
 	// default.
 	DefaultWorkers = 4
 
+	// DefaultWatchdogInterval is how often the watchdog goroutine probes
+	// the primary for liveness when Policy.AutoFailover is enabled. 30s
+	// matches ADR-0005's "Auto-failover (opt-in)" section and is
+	// conservative enough not to drown the primary in HEAD-equivalent
+	// list-of-one probes while still giving a fast-enough failover signal
+	// once Policy.AutoFailoverSec elapses.
+	DefaultWatchdogInterval = 30 * time.Second
+
 	// MaxBatchPerTick caps the number of objects replicated in one tick
 	// per (federation, replica) pair. Without this a brand-new federation
 	// against a multi-million-key bucket would stall the engine for hours
@@ -175,10 +183,11 @@ type Engine struct {
 	audit    audit.Logger
 	logger   *slog.Logger
 
-	tickInterval time.Duration
-	workers      int
+	tickInterval     time.Duration
+	watchdogInterval time.Duration
+	workers          int
 
-	mu      sync.Mutex
+	mu sync.Mutex
 	// fedQuit carries one channel per running federation goroutine; a
 	// per-federation "wake up now" trigger feeds the same channel via
 	// non-blocking send.
@@ -191,6 +200,12 @@ type Engine struct {
 	// bucket) so health can flip to "broken" after BrokenFailureThreshold
 	// in a row. Reset to 0 on the first successful replicate.
 	failures map[string]int
+	// watchdogQuit carries one quit channel per running watchdog
+	// goroutine (one per federation that has Policy.AutoFailover=true).
+	// The watchdog is independent of the replication loop because
+	// toggling AutoFailover on/off should spawn/stop the watchdog
+	// without disturbing the per-federation replication goroutine.
+	watchdogQuit map[string]chan struct{}
 
 	// inflight increments on every replicate goroutine launch and
 	// decrements on completion. Stop blocks until inflight returns to 0
@@ -223,15 +238,17 @@ func NewEngine(store FederatedBuckets, resolver DriverResolver, audit audit.Logg
 		logger = slog.Default()
 	}
 	return &Engine{
-		store:        store,
-		resolver:     resolver,
-		audit:        audit,
-		logger:       logger,
-		tickInterval: DefaultTickInterval,
-		workers:      DefaultWorkers,
-		fedQuit:      make(map[string]chan struct{}),
-		triggers:     make(map[string]chan struct{}),
-		failures:     make(map[string]int),
+		store:            store,
+		resolver:         resolver,
+		audit:            audit,
+		logger:           logger,
+		tickInterval:     DefaultTickInterval,
+		watchdogInterval: DefaultWatchdogInterval,
+		workers:          DefaultWorkers,
+		fedQuit:          make(map[string]chan struct{}),
+		triggers:         make(map[string]chan struct{}),
+		failures:         make(map[string]int),
+		watchdogQuit:     make(map[string]chan struct{}),
 	}
 }
 
@@ -251,6 +268,22 @@ func (e *Engine) SetTickInterval(d time.Duration) {
 func (e *Engine) SetWorkers(n int) {
 	if n > 0 {
 		e.workers = n
+	}
+}
+
+// SetWatchdogInterval overrides the auto-failover watchdog probe
+// cadence. Tests use this to assert "fail-over after N consecutive
+// probe failures" without waiting the 30s production cadence; production
+// keeps the DefaultWatchdogInterval default.
+//
+// Must be called before EnsureLoop / Start spawns the watchdog
+// goroutine for a given federation. Runtime changes are intentionally
+// unsupported in v1.6.0f — the watchdog re-reads the federation on
+// every tick but its OWN cadence is fixed for the goroutine's
+// lifetime.
+func (e *Engine) SetWatchdogInterval(d time.Duration) {
+	if d > 0 {
+		e.watchdogInterval = d
 	}
 }
 
@@ -286,10 +319,18 @@ func (e *Engine) Start(ctx context.Context) {
 
 	for _, fb := range feds {
 		e.spawnLoop(ctx, fb.ID)
+		// Mirror the EnsureLoop policy diff: a federation that already
+		// has AutoFailover enabled at boot gets a watchdog spawned
+		// alongside its replication loop. Toggling later flows through
+		// EnsureLoop / RemoveLoop instead.
+		if fb.Policy.AutoFailover {
+			e.spawnWatchdog(ctx, fb.ID)
+		}
 	}
 
 	e.logger.Info("federation engine: started", "federations", len(feds),
-		"tickInterval", e.tickInterval.String(), "workers", e.workers)
+		"tickInterval", e.tickInterval.String(), "workers", e.workers,
+		"watchdogInterval", e.watchdogInterval.String())
 }
 
 // Stop signals every per-federation goroutine to exit and waits for
@@ -308,14 +349,21 @@ func (e *Engine) Stop() {
 	for _, ch := range e.fedQuit {
 		close(ch)
 	}
+	for _, ch := range e.watchdogQuit {
+		close(ch)
+	}
 	e.fedQuit = make(map[string]chan struct{})
 	e.triggers = make(map[string]chan struct{})
+	e.watchdogQuit = make(map[string]chan struct{})
 	e.mu.Unlock()
 
-	// Wait for both: the per-federation tick loops to return, AND any
-	// replicate goroutines still mid-PUT. Loops first because the
-	// inflight counter is only incremented inside a tick — and we want
-	// all ticks to finish before draining the inflight set.
+	// Wait for both: the per-federation tick loops AND watchdog loops to
+	// return, AND any replicate goroutines still mid-PUT. Loops first
+	// because the inflight counter is only incremented inside a tick —
+	// and we want all ticks (and watchdog probes) to finish before
+	// draining the inflight set. e.loops.Wait covers both the
+	// replication and watchdog goroutines — see spawnWatchdog / spawnLoop
+	// for the loops.Add(1) bookkeeping.
 	e.loops.Wait()
 	e.inflight.Wait()
 	e.logger.Info("federation engine: stopped")
@@ -347,9 +395,15 @@ func (e *Engine) TriggerNow(fbID string) error {
 // EnsureLoop spawns a per-federation loop for fbID if one isn't already
 // running. v1.6.0c API handlers call this after Create so a brand-new
 // federation starts replicating without waiting for an engine restart.
-// No-op when a loop is already running (Update / replica-add reuses the
-// same loop; the next tick picks up the change because every tick
-// re-reads the federation from the store).
+//
+// EnsureLoop also reconciles the watchdog goroutine to the federation's
+// current Policy.AutoFailover setting (v1.6.0f):
+//   - Policy.AutoFailover=true + no watchdog: spawn one
+//   - Policy.AutoFailover=false + watchdog running: stop it
+//
+// This makes PUT /user/federated-buckets/{id} -> EnsureLoop the single
+// path that flips the watchdog on/off without the API layer having to
+// know the engine's internals.
 //
 // ctx parameter is the engine-level context; per-federation loops
 // inherit cancellation from it and from Stop's per-fed quit channel.
@@ -360,16 +414,40 @@ func (e *Engine) EnsureLoop(ctx context.Context, fbID string) {
 	e.mu.Lock()
 	_, exists := e.fedQuit[fbID]
 	e.mu.Unlock()
-	if exists {
+	if !exists {
+		e.spawnLoop(ctx, fbID)
+	}
+
+	// Reconcile watchdog to current policy. Failure to load is logged
+	// and we leave the watchdog as-is — the next EnsureLoop / boot will
+	// re-evaluate.
+	fb, err := e.store.Get(ctx, fbID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			e.logger.Warn("federation engine: watchdog policy lookup failed",
+				"federationId", fbID, "error", err)
+		}
 		return
 	}
-	e.spawnLoop(ctx, fbID)
+	e.mu.Lock()
+	_, watchdogRunning := e.watchdogQuit[fbID]
+	e.mu.Unlock()
+	switch {
+	case fb.Policy.AutoFailover && !watchdogRunning:
+		e.spawnWatchdog(ctx, fbID)
+	case !fb.Policy.AutoFailover && watchdogRunning:
+		e.stopWatchdog(fbID)
+	}
 }
 
 // RemoveLoop stops the per-federation loop for fbID. v1.6.0c API
 // handlers call this after Delete so a removed federation stops
 // replicating immediately rather than waiting for the next tick to
 // notice its absence.
+//
+// Also stops the watchdog goroutine (if one is running) for the same
+// federation — auto-failover doesn't make sense for a federation that's
+// been deleted.
 func (e *Engine) RemoveLoop(fbID string) {
 	e.mu.Lock()
 	ch, ok := e.fedQuit[fbID]
@@ -377,6 +455,11 @@ func (e *Engine) RemoveLoop(fbID string) {
 		close(ch)
 		delete(e.fedQuit, fbID)
 		delete(e.triggers, fbID)
+	}
+	wch, wok := e.watchdogQuit[fbID]
+	if wok {
+		close(wch)
+		delete(e.watchdogQuit, fbID)
 	}
 	e.mu.Unlock()
 }
@@ -402,6 +485,41 @@ func (e *Engine) spawnLoop(ctx context.Context, fbID string) {
 		defer e.loops.Done()
 		e.runFederation(ctx, fbID, quit, trigger)
 	}()
+}
+
+// spawnWatchdog registers fbID's watchdog and launches its goroutine.
+// Caller must hold no locks; the function acquires + releases e.mu
+// briefly. No-op if a watchdog is already running for fbID.
+func (e *Engine) spawnWatchdog(ctx context.Context, fbID string) {
+	quit := make(chan struct{})
+
+	e.mu.Lock()
+	if _, exists := e.watchdogQuit[fbID]; exists {
+		// Already running — abandon our channel.
+		e.mu.Unlock()
+		return
+	}
+	e.watchdogQuit[fbID] = quit
+	e.mu.Unlock()
+
+	e.loops.Add(1)
+	go func() {
+		defer e.loops.Done()
+		e.runWatchdog(ctx, fbID, quit)
+	}()
+}
+
+// stopWatchdog signals + clears the watchdog quit channel for fbID.
+// Caller must hold no locks; the function acquires + releases e.mu
+// briefly. No-op when no watchdog is running.
+func (e *Engine) stopWatchdog(fbID string) {
+	e.mu.Lock()
+	ch, ok := e.watchdogQuit[fbID]
+	if ok {
+		close(ch)
+		delete(e.watchdogQuit, fbID)
+	}
+	e.mu.Unlock()
 }
 
 // runFederation is the per-federation main loop. Re-reads the
@@ -813,6 +931,328 @@ func (e *Engine) recordFailure(ctx context.Context, fb FederatedBucket, replica 
 	}
 }
 
+// watchdogState tracks consecutive primary-probe failures inside one
+// watchdog goroutine. Lives on the stack of runWatchdog rather than
+// shared engine state because (a) only the owning goroutine reads it
+// and (b) restarting the watchdog naturally restarts the counter,
+// which is the right behaviour after a policy edit.
+type watchdogState struct {
+	consecutiveFailures int
+}
+
+// runWatchdog is the per-federation watchdog main loop. Probes primary
+// health every e.watchdogInterval and triggers an auto-failover after
+// Policy.AutoFailoverSec of consecutive failures (translated to N
+// probes via the watchdog interval).
+//
+// Re-reads the federation from the store on every tick so policy edits
+// or replica list changes take effect on the next probe. If the
+// federation's AutoFailover policy flips to false mid-loop the watchdog
+// exits early — EnsureLoop will have already closed the quit channel,
+// but this self-defence handles the edge where the policy reconciler
+// race-loses to a concurrent edit.
+//
+// Panic-safe: a top-level recover ensures one broken watchdog can't
+// kill the engine; the recovered panic is logged and the loop returns.
+// Callers that want the watchdog respawned should re-invoke EnsureLoop.
+func (e *Engine) runWatchdog(ctx context.Context, fbID string, quit <-chan struct{}) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("federation engine: panic in watchdog loop",
+				"federationId", fbID, "panic", r)
+		}
+	}()
+
+	state := &watchdogState{}
+
+	// First probe fires immediately so a watchdog spawned mid-outage
+	// doesn't have to wait one interval before starting to count
+	// failures. This matches runFederation's "tick once immediately".
+	e.tickWatchdog(ctx, fbID, state)
+
+	t := time.NewTicker(e.watchdogInterval)
+	defer t.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-quit:
+			return
+		case <-t.C:
+			e.tickWatchdog(ctx, fbID, state)
+		}
+	}
+}
+
+// tickWatchdog performs one primary-liveness probe for one federation.
+// Loads the latest state from the store (so a freshly-toggled policy
+// takes effect on the next tick), probes the primary's ListObjects via
+// the replication client, and either resets or increments the
+// consecutive-failure counter. Triggers an auto-failover when the
+// failure window exceeds Policy.AutoFailoverSec.
+//
+// Per-tick recover panic-shields each probe so a broken backend's
+// driver panic can't kill the watchdog.
+func (e *Engine) tickWatchdog(ctx context.Context, fbID string, state *watchdogState) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("federation engine: panic in watchdog tick",
+				"federationId", fbID, "panic", r)
+		}
+	}()
+
+	fb, err := e.store.Get(ctx, fbID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// Federation was deleted between Start and this tick — drop
+			// the watchdog quietly. RemoveLoop closes the quit channel
+			// from the API path, but this self-cleans the race.
+			e.stopWatchdog(fbID)
+			return
+		}
+		e.logger.Warn("federation engine: watchdog load failed",
+			"federationId", fbID, "error", err)
+		return
+	}
+	// The store's Get returns a deep copy of the Replicas slice (per
+	// the v1.6.0f isolation guarantee), so pickHealthiestReplica + the
+	// audit detail render are safe to read without further snapshotting.
+
+	// Self-defence: if the policy was flipped to false between
+	// EnsureLoop's reconcile and this tick, exit cleanly.
+	if !fb.Policy.AutoFailover {
+		e.stopWatchdog(fbID)
+		return
+	}
+
+	healthy := e.probePrimary(ctx, fb)
+	if healthy {
+		if state.consecutiveFailures > 0 {
+			e.logger.Info("federation engine: watchdog primary recovered",
+				"federationId", fbID,
+				"previousFailures", state.consecutiveFailures)
+		}
+		state.consecutiveFailures = 0
+		return
+	}
+
+	state.consecutiveFailures++
+	e.logger.Warn("federation engine: watchdog primary unreachable",
+		"federationId", fbID, "consecutiveFailures", state.consecutiveFailures)
+
+	// Translate Policy.AutoFailoverSec into a probe count using the
+	// watchdog's own interval. A zero / negative AutoFailoverSec means
+	// "fail over on the very first probe failure" — surfaces the
+	// trivially-misconfigured-to-default case clearly rather than
+	// silently never failing over.
+	probesRequired := 1
+	if fb.Policy.AutoFailoverSec > 0 {
+		intervalSecs := int(e.watchdogInterval / time.Second)
+		if intervalSecs < 1 {
+			// Sub-second watchdog intervals (tests) still need at least
+			// one probe failure to count.
+			intervalSecs = 1
+		}
+		probesRequired = fb.Policy.AutoFailoverSec / intervalSecs
+		if probesRequired < 1 {
+			probesRequired = 1
+		}
+	}
+
+	if state.consecutiveFailures < probesRequired {
+		return
+	}
+
+	// Threshold met — promote the healthiest replica.
+	e.triggerAutoFailover(ctx, fb)
+	// Reset the counter regardless of outcome — a "skipped" auto-failover
+	// (no healthy replica) shouldn't fire again on every subsequent tick
+	// because nothing has changed; we wait another full window before
+	// re-trying so the audit log stays signal-rich.
+	state.consecutiveFailures = 0
+}
+
+// probePrimary returns true when the primary backend responds to a
+// minimal ListObjects probe. Any error — driver resolve, list call,
+// context cancellation — is treated as "primary unreachable" and the
+// watchdog counts it as a failure. A future "discriminate transient vs
+// terminal" hook would live here, but ADR-0005 explicitly punts that
+// to a polish cycle.
+//
+// Returns true when the probe succeeds (regardless of whether the
+// primary's bucket is empty); false on any error.
+func (e *Engine) probePrimary(ctx context.Context, fb FederatedBucket) bool {
+	drv, err := e.resolver.Resolve(ctx, fb.OwnerUserID, fb.Primary.RegionID)
+	if err != nil {
+		e.logger.Warn("federation engine: watchdog resolve primary failed",
+			"federationId", fb.ID, "regionId", fb.Primary.RegionID, "error", err)
+		return false
+	}
+	if _, err := drv.ListObjects(ctx, fb.Primary.Bucket, "", 1); err != nil {
+		return false
+	}
+	return true
+}
+
+// pickHealthiestReplica returns the replica that's the best candidate
+// for promotion. Selection rule (per cycle spec):
+//   1. Lowest LagSec (where LagSec is now-LastSync; zero LastSync sorts
+//      last because we have no proof the replica's caught up)
+//   2. Tie-broken alphabetically by (RegionID, Bucket) for determinism
+//
+// A replica with Health=broken is excluded — that's a known-bad target.
+// Returns (zero, false) when no healthy replica is available.
+func pickHealthiestReplica(fb FederatedBucket, now time.Time) (ReplicaTarget, bool) {
+	type scored struct {
+		rep    ReplicaTarget
+		lagSec int64
+		seen   bool // false when LastSync is zero
+	}
+	var candidates []scored
+	for _, rep := range fb.Replicas {
+		if rep.Health == HealthBroken {
+			continue
+		}
+		s := scored{rep: rep, seen: !rep.LastSync.IsZero()}
+		if s.seen {
+			delta := now.Sub(rep.LastSync)
+			if delta < 0 {
+				delta = 0
+			}
+			s.lagSec = int64(delta / time.Second)
+		}
+		candidates = append(candidates, s)
+	}
+	if len(candidates) == 0 {
+		return ReplicaTarget{}, false
+	}
+	best := 0
+	for i := 1; i < len(candidates); i++ {
+		ci := candidates[i]
+		cb := candidates[best]
+		// Sort: seen-with-lag < never-seen, then by lagSec asc, then
+		// (RegionID, Bucket) lexicographic asc.
+		if ci.seen && !cb.seen {
+			best = i
+			continue
+		}
+		if !ci.seen && cb.seen {
+			continue
+		}
+		if ci.lagSec < cb.lagSec {
+			best = i
+			continue
+		}
+		if ci.lagSec > cb.lagSec {
+			continue
+		}
+		if ci.rep.RegionID < cb.rep.RegionID {
+			best = i
+			continue
+		}
+		if ci.rep.RegionID > cb.rep.RegionID {
+			continue
+		}
+		if ci.rep.Bucket < cb.rep.Bucket {
+			best = i
+		}
+	}
+	return candidates[best].rep, true
+}
+
+// triggerAutoFailover promotes the healthiest replica to primary,
+// persists the swap, kicks the engine to start replicating from the
+// new primary, and emits an audit event. Mirrors the manual failover
+// path in user_federated_buckets.go but is initiated by the engine
+// rather than the API layer.
+//
+// When no healthy replica is available, emits a federation:auto_failover_skipped
+// audit event and returns without changing state — operators see the
+// skip in the audit log so they know the watchdog is awake but stuck.
+func (e *Engine) triggerAutoFailover(ctx context.Context, fb FederatedBucket) {
+	now := time.Now().UTC()
+	newPrimary, ok := pickHealthiestReplica(fb, now)
+	if !ok {
+		e.logger.Error("federation engine: auto-failover skipped — no healthy replica",
+			"federationId", fb.ID, "primaryRegion", fb.Primary.RegionID,
+			"primaryBucket", fb.Primary.Bucket)
+		e.audit.Log(audit.Event{
+			Actor:    fb.OwnerUserID,
+			Action:   "federation:auto_failover_skipped",
+			Resource: "federation:" + fb.ID,
+			Result:   audit.ResultFailure,
+			Detail: fmt.Sprintf("primary=%s:%s reason=no healthy replica available",
+				fb.Primary.RegionID, fb.Primary.Bucket),
+		})
+		return
+	}
+
+	oldPrimary := fb.Primary
+	// Build new replica slice: replace the promoted replica entry with
+	// the demoted primary. Lag/health on the promoted entry is reset
+	// (it becomes source of truth); the demoted entry's lag/health is
+	// zeroed so the engine's next tick recomputes it from scratch.
+	newReplicas := make([]ReplicaTarget, 0, len(fb.Replicas))
+	for _, rep := range fb.Replicas {
+		if rep.RegionID == newPrimary.RegionID && rep.Bucket == newPrimary.Bucket {
+			newReplicas = append(newReplicas, ReplicaTarget{
+				RegionID: oldPrimary.RegionID,
+				Bucket:   oldPrimary.Bucket,
+			})
+			continue
+		}
+		newReplicas = append(newReplicas, rep)
+	}
+
+	patch := FederatedBucket{
+		Name:     fb.Name,
+		Primary:  ReplicaTarget{RegionID: newPrimary.RegionID, Bucket: newPrimary.Bucket},
+		Replicas: newReplicas,
+		Policy:   fb.Policy,
+	}
+	if _, err := e.store.Update(ctx, fb.ID, patch); err != nil {
+		e.logger.Error("federation engine: auto-failover persist failed",
+			"federationId", fb.ID, "error", err)
+		e.audit.Log(audit.Event{
+			Actor:    fb.OwnerUserID,
+			Action:   "federation:auto_failover_skipped",
+			Resource: "federation:" + fb.ID,
+			Result:   audit.ResultFailure,
+			Detail:   fmt.Sprintf("persist failed: %v", err),
+		})
+		return
+	}
+
+	// Kick the replication loop so the new primary starts being scanned
+	// on the next tick rather than waiting tickInterval.
+	if err := e.TriggerNow(fb.ID); err != nil {
+		// Loop might not be running (engine inert) — log + continue;
+		// the failover persisted, replication catches up on next Start.
+		e.logger.Warn("federation engine: auto-failover TriggerNow failed",
+			"federationId", fb.ID, "error", err)
+	}
+
+	// Compute a human-readable "primary unreachable for Xs" detail. We
+	// know Policy.AutoFailoverSec was met (or exceeded by one probe);
+	// surface it verbatim because that's the metric the operator set.
+	reason := fmt.Sprintf("primary unreachable for %ds", fb.Policy.AutoFailoverSec)
+	e.audit.Log(audit.Event{
+		Actor:    fb.OwnerUserID,
+		Action:   "federation:auto_failover",
+		Resource: "federation:" + fb.ID,
+		Result:   audit.ResultSuccess,
+		Detail: fmt.Sprintf("old_primary=%s:%s new_primary=%s:%s reason=%s",
+			oldPrimary.RegionID, oldPrimary.Bucket,
+			newPrimary.RegionID, newPrimary.Bucket, reason),
+	})
+	e.logger.Info("federation engine: auto-failover promoted replica",
+		"federationId", fb.ID,
+		"oldPrimary", oldPrimary.RegionID+":"+oldPrimary.Bucket,
+		"newPrimary", newPrimary.RegionID+":"+newPrimary.Bucket,
+		"reason", reason)
+}
+
 // failureKey builds the (fbID, regionID, bucket) key the engine uses
 // internally to track consecutive failures per replica.
 func failureKey(fbID string, r ReplicaTarget) string {
@@ -840,6 +1280,25 @@ func (e *Engine) FailureCount(fbID string, r ReplicaTarget) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.failures[failureKey(fbID, r)]
+}
+
+// WatchdogCount reports the number of per-federation watchdog goroutines
+// the engine is currently tracking. Tests assert "spawned a watchdog for
+// federation X" or "no watchdog when policy disabled" via this accessor.
+func (e *Engine) WatchdogCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.watchdogQuit)
+}
+
+// HasWatchdog returns true if a watchdog goroutine is currently running
+// for fbID. Tests use this to assert policy-toggle behaviour without
+// peeking at the engine's internals.
+func (e *Engine) HasWatchdog(fbID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	_, ok := e.watchdogQuit[fbID]
+	return ok
 }
 
 // LoopCount reports the number of per-federation goroutines the engine

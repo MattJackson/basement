@@ -776,6 +776,523 @@ func TestEngine_TriggerNowOnUnknownFederation(t *testing.T) {
 	}
 }
 
+// gatedDriver is a fakeDriver that fails ListObjects whenever the
+// failList gate is held. Used by the watchdog tests to simulate a
+// primary that's "unreachable" — the watchdog probes via ListObjects
+// so failing that call is the test's only required injection point.
+//
+// Wraps the underlying fakeDriver so seed / has / per-call counters
+// keep working; only the ListObjects path is interposed.
+type gatedDriver struct {
+	*fakeDriver
+}
+
+func newGatedDriver(id string) *gatedDriver {
+	return &gatedDriver{fakeDriver: newFakeDriver(id)}
+}
+
+// TestWatchdog_NotSpawnedWhenPolicyDisabled: a federation with
+// Policy.AutoFailover=false should never produce a watchdog goroutine.
+func TestWatchdog_NotSpawnedWhenPolicyDisabled(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	ctx := context.Background()
+
+	res.set("region-primary", newFakeDriver("primary"))
+	res.set("region-replica", newFakeDriver("replica"))
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = false // explicit — make the test's intent obvious
+	_, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	if got := e.WatchdogCount(); got != 0 {
+		t.Fatalf("expected 0 watchdogs when policy disabled, got %d", got)
+	}
+}
+
+// TestWatchdog_FailingPrimaryTriggersFailover: a federation with
+// AutoFailover=true whose primary errors on probe should auto-promote
+// the (sole) replica after AutoFailoverSec / watchdogInterval
+// consecutive failures.
+func TestWatchdog_FailingPrimaryTriggersFailover(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	// Sub-second watchdog interval so the test finishes quickly. With
+	// watchdogInterval=20ms and AutoFailoverSec=1, the watchdog needs
+	// 1/1=1 (clamped to 1) failure -> failover after the first probe.
+	// We bump AutoFailoverSec to 1s = 50 probes at 20ms to make the
+	// "counts up over time" semantics visible.
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newGatedDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	// Primary is broken from the start.
+	primary.failList.Store(true)
+	primary.failStream.Store(true)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 1 // 1s of failures -> 50 probes at 20ms
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	if got := e.WatchdogCount(); got != 1 {
+		t.Fatalf("expected 1 watchdog at boot, got %d", got)
+	}
+
+	// Wait for the failover to materialise: store's primary should now
+	// point at region-replica/r-bucket. 5s deadline covers 1s of probes
+	// + scheduling slack.
+	waitFor(t, 5*time.Second, func() bool {
+		got, err := st.Get(ctx, fb.ID)
+		if err != nil {
+			return false
+		}
+		return got.Primary.RegionID == "region-replica" && got.Primary.Bucket == "r-bucket"
+	})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get post-failover: %v", err)
+	}
+	if got.Primary.RegionID != "region-replica" || got.Primary.Bucket != "r-bucket" {
+		t.Fatalf("primary should have failed over to region-replica/r-bucket, got %s/%s",
+			got.Primary.RegionID, got.Primary.Bucket)
+	}
+	if len(got.Replicas) != 1 {
+		t.Fatalf("expected 1 replica after swap, got %d", len(got.Replicas))
+	}
+	if got.Replicas[0].RegionID != "region-primary" || got.Replicas[0].Bucket != "p-bucket" {
+		t.Fatalf("demoted primary should be a replica, got %+v", got.Replicas[0])
+	}
+
+	// Audit event check happens in TestWatchdog_AuditEventEmitted below,
+	// but assert at least one auto_failover record was emitted here so
+	// a partial failure shows up at the obvious test rather than the
+	// dedicated audit test.
+	if rec.countByAction("federation:auto_failover") == 0 {
+		t.Fatalf("expected at least one federation:auto_failover audit event")
+	}
+}
+
+// TestWatchdog_HealthyPrimaryDoesNothing: a federation with
+// AutoFailover=true whose primary is healthy should never auto-failover,
+// and the consecutive-failures counter should stay reset.
+func TestWatchdog_HealthyPrimaryDoesNothing(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetWatchdogInterval(10 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 60 // never reach via the test wall-clock window
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	// Let the watchdog probe ~20+ times. Healthy probes should reset
+	// the counter on every loop, so no auto-failover.
+	time.Sleep(250 * time.Millisecond)
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Primary.RegionID != "region-primary" || got.Primary.Bucket != "p-bucket" {
+		t.Fatalf("primary should remain unchanged on healthy probe, got %s/%s",
+			got.Primary.RegionID, got.Primary.Bucket)
+	}
+	if rec.countByAction("federation:auto_failover") != 0 {
+		t.Fatalf("expected zero auto_failover audit events on healthy primary, got %d",
+			rec.countByAction("federation:auto_failover"))
+	}
+	if rec.countByAction("federation:auto_failover_skipped") != 0 {
+		t.Fatalf("expected zero auto_failover_skipped events on healthy primary, got %d",
+			rec.countByAction("federation:auto_failover_skipped"))
+	}
+}
+
+// TestWatchdog_NoFailoverWhenAllReplicasBroken: primary fails AND every
+// replica is marked Broken -> watchdog emits federation:auto_failover_skipped
+// and leaves the primary in place.
+func TestWatchdog_NoFailoverWhenAllReplicasBroken(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newGatedDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.failList.Store(true)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 1
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas: []ReplicaTarget{{
+			RegionID: "region-replica",
+			Bucket:   "r-bucket",
+			Health:   HealthBroken,
+		}},
+		Policy: policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Persist the broken health via UpdateReplicaHealth so the store
+	// view matches the test's intent — Create doesn't trust caller-
+	// supplied health fields on the engine path but does on the data path.
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		Health: HealthBroken,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	// Wait for at least one auto_failover_skipped audit event.
+	waitFor(t, 5*time.Second, func() bool {
+		return rec.countByAction("federation:auto_failover_skipped") >= 1
+	})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Primary.RegionID != "region-primary" || got.Primary.Bucket != "p-bucket" {
+		t.Fatalf("primary should remain unchanged when no healthy replica, got %s/%s",
+			got.Primary.RegionID, got.Primary.Bucket)
+	}
+	if rec.countByAction("federation:auto_failover") != 0 {
+		t.Fatalf("expected zero auto_failover success events, got %d",
+			rec.countByAction("federation:auto_failover"))
+	}
+}
+
+// TestWatchdog_PicksHealthiestReplica: with multiple non-broken replicas,
+// the watchdog should pick the lowest-lag one for promotion. Verified
+// directly via pickHealthiestReplica so we don't have to drive the full
+// engine for a pure-function check.
+func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
+	now := time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name     string
+		replicas []ReplicaTarget
+		wantR    string
+		wantB    string
+		wantOK   bool
+	}{
+		{
+			name: "lowest lag wins",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-10 * time.Minute)},
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-1 * time.Minute)},
+				{RegionID: "r-c", Bucket: "bc", LastSync: now.Add(-5 * time.Minute)},
+			},
+			wantR:  "r-b",
+			wantB:  "bb",
+			wantOK: true,
+		},
+		{
+			name: "broken excluded",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-30 * time.Second), Health: HealthBroken},
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-10 * time.Minute)},
+			},
+			wantR:  "r-b",
+			wantB:  "bb",
+			wantOK: true,
+		},
+		{
+			name: "tie broken by region asc",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-z", Bucket: "bb", LastSync: now.Add(-1 * time.Minute)},
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-1 * time.Minute)},
+			},
+			wantR:  "r-a",
+			wantB:  "ba",
+			wantOK: true,
+		},
+		{
+			name: "tie broken by bucket asc when region equal",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "bz", LastSync: now.Add(-1 * time.Minute)},
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-1 * time.Minute)},
+			},
+			wantR:  "r-a",
+			wantB:  "ba",
+			wantOK: true,
+		},
+		{
+			name: "seen wins over never-seen",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba"}, // zero LastSync
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-1 * time.Hour)},
+			},
+			wantR:  "r-b",
+			wantB:  "bb",
+			wantOK: true,
+		},
+		{
+			name: "all broken returns no candidate",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba", Health: HealthBroken},
+				{RegionID: "r-b", Bucket: "bb", Health: HealthBroken},
+			},
+			wantOK: false,
+		},
+		{
+			name:     "empty replicas",
+			replicas: nil,
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fb := FederatedBucket{Replicas: tc.replicas}
+			got, ok := pickHealthiestReplica(fb, now)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v, want %v", ok, tc.wantOK)
+			}
+			if !tc.wantOK {
+				return
+			}
+			if got.RegionID != tc.wantR || got.Bucket != tc.wantB {
+				t.Fatalf("got %s/%s, want %s/%s",
+					got.RegionID, got.Bucket, tc.wantR, tc.wantB)
+			}
+		})
+	}
+}
+
+// TestWatchdog_PolicyToggleSpawnsAndStops: flipping Policy.AutoFailover
+// via Update + EnsureLoop should spawn the watchdog when toggled on
+// and stop it when toggled off.
+func TestWatchdog_PolicyToggleSpawnsAndStops(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	ctx := context.Background()
+
+	res.set("region-primary", newFakeDriver("primary"))
+	res.set("region-replica", newFakeDriver("replica"))
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = false
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	if e.HasWatchdog(fb.ID) {
+		t.Fatalf("watchdog should not be running with policy disabled")
+	}
+
+	// Flip policy to true + run EnsureLoop -> watchdog spawns.
+	enabledPolicy := policy
+	enabledPolicy.AutoFailover = true
+	enabledPolicy.AutoFailoverSec = 60
+	if _, err := st.Update(ctx, fb.ID, FederatedBucket{
+		Name:     fb.Name,
+		Primary:  fb.Primary,
+		Replicas: fb.Replicas,
+		Policy:   enabledPolicy,
+	}); err != nil {
+		t.Fatalf("Update on: %v", err)
+	}
+	e.EnsureLoop(ctx, fb.ID)
+	if !e.HasWatchdog(fb.ID) {
+		t.Fatalf("watchdog should be running after policy flip to true")
+	}
+
+	// Flip policy back to false + run EnsureLoop -> watchdog stops.
+	disabledPolicy := enabledPolicy
+	disabledPolicy.AutoFailover = false
+	if _, err := st.Update(ctx, fb.ID, FederatedBucket{
+		Name:     fb.Name,
+		Primary:  fb.Primary,
+		Replicas: fb.Replicas,
+		Policy:   disabledPolicy,
+	}); err != nil {
+		t.Fatalf("Update off: %v", err)
+	}
+	e.EnsureLoop(ctx, fb.ID)
+	if e.HasWatchdog(fb.ID) {
+		t.Fatalf("watchdog should stop after policy flip to false")
+	}
+}
+
+// TestWatchdog_AuditEventEmitted: a successful auto-failover writes a
+// federation:auto_failover audit event with the old + new primary +
+// reason in the detail.
+func TestWatchdog_AuditEventEmitted(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newGatedDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.failList.Store(true)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 1
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	waitFor(t, 5*time.Second, func() bool {
+		return rec.countByAction("federation:auto_failover") >= 1
+	})
+
+	var found bool
+	for _, ev := range rec.snapshot() {
+		if ev.Action != "federation:auto_failover" {
+			continue
+		}
+		if ev.Resource != "federation:"+fb.ID {
+			t.Fatalf("audit resource mismatch: got %q, want federation:%s", ev.Resource, fb.ID)
+		}
+		if ev.Result != audit.ResultSuccess {
+			t.Fatalf("audit result should be success, got %q", ev.Result)
+		}
+		if ev.Actor != "matthew" {
+			t.Fatalf("audit actor mismatch: got %q, want matthew", ev.Actor)
+		}
+		// Detail should contain old + new primary + reason.
+		for _, want := range []string{
+			"old_primary=region-primary:p-bucket",
+			"new_primary=region-replica:r-bucket",
+			"reason=primary unreachable for 1s",
+		} {
+			if !strings.Contains(ev.Detail, want) {
+				t.Errorf("audit detail %q missing %q", ev.Detail, want)
+			}
+		}
+		found = true
+		break
+	}
+	if !found {
+		t.Fatalf("federation:auto_failover audit event never landed")
+	}
+}
+
+// TestWatchdog_RemoveLoopStopsWatchdog: RemoveLoop on a federation with
+// an active watchdog should also tear down the watchdog goroutine.
+func TestWatchdog_RemoveLoopStopsWatchdog(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	ctx := context.Background()
+
+	res.set("region-primary", newFakeDriver("primary"))
+	res.set("region-replica", newFakeDriver("replica"))
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 60
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	if !e.HasWatchdog(fb.ID) {
+		t.Fatalf("watchdog should be running at boot when policy enabled")
+	}
+
+	e.RemoveLoop(fb.ID)
+	if e.HasWatchdog(fb.ID) {
+		t.Fatalf("RemoveLoop should stop the watchdog goroutine")
+	}
+	if got := e.LoopCount(); got != 0 {
+		t.Fatalf("RemoveLoop should also stop the replication loop, got %d loops", got)
+	}
+}
+
 // TestEngine_AuditOnReplicateFailure: a failing PUT still emits a
 // federation:replicate_object audit event with result=failure.
 func TestEngine_AuditOnReplicateFailure(t *testing.T) {

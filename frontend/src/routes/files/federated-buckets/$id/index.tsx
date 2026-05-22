@@ -144,6 +144,11 @@ function FederationDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {federation.policy.autoFailover && (
+            <AutoFailoverArmedBadge
+              autoFailoverSec={federation.policy.autoFailoverSec ?? 0}
+            />
+          )}
           <StatusBadge health={federation.computedHealth || "in-sync"} />
         </div>
       </header>
@@ -343,6 +348,30 @@ function HealthPill({ health }: { health: FederationHealth }) {
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {label}
+    </span>
+  );
+}
+
+// AutoFailoverArmedBadge surfaces the v1.6.0f auto-failover policy in
+// the header — a subtle blue pill next to the StatusBadge so operators
+// know the watchdog will promote a replica if the primary stays
+// unreachable for autoFailoverSec. Tooltip gives the precise window.
+//
+// Visible only when Policy.AutoFailover === true; never rendered for
+// federations using the v1.6.0 default of manual failover only.
+function AutoFailoverArmedBadge({ autoFailoverSec }: { autoFailoverSec: number }) {
+  const human =
+    autoFailoverSec >= 60
+      ? `${Math.round(autoFailoverSec / 60)}m`
+      : `${autoFailoverSec}s`;
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-400"
+      data-testid="auto-failover-armed-badge"
+      title={`Watchdog will promote the healthiest replica after ${autoFailoverSec}s of primary unreachability.`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      Auto-failover armed ({human})
     </span>
   );
 }
