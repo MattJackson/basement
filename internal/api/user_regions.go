@@ -544,10 +544,34 @@ func regionKeyCanAccessBucket(ctx context.Context, userDrv driver.Driver, bucket
 	return true
 }
 
+// regionObjectResource builds the canonical Resource string for
+// object-tier region audit events. Shape: region:{regionId}:{bucketID}
+// per the v1.1.0h spec — bucket-scoped so an operator filtering the
+// audit log on a bucket name finds every region-tier object op that
+// touched it. The accessKey lands in Detail (not Resource) so the
+// resource cardinality stays bounded by (region × bucket).
+func regionObjectResource(r store.UserRegion, bucketID string) string {
+	return "region:" + r.ID + ":" + bucketID
+}
+
+// regionAuditDetail formats the audit Detail string used by every
+// object-tier region handler: accessKey=<id>. Centralised so a future
+// addition (e.g. partCount=) lands in one place.
+func regionAuditDetail(r store.UserRegion) string {
+	return "accessKey=" + r.AccessKeyID
+}
+
 // userListRegionBucketObjectsHandler implements GET
 // /api/v1/user/regions/{regionId}/buckets/{bid}/objects — prefix +
 // continuation-token + limit query params, same shape as the retired
 // cluster-tier list-objects endpoint.
+//
+// v1.1.0h: emits region:list_objects audit events on both success and
+// failure. Resource = region:{regionId}:{bucketID}; Detail carries the
+// access key used to sign the call (per v1.1.0g pattern). Reads ARE
+// audited at the region tier because the operator needs the trail —
+// "who read what bucket, with which key" — to investigate suspicious
+// activity against backend access logs.
 func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -562,6 +586,7 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:list_objects", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED",
 			"Failed to build region driver: "+err.Error())
 		return
@@ -578,6 +603,7 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 
 	page, err := drv.ListObjects(r.Context(), bid, prefix, token, limit)
 	if err != nil {
+		s.auditFailure(r, "region:list_objects", regionObjectResource(region, bid), err)
 		writeDriverError(w, "ListObjects", err)
 		return
 	}
@@ -587,6 +613,10 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 	if page.Prefixes == nil {
 		page.Prefixes = []string{}
 	}
+
+	s.auditEmit(r, "region:list_objects", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	writeJSON(w, http.StatusOK, page)
 }
 
@@ -608,6 +638,11 @@ func presignTTL(r *http.Request) time.Duration {
 
 // userPresignGetRegionObjectHandler implements GET
 // /api/v1/user/regions/{regionId}/buckets/{bid}/objects/{key}/presign-get.
+//
+// v1.1.0h: audits as region:presign_get. The presigned URL is the
+// effective grant — once handed to a browser it can pull the object
+// independent of basement — so the audit trail matters more here
+// than for a direct GET that would only ever run inside the server.
 func (s *Server) userPresignGetRegionObjectHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -622,15 +657,21 @@ func (s *Server) userPresignGetRegionObjectHandler(w http.ResponseWriter, r *htt
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:presign_get", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	presign, err := drv.PresignGet(r.Context(), bid, key, presignTTL(r))
 	if err != nil {
+		s.auditFailure(r, "region:presign_get", regionObjectResource(region, bid), err)
 		writeDriverError(w, "PresignGet", err)
 		return
 	}
+
+	s.auditEmit(r, "region:presign_get", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	writeJSON(w, http.StatusOK, presign)
 }
 
@@ -638,6 +679,10 @@ func (s *Server) userPresignGetRegionObjectHandler(w http.ResponseWriter, r *htt
 // /api/v1/user/regions/{regionId}/buckets/{bid}/objects/{key}/presign-put.
 // Body may optionally contain {"contentType": "..."} — used by the
 // uploader to pre-bind the Content-Type into the signed URL.
+//
+// v1.1.0h: audits as region:presign_put. Mirrors presign_get — the
+// signed URL is the effective grant for the upload, so the operator
+// needs to see who minted it.
 func (s *Server) userPresignPutRegionObjectHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -658,20 +703,28 @@ func (s *Server) userPresignPutRegionObjectHandler(w http.ResponseWriter, r *htt
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:presign_put", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	presign, err := drv.PresignPut(r.Context(), bid, key, presignTTL(r), body.ContentType)
 	if err != nil {
+		s.auditFailure(r, "region:presign_put", regionObjectResource(region, bid), err)
 		writeDriverError(w, "PresignPut", err)
 		return
 	}
+
+	s.auditEmit(r, "region:presign_put", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	writeJSON(w, http.StatusOK, presign)
 }
 
 // userInitRegionMultipartHandler implements POST
 // /api/v1/user/regions/{regionId}/buckets/{bid}/multipart/init.
+//
+// v1.1.0h: audits as region:multipart_init.
 func (s *Server) userInitRegionMultipartHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -698,20 +751,28 @@ func (s *Server) userInitRegionMultipartHandler(w http.ResponseWriter, r *http.R
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:multipart_init", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	upload, err := drv.CreateMultipart(r.Context(), bid, req.Key, req.ContentType)
 	if err != nil {
+		s.auditFailure(r, "region:multipart_init", regionObjectResource(region, bid), err)
 		writeDriverError(w, "CreateMultipart", err)
 		return
 	}
+
+	s.auditEmit(r, "region:multipart_init", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	writeJSON(w, http.StatusOK, upload)
 }
 
 // userCompleteRegionMultipartHandler implements POST
 // /api/v1/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/complete.
+//
+// v1.1.0h: audits as region:multipart_complete.
 func (s *Server) userCompleteRegionMultipartHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -747,19 +808,27 @@ func (s *Server) userCompleteRegionMultipartHandler(w http.ResponseWriter, r *ht
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:multipart_complete", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	if err := drv.CompleteMultipart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}, parts); err != nil {
+		s.auditFailure(r, "region:multipart_complete", regionObjectResource(region, bid), err)
 		writeDriverError(w, "CompleteMultipart", err)
 		return
 	}
+
+	s.auditEmit(r, "region:multipart_complete", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // userAbortRegionMultipartHandler implements DELETE
 // /api/v1/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}.
+//
+// v1.1.0h: audits as region:multipart_abort.
 func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -774,14 +843,20 @@ func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:multipart_abort", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	if err := drv.AbortMultipart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}); err != nil {
+		s.auditFailure(r, "region:multipart_abort", regionObjectResource(region, bid), err)
 		writeDriverError(w, "AbortMultipart", err)
 		return
 	}
+
+	s.auditEmit(r, "region:multipart_abort", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -792,6 +867,10 @@ func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.
 // each part directly from the browser to the backend via a presigned
 // PUT — without this handler, multipart uploads under the region tier
 // would have no way to sign individual parts.
+//
+// v1.1.0h: audits as region:multipart_part. Each presigned-part URL is
+// the effective per-part upload grant, so it's audited like presign_get
+// + presign_put rather than coalesced with the parent upload.
 func (s *Server) userPresignRegionUploadPartHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -813,15 +892,21 @@ func (s *Server) userPresignRegionUploadPartHandler(w http.ResponseWriter, r *ht
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:multipart_part", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	presign, err := drv.PresignUploadPart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}, partNum)
 	if err != nil {
+		s.auditFailure(r, "region:multipart_part", regionObjectResource(region, bid), err)
 		writeDriverError(w, "PresignUploadPart", err)
 		return
 	}
+
+	s.auditEmit(r, "region:multipart_part", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	writeJSON(w, http.StatusOK, presign)
 }
 
@@ -832,6 +917,9 @@ func (s *Server) userPresignRegionUploadPartHandler(w http.ResponseWriter, r *ht
 // region-tier endpoint. The region's S3 key is the permission — the
 // backend rejects the DELETE if the key lacks objects:delete on the
 // bucket, surfacing as a 4xx from the driver.
+//
+// v1.1.0h: audits as region:delete_object. Destructive, so the trail
+// matters most here of any object-tier op.
 func (s *Server) userDeleteRegionObjectHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -846,13 +934,19 @@ func (s *Server) userDeleteRegionObjectHandler(w http.ResponseWriter, r *http.Re
 
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
+		s.auditFailure(r, "region:delete_object", regionObjectResource(region, bid), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "REGION_DRIVER_FAILED", err.Error())
 		return
 	}
 
 	if err := drv.DeleteObject(r.Context(), bid, key); err != nil {
+		s.auditFailure(r, "region:delete_object", regionObjectResource(region, bid), err)
 		writeDriverError(w, "DeleteObject", err)
 		return
 	}
+
+	s.auditEmit(r, "region:delete_object", regionObjectResource(region, bid),
+		audit.ResultSuccess, regionAuditDetail(region))
+
 	w.WriteHeader(http.StatusNoContent)
 }
