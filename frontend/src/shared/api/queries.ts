@@ -363,7 +363,10 @@ export function useUserRegionObjects(
   });
 }
 
-export interface CreateUserRegionRequest {
+// v1.2.0d: renamed from CreateUserRegionRequest. The user-facing
+// concept is a KEY (each access key is the primary noun on the
+// keychain); the storage tuple is still called UserRegion server-side.
+export interface CreateUserKeyRequest {
   alias: string;
   endpoint: string;
   accessKeyId: string;
@@ -371,8 +374,12 @@ export interface CreateUserRegionRequest {
   region?: string;
 }
 
-export function useCreateUserRegion() {
-  return useMutation<UserRegion, Error, CreateUserRegionRequest>({
+// v1.2.0d: renamed from useCreateUserRegion. Still POSTs to
+// /api/v1/user/regions because the server type is unchanged — only
+// the FE label moved to match the operator's "key-first" mental model
+// (a user may add multiple keys against the same endpoint).
+export function useCreateUserKey() {
+  return useMutation<UserRegion, Error, CreateUserKeyRequest>({
     mutationFn: async (input) => {
       const res = await fetch("/api/v1/user/regions", {
         method: "POST",

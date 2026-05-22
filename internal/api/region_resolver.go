@@ -64,6 +64,14 @@ var ErrRegionNotFound = errors.New("region not found")
 // see the ambiguity. Picking the first match is deterministic across
 // boots because connections.List preserves on-disk order; a future
 // cycle can promote this to operator-pickable config.
+//
+// v1.2.0d also handles the symmetric case on the user-region side:
+// a user may now own multiple UserRegions against the same endpoint
+// (different aliases per the key-first model). All of them bridge to
+// the same admin Connection, so resolution is identical — but if more
+// than one user-region exists at the resolved endpoint we log a debug
+// note so an operator inspecting share/sync traffic can see why a
+// particular alias was implicitly used at the bridge layer.
 func (s *Server) resolveRegionToConnection(ctx context.Context, userID, regionID string) (string, error) {
 	regions := s.regionsStore()
 	if regions == nil {
@@ -116,6 +124,24 @@ func (s *Server) resolveRegionToConnection(ctx context.Context, userID, regionID
 		s.logger.Warn("region resolver: multiple admin Connections at same endpoint — picking first",
 			"endpoint", target, "regionId", regionID, "userId", userID,
 			"connectionId", firstMatch, "matches", matchCount)
+	}
+
+	// v1.2.0d: log if the user owns multiple keys at this endpoint, so
+	// share/sync diagnostics can show which alias was bridged. List
+	// errors are non-fatal — we don't want a diagnostic to break the
+	// resolve.
+	if siblings, listErr := regions.ListForUser(ctx, userID); listErr == nil {
+		var same int
+		for _, sib := range siblings {
+			if sib.Endpoint == target {
+				same++
+			}
+		}
+		if same > 1 {
+			s.logger.Debug("region resolver: user has multiple keys at this endpoint — all bridge to the same Connection",
+				"endpoint", target, "regionId", regionID, "userId", userID,
+				"connectionId", firstMatch, "userKeyCount", same)
+		}
 	}
 
 	return firstMatch, nil

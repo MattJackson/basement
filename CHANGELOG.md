@@ -46,6 +46,21 @@ write-up; this file is the at-a-glance index.
   the callback's `?elevated=<mode>` query param, fires a success
   toast, invalidates `/auth/me`, and strips the param from the
   URL. In-memory state map cleans expired entries on each insert.
+- **v1.2.0d** — Key-first user model + drop unique-endpoint constraint.
+  Backend uniqueness on `UserRegion` moves from `(userId, endpoint)`
+  to `(userId, endpoint, alias)` so a user can register multiple
+  access keys against the same S3 endpoint ("Work S3" +
+  "Personal S3"); same alias still 409s. The sync resolver picks
+  the first match per endpoint (all keys at one endpoint bridge to
+  the same admin Connection) and emits a debug log when multiple
+  keys exist. Frontend: new canonical `/files/keys/new` "Add a
+  key" form, `/files/regions/new` redirects to it; `/files/keys`
+  becomes "My Keys"; `/files` keeps "My Regions" but reframes the
+  subtitle as "Each card is one of your access keys" and renders
+  `UserKeyCard` (alias prominent, endpoint hostname as small mono
+  subtitle, access-key-ID truncated below). `useCreateUserRegion`
+  hook renamed to `useCreateUserKey` (`useUserRegions` kept — it
+  matches the storage type).
 
 ## v1.1.0 — 2026-05-21
 
