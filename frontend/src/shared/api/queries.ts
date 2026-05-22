@@ -434,6 +434,47 @@ export function useCreateUserKey() {
   });
 }
 
+// v1.3.0d: bulk-create N UserRegions in one request. Each row is
+// validated server-side independently; a per-row failure (duplicate
+// alias, malformed endpoint) lands in `errors` while the rest of the
+// batch creates normally. Used by /files/keys/new's "Bulk import"
+// toggle to onboard multiple credentials in one paste.
+export interface BulkCreateUserKeyRow {
+  alias: string;
+  endpoint: string;
+  accessKeyId: string;
+  secretKey: string;
+  region?: string;
+  addressingStyle?: "path" | "virtual_host";
+}
+
+export interface BulkCreateUserKeyResponse {
+  created: UserRegion[];
+  errors: Array<{
+    index: number;
+    alias?: string;
+    endpoint?: string;
+    error: string;
+    message: string;
+  }>;
+}
+
+export function useBulkCreateUserKeys() {
+  return useMutation<BulkCreateUserKeyResponse, Error, BulkCreateUserKeyRow[]>({
+    mutationFn: async (rows) => {
+      const res = await fetch("/api/v1/user/regions/bulk", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regions: rows }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/regions/bulk", res.status, body);
+      return body as BulkCreateUserKeyResponse;
+    },
+  });
+}
+
 // v1.3.0c: rotate the access key + secret on an existing UserRegion
 // in place. Alias / endpoint / region / addressingStyle / lastUsedAt
 // history all survive — only the credential pair flips. Server-side
@@ -1234,4 +1275,81 @@ export function useAudit(filter: AuditFilter) {
   });
 }
 
+// v1.3.0d — persistent invite-token surface for /admin/users. Tokens
+// are minted server-side, returned plaintext exactly once on create +
+// rotate (operator copies + sends), and persist as bcrypt hashes for
+// the public redemption endpoint to check against.
+export interface InvitePublic {
+  id: string;
+  label?: string;
+  tokenLast4: string;
+  createdBy?: string;
+  createdAt: string;
+  expiresAt: string;
+  expired: boolean;
+}
 
+export interface InviteCreateResponse {
+  invite: InvitePublic;
+  token: string;
+}
+
+export function useInvites() {
+  return useQuery<InvitePublic[]>({
+    queryKey: ["admin", "invites"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/invites", { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/invites", res.status, body);
+      return body as InvitePublic[];
+    },
+    staleTime: 5 * 1000,
+  });
+}
+
+export function useCreateInvite() {
+  return useMutation<InviteCreateResponse, Error, { label?: string; ttlHours?: number }>({
+    mutationFn: async (input) => {
+      const res = await fetch("/api/v1/admin/invites", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/invites/create", res.status, body);
+      return body as InviteCreateResponse;
+    },
+  });
+}
+
+export function useRevokeInvite() {
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(`/api/v1/admin/invites/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`admin/invites/revoke/${id}`, res.status, body);
+      }
+    },
+  });
+}
+
+export function useRotateInvite() {
+  return useMutation<InviteCreateResponse, Error, { id: string; ttlHours?: number }>({
+    mutationFn: async ({ id, ttlHours }) => {
+      const res = await fetch(`/api/v1/admin/invites/${encodeURIComponent(id)}/rotate`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ttlHours }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/invites/rotate/${id}`, res.status, body);
+      return body as InviteCreateResponse;
+    },
+  });
+}

@@ -1,6 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { useCreateUserKey, useDriverDefaults, type DriverDefaults } from "@/shared/api/queries";
+import { useMemo, useState } from "react";
+import {
+  useBulkCreateUserKeys,
+  useCreateUserKey,
+  useDriverDefaults,
+  type BulkCreateUserKeyResponse,
+  type DriverDefaults,
+} from "@/shared/api/queries";
+import {
+  parseBulkKeys,
+  type BulkKeyFormat,
+  type ParsedKeyRow,
+} from "@/shared/lib/bulkKeyParse";
 
 // detectDriverFromEndpoint returns the heuristic match for an endpoint
 // URL the operator just pasted. Used to auto-suggest the region label
@@ -71,7 +82,13 @@ export const Route = createFileRoute("/files/keys/new")({
 function AddKeyPage() {
   const navigate = useNavigate();
   const createKey = useCreateUserKey();
+  const bulkCreate = useBulkCreateUserKeys();
   const { data: driverDefaults } = useDriverDefaults();
+
+  // v1.3.0d: "Bulk import" toggle. When on, the form swaps to a
+  // paste-area that accepts CSV / TSV / aws-cli credentials format,
+  // shows a parsed-preview table, and submits via the bulk endpoint.
+  const [bulkMode, setBulkMode] = useState(false);
 
   const [alias, setAlias] = useState("");
   const [endpoint, setEndpoint] = useState("");
@@ -181,7 +198,31 @@ function AddKeyPage() {
         </p>
       </header>
 
-      {driverDefaults && driverDefaults.length > 0 && (
+      {/* v1.3.0d — Bulk-import toggle. */}
+      <div className="max-w-2xl flex items-center gap-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={bulkMode}
+            onChange={(e) => setBulkMode(e.target.checked)}
+            data-testid="bulk-mode-toggle"
+          />
+          <span className="font-medium">Bulk import (paste multiple keys)</span>
+        </label>
+        <span className="text-xs text-muted-foreground">
+          Accepts CSV, TSV, or aws-cli credentials profiles
+        </span>
+      </div>
+
+      {bulkMode && (
+        <BulkImportPanel
+          onDone={() => navigate({ to: "/files" })}
+          submit={async (rows) => bulkCreate.mutateAsync(rows)}
+          submitting={bulkCreate.isPending}
+        />
+      )}
+
+      {!bulkMode && driverDefaults && driverDefaults.length > 0 && (
         <div className="max-w-2xl rounded-md border bg-card">
           <button
             type="button"
@@ -234,6 +275,7 @@ function AddKeyPage() {
         </div>
       )}
 
+      {!bulkMode && (
       <form onSubmit={handleSubmit} className="space-y-4 max-w-2xl">
         <div className="space-y-2">
           <label htmlFor="alias" className="text-sm font-medium">
@@ -394,6 +436,196 @@ function AddKeyPage() {
           </a>
         </div>
       </form>
+      )}
+    </div>
+  );
+}
+
+// BulkImportPanel — v1.3.0d. Renders a textarea + paste-time format
+// detector + preview table + submit-to-bulk-endpoint. Per-row errors
+// surface inline in the table; per-row server errors land on the same
+// row after submit. The panel is intentionally separate from the
+// single-key form because it lives behind a toggle — operators not
+// using bulk import never render any of this.
+function BulkImportPanel({
+  onDone,
+  submit,
+  submitting,
+}: {
+  onDone: () => void;
+  submit: (rows: Array<{
+    alias: string;
+    endpoint: string;
+    accessKeyId: string;
+    secretKey: string;
+    region?: string;
+    addressingStyle?: "path" | "virtual_host";
+  }>) => Promise<BulkCreateUserKeyResponse>;
+  submitting: boolean;
+}) {
+  const [raw, setRaw] = useState("");
+  const [result, setResult] = useState<BulkCreateUserKeyResponse | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Parse the raw paste on every keystroke. Cheap (string operations
+  // only), and gives the operator immediate format-detected feedback
+  // + per-row validation in the preview table.
+  const { format, rows } = useMemo<{ format: BulkKeyFormat; rows: ParsedKeyRow[] }>(
+    () => parseBulkKeys(raw),
+    [raw],
+  );
+
+  const validRowCount = rows.filter((r) => r.rowErrors.length === 0).length;
+  const anyRowInvalid = rows.some((r) => r.rowErrors.length > 0);
+  const canSubmit = !submitting && rows.length > 0 && !anyRowInvalid && !result;
+
+  const handleSubmit = async () => {
+    setSubmitError(null);
+    try {
+      const payload = rows.map((r) => ({
+        alias: r.alias,
+        endpoint: r.endpoint,
+        accessKeyId: r.accessKeyId,
+        secretKey: r.secretKey,
+        region: r.region,
+        addressingStyle: r.addressingStyle,
+      }));
+      const res = await submit(payload);
+      setResult(res);
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : "Bulk import failed");
+    }
+  };
+
+  return (
+    <div className="max-w-3xl space-y-4">
+      <div className="space-y-2">
+        <label htmlFor="bulk-input" className="text-sm font-medium">
+          Paste keys
+        </label>
+        <textarea
+          id="bulk-input"
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          placeholder={`alias,endpoint,accessKeyId,secretKey,region
+home,https://s3.example.com,GK...,SECRET,us-east-1
+
+# or aws-cli credentials format:
+[work]
+aws_access_key_id = GK...
+aws_secret_access_key = ...
+endpoint_url = https://s3.example.com
+region = us-east-1`}
+          rows={10}
+          spellCheck={false}
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-2 focus:ring-ring"
+          data-testid="bulk-input"
+        />
+        <p className="text-xs text-muted-foreground">
+          Detected format:{" "}
+          <span data-testid="bulk-detected-format" className="font-medium">
+            {format === "unknown" ? "—" : format}
+          </span>
+          {rows.length > 0 && (
+            <>
+              {" · "}
+              <span data-testid="bulk-row-count">
+                {validRowCount} of {rows.length} rows valid
+              </span>
+            </>
+          )}
+        </p>
+      </div>
+
+      {rows.length > 0 && (
+        <div className="rounded-md border bg-card overflow-x-auto" data-testid="bulk-preview">
+          <table className="min-w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-muted-foreground">#</th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Alias</th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Endpoint</th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Access key</th>
+                <th className="px-3 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {rows.map((r, i) => {
+                const serverErr = result?.errors.find((e) => e.index === i);
+                const createdHit = result && !serverErr && i < rows.length;
+                const status = serverErr
+                  ? { kind: "error" as const, text: `${serverErr.error}: ${serverErr.message}` }
+                  : r.rowErrors.length > 0
+                  ? { kind: "error" as const, text: r.rowErrors.join("; ") }
+                  : result && createdHit
+                  ? { kind: "success" as const, text: "Created" }
+                  : { kind: "ready" as const, text: "Ready" };
+                return (
+                  <tr key={i} data-testid={`bulk-row-${i}`}>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">{i + 1}</td>
+                    <td className="px-3 py-2 font-medium">{r.alias || "—"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{r.endpoint || "—"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{r.accessKeyId || "—"}</td>
+                    <td className="px-3 py-2 text-xs">
+                      <span
+                        className={
+                          status.kind === "error"
+                            ? "text-red-700 dark:text-red-300"
+                            : status.kind === "success"
+                            ? "text-green-700 dark:text-green-300"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        {status.text}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {submitError && (
+        <div
+          data-testid="bulk-submit-error"
+          className="rounded-md border border-red-500/50 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-300"
+        >
+          {submitError}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        {!result ? (
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            data-testid="bulk-submit"
+          >
+            {submitting ? "Importing..." : `Import ${validRowCount} key${validRowCount === 1 ? "" : "s"}`}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onDone}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            data-testid="bulk-done"
+          >
+            Done — back to my keys
+          </button>
+        )}
+        {!result && (
+          <a
+            href="/files"
+            className="rounded-md px-3 py-2 text-sm text-muted-foreground hover:underline"
+          >
+            Cancel
+          </a>
+        )}
+      </div>
     </div>
   );
 }

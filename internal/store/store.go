@@ -27,6 +27,7 @@ type Store struct {
 	orgCaps     *OrgCapabilitiesStore
 	oidcGroups  *OIDCGroupMappingsStore
 	userRegions UserRegions
+	invites     Invites
 }
 
 // Open opens or creates the store at dataDir with the given retention period.
@@ -66,6 +67,16 @@ func Open(dataDir string, retention time.Duration) (*Store, error) {
 		return nil, fmt.Errorf("opening oidc group mappings: %w", err)
 	}
 	s.oidcGroups = oidcGroups
+
+	// v1.3.0d: persistent invite-token store. Tokens live here so the
+	// Pending Invites panel on /admin/users can render the same list
+	// across restarts and so the public redemption endpoint can verify
+	// against a bcrypt hash instead of accepting any well-formed input.
+	invites, err := OpenInvites(dataDir)
+	if err != nil {
+		return nil, fmt.Errorf("opening invites: %w", err)
+	}
+	s.invites = invites
 
 	return s, nil
 }
@@ -129,6 +140,14 @@ func (s *Store) WireUserRegions(jwtSecret []byte) error {
 // been called — callers must nil-check.
 func (s *Store) UserRegions() UserRegions {
 	return s.userRegions
+}
+
+// Invites returns the persistent invite-token store (v1.3.0d). Always
+// non-nil after Open() — invites.json is opened lazily by OpenInvites
+// (which tolerates a missing file), so first boot starts with an empty
+// list and never errors here.
+func (s *Store) Invites() Invites {
+	return s.invites
 }
 
 // MigrateLegacyUsers sets uiAdmin=true for existing admin users.

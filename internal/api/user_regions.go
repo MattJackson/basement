@@ -315,6 +315,183 @@ func (s *Server) userCreateRegionHandler(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusCreated, toRegionResponse(created))
 }
 
+// userRegionsBulkRequest is the body shape for POST /user/regions/bulk
+// (v1.3.0d). Each row mirrors userRegionCreateRequest. Per-row errors
+// don't abort the rest — the response payload reports which indices
+// succeeded and which failed, with a typed error code per row.
+type userRegionsBulkRequest struct {
+	Regions []userRegionCreateRequest `json:"regions"`
+}
+
+// userRegionsBulkRowError is one per-row failure in the bulk-create
+// response. Index is the original position in the request array so the
+// UI can correlate it with the operator's input row.
+type userRegionsBulkRowError struct {
+	Index    int    `json:"index"`
+	Alias    string `json:"alias,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Error    string `json:"error"`
+	Message  string `json:"message"`
+}
+
+// userRegionsBulkResponse is the wire shape for the bulk create.
+// Created mirrors a /user/regions GET result, errors carries per-row
+// failures. Caller renders a per-row status table off these two
+// arrays.
+type userRegionsBulkResponse struct {
+	Created []userRegionResponse      `json:"created"`
+	Errors  []userRegionsBulkRowError `json:"errors"`
+}
+
+// userBulkCreateRegionsHandler implements POST /api/v1/user/regions/bulk
+// (v1.3.0d).
+//
+// Body shape: {regions: [{alias, endpoint, accessKeyId, secretKey,
+// region, addressingStyle}, ...]}. Each row is validated + created
+// independently; a per-row failure (duplicate alias, malformed
+// endpoint, store error) is reported in the response's errors array
+// and does NOT abort the rest of the batch. Always returns 200 with
+// the full result envelope (created + errors), even when every row
+// failed — the FE renders a status table off the envelope so a
+// blanket non-2xx would just collapse useful per-row context.
+//
+// Gated only by USER-tier auth (no requireCapability): per the cycle
+// constraint, every authenticated user can bulk-add keys to their own
+// keychain. The created rows are owned by the calling claims.UserID.
+func (s *Server) userBulkCreateRegionsHandler(w http.ResponseWriter, r *http.Request) {
+	regions := s.regionsStore()
+	if regions == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "REGIONS_NOT_WIRED",
+			"Region keychain store is not configured on this deployment.")
+		return
+	}
+
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims.UserID == "" {
+		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
+		return
+	}
+
+	var req userRegionsBulkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+	if len(req.Regions) == 0 {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "regions array is required and must be non-empty")
+		return
+	}
+	// Defensive cap so a runaway client can't post a million-row body.
+	const maxBulkRows = 200
+	if len(req.Regions) > maxBulkRows {
+		writeErrorSimple(w, http.StatusBadRequest, "TOO_MANY_REGIONS",
+			"bulk import accepts at most 200 rows per request")
+		return
+	}
+
+	resp := userRegionsBulkResponse{
+		Created: make([]userRegionResponse, 0, len(req.Regions)),
+		Errors:  make([]userRegionsBulkRowError, 0),
+	}
+
+	for i, row := range req.Regions {
+		row.Alias = strings.TrimSpace(row.Alias)
+		row.Endpoint = strings.TrimSpace(row.Endpoint)
+		row.AccessKeyID = strings.TrimSpace(row.AccessKeyID)
+		row.SecretKey = strings.TrimSpace(row.SecretKey)
+		row.Region = strings.TrimSpace(row.Region)
+
+		// Per-row required-fields check. Returns INVALID_REQUEST for
+		// any missing field — the FE pre-validates client-side too but
+		// this is the canonical wire-level check.
+		var missing string
+		switch {
+		case row.Alias == "":
+			missing = "alias"
+		case row.Endpoint == "":
+			missing = "endpoint"
+		case row.AccessKeyID == "":
+			missing = "accessKeyId"
+		case row.SecretKey == "":
+			missing = "secretKey"
+		}
+		if missing != "" {
+			resp.Errors = append(resp.Errors, userRegionsBulkRowError{
+				Index:    i,
+				Alias:    row.Alias,
+				Endpoint: row.Endpoint,
+				Error:    "INVALID_REQUEST",
+				Message:  missing + " is required",
+			})
+			continue
+		}
+
+		// Light URL precheck — same as the single-create handler.
+		if u, err := url.Parse(row.Endpoint); err != nil || u.Scheme == "" || u.Host == "" {
+			resp.Errors = append(resp.Errors, userRegionsBulkRowError{
+				Index:    i,
+				Alias:    row.Alias,
+				Endpoint: row.Endpoint,
+				Error:    "INVALID_ENDPOINT",
+				Message:  "endpoint must be a full URL with scheme and host",
+			})
+			continue
+		}
+
+		in := store.UserRegion{
+			UserID:          claims.UserID,
+			Alias:           row.Alias,
+			Endpoint:        row.Endpoint,
+			Region:          row.Region,
+			AccessKeyID:     row.AccessKeyID,
+			AddressingStyle: row.AddressingStyle,
+			SecretKeyEnc:    []byte(row.SecretKey),
+		}
+
+		created, err := regions.Create(r.Context(), in)
+		if err != nil {
+			failResource := "region:" + row.Endpoint
+			if errors.Is(err, store.ErrUserRegionDuplicate) {
+				s.auditFailure(r, "region:bulk_create", failResource, err)
+				resp.Errors = append(resp.Errors, userRegionsBulkRowError{
+					Index:    i,
+					Alias:    row.Alias,
+					Endpoint: row.Endpoint,
+					Error:    "DUPLICATE_REGION",
+					Message:  "A key with this alias already exists at this endpoint.",
+				})
+				continue
+			}
+			// NormalizeEndpoint failures from the store land here too.
+			if strings.Contains(err.Error(), "endpoint") || strings.Contains(err.Error(), "scheme") || strings.Contains(err.Error(), "host") {
+				s.auditFailure(r, "region:bulk_create", failResource, err)
+				resp.Errors = append(resp.Errors, userRegionsBulkRowError{
+					Index:    i,
+					Alias:    row.Alias,
+					Endpoint: row.Endpoint,
+					Error:    "INVALID_ENDPOINT",
+					Message:  err.Error(),
+				})
+				continue
+			}
+			s.auditFailure(r, "region:bulk_create", failResource, err)
+			resp.Errors = append(resp.Errors, userRegionsBulkRowError{
+				Index:    i,
+				Alias:    row.Alias,
+				Endpoint: row.Endpoint,
+				Error:    "REGION_CREATE_FAILED",
+				Message:  err.Error(),
+			})
+			continue
+		}
+
+		s.auditSuccess(r, "region:bulk_create", "region:"+created.ID)
+		resp.Created = append(resp.Created, toRegionResponse(created))
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // userListRegionsHandler implements GET /api/v1/user/regions.
 //
 // Returns the caller's UserRegions, never anyone else's. Empty list

@@ -4,6 +4,40 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0d — 2026-05-22
+
+Multi-user onboarding cycle — two related features both about adding
+more humans to a basement install. Invite-token polish: persistent
+invites now live in `{dataDir}/invites.json` (bcrypt-hashed, atomic
+write, RWMutex), tokens default to 30-day expiry (operator-configurable
+per invite), and `/admin/users` gains a Pending Invites section with
+create + label + revoke + rotate + copy-full-URL affordances. The
+public redemption endpoint (`POST /invites/{token}/redeem`) now
+verifies against the persistent store instead of accepting any
+well-formed input; expired tokens are cleaned up on the rejection
+path. The optional label feeds the auto-generated username (sanitized
+to lowercase + alnum + dash) so an invite labelled "wife" provisions
+the user as `wife` instead of `user-abcd1234`. Bulk-import keys at
+`/files/keys/new`: new "Bulk import" toggle swaps the single-key form
+for a paste-area that auto-detects three formats — CSV (with snake_case
+or camelCase header variants), TSV, and aws-cli credentials-file
+profile blocks — renders a per-row preview table with client-side
+validation errors, and submits via the new `POST
+/api/v1/user/regions/bulk` endpoint. The bulk endpoint creates rows
+independently: a per-row failure (`DUPLICATE_REGION`, `INVALID_ENDPOINT`,
+`INVALID_REQUEST`) lands in the response's `errors` array with the
+original index but doesn't abort the rest of the batch. The
+`addressingStyle` column rides along when present (default `path`).
+Gated only on USER-tier auth — anyone authenticated can bulk-add their
+own keys. Invite endpoints stay gated on `host:manage_users` (admin
+only). Test surface: store-level invite tests (create + redeem +
+revoke + rotate + expiry rejection + persistence across reopen), API
+tests for invite endpoints + bulk regions (happy path + per-row error
+non-abort + duplicate detection + addressing-style honoring), FE
+parser tests covering all three formats + header variants, FE UI
+tests covering bulk-mode toggle + preview + submit. `pnpm build` +
+`go test -race ./...` both green.
+
 ## v1.3.0c.1 — 2026-05-22
 
 Folder navigation in the bucket browser via S3 `delimiter="/"`. Before
