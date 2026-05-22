@@ -223,7 +223,7 @@ func (s *Server) userCreateRegionHandler(w http.ResponseWriter, r *http.Request)
 		if errors.Is(err, store.ErrUserRegionDuplicate) {
 			s.auditFailure(r, "region:create", failResource, err)
 			writeErrorSimple(w, http.StatusConflict, "DUPLICATE_REGION",
-				"You already have a region for this endpoint.")
+				"You already have a key with this alias at this endpoint. Pick a different alias to add another key for the same endpoint.")
 			return
 		}
 		// NormalizeEndpoint surfaces its own errors here (e.g. bad
