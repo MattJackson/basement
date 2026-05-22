@@ -29,7 +29,10 @@ S3 credentials so backend audit logs attribute requests to the
 actual user rather than a shared key. v1.1 sharpened the user
 persona around a **region-tier keychain** — one credential per
 endpoint, backend authoritative for bucket visibility — so users
-stop seeing the cluster plumbing.
+stop seeing the cluster plumbing. v1.2 lands **sudo-style admin
+elevation** (USER → ADMIN → ELEVATED state machine with re-auth at
+each transition) plus a **key-first user keychain** that supports
+multiple access keys against the same S3 endpoint.
 
 ## Features
 
@@ -38,8 +41,9 @@ stop seeing the cluster plumbing.
 - **First UI to support Garage v2 admin API** — vendored spec, refreshed on upstream updates
 - **OIDC + local password** — Sign in with Authentik / Keycloak / Pocket-ID; local password as break-glass
 - **Three-tier role model** — Host Admin / Cluster Admin / User; orthogonal axes, any combo per account
+- **Sudo-style admin elevation** — USER / ADMIN / ELEVATED session state machine (ADR-0003); destructive ops require fresh re-auth with a short TTL; local-password or OIDC step-up via `prompt=login`; persona pill carries the live mode + countdown
 - **Flexible policy matrix** — 27 capabilities × roles × scopes editable at `/admin/policies`; two seeded roles (host_admin, cluster_admin) plus operator-defined custom roles. `bucket_user` is deprecated in v1.1 — bucket access is the S3 key's grant on the cluster, not a basement role
-- **Region-tier user keychain** — one credential per endpoint at `/files/keys`; the backend is authoritative for which buckets the key can reach (no per-bucket grant explosion in basement state); AES-GCM keyed off JWT secret
+- **Key-first user keychain** — each access key is a card at `/files`; multiple keys per endpoint OK ("Work S3" + "Personal S3" against the same `s3.us-east-1.amazonaws.com`); AES-GCM keyed off JWT secret; backend authoritative for which buckets the key can reach (no per-bucket grant explosion in basement state)
 - **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
 - **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
 - **Bucket lifecycle wizard** — "After 30 days, delete" without writing JSON; capability-gated per driver
@@ -109,8 +113,9 @@ Full competitive write-up:
 - v0.8.x — cross-backend sync (Pull / Push between any two clusters) (shipped)
 - v0.9.x — operator polish: ADR-0001 three-tier RBAC, lifecycle wizard, policy simulator, usage dashboard, migrate wizard (shipped)
 - v1.0 — production-ready milestone: at-rest encryption for admin_token + S3 secrets, audit log subsystem, metrics persistence + time-series chart on `/admin/usage` (shipped — see [docs/release-notes/v1.0.0.md](docs/release-notes/v1.0.0.md))
-- **v1.1 (current)** — region tier replaces cluster-tier at the user persona (ADR-0002); `bucket_user` role deprecated; per-user keychain at `/files/keys`; sync + share become region-aware (shipped — see [docs/release-notes/v1.1.0.md](docs/release-notes/v1.1.0.md))
-- v1.2 — sudo-style admin elevation per [ADR-0003](docs/adr/0003-sudo-style-admin-elevation.md) (USER → ADMIN → ELEVATED state machine with re-auth at each transition); per-cluster-admin role assignment UI; OIDC group-claim → role auto-mapping
+- v1.1 — region tier replaces cluster-tier at the user persona (ADR-0002); `bucket_user` role deprecated; per-user keychain at `/files/keys`; sync + share become region-aware (shipped — see [docs/release-notes/v1.1.0.md](docs/release-notes/v1.1.0.md))
+- **v1.2 (current)** — sudo-style admin elevation per [ADR-0003](docs/adr/0003-sudo-style-admin-elevation.md) (USER → ADMIN → ELEVATED state machine with re-auth at each transition); key-first user keychain (multiple access keys per endpoint); `unique(userId, endpoint)` relaxed to `unique(userId, endpoint, alias)` (shipped — see [docs/release-notes/v1.2.0.md](docs/release-notes/v1.2.0.md))
+- v1.3 — multi-user polish: per-cluster `cluster_admin` role assignment UI; bulk-import of access keys; rotate-key flow; OIDC group-claim → role auto-mapping
 
 ## Architecture
 
@@ -127,7 +132,8 @@ Full competitive write-up:
   - [`docs/adr/0003-sudo-style-admin-elevation.md`](docs/adr/0003-sudo-style-admin-elevation.md) — USER → ADMIN → ELEVATED state machine (v1.2)
 
 See `docs/configuration.md` for env reference,
-`docs/release-notes/v1.1.0.md` for the current release changelog, and
+`docs/release-notes/v1.2.0.md` for the current release changelog,
+`docs/release-notes/v1.1.0.md` for the v1.1 region-tier write-up, and
 `docs/release-notes/v1.0.0.md` for the v1.0 baseline.
 
 ## Contributing
