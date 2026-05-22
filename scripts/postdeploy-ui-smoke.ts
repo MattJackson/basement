@@ -68,7 +68,10 @@ const USERNAME = process.env.BUI_USERNAME ?? process.env.BASEMENT_USERNAME ?? "m
 const PASSWORD = process.env.BUI_PASSWORD ?? process.env.BASEMENT_PASSWORD ?? process.env.PASSWORD ?? "password";
 
 const RUN_TS = new Date().toISOString().replace(/[:.]/g, "-");
-const SHOT_DIR = join("/tmp", "basement-smoke", RUN_TS);
+// SMOKE_SHOT_DIR lets the operator pin a known directory (e.g. for a
+// release-tag screenshot pass like /tmp/v1.5.0-screenshots/) instead
+// of the timestamped per-run default.
+const SHOT_DIR = process.env.SMOKE_SHOT_DIR ?? join("/tmp", "basement-smoke", RUN_TS);
 mkdirSync(SHOT_DIR, { recursive: true });
 
 // ---------- color helpers (no emoji, match bash smoke tone) ----------
@@ -1702,6 +1705,164 @@ section("[16] version label under Logo (Fix 7)");
       }
       await shot(page!, 'v1.5b-backups-new-step3-mode');
     });
+
+    // ----- v1.5.0c: backup detail page + restore wizard -----
+    // The detail + restore screens are gated on having at least one
+    // backup record. The smoke prefers an existing user-owned record
+    // so it doesn't touch destination buckets; if none exist it creates
+    // a transient manual+disabled+mirror-mode record (no scheduled
+    // runs, no destination writes) and deletes it after the checks.
+    section("[v1.5c] /files/backups/{id} detail + restore wizard (v1.5.0c)");
+    {
+      let backupId = "";
+      let createdEphemeral = false;
+
+      await check("[v1.5c] discover (or create) a backup record", async () => {
+        const listResp = await page!.request.get(`${BASE_URL}/api/v1/user/backups`);
+        if (!listResp.ok()) {
+          throw new Error(`GET /api/v1/user/backups → ${listResp.status()}`);
+        }
+        const existing = await listResp.json();
+        if (Array.isArray(existing) && existing.length > 0) {
+          backupId = existing[0].id as string;
+          info(`reusing existing backup ${backupId} (${existing[0].name ?? "<unnamed>"})`);
+          return;
+        }
+
+        // Need to create one. Find two regions (or one region with two
+        // buckets) so src+dst differ. If the caller has no regions, the
+        // detail+restore checks degrade to a warn-and-skip rather than
+        // fail — empty deploy.
+        const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+        if (!regionsResp.ok()) {
+          warnLine(`/user/regions → ${regionsResp.status()}; skipping backup detail checks`);
+          return;
+        }
+        const regions = await regionsResp.json();
+        if (!Array.isArray(regions) || regions.length === 0) {
+          warnLine("no user regions configured — skipping backup detail checks");
+          return;
+        }
+        const regionId = regions[0].id as string;
+
+        const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+        if (!bucketsResp.ok()) {
+          warnLine(`/user/regions/${regionId}/buckets → ${bucketsResp.status()}; skipping`);
+          return;
+        }
+        const body = await bucketsResp.json();
+        const buckets: any[] = Array.isArray(body) ? body : body?.buckets ?? [];
+        if (buckets.length === 0) {
+          warnLine("region has no buckets — skipping backup detail checks");
+          return;
+        }
+        // src = first bucket; dst = last bucket. If only one bucket
+        // exists src === dst — still acceptable since the backup is
+        // manual+disabled and never runs.
+        const srcBucket = buckets[0].id as string;
+        const dstBucket = buckets[buckets.length - 1].id as string;
+
+        const createResp = await page!.request.post(`${BASE_URL}/api/v1/user/backups`, {
+          headers: { "Content-Type": "application/json" },
+          data: {
+            name: `smoke-ephemeral-${Date.now()}`,
+            srcRegionId: regionId,
+            srcBucket,
+            dstRegionId: regionId,
+            dstBucket,
+            schedule: "manual",
+            disabled: true,
+            mode: "mirror",
+          },
+        });
+        if (!createResp.ok()) {
+          throw new Error(`POST /api/v1/user/backups → ${createResp.status()} ${await createResp.text()}`);
+        }
+        const created = await createResp.json();
+        backupId = created.id as string;
+        createdEphemeral = true;
+        info(`created ephemeral backup ${backupId} (manual+disabled+mirror)`);
+      });
+
+      if (backupId) {
+        await check("[v1.5c] /files/backups/{id} detail page renders", async () => {
+          await page!.goto(`${BASE_URL}/files/backups/${backupId}`, { waitUntil: "networkidle" });
+          await page!.waitForSelector('h1', { timeout: 10_000 });
+          // Configuration section heading always renders.
+          const hasConfig = await page!.locator('h2:has-text("Configuration")').count();
+          if (hasConfig === 0) {
+            throw new Error("/files/backups/{id} missing 'Configuration' section");
+          }
+          // Recent runs section heading always renders (empty table is fine).
+          const hasRuns = await page!.locator('h2:has-text("Recent runs")').count();
+          if (hasRuns === 0) {
+            throw new Error("/files/backups/{id} missing 'Recent runs' section");
+          }
+          await shot(page!, "v1.5c-backups-detail");
+        });
+
+        await check("[v1.5c] /files/backups/{id}/restore wizard renders step 1", async () => {
+          await page!.goto(`${BASE_URL}/files/backups/${backupId}/restore`, { waitUntil: "networkidle" });
+          // The page has three render branches gated on the backup's
+          // mode + snapshot inventory:
+          //   1. snapshot mode + snapshots present → "Restore from
+          //      snapshot" header + Step 1 of 3 indicator + radio
+          //   2. snapshot mode + zero snapshots → header + "No snapshots
+          //      on disk yet" copy (step 1 + empty-state)
+          //   3. mirror mode → no wizard header; an inline notice
+          //      "Restore is only available for snapshot-mode backups"
+          // Smoke accepts all three — the gate is "the route mounts
+          // without crashing and renders something meaningful".
+          await page!.waitForFunction(
+            () => {
+              const t = document.body.innerText || "";
+              return (
+                /Restore from snapshot/.test(t) ||
+                /Restore is only available for snapshot-mode/i.test(t)
+              );
+            },
+            null,
+            { timeout: 10_000 },
+          );
+          const hasWizardHeader = await page!.locator('h1:has-text("Restore from snapshot")').count();
+          const hasMirrorNotice = await page!
+            .locator('text=/Restore is only available for snapshot-mode/i')
+            .count();
+          if (hasWizardHeader === 0 && hasMirrorNotice === 0) {
+            throw new Error(
+              "/files/backups/{id}/restore: neither wizard header nor mirror-mode notice rendered",
+            );
+          }
+          if (hasWizardHeader > 0) {
+            // Snapshot-mode branch — also assert the Step 1 indicator or
+            // the empty-state copy is in the DOM.
+            const hasStepText = await page!.locator('text=/Step 1 of 3/i').count();
+            const hasEmpty = await page!.locator('text=/No snapshots on disk yet/i').count();
+            if (hasStepText === 0 && hasEmpty === 0) {
+              throw new Error(
+                "/files/backups/{id}/restore wizard rendered but neither Step 1 of 3 nor empty-state",
+              );
+            }
+          } else {
+            info("restore route in mirror-mode notice branch (ephemeral backup is mirror)");
+          }
+          await shot(page!, "v1.5c-backups-restore");
+        });
+      } else {
+        skipLine("[v1.5c] backup detail + restore checks", "no backup record available");
+      }
+
+      // Cleanup: delete the ephemeral record we created so the next
+      // smoke run sees a clean slate.
+      if (createdEphemeral && backupId) {
+        await check("[v1.5c] cleanup ephemeral backup", async () => {
+          const delResp = await page!.request.delete(`${BASE_URL}/api/v1/user/backups/${backupId}`);
+          if (!delResp.ok()) {
+            throw new Error(`DELETE /api/v1/user/backups/${backupId} → ${delResp.status()}`);
+          }
+        });
+      }
+    }
 
     // ============================================================
     // [NN] v1.3 feature surfaces — invites, admin TTL, folder nav
