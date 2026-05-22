@@ -78,7 +78,27 @@ deletes propagate to every replica within seconds instead of
 waiting up to the polling tick, with polling staying as the
 fallback for backends without webhook coverage. No driver changes;
 no new env vars; bearer auth runs parallel to the existing JWT
-session cookie.
+session cookie. v1.8 is the **AI-agent + mobile** cycle: a
+**`basement-mcp` stdio server** exposes a curated subset of the
+control plane (ten tools at launch — seven read + two write + one
+forward-compatible placeholder) to MCP-aware clients (Claude
+Desktop, Claude Code, Cursor) over JSON-RPC 2.0, authenticating
+via v1.7 service-account bearer credentials; the service-account
+mint UI gains a **"Use with MCP" affordance** that emits ready-to-
+paste `config.yaml` + Claude / Cursor JSON snippets so an operator
+goes from "mint" to "Claude can drive my basement" without hand-
+editing config files; the web shell becomes an **installable PWA**
+with offline-cached app shell + iOS standalone hooks + Android
+theme color, plus a **mobile bucket browser** that collapses the
+table to a stacked card layout below 640px with 56px tap-target
+rows + an **install-hint banner** for non-technical household
+users. Project **rebranded** `basement-ui` → `basement` (Go module
+`github.com/mattjackson/basement`, Docker image
+`ghcr.io/mattjackson/basement`, OpenAPI spec `basement.yaml`) and
+**relicensed** MIT → AGPLv3 with a commercial-license escape hatch
+(contact matthew@pq.io). The v1.8.0a `basement` CLI binary was
+dropped in v1.8.0d — aws-cli covers S3 object CRUD and the web UI
++ MCP cover the control plane.
 
 ## Features
 
@@ -114,6 +134,11 @@ session cookie.
 - **Webhook subscriptions: event-driven workloads** (v1.7) — `/files/webhooks` lists the caller's HMAC-SHA256-signed bucket-event subscriptions; `/files/webhooks/new` creates one with target URL + auto-generated or operator-supplied secret + event-type filter + region/bucket/prefix scope; detail page surfaces a copy-pasteable Python verification snippet + recent delivery history + Test affordance (synthetic envelope); 3-attempt retry policy (1s/5s/15s backoff); 10 consecutive failures auto-disable the subscription with `webhook:auto_disabled` audit
 - **Event-driven federation** (v1.7) — an in-process pub/sub (`webhook.Engine.Subscribe`) lets v1.6's federation engine react to bucket events directly; `ObjectCreated/Modified/Deleted` envelopes drive sub-second per-replica streamPut / DeleteObject instead of waiting up to v1.6's 10s polling tick; polling stays as fallback for backends without webhook source coverage; both paths share the same `recordSuccess`/`recordFailure` semantics so broken-after-3 / auto-failover behave identically
 - **Auto-elevation on /admin/\* deep links** (v1.7) — `AdminEntryElevationGuard` opens the elevation modal whenever the operator lands on `/admin/*` in USER mode (URL bar, bookmark, manual nav); cancel routes to `/files` with an info toast; success leaves the page in place with mode = ADMIN; debounced per-pathname so navigating within `/admin/*` doesn't fire N modals; `AdminUserModeBanner` provides a sticky amber fallback affordance one click from elevate
+- **MCP server for AI agents** (v1.8) — `basement-mcp` stdio binary exposes ten tools (seven read + two write + one forward-compatible placeholder) to Claude Desktop / Claude Code / Cursor over JSON-RPC 2.0 on the Model Context Protocol; bearer-only auth via v1.7 service accounts read from `~/.config/basement/config.yaml`; tool calls log to stderr (JSON) so the stdout RPC transport stays clean; protocol version 2024-11-05; advertises `tools` capability only
+- **"Use with MCP" service-account UX** (v1.8) — `<McpConfigSection>` shared component renders a `config.yaml` profile + a Claude / Cursor host JSON snippet for any service account; endpoint defaults to `window.location.origin`; on the mint dialog the YAML inlines the shown-once plaintext secret, on the new `/admin/service-accounts/$id` detail page the YAML carries a `<SECRET_FROM_ROTATE>` placeholder + a rotate hint; download-as-config.yaml button alongside Copy
+- **Installable Mobile PWA** (v1.8) — vite-plugin-pwa generates `dist/manifest.webmanifest` + `dist/sw.js`; service worker precaches the static app shell for offline shell loads; `/api/*` denylisted from the navigation fallback so auth-scoped responses always hit the network; iOS standalone meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`) so Safari renders the installed app full-bleed; theme-color `#C9874B` tints the address bar on Chrome / Edge Android; `/site.webmanifest` retained alongside `/manifest.webmanifest` for back-compat with already-installed shortcuts
+- **Mobile-tuned bucket browser** (v1.8) — virtualized object browser flips to a stacked card layout below 640px; row height bumps to 56px so checkbox + filename tap targets meet iOS HIG's 44px minimum; size + last-modified columns hide so the file name is the primary visual element; `data-layout="card"` on the scroll container is the E2E observability seam
+- **Install-to-home-screen hint** (v1.8) — one-time dismissible banner on `/files` for mobile + display-mode=browser; explains Share → Add to Home Screen for Safari iOS (which doesn't auto-prompt); keyed on `localStorage["basement.pwaHintDismissed"]` so once dismissed it never re-shows for that device
 - **Persistent invite tokens** (v1.3) — `/admin/users` "Pending invites" section: mint, label, revoke, rotate, copy-full-URL; 30-day default expiry; optional label feeds the auto-generated username
 - **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
 - **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
@@ -156,7 +181,7 @@ See `docs/configuration.md` for production env vars.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v1.7 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.8 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
@@ -172,12 +197,14 @@ See `docs/configuration.md` for production env vars.
 | M2M service accounts (bearer auth)   | yes (v1.7)       | no                      | no                | (MinIO-driven)  |
 | HMAC-signed bucket webhooks          | yes (v1.7)       | no                      | no                | (MinIO-driven)  |
 | Event-driven federation replication  | yes (v1.7)       | no                      | no                | no              |
+| MCP server for AI agents             | yes (v1.8)       | no                      | no                | no              |
+| Installable mobile PWA               | yes (v1.8)       | no                      | no                | no              |
 | Bucket lifecycle wizard              | yes              | no                      | no                | (MinIO-driven)  |
 | Policy simulator (what-if)           | yes              | no                      | no                | no              |
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | AGPL-3.0         | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-22)            | active v1.8      | active v1.1.0           | active v0.5       | active fork     |
+| Status (as of 2026-05-22)            | shipped v1.8     | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -197,8 +224,9 @@ Full competitive write-up:
 - v1.4 — scale + perf: virtualized bucket browser for 10K+ object directories; `Driver.PerBucketStatsAvailable()` capability gate; paginated audit log + Export CSV; paginated key permissions editor with filter + sticky Save bar; batch object operations + sticky action bar; storage growth analytics (`Growth (Nd)` column, top-growing-buckets panel, anomaly banner, 7d / 30d / 90d range selector); Garage block-scrub UI at `/admin/clusters/{cid}/scrub` (shipped — see [docs/release-notes/v1.4.0.md](docs/release-notes/v1.4.0.md))
 - v1.5 — backup story: scheduled bucket-to-bucket backups with cron engine; mirror + snapshot modes; GFS retention with auto-prune; 3-step restore wizard with snapshot-level deep-link; mirror-mode short-circuit for backups that don't keep history (shipped — see [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md))
 - v1.6 — federation + multi-backend replication: `FederatedBucket` first-class concept; polling-based replication engine with per-federation goroutines + per-replica worker pool + lag tracking; user-tier CRUD + manual failover + opt-in auto-failover watchdog; 5-step wizard at `/files/federated-buckets/new`; per-replica health table on the detail page; bucket-browser federation badge via a reverse-lookup endpoint. Builds directly on v1.5's sync engine, no driver changes. Substrate for the v2.0 S3 gateway (shipped — see [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md), [ADR-0005](docs/adr/0005-federation.md))
-- **v1.7 (current)** — service accounts (M2M bearer auth substrate for v1.8's CLI / MCP / Mobile PWA) + webhook subscriptions (HMAC-signed bucket events + auto-disable + Python verification snippet) + event-driven federation (in-process pub/sub flips v1.6's 10s polling to sub-second convergence; polling stays as fallback) + `/admin/*` auto-elevation guard + AdminUserModeBanner. No driver changes; no new env vars; bearer auth runs parallel to JWT cookie (shipped — see [docs/release-notes/v1.7.0.md](docs/release-notes/v1.7.0.md))
-- v1.8 — MCP server (`cmd/basement-mcp/`, read-mostly initially, exposes a subset of capabilities to LLM-driven tools via Anthropic's Model Context Protocol; authenticates via v1.7 service accounts) + Mobile PWA (installable wrapper + mobile-tuned chrome, bearer auth for offline-to-online). Object-store CRUD is covered by aws-cli against the SigV4 endpoints; basement-specific control-plane work is covered by the web UI — no dedicated `basement` CLI ships.
+- v1.7 — service accounts (M2M bearer auth substrate for v1.8's MCP / Mobile PWA) + webhook subscriptions (HMAC-signed bucket events + auto-disable + Python verification snippet) + event-driven federation (in-process pub/sub flips v1.6's 10s polling to sub-second convergence; polling stays as fallback) + `/admin/*` auto-elevation guard + AdminUserModeBanner. No driver changes; no new env vars; bearer auth runs parallel to JWT cookie (shipped — see [docs/release-notes/v1.7.0.md](docs/release-notes/v1.7.0.md))
+- **v1.8 (current)** — MCP server (`cmd/basement-mcp/`, ten tools at launch — seven read + two write + one forward-compatible placeholder — over stdio JSON-RPC 2.0, authenticates via v1.7 service accounts) + service-account "Use with MCP" config UX (`<McpConfigSection>` shared component emits ready-to-paste `config.yaml` + Claude / Cursor JSON snippets; new `/admin/service-accounts/$id` detail page) + Mobile PWA (vite-plugin-pwa installable wrapper + offline-cached app shell + iOS standalone hooks + mobile bucket browser card layout below 640px + `<InstallToHomeScreenHint>` banner) + project rebrand (`basement-ui` → `basement`, `github.com/mattjackson/basement` module, `ghcr.io/mattjackson/basement` image) + relicense (MIT → AGPLv3, commercial-license escape hatch at matthew@pq.io). v1.8.0a CLI binary dropped in v1.8.0d (aws-cli + web UI + MCP cover the matrix). Shipped — see [docs/release-notes/v1.8.0.md](docs/release-notes/v1.8.0.md)
+- v1.9 — **WebDAV + SMB gateways**: network-drive surfaces for non-tech household users (the same audience who installed the PWA in v1.8) — mount a basement bucket as a Finder / Explorer / GVFS drive. WebDAV is the cross-platform default; SMB picks up Windows-shop + macOS-finder cases where WebDAV's latency is too high. Both gateways authenticate via v1.7 service accounts and route through v1.6 federation topology + v0.8 sync engine
 - **v2.0 — S3 gateway.** Major-version slot. Inbound S3 requests routed through basement's gateway, which dispatches via the v1.6 federation topology (read → nearest healthy replica; write → primary). Service-account-minted SigV4 keys gate ingress; webhooks emit inbound-write events that drive event-driven federation. Carry-over from the v1.x backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself
 
 ## Architecture
@@ -216,7 +244,9 @@ Full competitive write-up:
   - [`docs/adr/0003-sudo-style-admin-elevation.md`](docs/adr/0003-sudo-style-admin-elevation.md) — USER → ADMIN → ELEVATED state machine (v1.2)
 
 See `docs/configuration.md` for env reference,
-`docs/release-notes/v1.7.0.md` for the current release changelog,
+`docs/release-notes/v1.8.0.md` for the current release changelog,
+`docs/release-notes/v1.7.0.md` for the v1.7 service-account +
+webhook write-up,
 `docs/release-notes/v1.6.0.md` for the v1.6 federation write-up,
 `docs/release-notes/v1.5.0.md` for the v1.5 backup-story write-up,
 `docs/release-notes/v1.4.0.md` for the v1.4 scale + perf write-up,

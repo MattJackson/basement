@@ -2374,6 +2374,285 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.8a] /admin/service-accounts/$id detail page (v1.8.0d)
+    // ============================================================
+    section("[v1.8a] /admin/service-accounts/$id detail page renders + McpConfigSection");
+    {
+      let ephemeralSaId = "";
+      let ephemeralSaCreated = false;
+
+      await check("[v1.8a] discover (or create) a service account", async () => {
+        const listResp = await page!.request.get(`${BASE_URL}/api/v1/admin/service-accounts`);
+        if (!listResp.ok()) {
+          throw new Error(`GET /api/v1/admin/service-accounts → ${listResp.status()}`);
+        }
+        const existing = await listResp.json();
+        if (Array.isArray(existing) && existing.length > 0) {
+          ephemeralSaId = existing[0].id as string;
+          info(`reusing existing service account ${ephemeralSaId} (${existing[0].name ?? "<unnamed>"})`);
+          return;
+        }
+        // Mint an ephemeral SA for the smoke. bucket:view is a benign
+        // read capability so the SA can't do anything destructive even if
+        // its bearer credentials leaked.
+        const createResp = await page!.request.post(`${BASE_URL}/api/v1/admin/service-accounts`, {
+          headers: { "Content-Type": "application/json" },
+          data: {
+            name: `smoke-ephemeral-${Date.now()}`,
+            capabilities: [{ id: "bucket:view", scope: "bucket:*:*" }],
+            scopes: ["bucket:*:*"],
+          },
+        });
+        if (!createResp.ok()) {
+          throw new Error(`POST /api/v1/admin/service-accounts → ${createResp.status()} ${await createResp.text()}`);
+        }
+        // Wire shape: { serviceAccount: serviceAccountPublic, secret: "<plaintext>" }
+        // The plaintext secret is returned exactly once.
+        const created = await createResp.json();
+        ephemeralSaId = created.serviceAccount?.id as string;
+        ephemeralSaCreated = true;
+        info(`created ephemeral service account ${ephemeralSaId} for v1.8 smoke`);
+
+        const akid = created.serviceAccount?.accessKeyId;
+        if (typeof akid !== "string" || !akid.startsWith("BMNT")) {
+          throw new Error(`mint response missing BMNT accessKeyId: ${akid}`);
+        }
+        if (typeof created.secret !== "string" || created.secret.length < 16) {
+          throw new Error("mint response missing plaintext secret");
+        }
+      });
+
+      if (ephemeralSaId) {
+        await check("[v1.8a] /admin/service-accounts/{id} detail page renders Identity + Capabilities + Use with MCP", async () => {
+          await page!.goto(`${BASE_URL}/admin/service-accounts/${ephemeralSaId}`, { waitUntil: "networkidle" });
+          await page!.waitForSelector('h1', { timeout: 10_000 });
+          // Identity card always present.
+          const hasIdentity = await page!.locator('text=/Identity/').count();
+          if (hasIdentity === 0) {
+            throw new Error("/admin/service-accounts/{id} missing 'Identity' card");
+          }
+          // Capabilities card always present (may show "No capabilities granted").
+          const hasCapabilities = await page!.locator('text=/^Capabilities$/').count();
+          if (hasCapabilities === 0) {
+            throw new Error("/admin/service-accounts/{id} missing 'Capabilities' card");
+          }
+          // McpConfigSection — always rendered on the detail page (with
+          // <SECRET_FROM_ROTATE> placeholder).
+          await page!.waitForSelector('[data-testid="mcp-config-section"]', { timeout: 5_000 });
+          await page!.waitForSelector('[data-testid="mcp-yaml-snippet"]', { timeout: 5_000 });
+          await page!.waitForSelector('[data-testid="mcp-client-snippet"]', { timeout: 5_000 });
+          // The rotate hint is what differentiates the detail page from
+          // the mint dialog — secret=null path renders it.
+          const hasRotateHint = await page!.locator('[data-testid="mcp-rotate-hint"]').count();
+          if (hasRotateHint === 0) {
+            throw new Error("/admin/service-accounts/{id} missing mcp-rotate-hint (secret should be null on detail page)");
+          }
+          // YAML snippet should contain the SECRET_FROM_ROTATE placeholder
+          // since secret=null.
+          const yamlText = await page!.locator('[data-testid="mcp-yaml-snippet"]').first().textContent();
+          if (!yamlText || !yamlText.includes("<SECRET_FROM_ROTATE>")) {
+            throw new Error("detail-page YAML snippet missing <SECRET_FROM_ROTATE> placeholder");
+          }
+          await shot(page!, "v1.8a-service-account-detail");
+        });
+      }
+
+      // Cleanup: revoke the ephemeral SA if we created it.
+      if (ephemeralSaCreated && ephemeralSaId) {
+        await check("[v1.8a] cleanup ephemeral service account", async () => {
+          const delResp = await page!.request.delete(`${BASE_URL}/api/v1/admin/service-accounts/${ephemeralSaId}`);
+          if (!delResp.ok()) {
+            throw new Error(`DELETE /api/v1/admin/service-accounts/${ephemeralSaId} → ${delResp.status()}`);
+          }
+        });
+      }
+    }
+
+    // ============================================================
+    // [v1.8b] PWA manifest endpoints (v1.8.0e)
+    // ============================================================
+    section("[v1.8b] PWA manifest endpoints resolve (v1.8.0e)");
+    await check("[v1.8b] /manifest.webmanifest returns a valid PWA manifest", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/manifest.webmanifest`);
+      if (!resp.ok()) {
+        throw new Error(`GET /manifest.webmanifest → ${resp.status()}`);
+      }
+      const ct = (resp.headers()["content-type"] ?? "").toLowerCase();
+      if (!ct.includes("manifest") && !ct.includes("json")) {
+        throw new Error(`/manifest.webmanifest unexpected Content-Type: ${ct}`);
+      }
+      const manifest = await resp.json();
+      // Required PWA fields per the W3C spec + the iOS install path.
+      for (const field of ["name", "icons", "start_url", "display"]) {
+        if (!(field in manifest)) {
+          throw new Error(`/manifest.webmanifest missing required field: ${field}`);
+        }
+      }
+      if (!Array.isArray(manifest.icons) || manifest.icons.length === 0) {
+        throw new Error("/manifest.webmanifest icons[] missing or empty");
+      }
+    });
+
+    await check("[v1.8b] /site.webmanifest still resolves for back-compat with already-installed shortcuts", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/site.webmanifest`);
+      if (!resp.ok()) {
+        throw new Error(`GET /site.webmanifest → ${resp.status()}`);
+      }
+      const manifest = await resp.json();
+      for (const field of ["name", "icons", "start_url"]) {
+        if (!(field in manifest)) {
+          throw new Error(`/site.webmanifest missing required field: ${field}`);
+        }
+      }
+    });
+
+    // ============================================================
+    // [v1.8c] Mobile viewport — bucket browser card layout (v1.8.0e)
+    // ============================================================
+    section("[v1.8c] mobile viewport (375x667): bucket browser uses card layout");
+    await check("[v1.8c] /files/{rid}/b/{bid} at 375x667 renders with data-layout=card", async () => {
+      // Find a region + bucket. Skip if the user has none.
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("[v1.8c] mobile card layout", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("[v1.8c] mobile card layout", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("[v1.8c] mobile card layout", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("[v1.8c] mobile card layout", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+
+      // Set the iPhone-SE viewport (375x667) for this navigation, then
+      // restore to desktop for downstream checks.
+      await page!.setViewportSize({ width: 375, height: 667 });
+      try {
+        await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+        // Either data-layout="card" is set on the scroll container OR
+        // the empty-state copy shows (an empty bucket still mounts the
+        // scroll container under the v1.8.0e implementation).
+        await page!.waitForFunction(
+          () => {
+            const layoutAttr = document.querySelector('[data-layout]');
+            const empty = /No objects here|This bucket is empty|This folder is empty/i.test(
+              document.body.innerText || "",
+            );
+            return (layoutAttr?.getAttribute("data-layout") === "card") || empty;
+          },
+          null,
+          { timeout: 10_000 },
+        );
+        const layoutEl = await page!.$('[data-layout]');
+        if (layoutEl) {
+          const layout = await layoutEl.getAttribute('data-layout');
+          if (layout !== "card") {
+            // Tolerate the empty-state branch where the scroll container
+            // may not mount.
+            const hasEmpty = await page!.locator('text=/No objects here|This bucket is empty|This folder is empty/i').count();
+            if (hasEmpty === 0) {
+              throw new Error(`at 375x667 expected data-layout="card", got "${layout}"`);
+            }
+          }
+        }
+        await shot(page!, "v1.8c-mobile-bucket-card-layout");
+      } finally {
+        // Restore desktop viewport before any downstream check.
+        await page!.setViewportSize({ width: 1280, height: 900 });
+      }
+    });
+
+    // ============================================================
+    // [v1.8d] Install-to-home-screen hint visible at mobile viewport
+    // ============================================================
+    section("[v1.8d] mobile viewport: /files renders InstallToHomeScreenHint");
+    await check("[v1.8d] /files at 375x667 renders install-to-home-screen hint banner", async () => {
+      await page!.setViewportSize({ width: 375, height: 667 });
+      try {
+        // Clear the localStorage dismiss flag so the banner is eligible
+        // to render even if a prior smoke run dismissed it.
+        await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
+        await page!.evaluate(() => {
+          try {
+            window.localStorage?.removeItem("basement.pwaHintDismissed");
+          } catch {
+            // ignore
+          }
+        });
+        // Reload so the component re-runs detectShouldShowHint() with the
+        // cleared flag.
+        await page!.reload({ waitUntil: "networkidle" });
+        // The banner uses matchMedia('(display-mode: browser)') +
+        // matchMedia('(max-width: 767px)'). Playwright at 375x667 satisfies
+        // the second; the first is also true (Playwright doesn't run as
+        // a PWA).
+        await page!.waitForSelector('[data-testid="install-to-home-screen-hint"]', { timeout: 10_000 });
+        await shot(page!, "v1.8d-install-hint-banner");
+        // Click dismiss and assert the banner goes away + localStorage
+        // gets the flag.
+        await page!.locator('[data-testid="install-hint-dismiss"]').click();
+        await page!.waitForFunction(
+          () => !document.querySelector('[data-testid="install-to-home-screen-hint"]'),
+          null,
+          { timeout: 3_000 },
+        );
+        const flag = await page!.evaluate(() => {
+          try {
+            return window.localStorage?.getItem("basement.pwaHintDismissed");
+          } catch {
+            return null;
+          }
+        });
+        if (flag !== "1") {
+          throw new Error(`expected basement.pwaHintDismissed=1 after dismiss, got: ${flag}`);
+        }
+      } finally {
+        await page!.setViewportSize({ width: 1280, height: 900 });
+      }
+    });
+
+    // ============================================================
+    // [v1.8e] mobile viewport screenshot pass (visual coverage)
+    // ============================================================
+    section("[v1.8e] mobile viewport screenshot pass (375x667 across user-shell routes)");
+    await check("[v1.8e] capture mobile screenshots of /files, /files/keys, /files/regions/new, /files/webhooks", async () => {
+      await page!.setViewportSize({ width: 375, height: 667 });
+      try {
+        const routes: Array<[string, string]> = [
+          ["/files", "v1.8e-mobile-files"],
+          ["/files/keys", "v1.8e-mobile-files-keys"],
+          ["/files/regions/new", "v1.8e-mobile-files-regions-new"],
+          ["/files/webhooks", "v1.8e-mobile-files-webhooks"],
+        ];
+        for (const [path, name] of routes) {
+          try {
+            await page!.goto(`${BASE_URL}${path}`, { waitUntil: "networkidle" });
+            await page!.waitForSelector('h1', { timeout: 10_000 });
+          } catch (err) {
+            warnLine(`mobile screenshot of ${path} skipped: ${err instanceof Error ? err.message : String(err)}`);
+            continue;
+          }
+          await shot(page!, name);
+        }
+      } finally {
+        await page!.setViewportSize({ width: 1280, height: 900 });
+      }
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
     section("[NN] console + pageerror gate (v0.8.0c)");

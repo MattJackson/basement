@@ -4,6 +4,95 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.8.0 — 2026-05-22
+
+MCP server + Mobile PWA + service-account config UX milestone. Six
+primary cycles (v1.8.0a → v1.8.0e) plus this milestone tag give
+basement its AI-agent-driveable control plane + phone-installable
+shell + rebrand-and-relicense cutover end-to-end. Headline surfaces:
+`basement-mcp` stdio server with ten tools (seven read + two write +
+one placeholder) authenticated via v1.7 service accounts;
+`<McpConfigSection>` shared component that emits ready-to-paste
+`config.yaml` + Claude/Cursor JSON from any service account;
+`/admin/service-accounts/$id` detail page surfaces the MCP config
+after the shown-once dialog has closed; vite-plugin-pwa + iOS
+standalone hooks + theme color make the web app installable on
+Safari iOS + Chrome Android; mobile bucket browser flips to a
+stacked card layout below 640px with 56px tap-target rows;
+`<InstallToHomeScreenHint>` banner on `/files` walks non-technical
+household users through Share → Add to Home Screen. Project
+rebranded `basement-ui` → `basement` (Go module
+`github.com/mattjackson/basement`, Docker image
+`ghcr.io/mattjackson/basement`, OpenAPI spec `basement.yaml`) and
+relicensed MIT → AGPLv3 with commercial-license escape hatch
+(contact matthew@pq.io). The v1.8.0a `basement` CLI binary was
+deleted in v1.8.0d before it could ship — aws-cli + web UI + MCP
+cover the matrix.
+
+Full notes: [`docs/release-notes/v1.8.0.md`](docs/release-notes/v1.8.0.md)
+
+### Cycles
+
+- **v1.8.0a** — `basement` CLI binary (later deleted in v1.8.0d).
+  Introduced `internal/clilib` shared config + HTTP client package
+  that survives the CLI deletion (basement-mcp re-uses it).
+- **v1.8.0b** — Rebrand cutover: project renamed `basement-ui` →
+  `basement`; Go module path moved to `github.com/mattjackson/basement`;
+  OpenAPI spec file renamed; LICENSE switched from MIT to AGPLv3;
+  Docker image moved to `ghcr.io/mattjackson/basement`; commercial-
+  license escape hatch documented.
+- **v1.8.0b.1** — Follow-on fix: OpenAPI filename `basement-ui.yaml`
+  renamed to `basement.yaml` (the cutover commit missed it; CI was
+  loading the old path).
+- **v1.8.0c** — `basement-mcp` Model Context Protocol stdio server.
+  Ten tools at launch; bearer-only auth via v1.7 service accounts
+  + `~/.config/basement/config.yaml`; JSON-RPC 2.0 on newline-
+  delimited stdin/stdout; install paths documented for Claude
+  Desktop, Claude Code, Cursor.
+- **v1.8.0d** — Drop `cmd/basement-cli/` (auditing found
+  duplication with aws-cli + web UI); add "Use with MCP" affordance
+  to service-account UI via new `<McpConfigSection>` shared
+  component reused by `<SecretShownOnceDialog>` (mint flow) and
+  the new `/admin/service-accounts/$id` detail route. Scrubs stale
+  CLI references from README + v1.7 notes.
+- **v1.8.0e** — Mobile PWA. vite-plugin-pwa generates
+  `manifest.webmanifest` + `sw.js`; `/api/*` denylisted from
+  navigation fallback; iOS standalone meta tags + apple-touch-icon
+  + theme color; bucket browser card layout below 640px with 56px
+  rows (iOS HIG tap-target compliance); `<InstallToHomeScreenHint>`
+  banner on `/files` with one-time-dismissible localStorage gate.
+- **v1.8.0f** — This milestone tag. Smoke + screenshot pass +
+  release notes + CHANGELOG + README forward-link.
+
+## v1.8.0e — 2026-05-22
+
+Mobile PWA — installable on phone home screen + mobile-friendly
+bucket browser. vite-plugin-pwa generates `dist/sw.js` +
+`dist/manifest.webmanifest` on every build; the service worker
+precaches the static app shell (HTML, JS, CSS, images, fonts) for
+offline shell loads. `/api/*` is denylisted from the navigation-
+fallback so auth-scoped responses always hit the network instead of
+being served stale from the cache. `index.html` declares the iOS-
+specific `apple-mobile-web-app-capable` + `apple-mobile-web-app-
+status-bar-style` meta tags Safari needs to render standalone (the
+web manifest alone isn't enough for Safari iOS); `apple-touch-icon`
+at 180×180 supplies the home-screen icon; `theme-color: #C9874B`
+tints the address bar on Chrome / Edge Android. The existing
+`/site.webmanifest` is kept alongside the new `/manifest.webmanifest`
+for back-compat with v1.7-or-earlier installed shortcuts. Bucket
+browser virtualized row renderer flips to a stacked card layout
+below 640px (`useIsMobile()` via `(max-width: 639px)` matchMedia);
+row height bumps to 56px so checkbox + filename tap targets meet
+iOS HIG's 44px minimum; size + last-modified columns hide so the
+file name is the primary visual element; `data-layout="card"` on
+the scroll container is the smoke / E2E observability seam. New
+`<InstallToHomeScreenHint>` banner on `/files` renders when (1)
+localStorage flag not set, (2) display-mode=browser, (3) mobile
+viewport — explains Share → Add to Home Screen for Safari iOS
+(which doesn't auto-prompt); same banner shows on Android even
+though Chrome auto-prompts via `beforeinstallprompt`, for
+consistency. Once dismissed, never re-shows for that device.
+
 ## v1.8.0d — 2026-05-22
 
 CLI removed; aws-cli + web UI cover the use cases. The
@@ -66,6 +155,48 @@ and Cursor in `cmd/basement-mcp/README.md`. No driver changes; no
 new env vars except the existing `$BASEMENT_PROFILE` /
 `$BASEMENT_SECRET_KEY` from the CLI substrate. Tool calls log to
 stderr (JSON) so the stdout transport stays clean.
+
+## v1.8.0b.1 — 2026-05-22
+
+OpenAPI filename rename follow-on: `openapi/basement-ui.yaml` →
+`openapi/basement.yaml`. The v1.8.0b rebrand cutover swept LICENSE,
+package.json, README.md, the v1.7 release notes, and the Go module
+path in one pass but missed the spec file name itself — CI was
+loading `openapi/basement-ui.yaml` by path and failed on v1.8.0b.
+Single-file rename + CI loader path fix; no behavior change.
+
+## v1.8.0b — 2026-05-22
+
+Rebrand cutover: project renamed `basement-ui` → `basement`. The
+original name outgrew itself — basement is no longer just a UI,
+it's a control-plane substrate (federation engine, backup engine,
+webhook delivery worker, bearer-auth middleware, MCP server starting
+in v1.8.0c). Go module path moved to `github.com/mattjackson/basement`;
+all internal import paths updated in one sweep; OpenAPI spec file
+renamed; Docker image moved from `ghcr.io/mattjackson/basement-ui`
+to `ghcr.io/mattjackson/basement`; `cmd/basement-server` keeps its
+name (already correct since v0.x). License simultaneously switched
+from MIT to AGPLv3 with a commercial-license escape hatch (contact
+matthew@pq.io) for proprietary embedding / hosted SaaS scenarios.
+Operators using Watchtower against the old image repo will stop
+receiving updates until they update the image string; compose / k8s
+manifests need the rename. Data dir (`BASEMENT_DATA_DIR`) and env
+var names are unchanged. CI failed (`openapi/basement-ui.yaml`
+still referenced by path); fixed in v1.8.0b.1 follow-on.
+
+## v1.8.0a — 2026-05-22
+
+`basement` CLI binary (later deleted in v1.8.0d). Originally planned
+as a third surface alongside the web UI + (forthcoming) MCP server
+for operator scripting against basement's control plane. Shipped
+with subcommands for clusters / keys / regions / shares / syncs /
+backups + a YAML config loader at `~/.config/basement/config.yaml`
++ `$BASEMENT_PROFILE` selection. The `internal/clilib` shared
+package — config loader + HTTP client — was the durable artifact;
+the CLI binary itself was deleted in v1.8.0d after audit found
+substantial overlap with aws-cli (object CRUD) and the web UI
+(control plane), but `internal/clilib` stayed and now backs the
+v1.8.0c MCP server.
 
 ## v1.7.0 — 2026-05-22
 
