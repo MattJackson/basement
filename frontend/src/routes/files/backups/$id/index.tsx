@@ -22,7 +22,7 @@ import { useQueryClient } from "@tanstack/react-query";
 // recreate; flipping mode/retention is also a wizard-only action
 // (the destination layout changes so a mid-life flip is a config
 // migration, not a single-field edit).
-export const Route = createFileRoute("/files/backups/$id")({
+export const Route = createFileRoute("/files/backups/$id/")({
   component: BackupDetailPage,
 });
 
