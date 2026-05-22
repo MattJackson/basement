@@ -4,6 +4,69 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.6.0 — 2026-05-22
+
+Federation + multi-backend replication milestone. Six cycles
+(v1.6.0a → v1.6.0f) plus this tag give basement its first
+DR-grade story: a `FederatedBucket` is the same logical bucket
+living on multiple backends, kept in lock-step continuously by a
+polling-based replication engine, with manual + opt-in
+auto-failover when the primary goes dark. Builds directly on
+v1.5's sync engine — no driver changes; pure store + engine + API
++ UI additions. Six new user-tier endpoints under
+`/api/v1/user/federated-buckets` (CRUD + `/failover` + `/resync`)
+plus a `/by-target` reverse-lookup endpoint that powers the
+bucket-browser federation badge. Atomic JSON store at
+`{dataDir}/federated_buckets.json`. Per-federation goroutines tick
+every 10s, diff primary against each replica, and queue missing
+objects through a per-replica worker pool (default 4 workers) that
+reuses the v1.5 sync engine as the copy primitive. Per-replica
+health pills (`in-sync` / `lagging` / `stale` / `broken`) on the
+detail page; `Promote to primary` is a confirmation Dialog
+(two-fields rule). Opt-in auto-failover watchdog pings the
+primary every 30s and promotes the healthiest replica after
+`AutoFailoverSec` consecutive failures (audited as
+`federation:failover` with `actor=system`). The bucket browser
+surfaces a "Federated · N replicas, M in-sync" badge when a bucket
+is part of a federation; clicks through to the federation detail.
+No new env vars, no migrations, no breaking changes. Smoke 52/52
+pass against live; 42 routes screenshot-verified including a
+populated federation list + detail captured against an ephemeral
+federation. This is the substrate for v2.0's S3 gateway: when the
+gateway lands it routes inbound requests using the v1.6 federation
+topology.
+
+Full notes: [`docs/release-notes/v1.6.0.md`](docs/release-notes/v1.6.0.md)
+
+### Cycles
+
+- **v1.6.0a** — FederatedBucket data layer: `internal/federation`
+  package with `FederatedBucket` + `ReplicaTarget` + `FederationPolicy`
+  types, atomic JSON store, uniqueness on `(ownerUserId, name)`,
+  `FindByTarget(regionId, bucket)` substrate for the v1.6.0e
+  reverse-lookup endpoint.
+- **v1.6.0b** — Replication engine: per-federation goroutines, 10s
+  polling tick, per-replica worker pool (default 4 workers), health
+  calc (`in-sync` / `lagging` / `stale` / `broken`),
+  audit-per-object via `federation:replicate_object`.
+- **v1.6.0c** — API endpoints: 6 user-tier endpoints under
+  `/api/v1/user/federated-buckets` (CRUD + `/failover` + `/resync`),
+  gated on USER auth, audited per ADR-0005. DELETE preserves replica
+  data.
+- **v1.6.0d** — Frontend: `/files/federated-buckets` list + 5-step
+  wizard (Primary / Replicas / Policy / Initial-sync / Review) +
+  detail page with per-replica health table + Resync now + Delete +
+  Promote-to-primary confirmation Dialog.
+- **v1.6.0e** — Bucket-browser federation badge + reverse-lookup
+  endpoint `/by-target?regionId=X&bucket=Y`; `<FederationBadge>` on
+  `/files/{regionId}/b/{bucketId}` clicks through to the federation
+  detail page.
+- **v1.6.0f** — Auto-failover watchdog (opt-in via
+  `Policy.AutoFailover`); pings primary every 30s, promotes the
+  healthiest replica after `AutoFailoverSec` consecutive failures;
+  ranks replicas by `(health, lagBytes, lagObjects, lastSync)`;
+  audited as `federation:failover` with `actor=system, reason=auto_watchdog`.
+
 ## v1.5.0 — 2026-05-22
 
 Backup story milestone. Three cycles (v1.5.0a → v1.5.0c) plus the

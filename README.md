@@ -44,14 +44,29 @@ action bar, **growth analytics** on `/admin/usage` (per-cluster
 growth column + top-growing-buckets panel + anomaly banner + 7d /
 30d / 90d range selector), and **Garage block-scrub UI** at
 `/admin/clusters/{cid}/scrub` for live cluster-durability scans.
-v1.5 is the **backup story** cycle: **scheduled S3 → S3 backups**
+v1.5 was the **backup story** cycle: **scheduled S3 → S3 backups**
 with cron-driven engine, **mirror + snapshot modes** (timestamped
 history via `{slug}/{YYYY-MM-DD_HH:MM:SS}/`), **GFS retention**
 (`KeepDaily / KeepWeekly / KeepMonthly`, default `{7, 4, 12}` ≈
 14 months of history), an **auto-prune** runner after each
 snapshot run, and a **3-step restore wizard** with per-snapshot
 deep-link to walk an operator from "I lost the bucket" through
-"land last Tuesday's copy in a target bucket" without a CLI.
+"land last Tuesday's copy in a target bucket" without a CLI. v1.6
+is the **federation** cycle: a **`FederatedBucket`** is the same
+logical bucket living on multiple backends (home Garage + an
+off-site B2 copy stays in lock-step automatically); a polling-based
+**replication engine** keeps writes mirrored from primary to
+replicas continuously; a **5-step wizard** at
+`/files/federated-buckets/new` walks an operator through primary +
+replicas + policy; a per-replica **health table** + **manual
+failover** + **opt-in auto-failover watchdog** on the detail page
+handle the "primary went dark, promote a replica" path; and the
+bucket browser surfaces a **federation badge** when a bucket is
+part of a federation. Builds directly on v1.5's sync engine — no
+driver changes; pure store + engine + API + UI additions. This is
+also the substrate for v2.0's S3 gateway: when the gateway lands it
+routes inbound requests using the federation topology (read →
+nearest healthy replica; write → primary).
 
 ## Features
 
@@ -79,6 +94,10 @@ deep-link to walk an operator from "I lost the bucket" through
 - **Mirror + snapshot backup modes** (v1.5) — `mirror` overwrites the destination on every run (continuous one-shot); `snapshot` writes to `{dst}/{slug(name)}/{YYYY-MM-DD_HH:MM:SS}/` for point-in-time history
 - **Grandfather-Father-Son retention** (v1.5) — `RetentionPolicy{KeepDaily, KeepWeekly, KeepMonthly}` (default `{7, 4, 12}` ≈ 14 months of history with 23 stored snapshots); auto-prune runs after each snapshot write; pure-function `PlanPrune` with 17 table-driven tests
 - **Restore wizard with snapshot deep-link** (v1.5) — `/files/backups/$id/restore` 3-step wizard: pick snapshot (latest or explicit timestamp), pick destination (defaulted to backup's original source for one-click in-place restore), confirm + run with `overwriteExisting` toggle; synchronous `POST /api/v1/user/backups/{id}/restore` returns per-object summary; per-snapshot "Restore →" deep-link pre-fills the wizard via `?ts=YYYY-MM-DD_HH:MM:SS`
+- **Federation: multi-backend mirrored buckets** (v1.6) — `/files/federated-buckets` lists the caller's `FederatedBucket` records (canonical bucket name + primary backend + N replica backends); `/files/federated-buckets/new` is a 5-step wizard (primary / replicas / policy / initial-sync confirmation / review); detail page at `/files/federated-buckets/$id/` shows per-replica health table (`in-sync` / `lagging` / `stale` / `broken`), lag in objects + bytes, manual `Promote to primary` confirmation, `Resync now`, and `Delete` (preserves replica data on each backend)
+- **Polling-based replication engine** (v1.6) — Per-federation goroutines tick every 10s, diff primary against each replica, queue missing objects to a per-replica worker pool (default 4 workers); reuses the v1.5 sync engine's stream / server-side-copy primitive as the copy code path (no duplication); audit-per-object via `federation:replicate_object` (high-volume, filtered out of the default `/admin/audit` view)
+- **Opt-in auto-failover watchdog** (v1.6) — When `Policy.AutoFailover=true`, a watchdog goroutine pings the primary every 30s; after `AutoFailoverSec` consecutive failures, promotes the healthiest replica (ranked by `(health, lagBytes, lagObjects, lastSync)`); audited as `federation:failover` with `actor=system, reason=auto_watchdog`. Default: off
+- **Bucket-browser federation badge** (v1.6) — `/files/{regionId}/b/{bucketId}` calls a reverse-lookup endpoint (`/api/v1/user/federated-buckets/by-target?regionId=X&bucket=Y`) and renders a "Federated · N replicas, M in-sync" badge when the bucket is part of a federation; clicks through to the federation detail page
 - **Persistent invite tokens** (v1.3) — `/admin/users` "Pending invites" section: mint, label, revoke, rotate, copy-full-URL; 30-day default expiry; optional label feeds the auto-generated username
 - **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
 - **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
@@ -121,7 +140,7 @@ See `docs/configuration.md` for production env vars.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v1.5 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.6 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
@@ -133,12 +152,13 @@ See `docs/configuration.md` for production env vars.
 | Cross-backend sync (Migrate wizard)  | yes              | no                      | no                | no              |
 | Scheduled backups + GFS retention    | yes (v1.5)       | no                      | no                | no              |
 | Point-in-time restore wizard         | yes (v1.5)       | no                      | no                | no              |
+| Multi-backend federation + failover  | yes (v1.6)       | no                      | no                | no              |
 | Bucket lifecycle wizard              | yes              | no                      | no                | (MinIO-driven)  |
 | Policy simulator (what-if)           | yes              | no                      | no                | no              |
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | MIT              | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-22)            | active v1.5      | active v1.1.0           | active v0.5       | active fork     |
+| Status (as of 2026-05-22)            | active v1.6      | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -156,8 +176,10 @@ Full competitive write-up:
 - v1.2 — sudo-style admin elevation per [ADR-0003](docs/adr/0003-sudo-style-admin-elevation.md) (USER → ADMIN → ELEVATED state machine with re-auth at each transition); key-first user keychain (multiple access keys per endpoint); `unique(userId, endpoint)` relaxed to `unique(userId, endpoint, alias)` (shipped — see [docs/release-notes/v1.2.0.md](docs/release-notes/v1.2.0.md))
 - v1.3 — multi-user polish: OIDC group → role auto-mapping; driver-aware endpoint hints; per-region S3 addressing toggle (path-style / virtual-host); rotate-key flow; folder navigation in the bucket browser; invite-token polish + bulk-import keys; per-cluster `cluster_admin` assignment UI; two-mode elevation (USER / ADMIN) with operator-configurable TTL per [ADR-0003 amendment](docs/adr/0003-sudo-style-admin-elevation.md#amendment-v130a4--two-mode-simplification--operator-configurable-ttl) (shipped — see [docs/release-notes/v1.3.0.md](docs/release-notes/v1.3.0.md))
 - v1.4 — scale + perf: virtualized bucket browser for 10K+ object directories; `Driver.PerBucketStatsAvailable()` capability gate; paginated audit log + Export CSV; paginated key permissions editor with filter + sticky Save bar; batch object operations + sticky action bar; storage growth analytics (`Growth (Nd)` column, top-growing-buckets panel, anomaly banner, 7d / 30d / 90d range selector); Garage block-scrub UI at `/admin/clusters/{cid}/scrub` (shipped — see [docs/release-notes/v1.4.0.md](docs/release-notes/v1.4.0.md))
-- **v1.5 (current)** — backup story: scheduled bucket-to-bucket backups with cron engine; mirror + snapshot modes; GFS retention with auto-prune; 3-step restore wizard with snapshot-level deep-link; mirror-mode short-circuit for backups that don't keep history (shipped — see [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md))
-- **v2.0 — scoping doc pending operator review.** Major-version slot. Likely themes from the v1.x carry-over backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself. Scope locks once the operator signs off on the scoping doc
+- v1.5 — backup story: scheduled bucket-to-bucket backups with cron engine; mirror + snapshot modes; GFS retention with auto-prune; 3-step restore wizard with snapshot-level deep-link; mirror-mode short-circuit for backups that don't keep history (shipped — see [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md))
+- **v1.6 (current)** — federation + multi-backend replication: `FederatedBucket` first-class concept; polling-based replication engine with per-federation goroutines + per-replica worker pool + lag tracking; user-tier CRUD + manual failover + opt-in auto-failover watchdog; 5-step wizard at `/files/federated-buckets/new`; per-replica health table on the detail page; bucket-browser federation badge via a reverse-lookup endpoint. Builds directly on v1.5's sync engine, no driver changes. Substrate for the v2.0 S3 gateway (shipped — see [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md), [ADR-0005](docs/adr/0005-federation.md))
+- v1.7 — service accounts (M2M auth, CLI / MCP surface) + webhook upgrade (event-driven federation replacing polling on the happy path). Critical path before the v2.0 S3 gateway
+- **v2.0 — S3 gateway.** Major-version slot. Inbound S3 requests routed through basement's gateway, which dispatches via the v1.6 federation topology (read → nearest healthy replica; write → primary). Carry-over from the v1.x backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself
 
 ## Architecture
 
@@ -174,7 +196,8 @@ Full competitive write-up:
   - [`docs/adr/0003-sudo-style-admin-elevation.md`](docs/adr/0003-sudo-style-admin-elevation.md) — USER → ADMIN → ELEVATED state machine (v1.2)
 
 See `docs/configuration.md` for env reference,
-`docs/release-notes/v1.5.0.md` for the current release changelog,
+`docs/release-notes/v1.6.0.md` for the current release changelog,
+`docs/release-notes/v1.5.0.md` for the v1.5 backup-story write-up,
 `docs/release-notes/v1.4.0.md` for the v1.4 scale + perf write-up,
 `docs/release-notes/v1.3.0.md` for the v1.3 multi-user-onboarding
 write-up, `docs/release-notes/v1.2.0.md` for the v1.2 sudo-elevation +

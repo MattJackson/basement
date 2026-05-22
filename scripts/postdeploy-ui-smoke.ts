@@ -2218,6 +2218,94 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.6] federation: list, wizard step 1, bucket-browser badge
+    // ============================================================
+    section("[v1.6a] /files/federated-buckets renders (list or empty state)");
+    await check("/files/federated-buckets renders 'Federations' header + list or empty state", async () => {
+      await page!.goto(`${BASE_URL}/files/federated-buckets`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Federations")', { timeout: 10_000 });
+      // Either at least one row OR the "No federations yet" empty state.
+      const hasRows = await page!.locator('table tbody tr').count();
+      const hasEmpty = await page!.locator('text="No federations yet"').count();
+      if (hasRows === 0 && hasEmpty === 0) {
+        throw new Error("/files/federated-buckets shows neither rows nor 'No federations yet' empty state");
+      }
+      // The "+ New federation" CTA renders in both branches (header
+      // button on a non-empty list, EmptyState action on an empty list).
+      const hasNewCta = await page!.locator('button:has-text("New federation")').count();
+      if (hasNewCta === 0) {
+        throw new Error("/files/federated-buckets missing '+ New federation' CTA");
+      }
+      await shot(page!, "v1.6a-federations-list");
+    });
+
+    section("[v1.6b] /files/federated-buckets/new wizard step 1 (Primary picker)");
+    await check("/files/federated-buckets/new shows 'New federation' header + Step 1 Primary picker", async () => {
+      await page!.goto(`${BASE_URL}/files/federated-buckets/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("New federation")', { timeout: 10_000 });
+      // Step counter — 5-step wizard per ADR-0005.
+      const hasStepText = await page!.locator('text=/Step 1 of 5/i').count();
+      if (hasStepText === 0) {
+        throw new Error("/files/federated-buckets/new missing 'Step 1 of 5' indicator");
+      }
+      // Step 1 surfaces the primary region + bucket selects.
+      const hasPrimaryRegion = await page!.locator('#primaryRegion').count();
+      const hasPrimaryBucket = await page!.locator('#primaryBucket').count();
+      if (hasPrimaryRegion === 0 || hasPrimaryBucket === 0) {
+        throw new Error(
+          `/files/federated-buckets/new step 1 missing primary selects (region=${hasPrimaryRegion} bucket=${hasPrimaryBucket})`,
+        );
+      }
+      await shot(page!, "v1.6b-federation-wizard-step1");
+    });
+
+    section("[v1.6c] /files/{rid}/b/{bid} federation badge (probe + render)");
+    await check("bucket browser tolerates federation badge — present (federated bucket) or absent (non-federated)", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.6c federation badge probe", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.6c federation badge probe", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.6c federation badge probe", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.6c federation badge probe", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+
+      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+      // The bucket page must mount (h1 present) regardless of federation
+      // membership. The badge is only rendered when /by-target returns
+      // a federation record; otherwise null and no badge appears.
+      await page!.waitForSelector('h1', { timeout: 10_000 });
+      const hasBadge = await page!.locator('[data-testid="federation-badge"]').count();
+      if (hasBadge > 0) {
+        info(`federation badge rendered on /files/${regionId}/b/${bid} (bucket is part of a federation)`);
+        // If the badge is present, it should reference "Federated".
+        const badgeText = await page!.locator('[data-testid="federation-badge"]').first().textContent();
+        if (!badgeText || !/Federated/i.test(badgeText)) {
+          throw new Error(`federation badge present but text unexpected: '${badgeText}'`);
+        }
+      } else {
+        info(`no federation badge on /files/${regionId}/b/${bid} (bucket not federated — acceptable)`);
+      }
+      await shot(page!, "v1.6c-bucket-federation-badge");
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
     section("[NN] console + pageerror gate (v0.8.0c)");
