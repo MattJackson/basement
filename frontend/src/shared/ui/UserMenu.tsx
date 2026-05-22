@@ -124,6 +124,9 @@ export function UserMenu() {
           <DropdownMenuLinkItem href="/admin/policies">
             Policies
           </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem href="/admin/service-accounts">
+            Service accounts
+          </DropdownMenuLinkItem>
           <DropdownMenuLinkItem href="/admin/audit">
             Audit log
           </DropdownMenuLinkItem>

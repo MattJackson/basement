@@ -4,6 +4,39 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0c — 2026-05-22
+
+Service-account admin UI. New `/admin/service-accounts` list page and
+`/admin/service-accounts/new` mint route close out the v1.7.0a backend
+with an operator-facing surface. The list table shows name, `BMNT`
+access key, capability count, last-used relative time, expiry, and an
+Active/Expired/Revoked pill in the order the v1.7.0b bearer middleware
+checks them (revoked beats expired beats active). Per-row Rotate +
+Revoke actions are dropdown-gated and run through the existing
+elevation guard so a 403 pops the ADMIN-tier modal once + retries the
+mutation on success. The mint flow is a route page (not a modal) per
+the popups-max-2-fields doctrine — the capability picker is a
+domain-grouped, searchable checkbox grid backed by the policy
+registry's `usePolicies()` payload, with a per-capability scope
+editor that pre-fills `host:*` / `cluster:*` / `bucket:{cid}:*` /
+`key:{cid}:*` defaults so operators don't have to memorize the
+six-form scope grammar from `validateServiceAccountScope`. Expiry
+picks from "Never / 1 month / 6 months / 1 year / Custom date".
+The shown-once dialog is a new shared
+`<SecretShownOnceDialog>` reused by both create and rotate: lives in
+`shared/ui/`, refuses dismissal on Escape / outside-click, gates the
+Done button behind an acknowledgement checkbox, and surfaces four
+copy paths — access key alone, secret (show/hide-toggled) alone,
+the `Authorization: Bearer AKID:SECRET` header, and a
+ready-to-paste `~/.aws/credentials` profile snippet. Five new
+`useServiceAccounts`/`useServiceAccount`/`useCreate`/`useUpdate`/
+`useDelete`/`useRotate` hooks join `shared/api/queries.ts` keyed on
+`["admin", "service-accounts"]` for round-trip cache invalidation.
+Admin user-menu gains a "Service accounts" link between Policies and
+Audit log. 17 new component tests cover list rendering, status
+collapse, capability filter, submit gating, mutation body shape,
+clipboard interception, and the show/hide reveal toggle.
+
 ## v1.7.0b — 2026-05-22
 
 Bearer-token authentication middleware for service accounts. The
