@@ -18,6 +18,7 @@ import (
 	"github.com/mattjackson/basement/internal/backup"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
+	"github.com/mattjackson/basement/internal/federation"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
 	"github.com/mattjackson/basement/internal/sync"
@@ -60,6 +61,14 @@ type Server struct {
 	// "subsystem disabled" rather than crashing.
 	backups     backup.Backups
 	backupSched *backup.Scheduler
+	// v1.6.0c federation subsystem. federations is the store handle;
+	// federationEngine is the narrow interface the handlers need
+	// (EnsureLoop / RemoveLoop / TriggerNow). Both are nil in tests
+	// that don't wire them; handlers return 503 FEDERATIONS_NOT_WIRED
+	// when the store is nil, and silently skip engine pokes when the
+	// engine is nil (the store still persists, just no live ticking).
+	federations      federation.FederatedBuckets
+	federationEngine federationEngine
 	oidc        oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
@@ -166,6 +175,23 @@ func (s *Server) SetAuditLogger(l audit.Logger) {
 func (s *Server) SetBackups(store backup.Backups, sched *backup.Scheduler) {
 	s.backups = store
 	s.backupSched = sched
+}
+
+// SetFederation wires the v1.6.0c federation store + replication engine
+// into the server. Both can be passed independently (e.g. tests pass a
+// store-only configuration where the engine pokes silently no-op), but
+// production main.go always wires both. Passing nil for the store
+// disables the /user/federated-buckets endpoint family (handlers return
+// 503 FEDERATIONS_NOT_WIRED).
+//
+// The engine arg accepts federationEngine — production passes a
+// *federation.Engine (which already satisfies the interface);
+// user_federated_buckets_test.go substitutes a recording mock so it
+// can assert "EnsureLoop was called for ID X" without spinning up real
+// per-federation goroutines.
+func (s *Server) SetFederation(store federation.FederatedBuckets, engine federationEngine) {
+	s.federations = store
+	s.federationEngine = engine
 }
 
 // SetMetricsRecorder wires the metrics-snapshot recorder into the
@@ -418,6 +444,19 @@ func (s *Server) routes() {
 			// Synchronous — the wizard wants the per-object summary
 			// inline. See backup_restore.go for the engine.
 			userG.Post("/user/backups/{id}/restore", s.userRestoreBackupHandler)
+
+			// v1.6.0c FEDERATION.API — user-tier CRUD + failover +
+			// resync over the FederatedBucket store + replication
+			// engine (ADR-0005). Handlers return 503
+			// FEDERATIONS_NOT_WIRED when the store wasn't opened at
+			// boot (tests).
+			userG.Post("/user/federated-buckets", s.userCreateFederationHandler)
+			userG.Get("/user/federated-buckets", s.userListFederationsHandler)
+			userG.Get("/user/federated-buckets/{id}", s.userGetFederationHandler)
+			userG.Put("/user/federated-buckets/{id}", s.userUpdateFederationHandler)
+			userG.Delete("/user/federated-buckets/{id}", s.userDeleteFederationHandler)
+			userG.Post("/user/federated-buckets/{id}/failover", s.userFailoverFederationHandler)
+			userG.Post("/user/federated-buckets/{id}/resync", s.userResyncFederationHandler)
 
 			// User region keychain endpoints (ADR-0002, cycle
 			// v1.1.0b). The region's S3 key IS the permission —
