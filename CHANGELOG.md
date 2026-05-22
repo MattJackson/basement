@@ -4,6 +4,35 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0f — 2026-05-22
+
+Federation event-driven replication via internal pub/sub. The
+`webhook.Engine` gains a `Subscribe(name, cb) -> unsubscribe` API that
+fires synchronously inside the dispatcher BEFORE per-webhook delivery,
+so internal subsystems can react to bucket events without configuring
+external HTTP webhooks. `federation.Engine.SubscribeToEvents` wires
+the federation engine into that bus: when an envelope's
+(regionId, bucket) matches a federation's primary, the engine queues a
+single-object replicate task onto a per-federation buffered channel
+that a dedicated worker drains. `ObjectCreated` / `ObjectModified`
+envelopes drive a streamPut to each replica; `ObjectDeleted` envelopes
+trigger a `DeleteObject` instead (new method on the replication-client
+interface + on the production federationwire adapter). The 10s polling
+tick continues as a fallback for backends without webhook-source
+coverage — both paths share the same recordSuccess / recordFailure
+helpers so the broken-after-3 / auto-failover semantics stay identical
+across them. Saturated event channels drop the oldest task with a log
+warning rather than blocking the dispatcher; the dropped task's
+convergence falls back to the next polling pass. Wired in main.go
+after both engines start. 7 new tests (4 federation:
+event-driven-matches-primary, event-driven-ignores-non-primary,
+event-driven-delete-propagates, polling-still-runs-alongside; 3
+webhook: subscribe callback fires, unsubscribe stops, multi-subscriber
+independence; plus a panic-safety case). With this cycle live, an
+operator deleting an object via /files browser sees the delete
+propagate to every federation replica within seconds instead of
+waiting up to the 10s polling lag.
+
 ## v1.7.0d — 2026-05-22
 
 Webhook subscription type + delivery engine. New `internal/webhook`

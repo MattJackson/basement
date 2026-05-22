@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/mattjackson/basement/internal/audit"
+	"github.com/mattjackson/basement/internal/webhook"
 )
 
 // ObjectInfo is the engine's view of a single object's metadata —
@@ -101,6 +102,13 @@ type ReplicationClient interface {
 	StreamObject(ctx context.Context, bucket, key string) (StreamResult, error)
 	PutObjectStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string, size int64) error
 	ServerSideCopy(ctx context.Context, srcBucket, srcKey, dstBucket, dstKey string) error
+	// DeleteObject removes a single object from the replica. Added in
+	// v1.7.0f so event-driven ObjectDeleted webhook envelopes can
+	// propagate deletes from primary to replicas without waiting for
+	// the polling tick to notice the gap (polling can't notice deletes
+	// at all without a separate ListObjects-on-replica pass — the
+	// v1.6.0b polling path is creation-biased by design).
+	DeleteObject(ctx context.Context, bucket, key string) error
 }
 
 // DriverResolver turns a (ownerUserID, regionID) tuple into a
@@ -223,6 +231,44 @@ type Engine struct {
 	// Stopped flips once after Stop is called so a second Stop is a no-op.
 	started atomic.Bool
 	stopped atomic.Bool
+
+	// eventTasks carries one buffered channel per running federation
+	// loop. The Subscribe-to-webhooks callback enqueues a single-object
+	// replicate task here when an event matches the federation's primary;
+	// a per-federation event-worker goroutine (spawned by spawnLoop)
+	// drains the channel and replicates the object to each replica.
+	//
+	// Buffered + non-blocking send: a saturated channel drops the
+	// task rather than stalling the dispatcher — the polling tick will
+	// pick the diff up on the next 10s pass, so the worst case for an
+	// overloaded engine is "event-driven path falls back to polling"
+	// not "webhook dispatcher blocks".
+	eventTasks map[string]chan eventTask
+
+	// unsubscribeWebhook holds the unregister function returned by
+	// webhook.Engine.Subscribe so Stop can detach cleanly. Nil when
+	// SubscribeToEvents has never been called (the polling-only mode
+	// pre-v1.7.0f or a test that never wires webhooks).
+	unsubscribeWebhook func()
+}
+
+// eventTask is one single-object replicate or delete kicked off by a
+// webhook event. The federation engine queues one task per (federation,
+// replica) pair on a matching ObjectCreated / ObjectDeleted / ObjectModified
+// envelope.
+//
+// kind selects between the polling-tick path ("diff", drained by
+// tickFederation -> replicateBatch) and the event-driven path
+// ("single", drained by the per-federation event worker). v1.7.0f only
+// uses kind=single in the event channel; the diff path remains a
+// pure-function inside tickFederation.
+type eventTask struct {
+	kind       string // "single"
+	fbID       string
+	target     ReplicaTarget
+	singleKey  string
+	singleSize int64
+	isDelete   bool // when true: DeleteObject on replica; else streamPut
 }
 
 // NewEngine constructs an unstarted Engine. Defaults: 10s tick, 4
@@ -249,6 +295,7 @@ func NewEngine(store FederatedBuckets, resolver DriverResolver, audit audit.Logg
 		triggers:         make(map[string]chan struct{}),
 		failures:         make(map[string]int),
 		watchdogQuit:     make(map[string]chan struct{}),
+		eventTasks:       make(map[string]chan eventTask),
 	}
 }
 
@@ -345,6 +392,14 @@ func (e *Engine) Stop() {
 		return
 	}
 
+	// Detach from the webhook event bus FIRST so no new event tasks
+	// can land on a draining channel. Safe to call even when the
+	// engine never subscribed (nil-guard inside the closure).
+	if e.unsubscribeWebhook != nil {
+		e.unsubscribeWebhook()
+		e.unsubscribeWebhook = nil
+	}
+
 	e.mu.Lock()
 	for _, ch := range e.fedQuit {
 		close(ch)
@@ -355,6 +410,7 @@ func (e *Engine) Stop() {
 	e.fedQuit = make(map[string]chan struct{})
 	e.triggers = make(map[string]chan struct{})
 	e.watchdogQuit = make(map[string]chan struct{})
+	e.eventTasks = make(map[string]chan eventTask)
 	e.mu.Unlock()
 
 	// Wait for both: the per-federation tick loops AND watchdog loops to
@@ -455,6 +511,10 @@ func (e *Engine) RemoveLoop(fbID string) {
 		close(ch)
 		delete(e.fedQuit, fbID)
 		delete(e.triggers, fbID)
+		// The event worker selects on this same quit channel, so the
+		// fedQuit close above tears it down too. Just drop the channel
+		// map reference here — the worker drains naturally.
+		delete(e.eventTasks, fbID)
 	}
 	wch, wok := e.watchdogQuit[fbID]
 	if wok {
@@ -466,9 +526,22 @@ func (e *Engine) RemoveLoop(fbID string) {
 
 // spawnLoop registers fbID and launches its goroutine. Caller must
 // hold no locks; the function acquires + releases e.mu briefly.
+//
+// v1.7.0f: spawnLoop now also creates the per-federation event channel
+// + launches an event-worker goroutine that drains it. The event
+// channel is the destination for SubscribeToEvents callbacks; the
+// worker calls replicateOne / DeleteObject per task. Both goroutines
+// share the same fedQuit close-signal for clean shutdown.
 func (e *Engine) spawnLoop(ctx context.Context, fbID string) {
 	quit := make(chan struct{})
 	trigger := make(chan struct{}, 1)
+	// Event task buffer: sized to one batch's worth so a burst of
+	// concurrent writes (e.g. an operator drag-and-drops a folder of
+	// 50 files) doesn't immediately drop on the floor. Saturation
+	// drops the OLDEST queued task per the cycle spec's "no
+	// double-delivery — polling will pick it up" guarantee.
+	const eventTaskBuffer = 128
+	tasks := make(chan eventTask, eventTaskBuffer)
 
 	e.mu.Lock()
 	if _, exists := e.fedQuit[fbID]; exists {
@@ -478,12 +551,19 @@ func (e *Engine) spawnLoop(ctx context.Context, fbID string) {
 	}
 	e.fedQuit[fbID] = quit
 	e.triggers[fbID] = trigger
+	e.eventTasks[fbID] = tasks
 	e.mu.Unlock()
 
 	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
 		e.runFederation(ctx, fbID, quit, trigger)
+	}()
+
+	e.loops.Add(1)
+	go func() {
+		defer e.loops.Done()
+		e.runEventWorker(ctx, fbID, quit, tasks)
 	}()
 }
 
@@ -846,6 +926,244 @@ func (e *Engine) replicateOne(ctx context.Context, fb FederatedBucket, replica R
 		return fmt.Errorf("put replica %q: %w", entry.key, err)
 	}
 	return nil
+}
+
+// SubscribeToEvents wires the federation engine into the webhook
+// event bus. When an event matches a federation's PRIMARY (region,
+// bucket), the engine queues an immediate replicate to all replicas
+// for the affected key. Replaces the 10s polling tick for clusters
+// that have webhooks configured.
+//
+// Polling tick continues as a fallback so federations on backends
+// without webhook-source coverage still converge (just at the 10s
+// rate, not real-time). Real backend coverage of every create / modify
+// path lands with the v2.0 gateway; v1.7.0f wires the path so the
+// DELETE handler's ObjectDeleted envelopes already propagate end-to-end.
+//
+// Safe to call multiple times — the second + call replaces the prior
+// subscription. nil webhooks is a no-op (engine stays polling-only).
+func (e *Engine) SubscribeToEvents(webhooks *webhook.Engine) {
+	if webhooks == nil {
+		return
+	}
+	// Tear down any prior subscription so a second SubscribeToEvents
+	// (e.g. a test that re-wires for assertion clarity) doesn't double-
+	// register.
+	if e.unsubscribeWebhook != nil {
+		e.unsubscribeWebhook()
+	}
+	e.unsubscribeWebhook = webhooks.Subscribe("federation", func(env webhook.EventEnvelope) {
+		// MUST NOT block — the callback runs in the webhook
+		// dispatcher goroutine. Push the matching tasks onto the
+		// per-federation event channels and return immediately.
+		e.handleWebhookEvent(env)
+	})
+}
+
+// handleWebhookEvent maps one EventEnvelope onto the set of (federation,
+// replica) tasks it should trigger. Runs synchronously inside the
+// webhook dispatcher goroutine — every heavy step (store load,
+// per-task enqueue) is non-blocking, so the dispatcher is never stalled
+// by federation backpressure.
+//
+// Matching rule: the envelope must hit a federation's PRIMARY
+// (regionId + bucket). Events targeted at what's already a replica
+// don't trigger re-replication — the polling tick handles cross-replica
+// convergence per ADR-0005 (primary is the source of truth).
+//
+// On a saturated per-federation channel the task is dropped — the
+// polling tick will pick the change up on its next 10s pass, which
+// matches the cycle spec's "polling fallback continues" guarantee.
+func (e *Engine) handleWebhookEvent(env webhook.EventEnvelope) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("federation engine: panic in webhook callback",
+				"envelopeId", env.ID, "panic", r)
+		}
+	}()
+
+	if e.store == nil {
+		return
+	}
+
+	// Use the background context — the webhook dispatcher's caller-
+	// supplied ctx may already be a per-request scope, and we don't want
+	// the federation's view of the store to die when a stray HTTP
+	// request cancels.
+	ctx := context.Background()
+	feds, err := e.store.All(ctx)
+	if err != nil {
+		e.logger.Warn("federation engine: webhook callback All() failed",
+			"envelopeId", env.ID, "error", err)
+		return
+	}
+
+	for _, fb := range feds {
+		if fb.Primary.RegionID != env.RegionID || fb.Primary.Bucket != env.Bucket {
+			continue
+		}
+		if fb.Policy.SyncMode != SyncModeContinuous {
+			continue
+		}
+		// Look up the per-federation event channel. Skipped silently
+		// if the loop hasn't been spawned (engine still starting, or
+		// a transient race between Create + Start).
+		e.mu.Lock()
+		ch, ok := e.eventTasks[fb.ID]
+		e.mu.Unlock()
+		if !ok {
+			continue
+		}
+
+		isDelete := env.Type == webhook.EventObjectDeleted
+		for _, replica := range fb.Replicas {
+			task := eventTask{
+				kind:       "single",
+				fbID:       fb.ID,
+				target:     replica,
+				singleKey:  env.Key,
+				singleSize: env.Size,
+				isDelete:   isDelete,
+			}
+			// Non-blocking send: a saturated channel drops the task and
+			// lets the polling tick pick it up. We log on drop so a
+			// chronically backed-up federation surfaces in the engine
+			// log rather than silently lagging.
+			select {
+			case ch <- task:
+			default:
+				e.logger.Warn("federation engine: event task channel saturated, dropping (polling will catch up)",
+					"federationId", fb.ID, "key", env.Key, "type", env.Type)
+			}
+		}
+	}
+}
+
+// runEventWorker drains the per-federation event channel and
+// replicates one object per task. One goroutine per federation; the
+// outer for-select picks up shutdown via the federation's fedQuit
+// channel + a closed-tasks-channel fallback.
+//
+// Each task is one HTTP round-trip to a single replica (Put or
+// Delete). No internal worker pool — concurrency is already bounded
+// by the per-federation channel buffer + however many federations are
+// running. If a single backend's PUT is slow, the federation's tasks
+// queue up; the dispatcher doesn't stall.
+//
+// Panic-safe at both the loop level + the per-task level so a broken
+// driver can't kill the worker.
+func (e *Engine) runEventWorker(ctx context.Context, fbID string, quit <-chan struct{}, tasks <-chan eventTask) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("federation engine: panic in event worker",
+				"federationId", fbID, "panic", r)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-quit:
+			return
+		case task, ok := <-tasks:
+			if !ok {
+				return
+			}
+			e.handleEventTask(ctx, task)
+		}
+	}
+}
+
+// handleEventTask executes one single-object event-driven replicate or
+// delete. Re-reads the federation from the store so a stale task (e.g.
+// the federation was edited between queue + drain) still uses current
+// owner / replica info. Failures are logged + recorded against the
+// per-replica failure counter so a chronically-broken backend still
+// flips to HealthBroken via the same mechanism polling uses.
+func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
+	defer func() {
+		if r := recover(); r != nil {
+			e.logger.Error("federation engine: panic in event task",
+				"federationId", task.fbID, "key", task.singleKey, "panic", r)
+		}
+	}()
+
+	fb, err := e.store.Get(ctx, task.fbID)
+	if err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			e.logger.Warn("federation engine: event task store load failed",
+				"federationId", task.fbID, "error", err)
+		}
+		return
+	}
+
+	primaryDrv, err := e.resolver.Resolve(ctx, fb.OwnerUserID, fb.Primary.RegionID)
+	if err != nil {
+		e.recordFailure(ctx, fb, task.target, fmt.Errorf("event resolve primary: %w", err))
+		return
+	}
+	replicaDrv, err := e.resolver.Resolve(ctx, fb.OwnerUserID, task.target.RegionID)
+	if err != nil {
+		e.recordFailure(ctx, fb, task.target, fmt.Errorf("event resolve replica: %w", err))
+		return
+	}
+
+	e.inflight.Add(1)
+	defer e.inflight.Done()
+
+	var opErr error
+	if task.isDelete {
+		opErr = replicaDrv.DeleteObject(ctx, task.target.Bucket, task.singleKey)
+		if opErr != nil {
+			e.audit.Log(audit.Event{
+				Actor:    fb.OwnerUserID,
+				Action:   "federation:replicate_delete",
+				Resource: fmt.Sprintf("federation:%s:%s", fb.ID, task.singleKey),
+				Result:   audit.ResultFailure,
+				Detail:   fmt.Sprintf("event-driven: %v", opErr),
+			})
+		} else {
+			e.audit.Log(audit.Event{
+				Actor:    fb.OwnerUserID,
+				Action:   "federation:replicate_delete",
+				Resource: fmt.Sprintf("federation:%s:%s", fb.ID, task.singleKey),
+				Result:   audit.ResultSuccess,
+				Detail:   "event-driven",
+			})
+		}
+	} else {
+		entry := diffEntry{key: task.singleKey, size: task.singleSize}
+		opErr = e.replicateOne(ctx, fb, task.target, primaryDrv, replicaDrv, entry)
+		if opErr != nil {
+			e.audit.Log(audit.Event{
+				Actor:    fb.OwnerUserID,
+				Action:   "federation:replicate_object",
+				Resource: fmt.Sprintf("federation:%s:%s", fb.ID, task.singleKey),
+				Result:   audit.ResultFailure,
+				Detail:   fmt.Sprintf("event-driven size=%d bytes: %v", task.singleSize, opErr),
+			})
+		} else {
+			e.audit.Log(audit.Event{
+				Actor:    fb.OwnerUserID,
+				Action:   "federation:replicate_object",
+				Resource: fmt.Sprintf("federation:%s:%s", fb.ID, task.singleKey),
+				Result:   audit.ResultSuccess,
+				Detail:   fmt.Sprintf("event-driven size=%d bytes", task.singleSize),
+			})
+		}
+	}
+
+	// Health update on the replica: success resets the failure counter
+	// and rolls LastSync forward; failure increments + may flip to
+	// HealthBroken. We reuse the polling-tick helpers so the
+	// auto-failover / broken-after-3 semantics stay identical between
+	// the two paths.
+	if opErr != nil {
+		e.recordFailure(ctx, fb, task.target, opErr)
+		return
+	}
+	e.recordSuccess(ctx, fb, task.target, 0, 0)
 }
 
 // recordSuccess writes a replica-health update with the supplied

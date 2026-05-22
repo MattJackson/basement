@@ -362,6 +362,16 @@ func main() {
 	webhookEngine.Start(ctxSignal)
 	defer webhookEngine.Stop()
 
+	// v1.7.0f FEDERATION.EVENT-DRIVEN: subscribe the federation engine
+	// to the webhook event bus so writes hitting the primary trigger
+	// an immediate replicate to each replica instead of waiting for
+	// the 10s polling tick. Polling continues as a fallback for
+	// backends without webhook-source coverage (the v2.0 gateway will
+	// extend coverage to every mutation path; until then, real
+	// real-time signal only fires for the user-region DELETE handler
+	// the v1.7.0d cycle wired into the bus).
+	fedEngine.SubscribeToEvents(webhookEngine)
+
 	// v1.0.0d: kick off the hourly metrics snapshot scheduler. Fires
 	// once immediately so first-time deploys get a data point without
 	// waiting an hour, then on Interval + Jitter cadence. The goroutine

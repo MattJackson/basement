@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mattjackson/basement/internal/audit"
+	"github.com/mattjackson/basement/internal/webhook"
 )
 
 // fakeObject is one object inside the fakeDriver's per-bucket store.
@@ -47,6 +48,9 @@ type fakeDriver struct {
 	failPut    atomic.Bool
 	failStream atomic.Bool
 	failList   atomic.Bool
+	failDelete atomic.Bool
+
+	deleteCount atomic.Int64
 }
 
 func newFakeDriver(id string) *fakeDriver {
@@ -165,6 +169,20 @@ func (d *fakeDriver) PutObjectStream(_ context.Context, bucket, key string, read
 
 func (d *fakeDriver) ServerSideCopy(_ context.Context, _, _, _, _ string) error {
 	return errors.New("ServerSideCopy not implemented in fakeDriver")
+}
+
+func (d *fakeDriver) DeleteObject(_ context.Context, bucket, key string) error {
+	d.deleteCount.Add(1)
+	if d.failDelete.Load() {
+		return errors.New("fake delete failure")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, ok := d.data[bucket]; !ok {
+		return nil
+	}
+	delete(d.data[bucket], key)
+	return nil
 }
 
 // mapResolver maps regionID -> ReplicationClient. The owner field is
@@ -1291,6 +1309,295 @@ func TestWatchdog_RemoveLoopStopsWatchdog(t *testing.T) {
 	if got := e.LoopCount(); got != 0 {
 		t.Fatalf("RemoveLoop should also stop the replication loop, got %d loops", got)
 	}
+}
+
+// newWebhookEngine builds a webhook.Engine wired to a temp dir,
+// started against the supplied context. Returned for the
+// event-driven federation tests below — they don't care about
+// outbound HTTP deliveries (we're testing the Subscribe path), only
+// that Emit fans out to subscribers.
+func newWebhookEngine(t *testing.T) *webhook.Engine {
+	t.Helper()
+	store, err := webhook.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("webhook.Open: %v", err)
+	}
+	we := webhook.NewEngine(store, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	we.Start(ctx)
+	t.Cleanup(func() {
+		cancel()
+		we.Stop()
+	})
+	return we
+}
+
+// TestEngine_EventDrivenReplicateMatchesPrimary: an ObjectCreated event
+// matching a federation's primary (region, bucket) queues an immediate
+// replicate to the replica without waiting for the polling tick. Uses a
+// 1h tick so the only path that could land the object is the
+// event-driven one.
+func TestEngine_EventDrivenReplicateMatchesPrimary(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	// Suppress polling so the only way this test passes is via the
+	// event-driven path.
+	e.SetTickInterval(1 * time.Hour)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.seed("p-bucket", "live.txt", []byte("live body"), time.Now().UTC())
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	we := newWebhookEngine(t)
+	e.Start(ctx)
+	defer e.Stop()
+	e.SubscribeToEvents(we)
+
+	// Drain the boot-tick replicate (the polling path fires once
+	// immediately on Start, then sleeps for the configured interval —
+	// our 1h interval guarantees no second tick lands during the test).
+	waitFor(t, 2*time.Second, func() bool {
+		return replica.has("r-bucket", "live.txt")
+	})
+
+	// Add a new primary object + emit an ObjectCreated envelope. The
+	// event-driven path is the only way this object lands on the
+	// replica (polling is gated by the 1h tick).
+	primary.seed("p-bucket", "new.txt", []byte("new body"), time.Now().UTC())
+	we.Emit(webhook.EventEnvelope{
+		Type:     webhook.EventObjectCreated,
+		RegionID: "region-primary",
+		Bucket:   "p-bucket",
+		Key:      "new.txt",
+		Size:     int64(len("new body")),
+	})
+
+	waitFor(t, 2*time.Second, func() bool {
+		return replica.has("r-bucket", "new.txt")
+	})
+
+	// federation.ID round-trip check — the per-task store load must
+	// have resolved the right federation.
+	if _, err := st.Get(ctx, fb.ID); err != nil {
+		t.Fatalf("Get post-event: %v", err)
+	}
+}
+
+// TestEngine_EventDrivenIgnoresNonPrimary: an event for a bucket
+// unrelated to any federation primary is silently dropped — no task
+// queued, no replicate fired.
+func TestEngine_EventDrivenIgnoresNonPrimary(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	e.SetTickInterval(1 * time.Hour)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	_, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	we := newWebhookEngine(t)
+	e.Start(ctx)
+	defer e.Stop()
+	e.SubscribeToEvents(we)
+
+	// Snapshot baseline counters AFTER the boot tick has run so we're
+	// measuring only the event-driven path's contribution.
+	waitFor(t, 1*time.Second, func() bool { return primary.listCount.Load() > 0 })
+	basePut := replica.putCount.Load()
+	baseDelete := replica.deleteCount.Load()
+
+	// Emit an event for a completely unrelated bucket.
+	we.Emit(webhook.EventEnvelope{
+		Type:     webhook.EventObjectCreated,
+		RegionID: "region-primary",
+		Bucket:   "some-other-bucket",
+		Key:      "ignored.txt",
+	})
+	// Emit an event for the right bucket but wrong region.
+	we.Emit(webhook.EventEnvelope{
+		Type:     webhook.EventObjectCreated,
+		RegionID: "region-elsewhere",
+		Bucket:   "p-bucket",
+		Key:      "wrong-region.txt",
+	})
+
+	// Wait a beat so the subscriber + worker would have had time to
+	// (incorrectly) fire if matching were broken.
+	time.Sleep(80 * time.Millisecond)
+
+	if got := replica.putCount.Load(); got != basePut {
+		t.Fatalf("replica should not have received any PUTs for non-primary events, got delta %d",
+			got-basePut)
+	}
+	if got := replica.deleteCount.Load(); got != baseDelete {
+		t.Fatalf("replica should not have received any DELETEs for non-primary events, got delta %d",
+			got-baseDelete)
+	}
+}
+
+// TestEngine_EventDrivenDeletePropagates: an ObjectDeleted event for
+// the primary causes a DeleteObject on each replica. Seeds the object
+// on both sides up-front so we're testing the propagation, not the
+// initial sync.
+func TestEngine_EventDrivenDeletePropagates(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetTickInterval(1 * time.Hour)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	r1 := newFakeDriver("r1")
+	r2 := newFakeDriver("r2")
+	res.set("region-primary", primary)
+	res.set("region-r1", r1)
+	res.set("region-r2", r2)
+
+	// Both replicas already have the object (seeded directly, bypassing
+	// the engine). The delete event is the only mechanism that can
+	// remove it.
+	now := time.Now().UTC()
+	primary.seed("p-bucket", "doomed.txt", []byte("delete me"), now)
+	r1.seed("r-bucket-1", "doomed.txt", []byte("delete me"), now)
+	r2.seed("r-bucket-2", "doomed.txt", []byte("delete me"), now)
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas: []ReplicaTarget{
+			{RegionID: "region-r1", Bucket: "r-bucket-1"},
+			{RegionID: "region-r2", Bucket: "r-bucket-2"},
+		},
+		Policy: DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	we := newWebhookEngine(t)
+	e.Start(ctx)
+	defer e.Stop()
+	e.SubscribeToEvents(we)
+
+	// Simulate the user-region delete handler: the object is gone from
+	// primary, and an ObjectDeleted envelope hits the bus.
+	primary.mu.Lock()
+	delete(primary.data["p-bucket"], "doomed.txt")
+	primary.mu.Unlock()
+	we.Emit(webhook.EventEnvelope{
+		Type:     webhook.EventObjectDeleted,
+		RegionID: "region-primary",
+		Bucket:   "p-bucket",
+		Key:      "doomed.txt",
+	})
+
+	waitFor(t, 2*time.Second, func() bool {
+		return !r1.has("r-bucket-1", "doomed.txt") && !r2.has("r-bucket-2", "doomed.txt")
+	})
+
+	if r1.deleteCount.Load() < 1 {
+		t.Fatalf("r1 should have received a DeleteObject call, got count %d", r1.deleteCount.Load())
+	}
+	if r2.deleteCount.Load() < 1 {
+		t.Fatalf("r2 should have received a DeleteObject call, got count %d", r2.deleteCount.Load())
+	}
+
+	// Audit: one federation:replicate_delete event per replica.
+	if got := rec.countByAction("federation:replicate_delete"); got < 2 {
+		t.Fatalf("expected at least 2 federation:replicate_delete audit events, got %d", got)
+	}
+	if fb.ID == "" {
+		t.Fatalf("federation id should not be empty after Create")
+	}
+}
+
+// TestEngine_PollingStillRunsAlongside: both polling tick + event-driven
+// path work together without double-replicate (the per-object HeadObject
+// check on replicateOne caps duplicate copies — but we don't need to
+// drive that here; the test just asserts both code paths can co-exist
+// in a single Start lifecycle without deadlocking or panicking).
+func TestEngine_PollingStillRunsAlongside(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	// Use a normal-ish polling interval so the boot tick + a second
+	// tick both have a chance to fire during the test.
+	e.SetTickInterval(40 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.seed("p-bucket", "polling.txt", []byte("polling body"), time.Now().UTC())
+
+	_, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	we := newWebhookEngine(t)
+	e.Start(ctx)
+	defer e.Stop()
+	e.SubscribeToEvents(we)
+
+	// Polling path: the boot tick replicates the seeded object.
+	waitFor(t, 2*time.Second, func() bool {
+		return replica.has("r-bucket", "polling.txt")
+	})
+
+	// Event-driven path: another object arrives, fires an envelope.
+	primary.seed("p-bucket", "event.txt", []byte("event body"), time.Now().UTC())
+	we.Emit(webhook.EventEnvelope{
+		Type:     webhook.EventObjectCreated,
+		RegionID: "region-primary",
+		Bucket:   "p-bucket",
+		Key:      "event.txt",
+		Size:     int64(len("event body")),
+	})
+
+	waitFor(t, 2*time.Second, func() bool {
+		return replica.has("r-bucket", "event.txt")
+	})
+
+	// A third primary object lands without any event — the polling
+	// tick is the only mechanism that can pick it up. With our 40ms
+	// tick the next tick fires within a moment.
+	primary.seed("p-bucket", "polled-later.txt", []byte("late body"), time.Now().UTC())
+
+	waitFor(t, 3*time.Second, func() bool {
+		return replica.has("r-bucket", "polled-later.txt")
+	})
 }
 
 // TestEngine_AuditOnReplicateFailure: a failing PUT still emits a
