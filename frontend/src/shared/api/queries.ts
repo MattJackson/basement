@@ -923,6 +923,10 @@ export function useResumeUserSync() {
 export type BackupResult = components["schemas"]["BackupResult"];
 export type Backup = components["schemas"]["Backup"];
 export type UserBackupCreateRequest = components["schemas"]["UserBackupCreateRequest"];
+// v1.5.0b additions — snapshot mode + retention policy.
+export type RetentionPolicy = components["schemas"]["RetentionPolicy"];
+export type BackupSnapshotEntry = components["schemas"]["BackupSnapshotEntry"];
+export type BackupMode = "mirror" | "snapshot";
 
 export function useUserBackups() {
   return useQuery<Backup[]>({
@@ -1002,6 +1006,29 @@ export function useRunUserBackup() {
       if (!response.ok || !data) throw apiError(`user/backups/run/${id}`, response.status, error);
       return data as { id: string; status: string };
     },
+  });
+}
+
+// useUserBackupSnapshots powers the detail page's snapshot table.
+// Returns up to 10 most recent snapshots; server short-circuits to
+// [] for mirror-mode backups. We poll alongside the backup record
+// itself so a freshly-completed run lands in the table without a
+// manual refresh.
+export function useUserBackupSnapshots(id: string | null, enabled: boolean) {
+  return useQuery<BackupSnapshotEntry[]>({
+    queryKey: ["user", "backups", id, "snapshots"],
+    queryFn: async () => {
+      if (!id) throw new Error("Backup ID required");
+      const { data, error, response } = await client.GET("/user/backups/{id}/snapshots", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`user/backups/${id}/snapshots`, response.status, error);
+      return data as BackupSnapshotEntry[];
+    },
+    enabled: !!id && enabled,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    retry: 1,
   });
 }
 

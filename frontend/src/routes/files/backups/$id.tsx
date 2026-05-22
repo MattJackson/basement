@@ -6,15 +6,22 @@ import {
   useRunUserBackup,
   useDeleteUserBackup,
   useUpdateUserBackup,
+  useUserBackupSnapshots,
+  type Backup,
   type BackupResult,
+  type BackupSnapshotEntry,
 } from "@/shared/api/queries";
 import { useQueryClient } from "@tanstack/react-query";
 
 // /files/backups/$id — detail page. Shows the backup config, the
-// most-recent run, and a history table (up to 10 runs). Edit is
-// intentionally minimal in v1.5.0a: schedule + enabled toggle only.
-// Renaming and re-pointing source/dest happens via Delete + recreate
-// for now (v1.5.0b will broaden this).
+// most-recent run, run history, and (for snapshot-mode backups) the
+// list of snapshots currently on disk with "browse" links.
+//
+// Edit on this page is intentionally minimal: schedule + enabled
+// toggle. Renaming and re-pointing source/dest happens via Delete +
+// recreate; flipping mode/retention is also a wizard-only action
+// (the destination layout changes so a mid-life flip is a config
+// migration, not a single-field edit).
 export const Route = createFileRoute("/files/backups/$id")({
   component: BackupDetailPage,
 });
@@ -24,6 +31,8 @@ function BackupDetailPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: backup, isLoading, error } = useUserBackup(id);
+  const isSnapshot = backup?.mode === "snapshot";
+  const { data: snapshots = [] } = useUserBackupSnapshots(id, !!backup && isSnapshot);
   const runMutation = useRunUserBackup();
   const deleteMutation = useDeleteUserBackup();
   const updateMutation = useUpdateUserBackup();
@@ -44,6 +53,7 @@ function BackupDetailPage() {
     try {
       await runMutation.mutateAsync(backup.id);
       qc.invalidateQueries({ queryKey: ["user", "backups", backup.id] });
+      qc.invalidateQueries({ queryKey: ["user", "backups", backup.id, "snapshots"] });
     } catch (e) {
       console.error("run failed", e);
     }
@@ -63,17 +73,7 @@ function BackupDetailPage() {
     try {
       await updateMutation.mutateAsync({
         id: backup.id,
-        body: {
-          name: backup.name,
-          srcRegionId: backup.srcRegionId,
-          srcBucket: backup.srcBucket,
-          srcPrefix: backup.srcPrefix ?? undefined,
-          dstRegionId: backup.dstRegionId,
-          dstBucket: backup.dstBucket,
-          dstPrefix: backup.dstPrefix ?? undefined,
-          schedule: backup.schedule,
-          disabled: !backup.disabled,
-        },
+        body: passThroughBody(backup, { disabled: !backup.disabled }),
       });
       qc.invalidateQueries({ queryKey: ["user", "backups", backup.id] });
       qc.invalidateQueries({ queryKey: ["user", "backups"] });
@@ -88,17 +88,7 @@ function BackupDetailPage() {
     try {
       await updateMutation.mutateAsync({
         id: backup.id,
-        body: {
-          name: backup.name,
-          srcRegionId: backup.srcRegionId,
-          srcBucket: backup.srcBucket,
-          srcPrefix: backup.srcPrefix ?? undefined,
-          dstRegionId: backup.dstRegionId,
-          dstBucket: backup.dstBucket,
-          dstPrefix: backup.dstPrefix ?? undefined,
-          schedule: next,
-          disabled: backup.disabled ?? false,
-        },
+        body: passThroughBody(backup, { schedule: next }),
       });
       setEditingSchedule(false);
       qc.invalidateQueries({ queryKey: ["user", "backups", backup.id] });
@@ -143,7 +133,20 @@ function BackupDetailPage() {
           <dt className="text-muted-foreground">Source bucket</dt>
           <dd className="font-mono">{backup.srcBucket}{backup.srcPrefix ? ` (${backup.srcPrefix})` : ""}</dd>
           <dt className="text-muted-foreground">Destination bucket</dt>
-          <dd className="font-mono">{backup.dstBucket}{backup.dstPrefix ? ` (${backup.dstPrefix})` : ""}</dd>
+          <dd className="font-mono">
+            {backup.dstBucket}
+            {!isSnapshot && backup.dstPrefix ? ` (${backup.dstPrefix})` : ""}
+          </dd>
+          <dt className="text-muted-foreground">Mode</dt>
+          <dd className="font-mono">{backup.mode ?? "mirror"}</dd>
+          {isSnapshot && (
+            <>
+              <dt className="text-muted-foreground">Retention</dt>
+              <dd className="font-mono">
+                {formatRetention(backup)}
+              </dd>
+            </>
+          )}
           <dt className="text-muted-foreground">Schedule</dt>
           <dd className="flex items-center gap-2">
             {!editingSchedule ? (
@@ -182,6 +185,39 @@ function BackupDetailPage() {
         )}
       </section>
 
+      {isSnapshot && (
+        <section className="rounded-lg border bg-card p-6 space-y-4">
+          <h2 className="text-sm font-medium text-muted-foreground">Snapshots on disk</h2>
+          {snapshots.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No snapshots yet. Click "Run now" — the first run lands at <span className="font-mono">{`${backup.dstBucket}/{name}/{timestamp}/`}</span>.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs text-muted-foreground border-b">
+                  <tr>
+                    <th className="py-2 pr-4">Timestamp</th>
+                    <th className="py-2 pr-4 text-right">Objects</th>
+                    <th className="py-2 pr-4 text-right">Size</th>
+                    <th className="py-2 pr-4 text-right">Browse</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {snapshots.map((s) => (
+                    <SnapshotRow key={s.prefix} s={s} backup={backup} />
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-xs text-muted-foreground mt-3">
+                Showing the {snapshots.length} most recent snapshot{snapshots.length === 1 ? "" : "s"}. Older
+                snapshots are pruned automatically by the retention policy.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
       <section className="rounded-lg border bg-card p-6 space-y-4">
         <h2 className="text-sm font-medium text-muted-foreground">Recent runs</h2>
         {(!backup.history || backup.history.length === 0) ? (
@@ -195,11 +231,12 @@ function BackupDetailPage() {
                   <th className="py-2 pr-4">Result</th>
                   <th className="py-2 pr-4 text-right">Objects</th>
                   <th className="py-2 pr-4 text-right">Bytes</th>
+                  {isSnapshot && <th className="py-2 pr-4 text-right">Pruned</th>}
                   <th className="py-2 pr-4">Errors</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {backup.history.map((r, idx) => <HistoryRow key={idx} r={r} />)}
+                {backup.history.map((r, idx) => <HistoryRow key={idx} r={r} showPruned={isSnapshot} />)}
               </tbody>
             </table>
           </div>
@@ -209,7 +246,33 @@ function BackupDetailPage() {
   );
 }
 
-function HistoryRow({ r }: { r: BackupResult }) {
+// passThroughBody clones the current Backup back into a create-shaped
+// body so the update mutation only changes the fields the caller
+// explicitly overrides. Keeps every edit handler from re-typing the
+// pass-through field list.
+function passThroughBody(
+  b: Backup,
+  patch: Partial<{
+    schedule: string;
+    disabled: boolean;
+  }>,
+) {
+  return {
+    name: b.name,
+    srcRegionId: b.srcRegionId,
+    srcBucket: b.srcBucket,
+    srcPrefix: b.srcPrefix ?? undefined,
+    dstRegionId: b.dstRegionId,
+    dstBucket: b.dstBucket,
+    dstPrefix: b.dstPrefix ?? undefined,
+    schedule: patch.schedule ?? b.schedule,
+    disabled: patch.disabled ?? b.disabled ?? false,
+    mode: b.mode,
+    retention: b.retention,
+  };
+}
+
+function HistoryRow({ r, showPruned }: { r: BackupResult; showPruned: boolean }) {
   const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : "—";
   return (
     <tr>
@@ -219,11 +282,50 @@ function HistoryRow({ r }: { r: BackupResult }) {
       </td>
       <td className="py-2 pr-4 text-right">{r.objectsCopied}</td>
       <td className="py-2 pr-4 text-right">{formatBytes(r.bytesCopied)}</td>
+      {showPruned && (
+        <td className="py-2 pr-4 text-right">
+          {r.snapshotsPruned ?? 0}
+        </td>
+      )}
       <td className="py-2 pr-4 text-xs text-muted-foreground">
         {r.errors && r.errors.length > 0 ? r.errors[0] : "—"}
       </td>
     </tr>
   );
+}
+
+function SnapshotRow({ s, backup }: { s: BackupSnapshotEntry; backup: Backup }) {
+  const when = new Date(s.timestamp).toLocaleString();
+  // Browse navigates the file browser to the snapshot's own prefix
+  // under the destination region/bucket. Uses the same `prefix` query
+  // param the bucket browser already understands.
+  return (
+    <tr>
+      <td className="py-2 pr-4 whitespace-nowrap">
+        <span className="font-mono">{when}</span>
+      </td>
+      <td className="py-2 pr-4 text-right">{s.objects}</td>
+      <td className="py-2 pr-4 text-right">{formatBytes(s.bytes)}</td>
+      <td className="py-2 pr-4 text-right">
+        <Link
+          to="/files/$regionId/b/$bid"
+          params={{ regionId: backup.dstRegionId, bid: backup.dstBucket }}
+          search={{ prefix: s.prefix, token: "" }}
+          className="text-primary hover:underline"
+        >
+          Browse →
+        </Link>
+      </td>
+    </tr>
+  );
+}
+
+function formatRetention(b: Backup): string {
+  const r = b.retention;
+  if (!r || (!r.keepDaily && !r.keepWeekly && !r.keepMonthly)) {
+    return "default (7d / 4w / 12m)";
+  }
+  return `${r.keepDaily ?? 0}d / ${r.keepWeekly ?? 0}w / ${r.keepMonthly ?? 0}m`;
 }
 
 function formatBytes(n: number): string {

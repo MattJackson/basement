@@ -9,15 +9,17 @@ import {
   useUserRegionBuckets,
   useCreateUserBackup,
   type UserBackupCreateRequest,
+  type BackupMode,
 } from "@/shared/api/queries";
 
 // /files/backups/new — multi-step backup wizard.
 //
-// Step semantics:
-//   1. Source         — region + bucket dropdown (and optional prefix)
-//   2. Destination    — region + bucket dropdown (and optional prefix)
-//   3. Schedule       — radio: manual / daily / weekly / monthly / custom cron
-//   4. Name + review  — operator-friendly name + summary, then save
+// Step semantics (v1.5.0b adds "Mode" — the wizard is now 5 steps):
+//   1. Source             — region + bucket dropdown (+ optional prefix)
+//   2. Destination        — region + bucket dropdown (+ optional prefix; hidden in snapshot mode)
+//   3. Mode + retention   — mirror (overwrite) vs snapshot (timestamped history) + GFS keep counts
+//   4. Schedule           — radio: manual / daily / weekly / monthly / custom cron
+//   5. Name + review      — operator-friendly name + summary, then save
 //
 // Steps are linear with Back/Next; we don't try to be clever with
 // step-skipping because the form is short. Each step validates only
@@ -27,7 +29,7 @@ export const Route = createFileRoute("/files/backups/new")({
   component: NewBackupPage,
 });
 
-type Step = 1 | 2 | 3 | 4;
+type Step = 1 | 2 | 3 | 4 | 5;
 type ScheduleKind = "manual" | "daily" | "weekly" | "monthly" | "custom";
 
 const WEEKDAYS = [
@@ -39,6 +41,11 @@ const WEEKDAYS = [
   { value: "6", label: "Saturday" },
   { value: "0", label: "Sunday" },
 ];
+
+// Default GFS retention — matches the server's DefaultRetention()
+// so the wizard preview matches what the runner will actually apply
+// if the operator submits the form without changing the values.
+const DEFAULT_RETENTION = { keepDaily: 7, keepWeekly: 4, keepMonthly: 12 };
 
 function NewBackupPage() {
   const navigate = useNavigate();
@@ -56,6 +63,12 @@ function NewBackupPage() {
   const [dstRegionId, setDstRegionId] = useState("");
   const [dstBucket, setDstBucket] = useState("");
   const [dstPrefix, setDstPrefix] = useState("");
+
+  // Mode + retention (v1.5.0b)
+  const [mode, setMode] = useState<BackupMode>("mirror");
+  const [keepDaily, setKeepDaily] = useState<number>(DEFAULT_RETENTION.keepDaily);
+  const [keepWeekly, setKeepWeekly] = useState<number>(DEFAULT_RETENTION.keepWeekly);
+  const [keepMonthly, setKeepMonthly] = useState<number>(DEFAULT_RETENTION.keepMonthly);
 
   // Schedule
   const [scheduleKind, setScheduleKind] = useState<ScheduleKind>("manual");
@@ -85,7 +98,15 @@ function NewBackupPage() {
   const canNextFromStep = (s: Step): boolean => {
     if (s === 1) return !!srcRegionId && !!srcBucket;
     if (s === 2) return !!dstRegionId && !!dstBucket;
-    if (s === 3) return !!schedule;
+    if (s === 3) {
+      // Snapshot mode requires at least one non-zero keep-count
+      // so the prune phase doesn't immediately wipe the snapshot.
+      if (mode === "snapshot") {
+        return keepDaily + keepWeekly + keepMonthly > 0;
+      }
+      return true;
+    }
+    if (s === 4) return !!schedule;
     return true;
   };
 
@@ -98,8 +119,16 @@ function NewBackupPage() {
       srcPrefix: srcPrefix || undefined,
       dstRegionId,
       dstBucket,
-      dstPrefix: dstPrefix || undefined,
+      // dstPrefix is ignored by the runner in snapshot mode, so we
+      // omit it from the wire body when snapshot is selected — keeps
+      // the persisted record clean.
+      dstPrefix: mode === "snapshot" ? undefined : dstPrefix || undefined,
       schedule,
+      mode,
+      retention:
+        mode === "snapshot"
+          ? { keepDaily, keepWeekly, keepMonthly }
+          : undefined,
     };
     createBackup.mutate(body, {
       onSuccess: () => navigate({ to: "/files/backups" }),
@@ -115,13 +144,13 @@ function NewBackupPage() {
       <header>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">New backup</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Step {step} of 4 — {STEP_TITLES[step - 1]}
+          Step {step} of 5 — {STEP_TITLES[step - 1]}
         </p>
       </header>
 
       {/* Progress bar */}
       <div className="flex items-center gap-2">
-        {[1, 2, 3, 4].map((n) => (
+        {[1, 2, 3, 4, 5].map((n) => (
           <div
             key={n}
             className={`h-1.5 flex-1 rounded-full ${n <= step ? "bg-primary" : "bg-muted"}`}
@@ -206,12 +235,63 @@ function NewBackupPage() {
             <div className="grid gap-2 sm:col-span-2">
               <Label htmlFor="dstPrefix">Prefix (optional)</Label>
               <Input id="dstPrefix" value={dstPrefix} onChange={(e) => setDstPrefix(e.target.value)} placeholder="e.g. backups/" />
+              <p className="text-xs text-muted-foreground">
+                Snapshot-mode backups ignore this prefix and own the destination layout themselves
+                ({"{bucket}/{name}/{timestamp}/"}).
+              </p>
             </div>
           </div>
         </section>
       )}
 
       {step === 3 && (
+        <section className="space-y-4 rounded-lg border bg-card p-6">
+          <h2 className="text-sm font-medium text-muted-foreground">Mode &amp; retention</h2>
+          <RadioGroup
+            value={mode}
+            onValueChange={(v) => setMode(v as BackupMode)}
+            className="grid gap-2"
+          >
+            <ModeOption
+              value="mirror"
+              current={mode}
+              title="Mirror (overwrite destination)"
+              description="Each run overwrites the destination prefix. Use when you only ever care about the latest copy — simplest, no point-in-time history."
+            />
+            <ModeOption
+              value="snapshot"
+              current={mode}
+              title="Snapshot (timestamped history)"
+              description={
+                "Each run writes to {dstBucket}/{name}/{timestamp}/. Old snapshots are pruned automatically by the retention policy below."
+              }
+            />
+          </RadioGroup>
+
+          {mode === "snapshot" && (
+            <div className="rounded-md border bg-muted/20 p-4 space-y-4">
+              <h3 className="text-sm font-medium">Retention policy</h3>
+              <p className="text-xs text-muted-foreground">
+                Grandfather-Father-Son rotation. The keep set is the union of the three buckets — a single
+                snapshot can count toward all three at once. Default 7/4/12 covers about 14 months with 23
+                snapshots at steady state.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <RetentionField id="keepDaily" label="Keep daily" value={keepDaily} onChange={setKeepDaily} hint="Last N days, latest per day." />
+                <RetentionField id="keepWeekly" label="Keep weekly" value={keepWeekly} onChange={setKeepWeekly} hint="Last N ISO-weeks." />
+                <RetentionField id="keepMonthly" label="Keep monthly" value={keepMonthly} onChange={setKeepMonthly} hint="Last N calendar months." />
+              </div>
+              {keepDaily + keepWeekly + keepMonthly === 0 && (
+                <p className="text-xs text-destructive">
+                  All keep counts are zero — every snapshot would be pruned immediately after each run.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {step === 4 && (
         <section className="space-y-4 rounded-lg border bg-card p-6">
           <h2 className="text-sm font-medium text-muted-foreground">Schedule</h2>
           <RadioGroup
@@ -272,7 +352,7 @@ function NewBackupPage() {
         </section>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <section className="space-y-4 rounded-lg border bg-card p-6">
           <h2 className="text-sm font-medium text-muted-foreground">Name &amp; review</h2>
           <div className="grid gap-2">
@@ -283,7 +363,15 @@ function NewBackupPage() {
             <dt className="text-muted-foreground">Source</dt>
             <dd className="font-mono">{srcBucket}{srcPrefix ? ` (${srcPrefix})` : ""}</dd>
             <dt className="text-muted-foreground">Destination</dt>
-            <dd className="font-mono">{dstBucket}{dstPrefix ? ` (${dstPrefix})` : ""}</dd>
+            <dd className="font-mono">{dstBucket}{mode === "mirror" && dstPrefix ? ` (${dstPrefix})` : ""}</dd>
+            <dt className="text-muted-foreground">Mode</dt>
+            <dd className="font-mono">{mode}</dd>
+            {mode === "snapshot" && (
+              <>
+                <dt className="text-muted-foreground">Retention</dt>
+                <dd className="font-mono">{keepDaily}d / {keepWeekly}w / {keepMonthly}m</dd>
+              </>
+            )}
             <dt className="text-muted-foreground">Schedule</dt>
             <dd className="font-mono">{schedule}</dd>
           </dl>
@@ -305,7 +393,7 @@ function NewBackupPage() {
               Back
             </Button>
           )}
-          {step < 4 && (
+          {step < 5 && (
             <Button
               onClick={() => setStep((s) => (s + 1) as Step)}
               disabled={!canNextFromStep(step)}
@@ -313,7 +401,7 @@ function NewBackupPage() {
               Next
             </Button>
           )}
-          {step === 4 && (
+          {step === 5 && (
             <Button onClick={handleSubmit} disabled={!name.trim() || createBackup.isPending}>
               {createBackup.isPending ? "Saving…" : "Save backup"}
             </Button>
@@ -324,7 +412,7 @@ function NewBackupPage() {
   );
 }
 
-const STEP_TITLES = ["Source", "Destination", "Schedule", "Name & review"];
+const STEP_TITLES = ["Source", "Destination", "Mode & retention", "Schedule", "Name & review"];
 
 function ScheduleOption({
   value,
@@ -347,6 +435,61 @@ function ScheduleOption({
         <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
     </label>
+  );
+}
+
+function ModeOption({
+  value,
+  current,
+  title,
+  description,
+}: {
+  value: BackupMode;
+  current: BackupMode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <label
+      className={`flex items-start gap-3 rounded-md border p-3 cursor-pointer hover:bg-muted/30 ${current === value ? "border-ring" : ""}`}
+    >
+      <RadioGroupItem value={value} className="mt-1" />
+      <div>
+        <div className="font-medium text-sm">{title}</div>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      </div>
+    </label>
+  );
+}
+
+function RetentionField({
+  id,
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  hint: string;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10);
+          onChange(Number.isFinite(n) && n >= 0 ? n : 0);
+        }}
+      />
+      <p className="text-xs text-muted-foreground">{hint}</p>
+    </div>
   );
 }
 
