@@ -219,6 +219,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// v1.7.0a: basement-issued long-lived service-account access
+	// keys (CI, k8s, CLI, MCP). Data layer only this cycle; the
+	// v1.7.0b SigV4 middleware will read VerifySecret + TouchLastUsed
+	// off the same store. Missing service_accounts.json is fine —
+	// WireServiceAccounts treats it as empty.
+	if err := st.WireServiceAccounts(); err != nil {
+		slog.Error("failed to wire service-account store", "error", err)
+		os.Exit(1)
+	}
+
 	// Per ADR-0002 (v1.1.0b): the driver registry needs a handle to
 	// the region keychain so ForUserRegion can refuse to operate when
 	// the store is unwired (returns ErrUnsupported). Production always
