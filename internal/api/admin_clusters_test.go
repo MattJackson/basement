@@ -12,6 +12,16 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 )
 
+// newJSONRequest builds a POST request with a JSON body. Shared helper
+// used across user-share / user-sync tests (previously lived in the
+// now-deleted user_clusters_create_test.go).
+func newJSONRequest(url string, body interface{}) *http.Request {
+	data, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
 // testMockConnectionStore implements store.Connections for testing.
 type testMockConnectionStore struct {
 	conns       []store.Connection

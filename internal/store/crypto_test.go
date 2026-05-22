@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+// testKey is a 32-byte secret that satisfies the JWT min-length rule
+// applied in production. Previously lived in the v1.1.0e-retired
+// bucket_grants_test.go; user_regions_test.go now owns the only
+// remaining callers.
+var testKey = []byte("01234567890123456789012345678901")
+
 func TestCrypto_RoundTrip(t *testing.T) {
 	key := []byte("01234567890123456789012345678901")
 	plain := []byte("hello bucket grant")

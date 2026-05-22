@@ -105,19 +105,11 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	visibleBucketIDs := s.userVisibleBuckets(r.Context(), req.ConnectionID)
-	hasBucketAccess := false
-	for _, id := range visibleBucketIDs {
-		if req.BucketID == id {
-			hasBucketAccess = true
-			break
-		}
-	}
-
-	if !hasBucketAccess && !s.userOwnsConnection(r.Context(), req.ConnectionID) {
-		writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "User does not have access to this bucket")
-		return
-	}
+	// Bucket-level access is the backend's word now: if the user's S3
+	// key on the matching UserRegion can't reach the bucket, the
+	// downstream presign at /share/{token}/get returns 403 from the
+	// backend. basement no longer maintains its own per-bucket grant
+	// table to consult here (ADR-0002, v1.1.0e).
 
 	// Validate expiration time if provided.
 	if req.ExpiresAt != nil && req.ExpiresAt.Before(time.Now()) {

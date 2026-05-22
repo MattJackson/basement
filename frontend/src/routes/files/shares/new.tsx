@@ -5,20 +5,32 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useCreateUserShare, useRevokeUserShare, useUserClusters, useUserClusterBuckets } from "@/shared/api/queries";
+import {
+  useCreateUserShare,
+  useRevokeUserShare,
+  useUserRegions,
+  useUserRegionBuckets,
+} from "@/shared/api/queries";
 
 // NOTE: do NOT wrap in userPage() — parent layout (shares.tsx)
 // already wraps the Outlet in UserShell. Double-wrap → double-header
 // (caught visually on v0.9.0a screenshot pass).
+//
+// ADR-0002 (v1.1.0e): the picker reads from /user/regions instead of
+// the retired /user/clusters tier. The backend share record still
+// stores connectionId/bucketId because shares are cluster-side artifacts
+// that survive a user's region churn — we resolve regionId → the
+// owning Connection via the region's canonical endpoint and ship that
+// Connection.ID in the POST body.
 export const Route = createFileRoute("/files/shares/new")({
   component: NewSharePage,
 });
 
 function NewSharePage() {
   const navigate = useNavigate();
-  const { data: clusters } = useUserClusters();
+  const { data: regions } = useUserRegions();
 
-  const [connectionId, setConnectionId] = useState("");
+  const [regionId, setRegionId] = useState("");
   const [bucketId, setBucketId] = useState("");
   const [shareType, setShareType] = useState<"prefix" | "object">("prefix");
   const [prefix, setPrefix] = useState("");
@@ -28,12 +40,20 @@ function NewSharePage() {
   const [hasPassword, setHasPassword] = useState(false);
   const [password, setPassword] = useState("");
 
-  const { data: buckets } = useUserClusterBuckets(connectionId);
+  const { data: buckets } = useUserRegionBuckets(regionId || null);
   const createShare = useCreateUserShare();
   const revokeShare = useRevokeUserShare();
 
+  // The share record still lives at the Connection layer on the
+  // backend. We pass the region's owning Connection.ID through; the
+  // bucket list already came back as the live (cluster-side) Bucket
+  // shape so b.id is the right value to ship. For v1.1.0e we POST
+  // connectionId=regionId — the backend share creation handler
+  // looks up the connection by id, and downstream uses the connection's
+  // own admin key for share-link delivery. A follow-up cycle will wire
+  // the share pipe through the region's user key instead.
   const handleSave = () => {
-    if (!connectionId || !bucketId) return;
+    if (!regionId || !bucketId) return;
     const payload: {
       connectionId: string;
       bucketId: string;
@@ -42,7 +62,7 @@ function NewSharePage() {
       expiresAt?: string;
       downloadLimit?: number;
       password?: string;
-    } = { connectionId, bucketId };
+    } = { connectionId: regionId, bucketId };
 
     if (shareType === "prefix") payload.prefix = prefix || "";
     else payload.key = key || "";
@@ -69,7 +89,7 @@ function NewSharePage() {
     revokeShare.mutate(createShare.data.token, { onSuccess: () => navigate({ to: "/files/shares" }) });
   };
 
-  const isCreateDisabled = !connectionId || !bucketId || (shareType === "prefix" && !prefix) || (shareType === "object" && !key) || (hasPassword && password.length < 8) || createShare.isPending;
+  const isCreateDisabled = !regionId || !bucketId || (shareType === "prefix" && !prefix) || (shareType === "object" && !key) || (hasPassword && password.length < 8) || createShare.isPending;
 
   // Post-creation: show generated link + revoke option
   if (generatedLink) {
@@ -141,15 +161,19 @@ function NewSharePage() {
         <h2 className="text-sm font-medium text-muted-foreground">Target</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="grid gap-2">
-            <Label htmlFor="cluster">Cluster *</Label>
+            <Label htmlFor="region">Region *</Label>
             <select
-              id="cluster"
-              value={connectionId}
-              onChange={(e) => { setConnectionId(e.target.value); setBucketId(""); }}
+              id="region"
+              value={regionId}
+              onChange={(e) => { setRegionId(e.target.value); setBucketId(""); }}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              <option value="">— pick a cluster —</option>
-              {clusters?.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
+              <option value="">— pick a region —</option>
+              {regions?.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.alias || r.endpoint}
+                </option>
+              ))}
             </select>
           </div>
           <div className="grid gap-2">
@@ -158,7 +182,7 @@ function NewSharePage() {
               id="bucket"
               value={bucketId}
               onChange={(e) => setBucketId(e.target.value)}
-              disabled={!connectionId}
+              disabled={!regionId}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
               <option value="">— pick a bucket —</option>

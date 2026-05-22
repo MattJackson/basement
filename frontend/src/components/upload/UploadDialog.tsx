@@ -16,33 +16,22 @@ type FileUpload = {
 type UploadDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  // Exactly one of cid (cluster-tier, legacy) or regionId (ADR-0002
-  // region-tier, v1.1.0c) must be set. When regionId is set, the
-  // dialog uploads via /api/v1/user/regions/* instead of /user/clusters/*.
-  cid?: string;
-  regionId?: string;
+  // Region keychain id (ADR-0002). The legacy cluster-tier cid path
+  // retired in v1.1.0e along with the /user/clusters/* endpoints.
+  regionId: string;
   bid: string;
   prefix: string; // destination folder/prefix
   onSuccess?: () => void;
 };
 
-// uploadBaseFor picks the correct /user/{regions|clusters}/{id} prefix
-// for every signed-URL request. Centralised so the inline upload
-// implementation doesn't sprinkle the cid vs regionId branch through
-// every fetch call.
-function uploadBaseFor(opts: { cid?: string; regionId?: string; bid: string }): string {
-  if (opts.regionId) {
-    return `/api/v1/user/regions/${encodeURIComponent(opts.regionId)}/buckets/${encodeURIComponent(opts.bid)}`;
-  }
-  if (opts.cid) {
-    return `/api/v1/user/clusters/${encodeURIComponent(opts.cid)}/buckets/${encodeURIComponent(opts.bid)}`;
-  }
-  throw new Error("UploadDialog requires either cid or regionId");
+// uploadBaseFor builds the /user/regions/{regionId}/buckets/{bid} prefix
+// used by every signed-URL request out of this dialog.
+function uploadBaseFor(opts: { regionId: string; bid: string }): string {
+  return `/api/v1/user/regions/${encodeURIComponent(opts.regionId)}/buckets/${encodeURIComponent(opts.bid)}`;
 }
 
 // Simple upload implementation inline to avoid complex hook state management.
-// `base` is the per-bucket URL prefix — either /api/v1/user/clusters/{cid}/buckets/{bid}
-// (legacy) or /api/v1/user/regions/{regionId}/buckets/{bid} (ADR-0002).
+// `base` is the per-bucket URL prefix — /api/v1/user/regions/{regionId}/buckets/{bid}.
 async function doUpload(
   file: File,
   base: string,
@@ -208,8 +197,8 @@ async function doUpload(
   }
 }
 
-export function UploadDialog({ open, onOpenChange, cid, regionId, bid, prefix, onSuccess }: UploadDialogProps) {
-  const base = uploadBaseFor({ cid, regionId, bid });
+export function UploadDialog({ open, onOpenChange, regionId, bid, prefix, onSuccess }: UploadDialogProps) {
+  const base = uploadBaseFor({ regionId, bid });
   const [files, setFiles] = useState<FileUpload[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
