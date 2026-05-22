@@ -190,6 +190,54 @@ describe("AdminEntryElevationGuard — auto-elevate on /admin/* entry", () => {
     });
   });
 
+  // v1.7.0a.3 regression test — when /auth/me reports the operator
+  // is already in admin mode, the guard must NOT fire the prompt even
+  // if the provider state hasn't caught up yet. This is the live race
+  // the smoke caught: page.goto('/admin/...') remounts AppShell with
+  // mode = user default; useUser() resolves with { mode: 'admin' };
+  // AuthModeHydrator setMode runs in the next render; the guard's
+  // useEffect in THIS render sees provider mode = user but user.mode
+  // = admin and must defer to the server's word.
+  it("Server reports admin mode → no prompt fires (provider not yet hydrated)", async () => {
+    vi.resetModules();
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({
+        data: {
+          username: "matthew",
+          role: "admin" as const,
+          uiAdmin: true,
+          oidcUser: false,
+          mode: "admin" as const,
+          modeExpiresAt: Math.floor(Date.now() / 1000) + 600,
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    }));
+    const { AdminEntryElevationGuard: GuardWithAdminUser } = await import(
+      "@/components/auth/AdminEntryElevationGuard"
+    );
+    function AdminHarness() {
+      return (
+        <QueryClientProvider client={newClient()}>
+          {/* Provider is still on the conservative USER default — */}
+          {/* the hydrator hasn't run yet in this snapshot. */}
+          <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
+            <GuardWithAdminUser />
+          </AuthModeProvider>
+        </QueryClientProvider>
+      );
+    }
+    render(<AdminHarness />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(promptSpy).not.toHaveBeenCalled();
+    vi.doUnmock("@/shared/auth/useUser");
+    vi.resetModules();
+  });
+
   // v1.7.0a.3 regression test — the guard must defer firing until
   // /auth/me has resolved. Before the fix, the conservative USER default
   // in AuthModeProvider caused a stale-modal pop on every nav for users
