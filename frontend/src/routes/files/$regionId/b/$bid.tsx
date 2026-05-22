@@ -17,12 +17,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  useFederationByTarget,
   useUserRegionBuckets,
   useUserRegionObjectsInfinite,
   useUserRegionPresignGet,
 } from "@/shared/api/queries";
 import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
 import type { components } from "@/shared/api/types.gen";
+import type { FederatedBucket } from "@/shared/api/queries";
 import { UploadDialog } from "@/components/upload/UploadDialog";
 
 // Object browser for buckets reached via a UserRegion (ADR-0002, v1.1.0c).
@@ -86,6 +88,14 @@ function UserRegionBucketObjects() {
   } = useUserRegionObjectsInfinite(regionId, bid, prefix);
 
   const presignMutation = useUserRegionPresignGet(regionId, bid);
+
+  // v1.6.0e — reverse-lookup so the bucket browser can render a
+  // federation badge when this (region, bucket) is part of a
+  // FederatedBucket. The endpoint returns 204 + null when the bucket
+  // isn't federated; the hook surfaces that as `data === null` and we
+  // render nothing. Best-effort: a hook error doesn't block the
+  // bucket browser from rendering.
+  const { data: federation } = useFederationByTarget(regionId, bucketAlias);
 
   // Flatten the merged page set into a single VirtualRow list. Folders
   // are taken from the FIRST page only (S3 only returns CommonPrefixes
@@ -315,6 +325,7 @@ function UserRegionBucketObjects() {
       <PageHeader
         title={bucketAlias}
         description={`Objects in ${bucketAlias}`}
+        badge={federation ? <FederationBadge federation={federation} /> : null}
         actions={
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <Button variant="outline" onClick={handleBack}>
@@ -778,10 +789,14 @@ function FileRow({
 function PageHeader({
   title,
   description,
+  badge,
   actions,
 }: {
   title: React.ReactNode;
   description?: string;
+  // v1.6.0e: optional badge slot rendered under the title — used by
+  // the bucket browser to surface the federation membership pill.
+  badge?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
@@ -789,9 +804,64 @@ function PageHeader({
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{title}</h1>
         {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
+        {badge && <div className="mt-2">{badge}</div>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </header>
+  );
+}
+
+// FederationBadge renders the v1.6.0e "this bucket is federated" pill
+// under the bucket title. Amber background per the spec; the click
+// navigates to the federation detail route. Counts roll the replicas
+// list into "N replicas, M in-sync" so the operator sees the federation
+// shape at a glance. Health values originate from the v1.6.0b engine
+// via the federation record's `replicas[i].health` field.
+function FederationBadge({ federation }: { federation: FederatedBucket }) {
+  const navigate = useNavigate();
+  const replicaCount = federation.replicas.length;
+  const inSyncCount = federation.replicas.filter(
+    (rep) => (rep.health ?? "in-sync") === "in-sync",
+  ).length;
+  const tooltip = `This bucket is part of federation '${federation.name}'. Manage replicas →`;
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        navigate({
+          to: "/files/federated-buckets/$id",
+          params: { id: federation.id },
+        })
+      }
+      title={tooltip}
+      data-testid="federation-badge"
+      className="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-700/60 dark:bg-amber-900/30 dark:text-amber-100 dark:hover:bg-amber-900/50"
+    >
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-3.5 w-3.5"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="3" />
+        <circle cx="4" cy="6" r="2" />
+        <circle cx="20" cy="6" r="2" />
+        <circle cx="4" cy="18" r="2" />
+        <circle cx="20" cy="18" r="2" />
+        <path d="M6 6h12" />
+        <path d="M6 18h12" />
+        <path d="M9 12h6" />
+      </svg>
+      <span>
+        Federated &middot; {replicaCount} replica{replicaCount === 1 ? "" : "s"},{" "}
+        {inSyncCount} in-sync
+      </span>
+    </button>
   );
 }
 

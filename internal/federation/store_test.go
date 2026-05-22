@@ -386,6 +386,94 @@ func TestFederatedBuckets_Persists(t *testing.T) {
 	}
 }
 
+// TestFederatedBuckets_FindByTarget covers the v1.6.0e reverse-lookup
+// path: given (regionID, bucket), find the federation that has it as
+// the primary OR a replica, scoped to the owner. Misses return
+// ErrNotFound; other users' federations are invisible.
+func TestFederatedBuckets_FindByTarget(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	mine := FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "lsi",
+		Primary:     ReplicaTarget{RegionID: "region-garage", Bucket: "lsi-primary"},
+		Replicas: []ReplicaTarget{
+			{RegionID: "region-b2", Bucket: "lsi-b2"},
+			{RegionID: "region-wasabi", Bucket: "lsi-wasabi"},
+		},
+		Policy: DefaultPolicy(),
+	}
+	created, err := store.Create(ctx, mine)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Another user's federation that references the same (region,
+	// bucket) pair — must NOT leak across owners.
+	other := FederatedBucket{
+		OwnerUserID: "alice",
+		Name:        "alice-fed",
+		Primary:     ReplicaTarget{RegionID: "region-garage", Bucket: "lsi-primary"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-b2", Bucket: "alice-b2"}},
+		Policy:      DefaultPolicy(),
+	}
+	if _, err := store.Create(ctx, other); err != nil {
+		t.Fatalf("Create alice: %v", err)
+	}
+
+	// Primary match.
+	got, err := store.FindByTarget(ctx, "matthew", "region-garage", "lsi-primary")
+	if err != nil {
+		t.Fatalf("FindByTarget primary: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Fatalf("FindByTarget primary: wrong ID got=%q want=%q", got.ID, created.ID)
+	}
+
+	// Replica match.
+	got, err = store.FindByTarget(ctx, "matthew", "region-wasabi", "lsi-wasabi")
+	if err != nil {
+		t.Fatalf("FindByTarget replica: %v", err)
+	}
+	if got.ID != created.ID {
+		t.Fatalf("FindByTarget replica: wrong ID got=%q want=%q", got.ID, created.ID)
+	}
+
+	// No match → ErrNotFound.
+	if _, err := store.FindByTarget(ctx, "matthew", "region-garage", "no-such-bucket"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("FindByTarget no-match: want ErrNotFound got %v", err)
+	}
+
+	// Ownership scoping: matthew's federation invisible when alice queries.
+	if _, err := store.FindByTarget(ctx, "alice", "region-wasabi", "lsi-wasabi"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("FindByTarget cross-owner: want ErrNotFound got %v", err)
+	}
+
+	// And the inverse — alice's own row is still findable.
+	if _, err := store.FindByTarget(ctx, "alice", "region-b2", "alice-b2"); err != nil {
+		t.Fatalf("FindByTarget alice's own: %v", err)
+	}
+
+	// Timestamps survive the round trip — FindByTarget returns the
+	// stored record unchanged, so CreatedAt + UpdatedAt should match
+	// what store.Create assigned.
+	roundTrip, err := store.FindByTarget(ctx, "matthew", "region-garage", "lsi-primary")
+	if err != nil {
+		t.Fatalf("FindByTarget round-trip: %v", err)
+	}
+	if !roundTrip.CreatedAt.Equal(created.CreatedAt) {
+		t.Fatalf("FindByTarget CreatedAt drift: want %v got %v", created.CreatedAt, roundTrip.CreatedAt)
+	}
+	if time.Since(roundTrip.CreatedAt) > time.Minute {
+		t.Fatalf("FindByTarget CreatedAt looks stale: %v", roundTrip.CreatedAt)
+	}
+}
+
 // TestFederatedBuckets_DefaultPolicy: defaults match ADR-0005 — safe
 // continuous mode, 5min lag alert, write quorum 1, auto-failover off.
 func TestFederatedBuckets_DefaultPolicy(t *testing.T) {

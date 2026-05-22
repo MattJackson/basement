@@ -46,6 +46,18 @@ type FederatedBuckets interface {
 	// has no notion of user identity at boot. Order is unspecified.
 	All(ctx context.Context) ([]FederatedBucket, error)
 	UpdateReplicaHealth(ctx context.Context, fbID, regionID, bucket string, health ReplicaTarget) error
+	// FindByTarget returns the FederatedBucket owned by userID that
+	// references the given (regionID, bucket) pair as EITHER the primary
+	// or one of the replicas. Returns ErrNotFound when no federation
+	// matches. Used by the v1.6.0e bucket-browser reverse-lookup endpoint
+	// so the FE can render a "this bucket is federated" badge without
+	// the caller having to list + filter client-side.
+	//
+	// First cut iterates ListForUser-equivalent rows and filters in
+	// memory; O(N) where N = the user's federations. Acceptable for
+	// sub-100 federations per user. Add a secondary index later if the
+	// caller count climbs.
+	FindByTarget(ctx context.Context, userID, regionID, bucket string) (FederatedBucket, error)
 }
 
 // fileStore implements FederatedBuckets against
@@ -217,6 +229,31 @@ func (fs *fileStore) All(_ context.Context) ([]FederatedBucket, error) {
 		out = append(out, fb)
 	}
 	return out, nil
+}
+
+// FindByTarget walks the owner's federations looking for one whose
+// primary or any replica matches (regionID, bucket). Returns
+// ErrNotFound when no row matches — the caller (the v1.6.0e
+// /by-target endpoint) translates that into 204 No Content. The
+// (regionID, bucket) compare is exact; the API handler trims
+// whitespace before reaching us.
+func (fs *fileStore) FindByTarget(_ context.Context, userID, regionID, bucket string) (FederatedBucket, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	for _, fb := range fs.rows {
+		if fb.OwnerUserID != userID {
+			continue
+		}
+		if fb.Primary.RegionID == regionID && fb.Primary.Bucket == bucket {
+			return fb, nil
+		}
+		for _, rep := range fb.Replicas {
+			if rep.RegionID == regionID && rep.Bucket == bucket {
+				return fb, nil
+			}
+		}
+	}
+	return FederatedBucket{}, ErrNotFound
 }
 
 // UpdateReplicaHealth mutates the LastSync / Health / LagBytes /

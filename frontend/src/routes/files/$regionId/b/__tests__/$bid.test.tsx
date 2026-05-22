@@ -43,6 +43,7 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
     useUserRegionBuckets: vi.fn(),
     useUserRegionObjectsInfinite: vi.fn(),
     useUserRegionPresignGet: vi.fn(),
+    useFederationByTarget: vi.fn(),
   };
 });
 
@@ -53,6 +54,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { Route } from "@/routes/files/$regionId/b/$bid";
 import {
+  useFederationByTarget,
   useUserRegionBuckets,
   useUserRegionObjectsInfinite,
   useUserRegionPresignGet,
@@ -116,6 +118,13 @@ beforeEach(() => {
   vi.mocked(useUserRegionPresignGet).mockReturnValue({
     mutateAsync: vi.fn(),
     isError: false,
+  } as any);
+  // v1.6.0e: default the federation-lookup hook to "no federation"
+  // (null data). Tests that need a federation override this per case.
+  vi.mocked(useFederationByTarget).mockReturnValue({
+    data: null,
+    isLoading: false,
+    error: null,
   } as any);
 });
 
@@ -345,5 +354,108 @@ describe("/files/$regionId/b/$bid — batch operations (v1.4.0b)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
 
     restoreFetch();
+  });
+});
+
+// v1.6.0e: federation badge + reverse-lookup. The bucket browser calls
+// useFederationByTarget(regionId, bucketAlias) on every render; when a
+// federation matches we render a badge below the title that navigates
+// to the federation detail route. When the hook returns null, the
+// badge is absent — no extra DOM, no spurious queries.
+describe("/files/$regionId/b/$bid — federation badge (v1.6.0e)", () => {
+  it("renders the federation badge when the hook returns a federation", () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [{ key: "a.txt", size: 10 }],
+      }) as any,
+    );
+    vi.mocked(useFederationByTarget).mockReturnValue({
+      data: {
+        id: "fed-123",
+        ownerUserId: "matthew",
+        name: "lsi",
+        primary: { regionId: "lsi-region-id", bucket: "lsi" },
+        replicas: [
+          { regionId: "r2", bucket: "lsi", health: "in-sync" },
+          { regionId: "r3", bucket: "lsi", health: "lagging" },
+          { regionId: "r4", bucket: "lsi", health: "in-sync" },
+        ],
+        policy: {
+          syncMode: "continuous",
+          lagAlertSec: 300,
+          writeQuorum: 1,
+        },
+        createdAt: "2026-05-20T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderBucket();
+
+    const badge = screen.getByTestId("federation-badge");
+    expect(badge).toBeInTheDocument();
+    // The badge surfaces the replica + in-sync count from the federation
+    // record's `replicas[i].health` field.
+    expect(badge).toHaveTextContent(/Federated/);
+    expect(badge).toHaveTextContent(/3 replicas/);
+    expect(badge).toHaveTextContent(/2 in-sync/);
+    // Hover tooltip name + manage prompt.
+    expect(badge.getAttribute("title")).toMatch(/federation 'lsi'/i);
+    expect(badge.getAttribute("title")).toMatch(/Manage replicas/i);
+  });
+
+  it("renders nothing when the hook returns null (bucket isn't federated)", () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [{ key: "a.txt", size: 10 }],
+      }) as any,
+    );
+    vi.mocked(useFederationByTarget).mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderBucket();
+
+    expect(screen.queryByTestId("federation-badge")).not.toBeInTheDocument();
+  });
+
+  it("clicking the badge navigates to /files/federated-buckets/$id with the federation ID", async () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [{ key: "a.txt", size: 10 }],
+      }) as any,
+    );
+    vi.mocked(useFederationByTarget).mockReturnValue({
+      data: {
+        id: "fed-abc",
+        ownerUserId: "matthew",
+        name: "lsi",
+        primary: { regionId: "lsi-region-id", bucket: "lsi" },
+        replicas: [{ regionId: "r2", bucket: "lsi", health: "in-sync" }],
+        policy: {
+          syncMode: "continuous",
+          lagAlertSec: 300,
+          writeQuorum: 1,
+        },
+        createdAt: "2026-05-20T00:00:00Z",
+        updatedAt: "2026-05-22T00:00:00Z",
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderBucket();
+    await userEvent.click(screen.getByTestId("federation-badge"));
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/files/federated-buckets/$id",
+        params: { id: "fed-abc" },
+      }),
+    );
   });
 });
