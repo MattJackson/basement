@@ -36,3 +36,9 @@ func (m *mockDriver) GetLifecycle(_ context.Context, _ string) ([]LifecycleRule,
 func (m *mockDriver) PutLifecycle(_ context.Context, _ string, _ []LifecycleRule) error {
 	return nil
 }
+
+// v1.4.0a shim — mock advertises no per-bucket stats; tests that
+// care override via embedding/composition.
+func (m *mockDriver) PerBucketStatsAvailable() bool {
+	return false
+}

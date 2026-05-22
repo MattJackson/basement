@@ -48,6 +48,9 @@ type testMockDriver struct {
 	lifecycleSupportFunc func() driver.LifecycleCapabilities
 	getLifecycleFunc     func(ctx context.Context, bucketID string) ([]driver.LifecycleRule, error)
 	putLifecycleFunc     func(ctx context.Context, bucketID string, rules []driver.LifecycleRule) error
+
+	// v1.4.0a hook. nil-default returns false (matches Garage v1).
+	perBucketStatsAvailableFunc func() bool
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -241,6 +244,16 @@ func (m *testMockDriver) PutLifecycle(ctx context.Context, bucketID string, rule
 		return m.putLifecycleFunc(ctx, bucketID, rules)
 	}
 	return nil
+}
+
+// v1.4.0a — overridable per-bucket stats availability. Default false
+// (matches Garage v1, the current operator's deployment). Tests that
+// flip column visibility set perBucketStatsAvailableFunc.
+func (m *testMockDriver) PerBucketStatsAvailable() bool {
+	if m.perBucketStatsAvailableFunc != nil {
+		return m.perBucketStatsAvailableFunc()
+	}
+	return false
 }
 
 // testSecret is a 32-byte secret used for JWT token generation in tests.

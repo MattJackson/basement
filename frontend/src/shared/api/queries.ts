@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 import type { components } from "@/shared/api/types.gen";
 
@@ -355,8 +355,19 @@ export function useUserRegion(id: string | null) {
   });
 }
 
+// v1.4.0a: the wire response now wraps the bucket list in a small
+// envelope so the FE can read a per-driver capability flag alongside
+// the list. perBucketStatsAvailable is false on Garage v1 (and any
+// future driver that can't surface Objects + Bytes via ListBuckets);
+// the bucket-list page uses it to hide the Size + Objects columns
+// entirely rather than render rows of em-dashes.
+export interface UserRegionBucketList {
+  buckets: Bucket[];
+  perBucketStatsAvailable: boolean;
+}
+
 export function useUserRegionBuckets(regionId: string | null) {
-  return useQuery<Bucket[]>({
+  return useQuery<UserRegionBucketList>({
     queryKey: ["user", "regions", regionId, "buckets"],
     queryFn: async () => {
       if (!regionId) throw new Error("Region id required");
@@ -366,7 +377,10 @@ export function useUserRegionBuckets(regionId: string | null) {
       );
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/regions/${regionId}/buckets`, res.status, body);
-      return (body as Bucket[]) ?? [];
+      return {
+        buckets: (body?.buckets as Bucket[]) ?? [],
+        perBucketStatsAvailable: Boolean(body?.perBucketStatsAvailable),
+      };
     },
     enabled: !!regionId,
     staleTime: 30 * 1000,
@@ -392,6 +406,43 @@ export function useUserRegionObjects(
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/regions/${regionId}/buckets/${bid}/objects`, res.status, body);
       return body as components["schemas"]["ObjectPage"];
+    },
+    enabled: !!regionId && !!bid,
+    staleTime: 30 * 1000,
+    retry: 1,
+  });
+}
+
+// v1.4.0a: paginated bucket browsing. Walks continuation tokens
+// while staying inside a single prefix, accumulating pages so the
+// virtualized object table can render the merged objects+folders
+// list as one contiguous scrollable stream. Folders (commonPrefixes)
+// only ever come back on the first page so we deliberately collect
+// them once and ignore the empty arrays on subsequent pages.
+export function useUserRegionObjectsInfinite(
+  regionId: string | null,
+  bid: string | null,
+  prefix: string = "",
+) {
+  return useInfiniteQuery<components["schemas"]["ObjectPage"]>({
+    queryKey: ["user", "regions", regionId, "buckets", bid, "objects-inf", prefix],
+    initialPageParam: "" as string,
+    queryFn: async ({ pageParam }) => {
+      const params: Record<string, string> = {};
+      if (prefix) params.prefix = prefix;
+      if (pageParam) params.token = pageParam as string;
+      const qs = new URLSearchParams(params).toString();
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId!)}/buckets/${encodeURIComponent(bid!)}/objects${qs ? `?${qs}` : ""}`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/regions/${regionId}/buckets/${bid}/objects`, res.status, body);
+      return body as components["schemas"]["ObjectPage"];
+    },
+    getNextPageParam: (lastPage) => {
+      if (lastPage?.isTruncated && lastPage?.nextContinuation) {
+        return lastPage.nextContinuation;
+      }
+      return undefined;
     },
     enabled: !!regionId && !!bid,
     staleTime: 30 * 1000,
@@ -1285,11 +1336,20 @@ export interface AuditFilter {
   resource?: string;
   result?: string;
   limit?: number;
+  // v1.4.0a: pagination offset. Rows to skip from the newest-first
+  // ordering before the page is sliced. Combined with limit on the FE
+  // to render Prev / Next.
+  offset?: number;
 }
 
 export interface AuditResponse {
   events: AuditEvent[];
   total: number;
+  // v1.4.0a: offset + limit echo back from the server so the FE
+  // doesn't have to second-guess the canonical page bounds (server
+  // caps + defaults rule).
+  offset: number;
+  limit: number;
   truncated: boolean;
 }
 

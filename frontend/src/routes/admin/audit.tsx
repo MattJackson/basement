@@ -60,9 +60,17 @@ function defaultTo(): string {
   return d.toISOString().slice(0, 10);
 }
 
+// v1.4.0a: default page size dropped from 200 → 50, and Prev/Next
+// pagination replaces the prior "load more / narrow your window"
+// blunt instrument. The previous-cycle audit (v1.3.0f) flagged the
+// unfiltered 200-row scroll as a usability wart; 50 fits a laptop
+// screen + pagination chrome.
+const DEFAULT_PAGE_SIZE = 50;
+
 function AuditPage() {
   // Local filter state — applied on Search click so typing in the
-  // text inputs doesn't fire a fetch per keystroke.
+  // text inputs doesn't fire a fetch per keystroke. v1.4.0a: limit
+  // defaults to 50; offset is page-driven.
   const [draft, setDraft] = useState<AuditFilter>({
     from: defaultFrom(),
     to: defaultTo(),
@@ -70,12 +78,19 @@ function AuditPage() {
     action: "",
     resource: "",
     result: "",
-    limit: 200,
+    limit: DEFAULT_PAGE_SIZE,
   });
   const [filter, setFilter] = useState<AuditFilter>(draft);
-  const { data, isLoading, error, refetch } = useAudit(filter);
+  const [offset, setOffset] = useState(0);
+  const effectiveFilter: AuditFilter = { ...filter, offset };
+  const { data, isLoading, error, refetch } = useAudit(effectiveFilter);
 
-  const onSearch = () => setFilter(draft);
+  const onSearch = () => {
+    // Reset to page 1 whenever the filter changes — preserving the
+    // offset would scroll past the end of the new result set.
+    setOffset(0);
+    setFilter(draft);
+  };
   const onReset = () => {
     const f: AuditFilter = {
       from: defaultFrom(),
@@ -84,11 +99,17 @@ function AuditPage() {
       action: "",
       resource: "",
       result: "",
-      limit: 200,
+      limit: DEFAULT_PAGE_SIZE,
     };
     setDraft(f);
     setFilter(f);
+    setOffset(0);
   };
+
+  const pageSize = data?.limit ?? filter.limit ?? DEFAULT_PAGE_SIZE;
+  const currentOffset = data?.offset ?? offset;
+  const total = data?.total ?? 0;
+  const events = data?.events ?? [];
 
   return (
     <TooltipProvider>
@@ -104,9 +125,14 @@ function AuditPage() {
               window below; rows newest-first.
             </p>
           </div>
-          <Button variant="outline" onClick={() => refetch()}>
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => exportCSV(events)} disabled={events.length === 0}>
+              Export CSV
+            </Button>
+            <Button variant="outline" onClick={() => refetch()}>
+              Refresh
+            </Button>
+          </div>
         </header>
 
         <FilterBar
@@ -125,15 +151,105 @@ function AuditPage() {
             Failed to load audit log: {(error as Error).message}
           </div>
         ) : (
-          <EventsTable
-            events={data?.events ?? []}
-            total={data?.total ?? 0}
-            truncated={data?.truncated ?? false}
-          />
+          <>
+            <EventsTable
+              events={events}
+              total={total}
+              truncated={data?.truncated ?? false}
+            />
+            <PaginationBar
+              offset={currentOffset}
+              limit={pageSize}
+              total={total}
+              returned={events.length}
+              onPrev={() => setOffset(Math.max(0, currentOffset - pageSize))}
+              onNext={() => setOffset(currentOffset + pageSize)}
+            />
+          </>
         )}
       </div>
     </TooltipProvider>
   );
+}
+
+// PaginationBar renders Prev / Next + "showing X-Y of Z". Disabled
+// affordances on out-of-bounds clicks so the operator can't paginate
+// past the result set. We compute the page number from offset+limit
+// rather than store it in state — single source of truth is the
+// offset the server echoed back.
+function PaginationBar({
+  offset,
+  limit,
+  total,
+  returned,
+  onPrev,
+  onNext,
+}: {
+  offset: number;
+  limit: number;
+  total: number;
+  returned: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  if (total === 0) return null;
+  const start = returned === 0 ? 0 : offset + 1;
+  const end = offset + returned;
+  const hasPrev = offset > 0;
+  const hasNext = end < total;
+  const page = Math.floor(offset / Math.max(1, limit)) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / Math.max(1, limit)));
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-muted-foreground">
+      <div data-testid="audit-pagination-summary">
+        Showing {start.toLocaleString()}-{end.toLocaleString()} of {total.toLocaleString()}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" disabled={!hasPrev} onClick={onPrev}>
+          Previous
+        </Button>
+        <span className="tabular-nums">
+          Page {page} of {totalPages}
+        </span>
+        <Button variant="outline" size="sm" disabled={!hasNext} onClick={onNext}>
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// exportCSV serialises the currently-visible page of events to a CSV
+// download. Operator triggers this from the toolbar; we keep it
+// client-side (no server round-trip) so the file always matches what
+// they can see on screen — including the active filter and the
+// current page. Multi-page CSV is a v1.4.0b ask.
+function exportCSV(events: AuditEvent[]) {
+  const header = ["time", "actor", "actorRole", "action", "resource", "result", "detail", "ip", "userAgent"];
+  const escape = (v: unknown): string => {
+    if (v === undefined || v === null) return "";
+    const s = String(v);
+    if (/[",\n]/.test(s)) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+  const rows = events.map((e) =>
+    header.map((h) => escape((e as unknown as Record<string, unknown>)[h])).join(","),
+  );
+  const csv = [header.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  // Audit-YYYY-MM-DDTHH-MM-SS.csv — readable in a directory listing,
+  // collision-free across multiple exports in one session.
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  a.download = `audit-${ts}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function FilterBar({
@@ -199,14 +315,14 @@ function FilterBar({
             onChange={(e) => setDraft({ ...draft, to: e.target.value })}
           />
         </Field>
-        <Field label="Limit">
+        <Field label="Page size">
           <Input
             type="number"
             min={1}
             max={1000}
-            value={draft.limit ?? 200}
+            value={draft.limit ?? DEFAULT_PAGE_SIZE}
             onChange={(e) =>
-              setDraft({ ...draft, limit: Number(e.target.value) || 200 })
+              setDraft({ ...draft, limit: Number(e.target.value) || DEFAULT_PAGE_SIZE })
             }
           />
         </Field>
@@ -250,6 +366,12 @@ function EventsTable({
     );
   }
 
+  // v1.4.0a: total + truncated footer moved into PaginationBar; the
+  // EventsTable now only carries the table itself. Keeping the props
+  // signature stable so future cycles can re-introduce per-table
+  // summary chrome without refactoring callers.
+  void total;
+  void truncated;
   return (
     <section className="space-y-2">
       <div className="rounded-lg border bg-card overflow-x-auto">
@@ -270,18 +392,6 @@ function EventsTable({
             ))}
           </TableBody>
         </Table>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-        <div>
-          {total} event{total === 1 ? "" : "s"} returned.
-        </div>
-        {truncated && (
-          <div className="text-amber-600 dark:text-amber-400">
-            Result truncated. Narrow the date range or filter to see older
-            events.
-          </div>
-        )}
       </div>
     </section>
   );

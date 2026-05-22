@@ -97,3 +97,12 @@ func (m *fanoutDriver) GetLifecycle(_ context.Context, _ string) ([]driver.Lifec
 func (m *fanoutDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
 	return nil
 }
+
+// v1.4.0a shims — most test mocks don't care about per-bucket stats;
+// default to false. Tests that exercise the FE column-visibility path
+// (e.g. region_resolver_test) override on a per-fixture basis.
+
+func (m *layoutDriver) PerBucketStatsAvailable() bool { return false }
+func (m *stubDriver) PerBucketStatsAvailable() bool   { return false }
+func (m *mockDriver) PerBucketStatsAvailable() bool   { return false }
+func (m *fanoutDriver) PerBucketStatsAvailable() bool { return false }

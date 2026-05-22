@@ -184,7 +184,7 @@ function NewSharePage() {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
               <option value="">— pick a bucket —</option>
-              {buckets?.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0,12)}</option>))}
+              {buckets?.buckets.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0,12)}</option>))}
             </select>
           </div>
         </div>

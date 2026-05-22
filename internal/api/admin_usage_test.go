@@ -146,6 +146,7 @@ func (d *usageSizedDriver) GetLifecycle(_ context.Context, _ string) ([]driver.L
 func (d *usageSizedDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
 	return nil
 }
+func (d *usageSizedDriver) PerBucketStatsAvailable() bool { return true }
 
 const usageSizedDriverName = "stub-usage-sized"
 
