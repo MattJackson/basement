@@ -1675,3 +1675,192 @@ export function useStartClusterScrub(cid: string) {
     },
   });
 }
+
+// v1.6.0d FEDERATION.FE — federated bucket hooks.
+//
+// The federation endpoints don't ride the OpenAPI spec yet (the v1.6.0c
+// API landed too late in the cycle to regenerate); we go around
+// openapi-fetch with native fetch the same way the user-region and
+// policy hooks do. Hand-typed shapes mirror
+// `internal/federation/types.go` + `internal/api/user_federated_buckets.go`
+// verbatim so the wire is round-trip-safe.
+//
+// Polling cadences:
+//   - useFederations (list): 10s — matches the engine's default tick
+//     so a freshly-completed replicate lands in the list within one
+//     tick of the FE refresh.
+//   - useFederation (detail): 5s — tighter so the per-replica health
+//     pills react quickly when an operator clicks "Resync now" or
+//     "Promote to primary".
+
+export type FederationSyncMode = "continuous" | "scheduled";
+export type FederationHealth = "" | "in-sync" | "lagging" | "stale" | "broken";
+
+export interface FederationReplicaTarget {
+  regionId: string;
+  bucket: string;
+  lastSync?: string;
+  health?: FederationHealth;
+  lagBytes?: number;
+  lagObjects?: number;
+}
+
+export interface FederationPolicy {
+  syncMode: FederationSyncMode;
+  schedule?: string;
+  lagAlertSec: number;
+  writeQuorum: number;
+  autoFailover?: boolean;
+  autoFailoverSec?: number;
+}
+
+export interface FederatedBucket {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  primary: FederationReplicaTarget;
+  replicas: FederationReplicaTarget[];
+  policy: FederationPolicy;
+  createdAt: string;
+  updatedAt: string;
+  // computedHealth is the v1.6.0c server-side roll-up — the worst
+  // per-replica health across the federation. Used by the list view
+  // to render a one-row summary without iterating the replicas array.
+  computedHealth?: FederationHealth;
+}
+
+export interface FederatedBucketCreateRequest {
+  name: string;
+  primary: { regionId: string; bucket: string };
+  replicas: { regionId: string; bucket: string }[];
+  policy?: FederationPolicy;
+}
+
+export interface FederationFailoverRequest {
+  newPrimaryRegionId: string;
+  newPrimaryBucket: string;
+}
+
+export function useFederations() {
+  return useQuery<FederatedBucket[]>({
+    queryKey: ["user", "federations"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/user/federated-buckets", {
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/federated-buckets", res.status, body);
+      return (body as FederatedBucket[]) ?? [];
+    },
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    retry: 1,
+  });
+}
+
+export function useFederation(id: string | null) {
+  return useQuery<FederatedBucket>({
+    queryKey: ["user", "federations", id],
+    queryFn: async () => {
+      if (!id) throw new Error("Federation ID required");
+      const res = await fetch(
+        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}`,
+        { credentials: "include" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/federated-buckets/${id}`, res.status, body);
+      return body as FederatedBucket;
+    },
+    enabled: !!id,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useCreateFederation() {
+  return useMutation<FederatedBucket, Error, FederatedBucketCreateRequest>({
+    mutationFn: async (body) => {
+      const res = await fetch("/api/v1/user/federated-buckets", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const resp = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/federated-buckets/create", res.status, resp);
+      return resp as FederatedBucket;
+    },
+  });
+}
+
+export function useUpdateFederation() {
+  return useMutation<FederatedBucket, Error, { id: string; body: FederatedBucketCreateRequest }>({
+    mutationFn: async ({ id, body }) => {
+      const res = await fetch(
+        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const resp = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/federated-buckets/update/${id}`, res.status, resp);
+      return resp as FederatedBucket;
+    },
+  });
+}
+
+export function useDeleteFederation() {
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`user/federated-buckets/delete/${id}`, res.status, body);
+      }
+    },
+  });
+}
+
+export function useFailoverFederation() {
+  return useMutation<FederatedBucket, Error, { id: string; body: FederationFailoverRequest }>({
+    mutationFn: async ({ id, body }) => {
+      const res = await fetch(
+        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}/failover`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const resp = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/federated-buckets/failover/${id}`, res.status, resp);
+      return resp as FederatedBucket;
+    },
+  });
+}
+
+export function useResyncFederation() {
+  return useMutation<{ id: string; status: string }, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}/resync`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/federated-buckets/resync/${id}`, res.status, body);
+      return body as { id: string; status: string };
+    },
+  });
+}

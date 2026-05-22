@@ -16,6 +16,7 @@ import { Route as ShareTokenRouteImport } from "./routes/share/$token"
 import { Route as FilesSyncsRouteImport } from "./routes/files/syncs"
 import { Route as FilesSharesRouteImport } from "./routes/files/shares"
 import { Route as FilesKeysRouteImport } from "./routes/files/keys"
+import { Route as FilesFederatedBucketsRouteImport } from "./routes/files/federated-buckets"
 import { Route as FilesBackupsRouteImport } from "./routes/files/backups"
 import { Route as FilesRegionIdRouteImport } from "./routes/files/$regionId"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
@@ -28,6 +29,7 @@ import { Route as AdminAuditRouteImport } from "./routes/admin/audit"
 import { Route as FilesSyncsIndexRouteImport } from "./routes/files/syncs/index"
 import { Route as FilesSharesIndexRouteImport } from "./routes/files/shares/index"
 import { Route as FilesKeysIndexRouteImport } from "./routes/files/keys/index"
+import { Route as FilesFederatedBucketsIndexRouteImport } from "./routes/files/federated-buckets/index"
 import { Route as FilesBackupsIndexRouteImport } from "./routes/files/backups/index"
 import { Route as FilesRegionIdIndexRouteImport } from "./routes/files/$regionId/index"
 import { Route as AdminUsersIndexRouteImport } from "./routes/admin/users/index"
@@ -38,9 +40,11 @@ import { Route as FilesSyncsNewRouteImport } from "./routes/files/syncs/new"
 import { Route as FilesSharesNewRouteImport } from "./routes/files/shares/new"
 import { Route as FilesRegionsNewRouteImport } from "./routes/files/regions/new"
 import { Route as FilesKeysNewRouteImport } from "./routes/files/keys/new"
+import { Route as FilesFederatedBucketsNewRouteImport } from "./routes/files/federated-buckets/new"
 import { Route as FilesBackupsNewRouteImport } from "./routes/files/backups/new"
 import { Route as AdminUsersNewRouteImport } from "./routes/admin/users/new"
 import { Route as AdminClustersNewRouteImport } from "./routes/admin/clusters/new"
+import { Route as FilesFederatedBucketsIdIndexRouteImport } from "./routes/files/federated-buckets/$id/index"
 import { Route as FilesBackupsIdIndexRouteImport } from "./routes/files/backups/$id/index"
 import { Route as AdminClustersCidIndexRouteImport } from "./routes/admin/clusters/$cid/index"
 import { Route as FilesBackupsIdRestoreRouteImport } from "./routes/files/backups/$id/restore"
@@ -86,6 +90,11 @@ const FilesSharesRoute = FilesSharesRouteImport.update({
 const FilesKeysRoute = FilesKeysRouteImport.update({
   id: "/files/keys",
   path: "/files/keys",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FilesFederatedBucketsRoute = FilesFederatedBucketsRouteImport.update({
+  id: "/files/federated-buckets",
+  path: "/files/federated-buckets",
   getParentRoute: () => rootRouteImport,
 } as any)
 const FilesBackupsRoute = FilesBackupsRouteImport.update({
@@ -148,6 +157,12 @@ const FilesKeysIndexRoute = FilesKeysIndexRouteImport.update({
   path: "/",
   getParentRoute: () => FilesKeysRoute,
 } as any)
+const FilesFederatedBucketsIndexRoute =
+  FilesFederatedBucketsIndexRouteImport.update({
+    id: "/",
+    path: "/",
+    getParentRoute: () => FilesFederatedBucketsRoute,
+  } as any)
 const FilesBackupsIndexRoute = FilesBackupsIndexRouteImport.update({
   id: "/",
   path: "/",
@@ -198,6 +213,12 @@ const FilesKeysNewRoute = FilesKeysNewRouteImport.update({
   path: "/new",
   getParentRoute: () => FilesKeysRoute,
 } as any)
+const FilesFederatedBucketsNewRoute =
+  FilesFederatedBucketsNewRouteImport.update({
+    id: "/new",
+    path: "/new",
+    getParentRoute: () => FilesFederatedBucketsRoute,
+  } as any)
 const FilesBackupsNewRoute = FilesBackupsNewRouteImport.update({
   id: "/new",
   path: "/new",
@@ -213,6 +234,12 @@ const AdminClustersNewRoute = AdminClustersNewRouteImport.update({
   path: "/admin/clusters/new",
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesFederatedBucketsIdIndexRoute =
+  FilesFederatedBucketsIdIndexRouteImport.update({
+    id: "/$id/",
+    path: "/$id/",
+    getParentRoute: () => FilesFederatedBucketsRoute,
+  } as any)
 const FilesBackupsIdIndexRoute = FilesBackupsIdIndexRouteImport.update({
   id: "/$id/",
   path: "/$id/",
@@ -283,6 +310,7 @@ export interface FileRoutesByFullPath {
   "/admin/users": typeof AdminUsersRouteWithChildren
   "/files/$regionId": typeof FilesRegionIdRouteWithChildren
   "/files/backups": typeof FilesBackupsRouteWithChildren
+  "/files/federated-buckets": typeof FilesFederatedBucketsRouteWithChildren
   "/files/keys": typeof FilesKeysRouteWithChildren
   "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRouteWithChildren
@@ -292,6 +320,7 @@ export interface FileRoutesByFullPath {
   "/admin/clusters/new": typeof AdminClustersNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
+  "/files/federated-buckets/new": typeof FilesFederatedBucketsNewRoute
   "/files/keys/new": typeof FilesKeysNewRoute
   "/files/regions/new": typeof FilesRegionsNewRoute
   "/files/shares/new": typeof FilesSharesNewRoute
@@ -302,6 +331,7 @@ export interface FileRoutesByFullPath {
   "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$regionId/": typeof FilesRegionIdIndexRoute
   "/files/backups/": typeof FilesBackupsIndexRoute
+  "/files/federated-buckets/": typeof FilesFederatedBucketsIndexRoute
   "/files/keys/": typeof FilesKeysIndexRoute
   "/files/shares/": typeof FilesSharesIndexRoute
   "/files/syncs/": typeof FilesSyncsIndexRoute
@@ -312,6 +342,7 @@ export interface FileRoutesByFullPath {
   "/files/backups/$id/restore": typeof FilesBackupsIdRestoreRoute
   "/admin/clusters/$cid/": typeof AdminClustersCidIndexRoute
   "/files/backups/$id/": typeof FilesBackupsIdIndexRoute
+  "/files/federated-buckets/$id/": typeof FilesFederatedBucketsIdIndexRoute
   "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
   "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
@@ -331,6 +362,7 @@ export interface FileRoutesByTo {
   "/admin/clusters/new": typeof AdminClustersNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
+  "/files/federated-buckets/new": typeof FilesFederatedBucketsNewRoute
   "/files/keys/new": typeof FilesKeysNewRoute
   "/files/regions/new": typeof FilesRegionsNewRoute
   "/files/shares/new": typeof FilesSharesNewRoute
@@ -341,6 +373,7 @@ export interface FileRoutesByTo {
   "/admin/users": typeof AdminUsersIndexRoute
   "/files/$regionId": typeof FilesRegionIdIndexRoute
   "/files/backups": typeof FilesBackupsIndexRoute
+  "/files/federated-buckets": typeof FilesFederatedBucketsIndexRoute
   "/files/keys": typeof FilesKeysIndexRoute
   "/files/shares": typeof FilesSharesIndexRoute
   "/files/syncs": typeof FilesSyncsIndexRoute
@@ -351,6 +384,7 @@ export interface FileRoutesByTo {
   "/files/backups/$id/restore": typeof FilesBackupsIdRestoreRoute
   "/admin/clusters/$cid": typeof AdminClustersCidIndexRoute
   "/files/backups/$id": typeof FilesBackupsIdIndexRoute
+  "/files/federated-buckets/$id": typeof FilesFederatedBucketsIdIndexRoute
   "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
   "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
@@ -368,6 +402,7 @@ export interface FileRoutesById {
   "/admin/users": typeof AdminUsersRouteWithChildren
   "/files/$regionId": typeof FilesRegionIdRouteWithChildren
   "/files/backups": typeof FilesBackupsRouteWithChildren
+  "/files/federated-buckets": typeof FilesFederatedBucketsRouteWithChildren
   "/files/keys": typeof FilesKeysRouteWithChildren
   "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRouteWithChildren
@@ -377,6 +412,7 @@ export interface FileRoutesById {
   "/admin/clusters/new": typeof AdminClustersNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
+  "/files/federated-buckets/new": typeof FilesFederatedBucketsNewRoute
   "/files/keys/new": typeof FilesKeysNewRoute
   "/files/regions/new": typeof FilesRegionsNewRoute
   "/files/shares/new": typeof FilesSharesNewRoute
@@ -387,6 +423,7 @@ export interface FileRoutesById {
   "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$regionId/": typeof FilesRegionIdIndexRoute
   "/files/backups/": typeof FilesBackupsIndexRoute
+  "/files/federated-buckets/": typeof FilesFederatedBucketsIndexRoute
   "/files/keys/": typeof FilesKeysIndexRoute
   "/files/shares/": typeof FilesSharesIndexRoute
   "/files/syncs/": typeof FilesSyncsIndexRoute
@@ -397,6 +434,7 @@ export interface FileRoutesById {
   "/files/backups/$id/restore": typeof FilesBackupsIdRestoreRoute
   "/admin/clusters/$cid/": typeof AdminClustersCidIndexRoute
   "/files/backups/$id/": typeof FilesBackupsIdIndexRoute
+  "/files/federated-buckets/$id/": typeof FilesFederatedBucketsIdIndexRoute
   "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
   "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
@@ -415,6 +453,7 @@ export interface FileRouteTypes {
     | "/admin/users"
     | "/files/$regionId"
     | "/files/backups"
+    | "/files/federated-buckets"
     | "/files/keys"
     | "/files/shares"
     | "/files/syncs"
@@ -424,6 +463,7 @@ export interface FileRouteTypes {
     | "/admin/clusters/new"
     | "/admin/users/new"
     | "/files/backups/new"
+    | "/files/federated-buckets/new"
     | "/files/keys/new"
     | "/files/regions/new"
     | "/files/shares/new"
@@ -434,6 +474,7 @@ export interface FileRouteTypes {
     | "/admin/users/"
     | "/files/$regionId/"
     | "/files/backups/"
+    | "/files/federated-buckets/"
     | "/files/keys/"
     | "/files/shares/"
     | "/files/syncs/"
@@ -444,6 +485,7 @@ export interface FileRouteTypes {
     | "/files/backups/$id/restore"
     | "/admin/clusters/$cid/"
     | "/files/backups/$id/"
+    | "/files/federated-buckets/$id/"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
     | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
@@ -463,6 +505,7 @@ export interface FileRouteTypes {
     | "/admin/clusters/new"
     | "/admin/users/new"
     | "/files/backups/new"
+    | "/files/federated-buckets/new"
     | "/files/keys/new"
     | "/files/regions/new"
     | "/files/shares/new"
@@ -473,6 +516,7 @@ export interface FileRouteTypes {
     | "/admin/users"
     | "/files/$regionId"
     | "/files/backups"
+    | "/files/federated-buckets"
     | "/files/keys"
     | "/files/shares"
     | "/files/syncs"
@@ -483,6 +527,7 @@ export interface FileRouteTypes {
     | "/files/backups/$id/restore"
     | "/admin/clusters/$cid"
     | "/files/backups/$id"
+    | "/files/federated-buckets/$id"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
     | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
@@ -499,6 +544,7 @@ export interface FileRouteTypes {
     | "/admin/users"
     | "/files/$regionId"
     | "/files/backups"
+    | "/files/federated-buckets"
     | "/files/keys"
     | "/files/shares"
     | "/files/syncs"
@@ -508,6 +554,7 @@ export interface FileRouteTypes {
     | "/admin/clusters/new"
     | "/admin/users/new"
     | "/files/backups/new"
+    | "/files/federated-buckets/new"
     | "/files/keys/new"
     | "/files/regions/new"
     | "/files/shares/new"
@@ -518,6 +565,7 @@ export interface FileRouteTypes {
     | "/admin/users/"
     | "/files/$regionId/"
     | "/files/backups/"
+    | "/files/federated-buckets/"
     | "/files/keys/"
     | "/files/shares/"
     | "/files/syncs/"
@@ -528,6 +576,7 @@ export interface FileRouteTypes {
     | "/files/backups/$id/restore"
     | "/admin/clusters/$cid/"
     | "/files/backups/$id/"
+    | "/files/federated-buckets/$id/"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
     | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
@@ -545,6 +594,7 @@ export interface RootRouteChildren {
   AdminUsersRoute: typeof AdminUsersRouteWithChildren
   FilesRegionIdRoute: typeof FilesRegionIdRouteWithChildren
   FilesBackupsRoute: typeof FilesBackupsRouteWithChildren
+  FilesFederatedBucketsRoute: typeof FilesFederatedBucketsRouteWithChildren
   FilesKeysRoute: typeof FilesKeysRouteWithChildren
   FilesSharesRoute: typeof FilesSharesRouteWithChildren
   FilesSyncsRoute: typeof FilesSyncsRouteWithChildren
@@ -613,6 +663,13 @@ declare module "@tanstack/react-router" {
       path: "/files/keys"
       fullPath: "/files/keys"
       preLoaderRoute: typeof FilesKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/files/federated-buckets": {
+      id: "/files/federated-buckets"
+      path: "/files/federated-buckets"
+      fullPath: "/files/federated-buckets"
+      preLoaderRoute: typeof FilesFederatedBucketsRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/files/backups": {
@@ -699,6 +756,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof FilesKeysIndexRouteImport
       parentRoute: typeof FilesKeysRoute
     }
+    "/files/federated-buckets/": {
+      id: "/files/federated-buckets/"
+      path: "/"
+      fullPath: "/files/federated-buckets/"
+      preLoaderRoute: typeof FilesFederatedBucketsIndexRouteImport
+      parentRoute: typeof FilesFederatedBucketsRoute
+    }
     "/files/backups/": {
       id: "/files/backups/"
       path: "/"
@@ -769,6 +833,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof FilesKeysNewRouteImport
       parentRoute: typeof FilesKeysRoute
     }
+    "/files/federated-buckets/new": {
+      id: "/files/federated-buckets/new"
+      path: "/new"
+      fullPath: "/files/federated-buckets/new"
+      preLoaderRoute: typeof FilesFederatedBucketsNewRouteImport
+      parentRoute: typeof FilesFederatedBucketsRoute
+    }
     "/files/backups/new": {
       id: "/files/backups/new"
       path: "/new"
@@ -789,6 +860,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/admin/clusters/new"
       preLoaderRoute: typeof AdminClustersNewRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    "/files/federated-buckets/$id/": {
+      id: "/files/federated-buckets/$id/"
+      path: "/$id"
+      fullPath: "/files/federated-buckets/$id/"
+      preLoaderRoute: typeof FilesFederatedBucketsIdIndexRouteImport
+      parentRoute: typeof FilesFederatedBucketsRoute
     }
     "/files/backups/$id/": {
       id: "/files/backups/$id/"
@@ -916,6 +994,23 @@ const FilesBackupsRouteWithChildren = FilesBackupsRoute._addFileChildren(
   FilesBackupsRouteChildren,
 )
 
+interface FilesFederatedBucketsRouteChildren {
+  FilesFederatedBucketsNewRoute: typeof FilesFederatedBucketsNewRoute
+  FilesFederatedBucketsIndexRoute: typeof FilesFederatedBucketsIndexRoute
+  FilesFederatedBucketsIdIndexRoute: typeof FilesFederatedBucketsIdIndexRoute
+}
+
+const FilesFederatedBucketsRouteChildren: FilesFederatedBucketsRouteChildren = {
+  FilesFederatedBucketsNewRoute: FilesFederatedBucketsNewRoute,
+  FilesFederatedBucketsIndexRoute: FilesFederatedBucketsIndexRoute,
+  FilesFederatedBucketsIdIndexRoute: FilesFederatedBucketsIdIndexRoute,
+}
+
+const FilesFederatedBucketsRouteWithChildren =
+  FilesFederatedBucketsRoute._addFileChildren(
+    FilesFederatedBucketsRouteChildren,
+  )
+
 interface FilesKeysRouteChildren {
   FilesKeysNewRoute: typeof FilesKeysNewRoute
   FilesKeysIndexRoute: typeof FilesKeysIndexRoute
@@ -987,6 +1082,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminUsersRoute: AdminUsersRouteWithChildren,
   FilesRegionIdRoute: FilesRegionIdRouteWithChildren,
   FilesBackupsRoute: FilesBackupsRouteWithChildren,
+  FilesFederatedBucketsRoute: FilesFederatedBucketsRouteWithChildren,
   FilesKeysRoute: FilesKeysRouteWithChildren,
   FilesSharesRoute: FilesSharesRouteWithChildren,
   FilesSyncsRoute: FilesSyncsRouteWithChildren,
