@@ -32,4 +32,5 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.42.1 // indirect
 	github.com/aws/smithy-go v1.25.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 )

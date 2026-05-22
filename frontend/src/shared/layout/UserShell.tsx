@@ -44,6 +44,17 @@ export function UserShell({ children }: UserShellProps): ReactNode {
               >
                 Shares
               </Link>
+              {/* v1.5.0a: scheduled backups land alongside Keys + */}
+              {/* Shares in the user shell. The pivot from /files/syncs */}
+              {/* (ad-hoc copies) to /files/backups (recurring + named) */}
+              {/* is the post-v0.8 backup story spelled out. */}
+              <Link
+                to="/files/backups"
+                className={NAV_LINK}
+                activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+              >
+                Backups
+              </Link>
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">

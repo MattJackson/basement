@@ -15,6 +15,7 @@ import (
 	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
+	"github.com/mattjackson/basement/internal/backup"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/metrics"
@@ -54,7 +55,12 @@ type Server struct {
 	drv        driver.Driver
 	reg        *driver.Registry
 	syncStore  sync.Store
-	oidc       oidcProvider
+	// v1.5.0a backup subsystem. Both are nil in tests that don't
+	// wire them, and the user_backups handlers treat nil as
+	// "subsystem disabled" rather than crashing.
+	backups     backup.Backups
+	backupSched *backup.Scheduler
+	oidc        oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
 	metrics    metrics.Recorder
@@ -149,6 +155,17 @@ func (s *Server) SetAuditLogger(l audit.Logger) {
 		return
 	}
 	s.audit = l
+}
+
+// SetBackups wires the v1.5.0a backup store + scheduler into the
+// server. Both must be set together — handlers that touch one also
+// touch the other. Passing nil for either disables the
+// /user/backups endpoint family (handlers return 503 BACKUPS_NOT_WIRED).
+// Production main.go always supplies both; tests that don't care
+// about backups leave the defaults unset.
+func (s *Server) SetBackups(store backup.Backups, sched *backup.Scheduler) {
+	s.backups = store
+	s.backupSched = sched
 }
 
 // SetMetricsRecorder wires the metrics-snapshot recorder into the
@@ -381,6 +398,17 @@ func (s *Server) routes() {
 			userG.Delete("/user/syncs/{id}", s.userDeleteSyncHandler)
 			userG.Post("/user/syncs/{id}/pause", s.userPauseSyncHandler)
 			userG.Post("/user/syncs/{id}/resume", s.userResumeSyncHandler)
+
+			// User backup endpoints (v1.5.0a BACKUP.SCHEDULED).
+			// Promotes the sync engine into a recurring, named
+			// backup with a cron schedule. Handlers return 503
+			// when the backup subsystem isn't wired (tests).
+			userG.Post("/user/backups", s.userCreateBackupHandler)
+			userG.Get("/user/backups", s.userListBackupsHandler)
+			userG.Get("/user/backups/{id}", s.userGetBackupHandler)
+			userG.Put("/user/backups/{id}", s.userUpdateBackupHandler)
+			userG.Delete("/user/backups/{id}", s.userDeleteBackupHandler)
+			userG.Post("/user/backups/{id}/run", s.userRunBackupHandler)
 
 			// User region keychain endpoints (ADR-0002, cycle
 			// v1.1.0b). The region's S3 key IS the permission —

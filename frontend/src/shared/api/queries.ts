@@ -915,6 +915,96 @@ export function useResumeUserSync() {
   });
 }
 
+// v1.5.0a BACKUP.SCHEDULED — scheduled bucket-to-bucket backup hooks.
+// The wire types come from the generated openapi types, but we
+// pre-narrow them here so callers don't have to traffic in optional
+// chains for fields the server always returns.
+
+export type BackupResult = components["schemas"]["BackupResult"];
+export type Backup = components["schemas"]["Backup"];
+export type UserBackupCreateRequest = components["schemas"]["UserBackupCreateRequest"];
+
+export function useUserBackups() {
+  return useQuery<Backup[]>({
+    queryKey: ["user", "backups"],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET("/user/backups");
+      if (!response.ok || !data) throw apiError("user/backups", response.status, error);
+      return data as Backup[];
+    },
+    staleTime: 10_000,
+    // Light polling so the list view sees lastResult updates within
+    // ~10s of a scheduled run firing in the background.
+    refetchInterval: 10_000,
+    retry: 1,
+  });
+}
+
+export function useUserBackup(id: string | null) {
+  return useQuery<Backup>({
+    queryKey: ["user", "backups", id],
+    queryFn: async () => {
+      if (!id) throw new Error("Backup ID required");
+      const { data, error, response } = await client.GET("/user/backups/{id}", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`user/backups/${id}`, response.status, error);
+      return data as Backup;
+    },
+    enabled: !!id,
+    staleTime: 5_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useCreateUserBackup() {
+  return useMutation({
+    mutationFn: async (body: UserBackupCreateRequest) => {
+      const { data, error, response } = await client.POST("/user/backups", { body });
+      if (!response.ok || !data) throw apiError("user/backups/create", response.status, error);
+      return data as Backup;
+    },
+  });
+}
+
+export function useUpdateUserBackup() {
+  return useMutation({
+    mutationFn: async (args: { id: string; body: UserBackupCreateRequest }) => {
+      const { data, error, response } = await client.PUT("/user/backups/{id}", {
+        params: { path: { id: args.id } },
+        body: args.body,
+      });
+      if (!response.ok || !data) throw apiError(`user/backups/update/${args.id}`, response.status, error);
+      return data as Backup;
+    },
+  });
+}
+
+export function useDeleteUserBackup() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error, response } = await client.DELETE("/user/backups/{id}", {
+        params: { path: { id } },
+      });
+      if (!response.ok) throw apiError(`user/backups/delete/${id}`, response.status, error);
+      return null;
+    },
+  });
+}
+
+export function useRunUserBackup() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error, response } = await client.POST("/user/backups/{id}/run", {
+        params: { path: { id } },
+      });
+      if (!response.ok || !data) throw apiError(`user/backups/run/${id}`, response.status, error);
+      return data as { id: string; status: string };
+    },
+  });
+}
+
 // ADR-0001 v0.9.0g: policy matrix editor (/admin/policies).
 //
 // The OpenAPI spec doesn't carry these endpoints yet, so we go around

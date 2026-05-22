@@ -13,6 +13,7 @@ import (
 	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
+	"github.com/mattjackson/basement/internal/backup"
 	"github.com/mattjackson/basement/internal/config"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 	_ "github.com/mattjackson/basement/internal/drivers/aws_s3"
@@ -278,6 +279,26 @@ func main() {
 		srv.SetOIDC(oidcProv)
 		slog.Info("OIDC enabled", "issuer", cfg.OIDC.Issuer, "auto_provision", cfg.OIDC.AutoProvision)
 	}
+
+	// v1.5.0a: scheduled backup subsystem. The store persists
+	// operator-defined Backup records under {dataDir}/backups.json;
+	// the scheduler wraps robfig/cron/v3 and dispatches into the
+	// existing sync engine through a runner closure on srv. Both
+	// are opened before Start so the API handlers always have a
+	// non-nil reference, and LoadAll registers every persisted
+	// schedule before cron.Start fires the first tick.
+	backupStore, err := backup.NewFileStore(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to open backup store", "error", err)
+		os.Exit(1)
+	}
+	backupSched := backup.NewScheduler(backupStore, srv.NewBackupRunner(), slog.Default())
+	if err := backupSched.LoadAll(context.Background()); err != nil {
+		slog.Warn("backup scheduler: LoadAll returned an error — some schedules may not fire", "error", err)
+	}
+	srv.SetBackups(backupStore, backupSched)
+	backupSched.Start()
+	defer backupSched.Stop()
 
 	ctxSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
