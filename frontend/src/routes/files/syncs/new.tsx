@@ -18,15 +18,13 @@ type SyncSearch = {
   srcBid?: string;
 };
 
-// ADR-0002 (v1.1.0e): the picker reads from /user/regions instead of
-// the retired /user/clusters tier. The sync engine still expects
-// (srcConnectionId, dstConnectionId) at the cluster layer — we POST
-// the regionId in those fields, and a future v1.1.0g cycle will land
-// region→cluster resolution at the sync engine. Until then the POST
-// returns 500 from the backend; the picker UX is the win for v1.1.0e.
-//
-// TODO(v1.1.0g): wire region→cluster resolution on the backend so
-// useCreateUserSync no longer fails with "cluster not found".
+// ADR-0002 (v1.1.0e + v1.1.0g): the picker reads from /user/regions
+// instead of the retired /user/clusters tier. The backend now accepts
+// EITHER a region ID or a Connection ID in the srcConnectionId /
+// dstConnectionId fields — see internal/api/region_resolver.go. When
+// the region has no admin Connection at its endpoint the backend
+// returns 400 NO_ADMIN_BRIDGE; we render an inline error that points
+// the user at /admin/clusters/new with the offending endpoint.
 export const Route = createFileRoute("/files/syncs/new")({
   component: NewSyncPage,
   validateSearch: (search): SyncSearch => ({
@@ -58,9 +56,9 @@ function NewSyncPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!srcRegionId || !dstRegionId || !srcBucket || !dstBucket) return;
-    // POST will fail until v1.1.0g wires region→cluster resolution at
-    // the sync engine. Keeping the field names so the request shape
-    // matches the existing backend contract; only the values change.
+    // The backend resolves region IDs in the connectionId fields to the
+    // owning admin Connection (v1.1.0g). A 400 NO_ADMIN_BRIDGE response
+    // is rendered inline below via the createSync.error block.
     createSync.mutate(
       {
         mode,
@@ -97,13 +95,6 @@ function NewSyncPage() {
           </Button>
         </div>
       </header>
-
-      <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm">
-        <p className="font-medium">Heads up</p>
-        <p className="text-muted-foreground mt-1">
-          Sync POST will fail until v1.1.0g wires region→cluster resolution at the sync engine. The picker still lets you stage a job so the form is ready when the backend lands.
-        </p>
-      </div>
 
       <section className="space-y-4 rounded-lg border bg-card p-6">
         <h2 className="text-sm font-medium text-muted-foreground">Mode</h2>
@@ -204,11 +195,31 @@ function NewSyncPage() {
         </div>
       </section>
 
-      {createSync.error && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {String(createSync.error.message ?? "Failed to start sync")}
-        </div>
-      )}
+      {createSync.error && renderSyncError(createSync.error)}
+    </div>
+  );
+}
+
+// renderSyncError surfaces the NO_ADMIN_BRIDGE case with the offending
+// endpoint and a hint to the cluster admin; other errors fall back to
+// the standard inline message banner.
+function renderSyncError(err: unknown) {
+  const e = err as { code?: string; message?: string; details?: { endpoint?: string; field?: string } };
+  if (e?.code === "NO_ADMIN_BRIDGE") {
+    const endpoint = e.details?.endpoint ?? "(unknown)";
+    const field = e.details?.field ?? "region";
+    return (
+      <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-destructive space-y-1">
+        <p className="font-medium">No admin bridge for this region</p>
+        <p>
+          The {field === "srcConnectionId" ? "source" : field === "dstConnectionId" ? "destination" : ""} region at <code className="font-mono">{endpoint}</code> has no admin Connection registered. Ask a cluster admin to register this endpoint at <code className="font-mono">/admin/clusters/new</code>, then retry.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      {String(e?.message ?? "Failed to start sync")}
     </div>
   );
 }

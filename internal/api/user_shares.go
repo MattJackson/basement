@@ -6,20 +6,20 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"golang.org/x/crypto/bcrypt"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // UserShareCreateRequest represents the request body for creating a share.
 type UserShareCreateRequest struct {
-	ConnectionID  string `json:"connectionId"`
-	BucketID      string `json:"bucketId"`
-	Prefix        string `json:"prefix,omitempty"`
-	Key           string `json:"key,omitempty"`
+	ConnectionID  string     `json:"connectionId"`
+	BucketID      string     `json:"bucketId"`
+	Prefix        string     `json:"prefix,omitempty"`
+	Key           string     `json:"key,omitempty"`
 	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
 	DownloadLimit *int       `json:"downloadLimit,omitempty"`
-	Password      string   `json:"password,omitempty"`
+	Password      string     `json:"password,omitempty"`
 }
 
 // userCreateShareHandler handles POST /api/v1/user/shares.
@@ -55,6 +55,18 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	if hasPrefix && hasKey {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "Cannot specify both prefix and key")
+		return
+	}
+
+	// Region-tier bridge (v1.1.0g): connectionId may now carry either a
+	// real Connection.ID OR a UserRegion.ID owned by the caller. Resolve
+	// to a Connection.ID before any downstream lookup so the rest of
+	// the handler (capability gate, visibility check, GetBucket probe,
+	// share record) sees the cluster-tier shape it expects. Back-compat
+	// preserved: a real Connection.ID falls through unchanged.
+	if resolved, ok := s.maybeResolveRegionField(w, r, claims.UserID, req.ConnectionID, "connectionId"); ok {
+		req.ConnectionID = resolved
+	} else {
 		return
 	}
 
@@ -185,7 +197,7 @@ func (s *Server) userListSharesHandler(w http.ResponseWriter, r *http.Request) {
 	result := make([]map[string]interface{}, len(shares))
 	for i, share := range shares {
 		bucketInfo := map[string]string{}
-		
+
 		// Try to get bucket alias if user has access (skip if no registry).
 		if s.reg != nil {
 			if _, err := s.conns.Get(r.Context(), share.ConnectionID); err == nil {
@@ -209,19 +221,19 @@ func (s *Server) userListSharesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		result[i] = map[string]interface{}{
-			"token":          share.Token,
-			"connectionId":   share.ConnectionID,
-			"bucketId":       share.BucketID,
-			"bucketAlias":    bucketInfo["alias"],
-			"bucketLabel":    bucketInfo["label"],
-			"path":           displayPath,
-			"isPrefixShare":  share.Prefix != "",
-			"createdAt":      share.CreatedAt.UTC().Format(time.RFC3339),
-			"expiresAt":      formatTimeOrNull(share.ExpiresAt),
-			"downloadLimit":  share.DownloadLimit,
-			"downloadsUsed":  share.DownloadsUsed,
-			"hasPassword":    share.PasswordHash != "",
-			"isRevoked":      share.Revoked,
+			"token":         share.Token,
+			"connectionId":  share.ConnectionID,
+			"bucketId":      share.BucketID,
+			"bucketAlias":   bucketInfo["alias"],
+			"bucketLabel":   bucketInfo["label"],
+			"path":          displayPath,
+			"isPrefixShare": share.Prefix != "",
+			"createdAt":     share.CreatedAt.UTC().Format(time.RFC3339),
+			"expiresAt":     formatTimeOrNull(share.ExpiresAt),
+			"downloadLimit": share.DownloadLimit,
+			"downloadsUsed": share.DownloadsUsed,
+			"hasPassword":   share.PasswordHash != "",
+			"isRevoked":     share.Revoked,
 		}
 	}
 

@@ -23,6 +23,13 @@ type UserSyncCreateRequest struct {
 }
 
 // userCreateSyncHandler handles POST /api/v1/user/syncs.
+//
+// Post-ADR-0002 (v1.1.0g): srcConnectionId / dstConnectionId may carry
+// either a Connection.ID OR a UserRegion.ID owned by the caller. If a
+// field looks like a UserRegion ID for this user, it's translated via
+// resolveRegionToConnection BEFORE the cluster-lookup + access checks
+// run. Back-compat is preserved: callers passing a real Connection.ID
+// (the legacy shape) continue to work without modification.
 func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
@@ -44,6 +51,21 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 	// Validate mode (v0.8.0d: pull and push supported)
 	if req.Mode != "pull" && req.Mode != "push" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_MODE", "Mode must be \"pull\" or \"push\"")
+		return
+	}
+
+	// Region-tier bridge: translate region IDs to Connection IDs before
+	// any downstream lookup. Each field is independent — a caller can
+	// mix-and-match a region on one side and a real Connection.ID on
+	// the other.
+	if resolved, ok := s.maybeResolveRegionField(w, r, claims.UserID, req.SrcConnectionID, "srcConnectionId"); ok {
+		req.SrcConnectionID = resolved
+	} else {
+		return
+	}
+	if resolved, ok := s.maybeResolveRegionField(w, r, claims.UserID, req.DstConnectionID, "dstConnectionId"); ok {
+		req.DstConnectionID = resolved
+	} else {
 		return
 	}
 
@@ -114,6 +136,13 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.auditSuccess(r, "sync:create", resourceSync(job.ID))
 
+	// Snapshot the response values BEFORE spawning the goroutine so the
+	// race detector doesn't catch the engine's job.State writes against
+	// our subsequent encode. The goroutine mutates *job through
+	// engine.Run; the response only needs the queued-state values.
+	respID := job.ID
+	respState := job.State
+
 	// Spawn goroutine to run the sync (async, return 202 immediately)
 	go func() {
 		ctx := context.Background()
@@ -140,8 +169,8 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":      job.ID,
-		"state":   job.State,
+		"id":      respID,
+		"state":   respState,
 		"message": "Sync job created and queued",
 	})
 }
