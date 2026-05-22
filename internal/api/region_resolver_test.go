@@ -52,7 +52,7 @@ func newResolverTestEnv(t *testing.T) *resolverTestEnv {
 	conns := &testMockConnectionStore{}
 	reg := driver.NewRegistry(conns)
 	reg.SetUserRegionsStore(st.UserRegions())
-	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (driver.Driver, error) {
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
 		return &testMockDriver{}, nil
 	})
 

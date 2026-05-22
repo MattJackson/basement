@@ -64,9 +64,39 @@ type UserRegion struct {
 	Region       string    `json:"region"`   // S3 region label, default "us-east-1"
 	AccessKeyID  string    `json:"accessKeyId"`
 	SecretKeyEnc []byte    `json:"secretKeyEnc"` // AES-GCM(nonce||ct||tag), per crypto.go
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
-	LastUsedAt   time.Time `json:"lastUsedAt,omitempty"`
+	// AddressingStyle is the v1.3.0c per-region S3 addressing toggle:
+	// "path" (default) routes requests as endpoint/bucket/key; "virtual_host"
+	// routes as bucket.endpoint/key. Empty / unset reads as "path" so
+	// every UserRegion persisted before v1.3.0c keeps its current behaviour
+	// without a backfill migration — see normalizeAddressingStyle.
+	AddressingStyle string    `json:"addressingStyle,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	LastUsedAt      time.Time `json:"lastUsedAt,omitempty"`
+}
+
+// AddressingStylePath / AddressingStyleVirtualHost are the canonical
+// string values for UserRegion.AddressingStyle. Mirrored from
+// internal/driver so the FE-facing wire shape doesn't have to import
+// the driver package.
+const (
+	AddressingStylePath        = "path"
+	AddressingStyleVirtualHost = "virtual_host"
+)
+
+// normalizeAddressingStyle coalesces the empty / zero value to "path"
+// so every UserRegion read after v1.3.0c carries an explicit, valid
+// style — callers never have to special-case the unset case. Any
+// value other than "path" / "virtual_host" is conservatively treated
+// as path (defensive — a future style added here without a downstream
+// driver update should still produce a working client).
+func normalizeAddressingStyle(s string) string {
+	switch s {
+	case AddressingStyleVirtualHost:
+		return AddressingStyleVirtualHost
+	default:
+		return AddressingStylePath
+	}
 }
 
 // UserRegions is the CRUD surface for region keychain entries. Mirrors
@@ -225,6 +255,7 @@ func validateUserRegionCreate(in UserRegion, plaintextSecret string) (UserRegion
 	in.Alias = strings.TrimSpace(in.Alias)
 	in.Region = strings.TrimSpace(in.Region)
 	in.AccessKeyID = strings.TrimSpace(in.AccessKeyID)
+	in.AddressingStyle = strings.TrimSpace(in.AddressingStyle)
 
 	if in.UserID == "" {
 		return in, errors.New("userId is required")
@@ -245,6 +276,12 @@ func validateUserRegionCreate(in UserRegion, plaintextSecret string) (UserRegion
 	if in.Region == "" {
 		in.Region = "us-east-1"
 	}
+	// v1.3.0c: empty / unset addressing style normalizes to "path" so
+	// every UserRegion persisted after this cycle carries an explicit,
+	// driver-readable value. Any non-canonical value silently coalesces
+	// to "path" too — defensive against a future style key sneaking past
+	// the FE's validation.
+	in.AddressingStyle = normalizeAddressingStyle(in.AddressingStyle)
 	return in, nil
 }
 
@@ -285,15 +322,16 @@ func (s *userRegionStore) Create(_ context.Context, r UserRegion) (UserRegion, e
 
 	now := time.Now().UTC()
 	out := UserRegion{
-		ID:           uuid.NewString(),
-		UserID:       clean.UserID,
-		Alias:        clean.Alias,
-		Endpoint:     clean.Endpoint,
-		Region:       clean.Region,
-		AccessKeyID:  clean.AccessKeyID,
-		SecretKeyEnc: enc,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:              uuid.NewString(),
+		UserID:          clean.UserID,
+		Alias:           clean.Alias,
+		Endpoint:        clean.Endpoint,
+		Region:          clean.Region,
+		AccessKeyID:     clean.AccessKeyID,
+		SecretKeyEnc:    enc,
+		AddressingStyle: normalizeAddressingStyle(clean.AddressingStyle),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	s.cache = append(s.cache, out)
@@ -307,12 +345,21 @@ func (s *userRegionStore) Create(_ context.Context, r UserRegion) (UserRegion, e
 	return out, nil
 }
 
+// applyReadDefaults coalesces zero-value AddressingStyle to "path" so
+// every caller observing a UserRegion read from disk sees an explicit
+// addressing-style value — even rows persisted before v1.3.0c (which
+// don't carry the field on disk). Safe to call multiple times.
+func applyReadDefaults(r UserRegion) UserRegion {
+	r.AddressingStyle = normalizeAddressingStyle(r.AddressingStyle)
+	return r
+}
+
 func (s *userRegionStore) Get(_ context.Context, id string) (UserRegion, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, r := range s.cache {
 		if r.ID == id {
-			return r, nil
+			return applyReadDefaults(r), nil
 		}
 	}
 	return UserRegion{}, ErrUserRegionNotFound
@@ -337,7 +384,7 @@ func (s *userRegionStore) GetByUserEndpoint(_ context.Context, userID, endpoint 
 	defer s.mu.RUnlock()
 	for _, r := range s.cache {
 		if r.UserID == userID && r.Endpoint == canon {
-			return r, nil
+			return applyReadDefaults(r), nil
 		}
 	}
 	return UserRegion{}, ErrUserRegionNotFound
@@ -386,7 +433,7 @@ func (s *userRegionStore) Update(_ context.Context, id string, patch UserRegion)
 		if err := s.save(); err != nil {
 			return UserRegion{}, fmt.Errorf("persisting user region update: %w", err)
 		}
-		return *row, nil
+		return applyReadDefaults(*row), nil
 	}
 	return UserRegion{}, ErrUserRegionNotFound
 }
@@ -415,7 +462,7 @@ func (s *userRegionStore) ListForUser(_ context.Context, userID string) ([]UserR
 	out := make([]UserRegion, 0)
 	for _, r := range s.cache {
 		if r.UserID == userID {
-			out = append(out, r)
+			out = append(out, applyReadDefaults(r))
 		}
 	}
 	return out, nil

@@ -558,6 +558,125 @@ func TestUserRegions_TouchLastUsed_NotFound(t *testing.T) {
 	}
 }
 
+// TestUserRegions_AddressingStyle_DefaultsToPath (v1.3.0c): empty
+// AddressingStyle on Create coalesces to "path" — the backwards-compat
+// guarantee. Every UserRegion persisted before v1.3.0c rehydrates as
+// path-style without a backfill migration.
+func TestUserRegions_AddressingStyle_DefaultsToPath(t *testing.T) {
+	r, _ := newUserRegions(t)
+	ctx := context.Background()
+
+	in := sampleRegion()
+	in.AddressingStyle = "" // explicit zero-value
+	created, err := r.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.AddressingStyle != AddressingStylePath {
+		t.Errorf("AddressingStyle = %q, want %q for unset input", created.AddressingStyle, AddressingStylePath)
+	}
+
+	// Read paths also normalize: Get / List / GetByUserEndpoint never
+	// return a UserRegion with an empty AddressingStyle.
+	got, err := r.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.AddressingStyle != AddressingStylePath {
+		t.Errorf("Get.AddressingStyle = %q, want %q", got.AddressingStyle, AddressingStylePath)
+	}
+
+	rows, err := r.ListForUser(ctx, in.UserID)
+	if err != nil {
+		t.Fatalf("ListForUser: %v", err)
+	}
+	if len(rows) == 0 || rows[0].AddressingStyle != AddressingStylePath {
+		t.Errorf("ListForUser row addressing style = %v, want %q", rows, AddressingStylePath)
+	}
+}
+
+// TestUserRegions_AddressingStyle_HonorsVirtualHost (v1.3.0c): explicit
+// "virtual_host" survives the round-trip through validation + the
+// read-path defaulting helper.
+func TestUserRegions_AddressingStyle_HonorsVirtualHost(t *testing.T) {
+	r, _ := newUserRegions(t)
+	ctx := context.Background()
+
+	in := sampleRegion()
+	in.AddressingStyle = AddressingStyleVirtualHost
+	created, err := r.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.AddressingStyle != AddressingStyleVirtualHost {
+		t.Errorf("AddressingStyle = %q, want %q", created.AddressingStyle, AddressingStyleVirtualHost)
+	}
+
+	got, err := r.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.AddressingStyle != AddressingStyleVirtualHost {
+		t.Errorf("Get.AddressingStyle = %q, want %q", got.AddressingStyle, AddressingStyleVirtualHost)
+	}
+}
+
+// TestUserRegions_AddressingStyle_LegacyOnDiskJSON (v1.3.0c): a
+// UserRegion row written to disk BEFORE the cycle (i.e. with no
+// addressingStyle JSON field) rehydrates with the field set to "path".
+// Backwards-compat regression guard — no migration required.
+func TestUserRegions_AddressingStyle_LegacyOnDiskJSON(t *testing.T) {
+	dir := t.TempDir()
+	// Hand-craft a v1.2.x-shaped JSON row (no addressingStyle field).
+	// We don't bother with encryption-correct SecretKeyEnc bytes
+	// because Decrypt isn't exercised on this path; the read-default
+	// helper is.
+	legacy := `[{"id":"legacy-1","userId":"matthew","alias":"home","endpoint":"https://s3.pq.io","region":"garage","accessKeyId":"GK_LEGACY","secretKeyEnc":"AAAA","createdAt":"2026-05-01T00:00:00Z","updatedAt":"2026-05-01T00:00:00Z"}]`
+	if err := os.WriteFile(filepath.Join(dir, "user_regions.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatalf("seed legacy JSON: %v", err)
+	}
+
+	r, err := OpenUserRegions(dir, testKey)
+	if err != nil {
+		t.Fatalf("OpenUserRegions: %v", err)
+	}
+
+	got, err := r.Get(context.Background(), "legacy-1")
+	if err != nil {
+		t.Fatalf("Get legacy: %v", err)
+	}
+	if got.AddressingStyle != AddressingStylePath {
+		t.Errorf("legacy row AddressingStyle = %q, want %q", got.AddressingStyle, AddressingStylePath)
+	}
+
+	rows, err := r.ListForUser(context.Background(), "matthew")
+	if err != nil {
+		t.Fatalf("ListForUser legacy: %v", err)
+	}
+	if len(rows) != 1 || rows[0].AddressingStyle != AddressingStylePath {
+		t.Errorf("ListForUser legacy = %+v, want one row with addressingStyle=path", rows)
+	}
+}
+
+// TestUserRegions_AddressingStyle_UnknownValueFallsBackToPath: a
+// non-canonical value passed in (e.g. typo, future style we don't yet
+// recognise) coalesces to "path" so the registered region produces a
+// working S3 client regardless.
+func TestUserRegions_AddressingStyle_UnknownValueFallsBackToPath(t *testing.T) {
+	r, _ := newUserRegions(t)
+	ctx := context.Background()
+
+	in := sampleRegion()
+	in.AddressingStyle = "global_endpoint" // not yet a thing
+	created, err := r.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.AddressingStyle != AddressingStylePath {
+		t.Errorf("unknown style should coalesce to path, got %q", created.AddressingStyle)
+	}
+}
+
 func TestUserRegions_Create_Validation(t *testing.T) {
 	r, _ := newUserRegions(t)
 	ctx := context.Background()

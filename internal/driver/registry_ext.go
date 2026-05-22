@@ -37,12 +37,17 @@ type Registry struct {
 }
 
 // RegionDriverBuilder constructs a Driver from a raw (endpoint, accessKey,
-// secret, region) tuple — no Connection record required. The Registry
-// holds one; production wiring leaves it nil and falls back to the
-// registered "garage-v1" factory. Tests override it via
+// secret, region, addressingStyle) tuple — no Connection record required.
+// The Registry holds one; production wiring leaves it nil and falls back
+// to the registered "garage-v1" factory. Tests override it via
 // SetRegionDriverBuilder to inject a mock driver without touching the
 // global factory map.
-type RegionDriverBuilder func(endpoint, accessKeyID, secretKey, region string) (Driver, error)
+//
+// addressingStyle ("" | AddressingStylePath | AddressingStyleVirtualHost):
+// threads the per-region S3 addressing toggle (v1.3.0c) through to the
+// underlying client builder. Empty string is treated as path-style by
+// every downstream driver.
+type RegionDriverBuilder func(endpoint, accessKeyID, secretKey, region, addressingStyle string) (Driver, error)
 
 // NewRegistry creates a new driver registry backed by the given connections store.
 func NewRegistry(conns store.Connections) *Registry {
@@ -228,7 +233,12 @@ func (r *Registry) ForUserGrant(ctx context.Context, connID, accessKeyID, secret
 // Returns ErrUnsupported when SetUserRegionsStore hasn't been called
 // (Store.UserRegions() was nil at wire-up) — defensive against a half-
 // configured deploy. Callers map to 503.
-func (r *Registry) ForUserRegion(_ context.Context, endpoint, accessKeyID, secretKey, region string) (Driver, error) {
+//
+// addressingStyle is the v1.3.0c per-region S3 addressing toggle —
+// "" / "path" → path-style, "virtual_host" → virtual-host. The smart
+// default (force path-style when endpoint host is an IP literal) is
+// applied downstream in driver.BuildS3Client.
+func (r *Registry) ForUserRegion(_ context.Context, endpoint, accessKeyID, secretKey, region, addressingStyle string) (Driver, error) {
 	if endpoint == "" {
 		return nil, fmt.Errorf("ForUserRegion: empty endpoint")
 	}
@@ -256,13 +266,14 @@ func (r *Registry) ForUserRegion(_ context.Context, endpoint, accessKeyID, secre
 	var drv Driver
 	var err error
 	if builder != nil {
-		drv, err = builder(endpoint, accessKeyID, secretKey, region)
+		drv, err = builder(endpoint, accessKeyID, secretKey, region, addressingStyle)
 	} else {
 		cfg := Config{
-			"s3_endpoint":   endpoint,
-			"access_key_id": accessKeyID,
-			"secret_key":    secretKey,
-			"region":        region,
+			"s3_endpoint":      endpoint,
+			"access_key_id":    accessKeyID,
+			"secret_key":       secretKey,
+			"region":           region,
+			"addressing_style": addressingStyle,
 			// Legacy aliases the garage_v1 S3 path may consult.
 			"s3_access_key": accessKeyID,
 			"s3_secret_key": secretKey,

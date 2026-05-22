@@ -40,7 +40,7 @@ func (fakeUserRegions) Decrypt(_ store.UserRegion) (string, error)      { return
 func TestForUserRegion_UnwiredStoreReturnsErrUnsupported(t *testing.T) {
 	reg := NewRegistry(newMockConnStore())
 
-	_, err := reg.ForUserRegion(context.Background(), "https://s3.example.com", "AK", "SK", "us-east-1")
+	_, err := reg.ForUserRegion(context.Background(), "https://s3.example.com", "AK", "SK", "us-east-1", "")
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("expected ErrUnsupported on unwired regions store, got %v", err)
 	}
@@ -54,18 +54,18 @@ func TestForUserRegion_CachesByEndpointAndKey(t *testing.T) {
 	reg.SetUserRegionsStore(fakeUserRegions{})
 
 	built := 0
-	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (Driver, error) {
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (Driver, error) {
 		built++
 		return &mockDriver{id: int64(built)}, nil
 	})
 
 	ctx := context.Background()
 
-	a1, err := reg.ForUserRegion(ctx, "https://s3.example.com", "AK1", "SK1", "garage")
+	a1, err := reg.ForUserRegion(ctx, "https://s3.example.com", "AK1", "SK1", "garage", "")
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	a2, err := reg.ForUserRegion(ctx, "https://s3.example.com", "AK1", "SK1", "garage")
+	a2, err := reg.ForUserRegion(ctx, "https://s3.example.com", "AK1", "SK1", "garage", "")
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestForUserRegion_CachesByEndpointAndKey(t *testing.T) {
 	}
 
 	// Different access key → separate cache entry.
-	b1, err := reg.ForUserRegion(ctx, "https://s3.example.com", "AK2", "SK2", "garage")
+	b1, err := reg.ForUserRegion(ctx, "https://s3.example.com", "AK2", "SK2", "garage", "")
 	if err != nil {
 		t.Fatalf("third call: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestForUserRegion_InvalidateUserRegionEvicts(t *testing.T) {
 	reg.SetUserRegionsStore(fakeUserRegions{})
 
 	built := 0
-	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (Driver, error) {
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (Driver, error) {
 		built++
 		return &mockDriver{id: int64(built)}, nil
 	})
@@ -104,14 +104,14 @@ func TestForUserRegion_InvalidateUserRegionEvicts(t *testing.T) {
 	ctx := context.Background()
 	endpoint := "https://s3.example.com"
 
-	first, err := reg.ForUserRegion(ctx, endpoint, "AK", "SK", "garage")
+	first, err := reg.ForUserRegion(ctx, endpoint, "AK", "SK", "garage", "")
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
 
 	reg.InvalidateUserRegion(endpoint, "AK")
 
-	second, err := reg.ForUserRegion(ctx, endpoint, "AK", "SK", "garage")
+	second, err := reg.ForUserRegion(ctx, endpoint, "AK", "SK", "garage", "")
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestForUserRegion_InvalidateUserRegionEvicts(t *testing.T) {
 func TestForUserRegion_RejectsEmptyArgs(t *testing.T) {
 	reg := NewRegistry(newMockConnStore())
 	reg.SetUserRegionsStore(fakeUserRegions{})
-	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (Driver, error) {
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (Driver, error) {
 		return &mockDriver{}, nil
 	})
 
@@ -144,7 +144,7 @@ func TestForUserRegion_RejectsEmptyArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := reg.ForUserRegion(context.Background(), tc.endpoint, tc.ak, tc.sk, tc.region)
+			_, err := reg.ForUserRegion(context.Background(), tc.endpoint, tc.ak, tc.sk, tc.region, "")
 			if err == nil {
 				t.Fatalf("expected error for %s, got nil", tc.name)
 			}

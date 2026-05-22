@@ -22,6 +22,36 @@ function detectDriverFromEndpoint(endpoint: string): string | null {
   return null;
 }
 
+// endpointHostIsIP mirrors the server-side driver.EndpointHostIsIP
+// helper (Go) so the Advanced toggle can disable virtual-host
+// addressing when there's no DNS hostname to attach wildcard records
+// to. Matches IPv4 (with optional port) and bracketed IPv6 in URLs.
+// Returns false on empty / unparseable input — the toggle just stays
+// enabled rather than misleadingly disabled.
+//
+// Why mirror server logic here: the smart default lives server-side
+// anyway (BuildS3Client coerces IP-host virtual-host requests back to
+// path-style), but disabling the toggle in the FE gives operators
+// targeted feedback BEFORE submit — "this can't work with this
+// endpoint" instead of "your toggle was silently ignored."
+function endpointHostIsIP(endpoint: string): boolean {
+  if (!endpoint) return false;
+  let host: string;
+  try {
+    host = new URL(endpoint).hostname;
+  } catch {
+    return false;
+  }
+  if (!host) return false;
+  // IPv6 in URL.hostname has the brackets stripped already.
+  if (host.includes(":")) {
+    // bracketed IPv6 — at least one colon means it's not a DNS label.
+    return true;
+  }
+  // IPv4: four dot-separated 0-255 octets.
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+}
+
 // Canonical "Add a key" form (ADR-0002, v1.2.0d). Replaces the old
 // "Connect a region" copy. The legacy URL /files/regions/new now
 // loader-redirects here.
@@ -51,6 +81,23 @@ function AddKeyPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [regionTouched, setRegionTouched] = useState(false);
   const [showCommonEndpoints, setShowCommonEndpoints] = useState(false);
+  // v1.3.0c: per-region S3 addressing toggle. Default off (path-style)
+  // — the safe choice for every backend (Garage, IP-addressed MinIO,
+  // self-hosted S3 with no wildcard DNS). Operators with wildcard DNS
+  // for the endpoint host flip it on either via the AWS row in
+  // "Common endpoints" (auto-checks because AWS prefers virtual-host
+  // for tooling compat) or via the Advanced expandable below.
+  const [virtualHost, setVirtualHost] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Smart default mirror: if the endpoint host is an IP literal,
+  // virtual-host addressing can't possibly work (no wildcard DNS for
+  // a bare IP) so we disable the toggle AND force the underlying state
+  // back to path-style. Server-side BuildS3Client also enforces this,
+  // but disabling client-side gives the operator a clear inline hint
+  // before they submit.
+  const endpointIsIP = endpointHostIsIP(endpoint);
+  const effectiveVirtualHost = virtualHost && !endpointIsIP;
 
   const submitting = createKey.isPending;
 
@@ -73,11 +120,19 @@ function AddKeyPage() {
   // DriverDefaults row. Triggered ONLY by an explicit "Use this" click
   // — per cycle constraint, never auto-overwrite. Marks the region as
   // touched so subsequent endpoint typing doesn't unsettle it.
+  //
+  // v1.3.0c: AWS rows auto-check the virtual-host toggle because AWS
+  // S3 prefers virtual-host addressing for S3-tool compatibility
+  // (boto3 / aws-cli default). Self-hosted backends (Garage, MinIO)
+  // keep the toggle off — path-style is the safe choice for them.
   const applyExample = (d: DriverDefaults) => {
     if (d.s3Endpoint) setEndpoint(d.s3Endpoint);
     if (d.regionLabel) {
       setRegion(d.regionLabel);
       setRegionTouched(true);
+    }
+    if (d.driver === "aws-s3") {
+      setVirtualHost(true);
     }
   };
 
@@ -97,6 +152,11 @@ function AddKeyPage() {
         accessKeyId: accessKeyId.trim(),
         secretKey,
         region: region.trim() || "us-east-1",
+        // v1.3.0c: only send the toggle when virtual-host was actually
+        // checked AND the endpoint can support it. Omitting the field
+        // hits the server's default ("path"), matching pre-v1.3.0c
+        // behaviour for every key created without flipping the toggle.
+        addressingStyle: effectiveVirtualHost ? "virtual_host" : "path",
       });
       navigate({ to: "/files" });
     } catch (err) {
@@ -267,6 +327,46 @@ function AddKeyPage() {
           <p className="text-xs text-muted-foreground">
             Defaults to us-east-1 if your endpoint doesn{"’"}t care.
           </p>
+        </div>
+
+        <div className="rounded-md border bg-card">
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium hover:bg-muted/40"
+            aria-expanded={showAdvanced}
+            aria-controls="advanced-panel"
+            data-testid="toggle-advanced"
+          >
+            <span>Advanced</span>
+            <span aria-hidden="true" className="text-muted-foreground">
+              {showAdvanced ? "−" : "+"}
+            </span>
+          </button>
+          {showAdvanced && (
+            <div id="advanced-panel" className="border-t px-4 py-3 space-y-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={effectiveVirtualHost}
+                  disabled={endpointIsIP}
+                  onChange={(e) => setVirtualHost(e.target.checked)}
+                  className="mt-1"
+                  data-testid="virtual-host-toggle"
+                />
+                <span>
+                  <span className="font-medium">
+                    Use virtual-host addressing
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {endpointIsIP
+                      ? "Virtual-host requires a DNS hostname — disabled for IP endpoints."
+                      : "Requires DNS for bucket subdomains (e.g. *.s3.example.com wildcard). Leave unchecked for self-hosted Garage / IP-addressed MinIO."}
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
         </div>
 
         {errorMessage && (

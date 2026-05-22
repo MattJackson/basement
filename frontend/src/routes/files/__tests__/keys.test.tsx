@@ -26,7 +26,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import KeysIndex from "@/routes/files/keys/index";
-import { useUserRegions, useDeleteUserRegion } from "@/shared/api/queries";
+import {
+  useUserRegions,
+  useDeleteUserRegion,
+  useRotateUserRegion,
+} from "@/shared/api/queries";
 
 vi.mock("@/shared/api/queries", async (importOriginal) => {
   const actual = await importOriginal();
@@ -34,6 +38,7 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
     ...(actual as object),
     useUserRegions: vi.fn(),
     useDeleteUserRegion: vi.fn(),
+    useRotateUserRegion: vi.fn(),
   };
 });
 
@@ -54,11 +59,17 @@ function renderWithProviders(component: React.ReactNode) {
 }
 
 const mutateAsyncMock = vi.fn().mockResolvedValue(undefined);
+const rotateMutateAsyncMock = vi.fn().mockResolvedValue(undefined);
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(useDeleteUserRegion).mockReturnValue({
     mutateAsync: mutateAsyncMock,
+    isPending: false,
+    error: null,
+  } as any);
+  vi.mocked(useRotateUserRegion).mockReturnValue({
+    mutateAsync: rotateMutateAsyncMock,
     isPending: false,
     error: null,
   } as any);
@@ -179,6 +190,98 @@ describe("KeysIndex (My Keys)", () => {
 
     await userEvent.click(screen.getByTestId("copy-region-key-button"));
     expect(writeText).toHaveBeenCalledWith("GK_COPY_ME");
+  });
+
+  // v1.3.0c — per-region addressing-style subtitle on each card.
+  it("shows 'via path-style' on path-style keys and 'via virtual-host' on virtual-host keys", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [
+        {
+          id: "r1",
+          userId: "matthew",
+          alias: "home",
+          endpoint: "https://s3.pq.io",
+          region: "garage",
+          accessKeyId: "GK_PATH",
+          addressingStyle: "path",
+          createdAt: "2026-05-21T00:00:00Z",
+          updatedAt: "2026-05-21T00:00:00Z",
+        },
+        {
+          id: "r2",
+          userId: "matthew",
+          alias: "aws-tools",
+          endpoint: "https://s3.us-east-1.amazonaws.com",
+          region: "us-east-1",
+          accessKeyId: "AKIA_VH",
+          addressingStyle: "virtual_host",
+          createdAt: "2026-05-21T00:00:00Z",
+          updatedAt: "2026-05-21T00:00:00Z",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<KeysIndex />);
+
+    const subtitles = screen.getAllByTestId("region-addressing-style");
+    expect(subtitles[0]).toHaveTextContent("via path-style");
+    expect(subtitles[1]).toHaveTextContent("via virtual-host");
+  });
+
+  // v1.3.0c — Rotate button + 2-field dialog wiring.
+  it("opens the rotate dialog and submits the new credentials", async () => {
+    rotateMutateAsyncMock.mockResolvedValueOnce({
+      id: "r1",
+      userId: "matthew",
+      alias: "home",
+      endpoint: "https://s3.pq.io",
+      region: "garage",
+      accessKeyId: "GK_NEW",
+      addressingStyle: "path",
+      createdAt: "2026-05-21T00:00:00Z",
+      updatedAt: "2026-05-21T00:00:00Z",
+    });
+
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [
+        {
+          id: "r1",
+          userId: "matthew",
+          alias: "home",
+          endpoint: "https://s3.pq.io",
+          region: "garage",
+          accessKeyId: "GK_OLD",
+          addressingStyle: "path",
+          createdAt: "2026-05-21T00:00:00Z",
+          updatedAt: "2026-05-21T00:00:00Z",
+        },
+      ],
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderWithProviders(<KeysIndex />);
+
+    await userEvent.click(screen.getByTestId("rotate-region-key-button"));
+
+    expect(screen.getByText("Rotate key?")).toBeInTheDocument();
+
+    await userEvent.type(
+      screen.getByTestId("rotate-region-access-key"),
+      "GK_NEW",
+    );
+    await userEvent.type(screen.getByTestId("rotate-region-secret"), "fresh");
+
+    await userEvent.click(screen.getByTestId("rotate-region-submit"));
+
+    expect(rotateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(rotateMutateAsyncMock).toHaveBeenCalledWith({
+      regionId: "r1",
+      accessKeyId: "GK_NEW",
+      secretKey: "fresh",
+    });
   });
 
   it("opens the delete confirmation when Delete is clicked", async () => {

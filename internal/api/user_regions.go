@@ -91,16 +91,23 @@ func writeUserKeyRejected(w http.ResponseWriter, region store.UserRegion) {
 // userRegionResponse is the wire shape for a UserRegion — strips the
 // encrypted secret so it never leaves the server. The plaintext secret
 // is never returned anywhere; the user only ever PUTs it, not GETs.
+//
+// v1.3.0c: AddressingStyle ("path" | "virtual_host") rides on the wire
+// so the FE can render a per-key "via path-style" / "via virtual-host"
+// subtitle on the keys list. Always non-empty after this cycle thanks
+// to the store's applyReadDefaults — every UserRegion is observed with
+// an explicit style even when the on-disk JSON predates the field.
 type userRegionResponse struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"userId"`
-	Alias       string    `json:"alias"`
-	Endpoint    string    `json:"endpoint"`
-	Region      string    `json:"region"`
-	AccessKeyID string    `json:"accessKeyId"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	LastUsedAt  time.Time `json:"lastUsedAt,omitempty"`
+	ID              string    `json:"id"`
+	UserID          string    `json:"userId"`
+	Alias           string    `json:"alias"`
+	Endpoint        string    `json:"endpoint"`
+	Region          string    `json:"region"`
+	AccessKeyID     string    `json:"accessKeyId"`
+	AddressingStyle string    `json:"addressingStyle"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+	LastUsedAt      time.Time `json:"lastUsedAt,omitempty"`
 }
 
 // toRegionResponse converts a store.UserRegion to the wire shape,
@@ -108,15 +115,16 @@ type userRegionResponse struct {
 // Notes) updates one place.
 func toRegionResponse(r store.UserRegion) userRegionResponse {
 	return userRegionResponse{
-		ID:          r.ID,
-		UserID:      r.UserID,
-		Alias:       r.Alias,
-		Endpoint:    r.Endpoint,
-		Region:      r.Region,
-		AccessKeyID: r.AccessKeyID,
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
-		LastUsedAt:  r.LastUsedAt,
+		ID:              r.ID,
+		UserID:          r.UserID,
+		Alias:           r.Alias,
+		Endpoint:        r.Endpoint,
+		Region:          r.Region,
+		AccessKeyID:     r.AccessKeyID,
+		AddressingStyle: r.AddressingStyle,
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
+		LastUsedAt:      r.LastUsedAt,
 	}
 }
 
@@ -186,16 +194,22 @@ func (s *Server) regionDriver(r *http.Request, region store.UserRegion) (driver.
 		return nil, err
 	}
 
-	return s.reg.ForUserRegion(r.Context(), region.Endpoint, region.AccessKeyID, secret, region.Region)
+	return s.reg.ForUserRegion(r.Context(), region.Endpoint, region.AccessKeyID, secret, region.Region, region.AddressingStyle)
 }
 
 // userRegionCreateRequest is the body shape for POST /user/regions.
+//
+// v1.3.0c: AddressingStyle is optional — empty / missing defaults to
+// "path" (current behaviour for every UserRegion shipped before this
+// cycle). "virtual_host" opts the region into virtual-host addressing;
+// the store coalesces any other value back to "path" defensively.
 type userRegionCreateRequest struct {
-	Alias       string `json:"alias"`
-	Endpoint    string `json:"endpoint"`
-	AccessKeyID string `json:"accessKeyId"`
-	SecretKey   string `json:"secretKey"`
-	Region      string `json:"region,omitempty"`
+	Alias           string `json:"alias"`
+	Endpoint        string `json:"endpoint"`
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretKey       string `json:"secretKey"`
+	Region          string `json:"region,omitempty"`
+	AddressingStyle string `json:"addressingStyle,omitempty"`
 }
 
 // userCreateRegionHandler implements POST /api/v1/user/regions.
@@ -260,12 +274,13 @@ func (s *Server) userCreateRegionHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	in := store.UserRegion{
-		UserID:       claims.UserID,
-		Alias:        req.Alias,
-		Endpoint:     req.Endpoint,
-		Region:       req.Region,
-		AccessKeyID:  req.AccessKeyID,
-		SecretKeyEnc: []byte(req.SecretKey), // store.Create encrypts immediately
+		UserID:          claims.UserID,
+		Alias:           req.Alias,
+		Endpoint:        req.Endpoint,
+		Region:          req.Region,
+		AccessKeyID:     req.AccessKeyID,
+		AddressingStyle: req.AddressingStyle,    // store normalizes "" / unknown → "path"
+		SecretKeyEnc:    []byte(req.SecretKey), // store.Create encrypts immediately
 	}
 
 	created, err := regions.Create(r.Context(), in)
@@ -340,6 +355,92 @@ func (s *Server) userGetRegionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toRegionResponse(region))
+}
+
+// userRotateRegionHandler implements POST
+// /api/v1/user/regions/{regionId}/rotate (v1.3.0c).
+//
+// Body: {accessKeyId, secretKey}. Updates ONLY those two fields in
+// place — alias / endpoint / region / addressingStyle / lastUsedAt
+// history remain untouched. Returns the updated UserRegion (sans
+// secret) on success.
+//
+// Side effects:
+//   - audit emits "region:rotate" success/failure rows with
+//     Resource=region:{id}:{host} (same shape as region:list_buckets
+//     so an operator filtering on host gets every region-tier event
+//     touching that endpoint).
+//   - InvalidateUserRegion evicts the cached S3 client for the OLD
+//     (endpoint, accessKeyId) tuple so the next ForUserRegion build
+//     picks up the fresh creds. We invalidate BOTH the old and new
+//     access-key cache keys because the new key may have been used
+//     before (replay of a rotated key).
+//
+// Wrong-owner / unknown-region collapse to 404 via requireOwnedRegion,
+// matching the rest of the user-region surface (never leak existence
+// of other users' regions).
+func (s *Server) userRotateRegionHandler(w http.ResponseWriter, r *http.Request) {
+	region, _, ok := s.requireOwnedRegion(w, r)
+	if !ok {
+		return
+	}
+
+	var req struct {
+		AccessKeyID string `json:"accessKeyId"`
+		SecretKey   string `json:"secretKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+
+	req.AccessKeyID = strings.TrimSpace(req.AccessKeyID)
+	req.SecretKey = strings.TrimSpace(req.SecretKey)
+
+	if req.AccessKeyID == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "accessKeyId is required")
+		return
+	}
+	if req.SecretKey == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "secretKey is required")
+		return
+	}
+
+	regions := s.regionsStore() // guaranteed non-nil by requireOwnedRegion
+
+	// store.Update interprets a non-empty SecretKeyEnc as PLAINTEXT
+	// bytes per its Create-style convention (the store layer encrypts
+	// before persisting). The patch is partial — leaving Alias/Region/
+	// Endpoint/AddressingStyle untouched means the existing values are
+	// preserved verbatim.
+	patch := store.UserRegion{
+		AccessKeyID:  req.AccessKeyID,
+		SecretKeyEnc: []byte(req.SecretKey),
+	}
+
+	updated, err := regions.Update(r.Context(), region.ID, patch)
+	if err != nil {
+		s.auditFailure(r, "region:rotate", regionListResource(region), err)
+		writeErrorSimple(w, http.StatusInternalServerError, "REGION_ROTATE_FAILED",
+			"Failed to rotate key: "+err.Error())
+		return
+	}
+
+	// Evict the OLD cache entry so the next ForUserRegion call rebuilds
+	// with the new creds. If the new accessKey was ever cached (e.g.
+	// re-uploading a previously rotated key), evict that too so the
+	// fresh secret is honoured rather than served from a stale cached
+	// driver.
+	if s.reg != nil {
+		s.reg.InvalidateUserRegion(region.Endpoint, region.AccessKeyID)
+		if updated.AccessKeyID != region.AccessKeyID {
+			s.reg.InvalidateUserRegion(updated.Endpoint, updated.AccessKeyID)
+		}
+	}
+
+	s.auditSuccess(r, "region:rotate", regionListResource(updated))
+
+	writeJSON(w, http.StatusOK, toRegionResponse(updated))
 }
 
 // userDeleteRegionHandler implements DELETE /api/v1/user/regions/{regionId}.

@@ -364,6 +364,7 @@ func (s *Server) routes() {
 			userG.Post("/user/regions", s.userCreateRegionHandler)
 			userG.Get("/user/regions", s.userListRegionsHandler)
 			userG.Get("/user/regions/{regionId}", s.userGetRegionHandler)
+			userG.Post("/user/regions/{regionId}/rotate", s.userRotateRegionHandler)
 			userG.Delete("/user/regions/{regionId}", s.userDeleteRegionHandler)
 			userG.Get("/user/regions/{regionId}/buckets", s.userListRegionBucketsHandler)
 			userG.Get("/user/regions/{regionId}/buckets/{bid}/objects", s.userListRegionBucketObjectsHandler)

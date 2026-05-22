@@ -4,6 +4,36 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0c — 2026-05-22
+
+Per-region S3 addressing toggle + in-place key rotation. Two compact
+operator-quality-of-life features delivered in one cycle. New
+`UserRegion.AddressingStyle` field ("path" default | "virtual_host")
+threads from the keychain through `Registry.ForUserRegion` and the
+shared `driver.BuildS3Client` helper which picks the right
+client constructor. New `driver.NewS3VirtualHostClient` mirrors the
+existing `NewS3PathStyleClient`; both are picked through
+`BuildS3Client` which enforces the IP-host smart default — an IP
+literal forces path-style regardless of the requested toggle because
+virtual-host addressing requires wildcard DNS for the bucket
+subdomain. Backwards-compat: every UserRegion persisted before this
+cycle reads back as path-style via the store's `applyReadDefaults`
+helper; no migration needed. New `POST
+/api/v1/user/regions/{regionId}/rotate` updates accessKey + secret in
+place (preserving alias / endpoint / region / addressingStyle /
+LastUsedAt history), audits as `region:rotate`, and invalidates the
+cached S3 client for the old (endpoint, accessKey) tuple so the next
+ListBuckets uses the fresh secret. Wrong-owner attempts collapse to
+404 (region API security model). Frontend: `/files/keys/new` gains
+an Advanced expandable with a "Use virtual-host addressing" toggle,
+auto-disabled when the endpoint host is an IP literal; the AWS row
+in "Common endpoints" auto-checks the toggle (AWS prefers
+virtual-host for S3-tool compatibility). `/files/keys` cards show a
+"via path-style" / "via virtual-host" subtitle and gain a "Rotate
+key" button next to Delete, opening a 2-field dialog
+(accessKeyId + secret) per the popups-max-2-fields rule. Card
+shows "Last rotated …" for 24h after a rotation.
+
 ## v1.3.0a.4 — 2026-05-21
 
 Two-mode auth model + operator-configurable admin TTL + drop-in-place

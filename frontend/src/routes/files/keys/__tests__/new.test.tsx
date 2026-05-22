@@ -147,8 +147,72 @@ describe("AddKeyPage (/files/keys/new)", () => {
       accessKeyId: "GK_TEST",
       secretKey: "sssh",
       region: "us-east-1",
+      // v1.3.0c: path-style is the default when the virtual-host toggle
+      // hasn't been flipped.
+      addressingStyle: "path",
     });
     expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
+  });
+
+  // v1.3.0c — Advanced expandable with the addressing-style toggle.
+  it("submits addressingStyle=virtual_host when the Advanced toggle is checked", async () => {
+    mutateAsyncMock.mockResolvedValueOnce({ id: "r-new" });
+
+    renderWithProviders(<AddKeyPage />);
+
+    await userEvent.type(screen.getByLabelText(/Key alias/), "home");
+    await userEvent.type(
+      screen.getByLabelText(/S3 endpoint URL/),
+      "https://s3.pq.io",
+    );
+    await userEvent.type(screen.getByLabelText(/Access Key ID/), "GK_TEST");
+    await userEvent.type(screen.getByLabelText(/Secret Access Key/), "sssh");
+
+    await userEvent.click(screen.getByTestId("toggle-advanced"));
+    await userEvent.click(screen.getByTestId("virtual-host-toggle"));
+
+    await userEvent.click(screen.getByRole("button", { name: /Add key/ }));
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(mutateAsyncMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ addressingStyle: "virtual_host" }),
+    );
+  });
+
+  // v1.3.0c — IP-host smart default: the toggle is disabled (cannot be
+  // checked) when the endpoint host is an IP literal. Server-side
+  // BuildS3Client also enforces this, but the FE disables to give an
+  // operator immediate, targeted feedback.
+  it("disables the virtual-host toggle when the endpoint host is an IP", async () => {
+    renderWithProviders(<AddKeyPage />);
+
+    await userEvent.type(
+      screen.getByLabelText(/S3 endpoint URL/),
+      "http://10.1.7.10:3902",
+    );
+    await userEvent.click(screen.getByTestId("toggle-advanced"));
+
+    const toggle = screen.getByTestId(
+      "virtual-host-toggle",
+    ) as HTMLInputElement;
+    expect(toggle).toBeDisabled();
+  });
+
+  // v1.3.0c — AWS row in "Common endpoints" auto-checks the
+  // virtual-host toggle (AWS prefers it for tooling compat).
+  it("auto-checks the virtual-host toggle when AWS is picked from Common endpoints", async () => {
+    renderWithProviders(<AddKeyPage />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /Common endpoints/ }),
+    );
+    await userEvent.click(screen.getByTestId("use-endpoint-aws-s3"));
+
+    await userEvent.click(screen.getByTestId("toggle-advanced"));
+    const toggle = screen.getByTestId(
+      "virtual-host-toggle",
+    ) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
   });
 
   // v1.3.0b — Common endpoints expandable + endpoint-driven region

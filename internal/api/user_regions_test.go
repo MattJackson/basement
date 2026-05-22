@@ -81,7 +81,7 @@ func newRegionsTestEnv(t *testing.T, mock *regionMockDriver) (*Server, *memAudit
 	conns := &testMockConnectionStore{}
 	reg := driver.NewRegistry(conns)
 	reg.SetUserRegionsStore(st.UserRegions())
-	reg.SetRegionDriverBuilder(func(_, _, _, _ string) (driver.Driver, error) {
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
 		return mock, nil
 	})
 
@@ -510,7 +510,7 @@ func TestUserRegions_DeleteInvalidatesDriverCache(t *testing.T) {
 
 	// We need to count builder invocations to assert eviction.
 	built := 0
-	srv.reg.SetRegionDriverBuilder(func(_, _, _, _ string) (driver.Driver, error) {
+	srv.reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
 		built++
 		return mock, nil
 	})
@@ -804,6 +804,267 @@ func TestUserRegions_ListObjects_AuditEvent(t *testing.T) {
 	}
 	if ev.Detail != "accessKey=GK434abc" {
 		t.Errorf("expected detail accessKey=GK434abc, got %q", ev.Detail)
+	}
+}
+
+// TestUserRegions_AddressingStyle_DefaultsToPathOnCreate (v1.3.0c):
+// the create handler echoes back AddressingStyle="path" when the
+// request omits the field — backwards-compat guarantee for every key
+// added before the toggle existed.
+func TestUserRegions_AddressingStyle_DefaultsToPathOnCreate(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	body := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.pq.io",
+		"accessKeyId": "GK_NOPE",
+		"secretKey":   "shh",
+	}
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var created userRegionResponse
+	_ = json.NewDecoder(rr.Body).Decode(&created)
+	if created.AddressingStyle != "path" {
+		t.Errorf("AddressingStyle = %q, want \"path\" by default", created.AddressingStyle)
+	}
+}
+
+// TestUserRegions_AddressingStyle_VirtualHostOnCreate (v1.3.0c): an
+// explicit "virtual_host" survives the create round-trip and is
+// reflected in the wire response for the FE's "via virtual-host"
+// subtitle.
+func TestUserRegions_AddressingStyle_VirtualHostOnCreate(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	body := map[string]string{
+		"alias":           "home",
+		"endpoint":        "https://s3.pq.io",
+		"accessKeyId":     "GK_NOPE",
+		"secretKey":       "shh",
+		"addressingStyle": "virtual_host",
+	}
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var created userRegionResponse
+	_ = json.NewDecoder(rr.Body).Decode(&created)
+	if created.AddressingStyle != "virtual_host" {
+		t.Errorf("AddressingStyle = %q, want \"virtual_host\"", created.AddressingStyle)
+	}
+}
+
+// TestUserRegions_Rotate_HappyPath (v1.3.0c): POST /rotate replaces
+// accessKey + secret in place, preserves alias/endpoint/region, and
+// emits a region:rotate audit success row.
+func TestUserRegions_Rotate_HappyPath(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, auditLog, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	// 1. Create the original region.
+	body := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.pq.io",
+		"accessKeyId": "GK_OLD",
+		"secretKey":   "old-secret",
+	}
+	rrC := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body)))
+	if rrC.Code != http.StatusCreated {
+		t.Fatalf("create: %d (%s)", rrC.Code, rrC.Body.String())
+	}
+	var created userRegionResponse
+	_ = json.NewDecoder(rrC.Body).Decode(&created)
+
+	// 2. Rotate.
+	rotate := map[string]string{
+		"accessKeyId": "GK_NEW",
+		"secretKey":   "fresh-secret",
+	}
+	rrR := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrR, regionUserCookieReq(newJSONRequest("/api/v1/user/regions/"+created.ID+"/rotate", rotate)))
+	if rrR.Code != http.StatusOK {
+		t.Fatalf("rotate: %d (%s)", rrR.Code, rrR.Body.String())
+	}
+	var rotated userRegionResponse
+	_ = json.NewDecoder(rrR.Body).Decode(&rotated)
+
+	if rotated.ID != created.ID {
+		t.Errorf("rotate must return same region id; got %q want %q", rotated.ID, created.ID)
+	}
+	if rotated.AccessKeyID != "GK_NEW" {
+		t.Errorf("AccessKeyID not rotated: got %q want GK_NEW", rotated.AccessKeyID)
+	}
+	if rotated.Alias != created.Alias {
+		t.Errorf("Alias must survive rotation: got %q want %q", rotated.Alias, created.Alias)
+	}
+	if rotated.Endpoint != created.Endpoint {
+		t.Errorf("Endpoint must survive rotation: got %q want %q", rotated.Endpoint, created.Endpoint)
+	}
+	// Secret never leaked back on the wire.
+	if bytes.Contains(rrR.Body.Bytes(), []byte("fresh-secret")) {
+		t.Errorf("rotate response leaked plaintext secret: %s", rrR.Body.String())
+	}
+
+	// 3. Audit row.
+	var found bool
+	for _, e := range auditLog.snapshot() {
+		if e.Action == "region:rotate" && e.Result == audit.ResultSuccess {
+			found = true
+			wantPrefix := "region:" + created.ID + ":"
+			if !bytes.HasPrefix([]byte(e.Resource), []byte(wantPrefix)) {
+				t.Errorf("audit resource = %q, want prefix %q", e.Resource, wantPrefix)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected region:rotate success audit row; got events: %+v", auditLog.snapshot())
+	}
+}
+
+// TestUserRegions_Rotate_OtherUser404 (v1.3.0c): user B cannot rotate
+// user A's region; the owner check returns 404 (never 403, per the
+// region API security model — don't leak existence of other users'
+// regions).
+func TestUserRegions_Rotate_OtherUser404(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK_USER",
+		"secretKey":   "SK_USER",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	// Bob (other user) tries to rotate matthew's region.
+	url := "/api/v1/user/regions/" + region.ID + "/rotate"
+	req := regionCookieReqFor(t, http.MethodPost, url, "bob", map[string]string{
+		"accessKeyId": "GK_BOB_TRIED",
+		"secretKey":   "bobs-secret",
+	})
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for non-owner rotate, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+}
+
+// TestUserRegions_Rotate_MissingFields_400 (v1.3.0c): omitted
+// accessKeyId or secretKey on the rotate body surfaces a 400 — neither
+// silently coerces to a wipe.
+func TestUserRegions_Rotate_MissingFields_400(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK_OLD",
+		"secretKey":   "SK_OLD",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	cases := []struct {
+		name string
+		body map[string]string
+	}{
+		{"missing access key", map[string]string{"secretKey": "x"}},
+		{"missing secret", map[string]string{"accessKeyId": "GK_X"}},
+		{"empty body", map[string]string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			srv.router.ServeHTTP(rr, regionUserCookieReq(newJSONRequest("/api/v1/user/regions/"+region.ID+"/rotate", tc.body)))
+			if rr.Code != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d (body=%s)", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+// TestUserRegions_Rotate_InvalidatesDriverCache (v1.3.0c): after a
+// rotate, the next ForUserRegion rebuild MUST hit the builder rather
+// than serve a cached driver carrying the stale secret.
+func TestUserRegions_Rotate_InvalidatesDriverCache(t *testing.T) {
+	mock := newRegionMockDriver()
+	mock.listBucketsFunc = func(_ context.Context) ([]driver.Bucket, error) { return nil, nil }
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	built := 0
+	srv.reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
+		built++
+		return mock, nil
+	})
+
+	rrC := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrC, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.pq.io",
+		"accessKeyId": "AK_OLD",
+		"secretKey":   "SK_OLD",
+	})))
+	if rrC.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrC.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrC.Body).Decode(&region)
+
+	// First buckets call seeds the cache.
+	rrB1 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrB1, regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+region.ID+"/buckets", nil)))
+	if rrB1.Code != http.StatusOK {
+		t.Fatalf("buckets1: %d", rrB1.Code)
+	}
+	if built != 1 {
+		t.Fatalf("expected 1 build after first list, got %d", built)
+	}
+
+	// Rotate the key.
+	rrR := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrR, regionUserCookieReq(newJSONRequest("/api/v1/user/regions/"+region.ID+"/rotate", map[string]string{
+		"accessKeyId": "AK_NEW",
+		"secretKey":   "SK_NEW",
+	})))
+	if rrR.Code != http.StatusOK {
+		t.Fatalf("rotate: %d (%s)", rrR.Code, rrR.Body.String())
+	}
+
+	// Next buckets call must rebuild — old cache key (endpoint, AK_OLD)
+	// is evicted; the new driver is built fresh with AK_NEW.
+	rrB2 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrB2, regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions/"+region.ID+"/buckets", nil)))
+	if rrB2.Code != http.StatusOK {
+		t.Fatalf("buckets2: %d", rrB2.Code)
+	}
+	if built != 2 {
+		t.Errorf("expected 2 builds after rotate, got %d (cache was not invalidated)", built)
 	}
 }
 

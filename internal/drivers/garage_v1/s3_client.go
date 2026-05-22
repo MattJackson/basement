@@ -48,7 +48,16 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 	//   AuthorizationHeaderMalformed: unexpected scope: <date>/us-east-1/s3/aws4_request
 	// when the backend's configured region (e.g. "garage") doesn't match.
 	region := cfg["region"]
-	client, err := driverpkg.NewS3PathStyleClient(endpoint, accessKey, secretKey, region)
+
+	// v1.3.0c: thread the per-region addressing-style toggle. Empty /
+	// unset stays on path-style (current behaviour); "virtual_host"
+	// routes through BuildS3Client which applies the IP-host smart
+	// default (force path-style when host is an IP literal). Garage
+	// itself only supports path-style — the toggle exists for the
+	// user-region tier where the underlying backend may be MinIO / AWS
+	// reached via wildcard DNS at the operator's endpoint host.
+	addressingStyle := cfg["addressing_style"]
+	client, err := driverpkg.BuildS3Client(endpoint, accessKey, secretKey, region, addressingStyle)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", endpoint, err)
 	}
