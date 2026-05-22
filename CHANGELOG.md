@@ -4,7 +4,22 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
-## v1.2.0 (in progress) — sudo-style admin elevation (ADR-0003)
+## v1.2.0 — 2026-05-21
+
+Sudo-style admin elevation (ADR-0003): USER → ADMIN → ELEVATED
+session state machine; destructive ops require fresh re-auth with
+short TTL (15 min ADMIN, 5 min ELEVATED, both env-tunable);
+local-password or OIDC step-up via `prompt=login` + 60s `auth_time`
+freshness check; persona pill carries live mode + countdown +
+"drop privileges" button. Key-first user model: each access key is
+a card on `/files`, multiple keys per endpoint allowed
+(`unique(userId, endpoint)` → `unique(userId, endpoint, alias)`).
+New env vars `BASEMENT_ADMIN_TTL_SEC`,
+`BASEMENT_ELEVATED_TTL_SEC`, `BASEMENT_OIDC_ELEVATION_PROMPT`. No
+breaking changes; existing matthew session grandfathered to ADMIN
+for 7 days post-deploy.
+
+Full notes: [`docs/release-notes/v1.2.0.md`](docs/release-notes/v1.2.0.md)
 
 ### Cycles
 
