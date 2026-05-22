@@ -52,11 +52,14 @@ describe("FilesHome (region tier, ADR-0002)", () => {
     renderWithProviders(<FilesHome />);
 
     expect(screen.getByText("My Regions")).toBeInTheDocument();
-    expect(screen.getByText("S3 endpoints you have a key for")).toBeInTheDocument();
+    // v1.2.0d subtitle reframes regions as "each card is one of your access keys".
+    expect(
+      screen.getByText(/Each card is one of your access keys/),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Couldn't load your regions/)).not.toBeInTheDocument();
   });
 
-  it("renders empty state with Connect button when regions array is empty", async () => {
+  it("renders empty state with Add a key CTA when regions array is empty", async () => {
     vi.mocked(useUserRegions).mockReturnValue({
       data: [],
       isLoading: false,
@@ -68,12 +71,14 @@ describe("FilesHome (region tier, ADR-0002)", () => {
     renderWithProviders(<FilesHome />);
 
     expect(screen.getByText("My Regions")).toBeInTheDocument();
-    expect(screen.getByText("No regions yet")).toBeInTheDocument();
+    expect(screen.getByText("No keys yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Connect to a region with an S3 access key from your cluster admin."),
+      screen.getByText(
+        "Add a key from your cluster admin to see the buckets it can reach.",
+      ),
     ).toBeInTheDocument();
-    // CTA appears once (in the empty-state action slot) when there are no regions.
-    expect(screen.getAllByText("+ Connect a region")).toHaveLength(1);
+    // v1.2.0d: the canonical CTA is "+ Add a key" pointing at /files/keys/new.
+    expect(screen.getAllByText("+ Add a key")).toHaveLength(1);
   });
 
   it("renders region cards when regions are populated", async () => {
@@ -116,12 +121,12 @@ describe("FilesHome (region tier, ADR-0002)", () => {
     const cardWrappers = screen.queryAllByTestId("link-wrapper");
     expect(cardWrappers.length).toBe(2);
 
-    // Aliases visible
+    // Aliases visible (v1.2.0d UserKeyCard renders alias FIRST, large)
     expect(screen.getByText("home")).toBeInTheDocument();
     expect(screen.getByText("work")).toBeInTheDocument();
-    // Endpoint hostnames visible
-    expect(screen.getByText("s3.basement.pq.io")).toBeInTheDocument();
-    expect(screen.getByText("s3.amazonaws.com")).toBeInTheDocument();
+    // Endpoint hostnames visible as "via {host}" subtitle
+    expect(screen.getByText("via s3.basement.pq.io")).toBeInTheDocument();
+    expect(screen.getByText("via s3.amazonaws.com")).toBeInTheDocument();
   });
 
   it("renders ErrorBanner when useUserRegions returns an error", async () => {

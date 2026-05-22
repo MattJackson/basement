@@ -168,6 +168,51 @@ Eight steps. Each a separate freshman cycle. Senior writes the ADR (this file).
 - `[[persona_split_user_vs_admin]]` — Sharpened by ADR-0002. Admin persona owns Clusters; User persona owns Regions; the URL split (`/files` vs `/admin/*`) cleanly mirrors data ownership.
 - `[[feedback_driver_parity]]` — No driver interface change required by ADR-0002 (Regions are a store-layer abstraction, drivers don't see them).
 
+## Refinement: v1.2.0d (key-first model)
+
+- **Date**: 2026-05-21
+- **Triggered by**: Operator product decision after multi-tenant
+  dogfooding — "each ACCESS KEY is the primary user noun, not the
+  region/endpoint."
+
+A user may now register multiple `UserRegion` rows against the same
+endpoint with different aliases ("Work S3", "Personal S3"). Each card
+on `/files` is one of these keys.
+
+### What changes
+
+- **Uniqueness key** moves from `(userId, endpoint)` to
+  `(userId, endpoint, alias)`. Same alias still 409s
+  `DUPLICATE_REGION`.
+- **`/files` heading** stays "My Regions" but the subtitle reframes:
+  "Each card is one of your access keys — click to browse the buckets
+  it can see."
+- **`/files/keys`** becomes "My Keys" (per-key admin view: copy
+  access-key-ID, last-used, delete one key without touching siblings
+  at the same endpoint).
+- **`/files/keys/new`** is the canonical "Add a key" form;
+  `/files/regions/new` keeps working as a redirect alias for in-flight
+  bookmarks.
+- **`GetByUserEndpoint`** picks the FIRST match by insertion order
+  when multiple keys share an endpoint. Sufficient for the sync
+  resolver because every key at one endpoint bridges to the same
+  admin `Connection`; the resolver logs a debug note when ambiguity
+  exists so an operator inspecting share/sync traffic can see which
+  alias was implicitly bridged.
+- **Frontend hook rename**: `useCreateUserRegion` →
+  `useCreateUserKey` (the user-facing noun shifts to "key").
+  `useUserRegions` kept — it still returns the storage type.
+- **Storage type stays `UserRegion`** server-side. Renaming the file
+  + Go type would churn every consumer for zero behavioural benefit
+  — the (key + endpoint) tuple is still what's persisted.
+
+### Migration
+
+None. Existing rows already satisfy the new `(userId, endpoint,
+alias)` uniqueness (the v1.1.x constraint was strictly stronger).
+On-disk JSON shape unchanged.
+
 ## Tags
 
-`rbac`, `architecture`, `breaking-change`, `v1.1`, `region-tier`, `supersedes-byo-cluster`
+`rbac`, `architecture`, `breaking-change`, `v1.1`, `v1.2`,
+`region-tier`, `key-first`, `supersedes-byo-cluster`

@@ -315,9 +315,10 @@ func TestUserRegions_OwnershipReturns404(t *testing.T) {
 	}
 }
 
-// TestUserRegions_DuplicateEndpoint409 — second create for the same
-// endpoint from the same user returns 409 DUPLICATE_REGION.
-func TestUserRegions_DuplicateEndpoint409(t *testing.T) {
+// TestUserRegions_DuplicateAlias409 — v1.2.0d: same user + same
+// endpoint + SAME alias returns 409 DUPLICATE_REGION. Same endpoint
+// with a DIFFERENT alias is allowed (covered by sibling test).
+func TestUserRegions_DuplicateAlias409(t *testing.T) {
 	mock := newRegionMockDriver()
 	srv, _, cleanup := newRegionsTestEnv(t, mock)
 	defer cleanup()
@@ -334,18 +335,17 @@ func TestUserRegions_DuplicateEndpoint409(t *testing.T) {
 		t.Fatalf("first create: expected 201, got %d (body=%s)", rr1.Code, rr1.Body.String())
 	}
 
-	// Same endpoint, different alias and key → still 409 per ADR-0002
-	// uniqueness on (userId, endpoint).
-	body2 := map[string]string{
-		"alias":       "other-name",
+	// Same endpoint + same alias → 409 (alias collides).
+	dup := map[string]string{
+		"alias":       "home",
 		"endpoint":    "https://s3.basement.pq.io",
 		"accessKeyId": "AK2",
 		"secretKey":   "S2",
 	}
 	rr2 := httptest.NewRecorder()
-	srv.router.ServeHTTP(rr2, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", body2)))
+	srv.router.ServeHTTP(rr2, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", dup)))
 	if rr2.Code != http.StatusConflict {
-		t.Fatalf("duplicate create: expected 409, got %d (body=%s)", rr2.Code, rr2.Body.String())
+		t.Fatalf("duplicate alias: expected 409, got %d (body=%s)", rr2.Code, rr2.Body.String())
 	}
 	var errResp struct {
 		Error struct {
@@ -357,6 +357,54 @@ func TestUserRegions_DuplicateEndpoint409(t *testing.T) {
 	}
 	if errResp.Error.Code != "DUPLICATE_REGION" {
 		t.Errorf("expected code DUPLICATE_REGION, got %q", errResp.Error.Code)
+	}
+}
+
+// TestUserRegions_SameEndpointDifferentAlias201 — v1.2.0d: same user +
+// same endpoint + DIFFERENT alias succeeds. Each access key is the
+// primary user noun, so "Work S3" + "Personal S3" against one service
+// are first-class.
+func TestUserRegions_SameEndpointDifferentAlias201(t *testing.T) {
+	mock := newRegionMockDriver()
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	first := map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.basement.pq.io",
+		"accessKeyId": "AK1",
+		"secretKey":   "S1",
+	}
+	rr1 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr1, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", first)))
+	if rr1.Code != http.StatusCreated {
+		t.Fatalf("first create: expected 201, got %d (body=%s)", rr1.Code, rr1.Body.String())
+	}
+
+	second := map[string]string{
+		"alias":       "work",
+		"endpoint":    "https://s3.basement.pq.io",
+		"accessKeyId": "AK2",
+		"secretKey":   "S2",
+	}
+	rr2 := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr2, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", second)))
+	if rr2.Code != http.StatusCreated {
+		t.Fatalf("second create (different alias): expected 201, got %d (body=%s)", rr2.Code, rr2.Body.String())
+	}
+
+	// List should now return 2 rows.
+	rrList := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrList, regionUserCookieReq(httptest.NewRequest(http.MethodGet, "/api/v1/user/regions", nil)))
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", rrList.Code)
+	}
+	var list []userRegionResponse
+	if err := json.NewDecoder(rrList.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected 2 regions after multi-key add, got %d", len(list))
 	}
 }
 

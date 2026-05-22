@@ -1,4 +1,4 @@
-// Package store: per-user S3 region keychain (ADR-0002).
+// Package store: per-user S3 region keychain (ADR-0002, refined v1.2.0d).
 //
 // A UserRegion binds a basement user to an S3 endpoint (a "region")
 // and stores the user-tier S3 credential (access key + AES-GCM-encrypted
@@ -7,9 +7,12 @@
 // Why a NEW type and file rather than reusing BucketGrant: ADR-0002
 // supersedes the per-bucket grant model. At the user persona, what
 // matters is "I have a key for this endpoint" — bucket visibility is
-// the backend's word, not basement's. A user has ONE UserRegion per
-// (user, endpoint) pair; the backend's S3 key bucket-grants govern
-// which buckets the key can see. See docs/adr/0002-region-tier-user-model.md.
+// the backend's word, not basement's. v1.2.0d refines the model so
+// that each ACCESS KEY is the primary user noun: a user may register
+// multiple UserRegions against the same endpoint with different aliases
+// ("Work S3", "Personal S3") — each card on /files is one of these
+// keys. The backend's S3 key bucket-grants govern which buckets each
+// key can see. See docs/adr/0002-region-tier-user-model.md.
 //
 // On-disk file: user_regions.json under {dataDir}. Atomic write via the
 // shared saveJSON helper (tmp + fsync + rename). Encryption at rest:
@@ -18,10 +21,18 @@
 // (only the encrypted bytes) and is never marshalled to JSON. Callers
 // wanting the plaintext call store.UserRegions.Decrypt.
 //
-// Hot-path lookup: GetByUserEndpoint(userID, endpoint) is what the
-// signing layer calls per request — endpoint is canonicalized by
-// NormalizeEndpoint before comparison, so callers can pass whatever
-// the user typed.
+// Uniqueness (v1.2.0d): the logical key is (UserID, Endpoint, Alias).
+// Same user + same endpoint with a DIFFERENT alias is allowed; same
+// alias errors with ErrUserRegionDuplicate. Endpoint stays
+// canonicalized via NormalizeEndpoint so stylistic variants don't
+// sneak past the alias check.
+//
+// Hot-path lookup: GetByUserEndpoint(userID, endpoint) is the
+// signing-layer / sync-resolver lookup. Per v1.2.0d, when multiple
+// UserRegions share the same (user, endpoint) it returns the FIRST
+// match by index (i.e. by insertion order — oldest first), which is
+// fine for the sync resolver because all keys at one endpoint bridge
+// to the same admin Connection.
 package store
 
 import (
@@ -40,10 +51,11 @@ import (
 
 // UserRegion is one user's S3 credential for one endpoint ("region").
 //
-// (UserID, Endpoint) is the logical unique key — Endpoint is stored
-// pre-canonicalized via NormalizeEndpoint, so a user can't add the same
-// endpoint twice with different aliases or with stylistic URL variants
-// (default port, trailing slash, host case).
+// v1.2.0d: (UserID, Endpoint, Alias) is the logical unique key — same
+// user can add the same endpoint multiple times under different
+// aliases. Endpoint is stored pre-canonicalized via NormalizeEndpoint,
+// so stylistic URL variants (default port, trailing slash, host case)
+// still collide on the alias check.
 type UserRegion struct {
 	ID           string    `json:"id"`
 	UserID       string    `json:"userId"`
@@ -88,8 +100,9 @@ type UserRegions interface {
 var ErrUserRegionNotFound = errors.New("user region not found")
 
 // ErrUserRegionDuplicate is returned by Create when an existing region
-// already covers the same (userID, canonicalized endpoint) pair.
-var ErrUserRegionDuplicate = errors.New("duplicate user+endpoint")
+// already covers the same (userID, canonicalized endpoint, alias)
+// triple. v1.2.0d: same endpoint with a DIFFERENT alias is allowed.
+var ErrUserRegionDuplicate = errors.New("duplicate user+endpoint+alias")
 
 // touchDebounce is the minimum time between persisted LastUsedAt bumps
 // for a single row. A burst of N signed requests within the window
@@ -256,11 +269,16 @@ func (s *userRegionStore) Create(_ context.Context, r UserRegion) (UserRegion, e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Enforce uniqueness on (userID, canonicalEndpoint). Alias is not
-	// part of the key — same endpoint with a different alias still
-	// duplicates.
+	// v1.2.0d: enforce uniqueness on (userID, canonicalEndpoint, alias).
+	// Same user + same endpoint with a DIFFERENT alias is allowed —
+	// each access key is the primary user noun, and an operator may
+	// legitimately want "Work S3" + "Personal S3" against the same
+	// service. Same alias still duplicates so we don't silently shadow
+	// an existing keychain entry.
 	for _, existing := range s.cache {
-		if existing.UserID == clean.UserID && existing.Endpoint == clean.Endpoint {
+		if existing.UserID == clean.UserID &&
+			existing.Endpoint == clean.Endpoint &&
+			existing.Alias == clean.Alias {
 			return UserRegion{}, ErrUserRegionDuplicate
 		}
 	}
@@ -303,6 +321,13 @@ func (s *userRegionStore) Get(_ context.Context, id string) (UserRegion, error) 
 // GetByUserEndpoint is the hot-path lookup. The supplied endpoint is
 // normalized before comparison so callers can pass either the raw form
 // they have or the canonical form already on file.
+//
+// Precedence (v1.2.0d): when a user has multiple UserRegions at the
+// same canonical endpoint (different aliases), the FIRST match by
+// insertion order wins. That's sufficient for the sync resolver —
+// every key against one endpoint bridges to the same admin Connection,
+// so any match resolves identically. Callers needing a specific row by
+// alias should call ListForUser + filter, or call Get by ID.
 func (s *userRegionStore) GetByUserEndpoint(_ context.Context, userID, endpoint string) (UserRegion, error) {
 	canon, err := NormalizeEndpoint(endpoint)
 	if err != nil {

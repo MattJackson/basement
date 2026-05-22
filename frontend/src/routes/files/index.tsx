@@ -1,15 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { userPage } from "@/shared/layout/userPage";
 import { useUserRegions } from "@/shared/api/queries";
-import { UserRegionCard } from "@/components/regions/UserRegionCard";
+import { UserKeyCard } from "@/components/keys/UserKeyCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 
-// /files = "My Regions" (ADR-0002, v1.1.0c). Was "My Clusters" — but
-// the user's mental model is now "I own a keychain of (endpoint, key)
-// pairs called Regions." Cluster is an admin concept; admins browse
-// clusters via /admin/clusters/{cid}. See ADR-0002 for the why.
+// /files = "My Regions" — heading kept per ADR-0002, but v1.2.0d
+// refines the model: each card is one of the user's ACCESS KEYS. A
+// user may add multiple keys against the same endpoint with different
+// aliases ("Work S3", "Personal S3"), so the subtitle clarifies the
+// region-as-keychain-entry framing. The canonical CTA is now "Add a
+// key" pointing at /files/keys/new; /files/regions/new redirects there
+// for back-compat.
 export const Route = createFileRoute("/files/")({
   component: userPage(FilesHome),
 });
@@ -33,10 +36,10 @@ function FilesHome() {
         action={
           regions.length > 0 ? (
             <a
-              href="/files/regions/new"
+              href="/files/keys/new"
               className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
-              + Connect a region
+              + Add a key
             </a>
           ) : null
         }
@@ -58,21 +61,21 @@ function FilesHome() {
       ) : regions.length === 0 ? (
         <EmptyState
           icon="server"
-          title="No regions yet"
-          description="Connect to a region with an S3 access key from your cluster admin."
+          title="No keys yet"
+          description="Add a key from your cluster admin to see the buckets it can reach."
           action={
             <a
-              href="/files/regions/new"
+              href="/files/keys/new"
               className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
-              + Connect a region
+              + Add a key
             </a>
           }
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {regions.map((region) => (
-            <UserRegionCard key={region.id} region={region} />
+            <UserKeyCard key={region.id} region={region} />
           ))}
         </div>
       )}
@@ -86,7 +89,8 @@ function Header({ action }: { action?: React.ReactNode }) {
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Regions</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          S3 endpoints you have a key for
+          Each card is one of your access keys — click to browse the buckets it
+          can see
         </p>
       </div>
       {action && <div className="flex items-center gap-2">{action}</div>}

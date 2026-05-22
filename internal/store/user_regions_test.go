@@ -180,23 +180,30 @@ func TestUserRegions_NormalizeEndpoint(t *testing.T) {
 	}
 }
 
-func TestUserRegions_UniquePerUserEndpoint(t *testing.T) {
+// TestUserRegions_AllowMultipleKeysPerEndpoint: v1.2.0d's product
+// shift — each access key is the primary user noun. A user can
+// register two UserRegions against the same endpoint as long as the
+// aliases differ ("Work S3" + "Personal S3").
+func TestUserRegions_AllowMultipleKeysPerEndpoint(t *testing.T) {
 	r, _ := newUserRegions(t)
 	ctx := context.Background()
 
-	if _, err := r.Create(ctx, sampleRegion()); err != nil {
+	first := sampleRegion()
+	first.Alias = "home"
+	if _, err := r.Create(ctx, first); err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
 
-	// Second attempt — same user, same endpoint, plaintext bytes
-	// restored for the second call (the Create-on-success path may
-	// have zeroed them).
-	dup := sampleRegion()
-	if _, err := r.Create(ctx, dup); !errors.Is(err, ErrUserRegionDuplicate) {
-		t.Fatalf("expected ErrUserRegionDuplicate, got %v", err)
+	// Same user, same endpoint, DIFFERENT alias — allowed post-v1.2.0d.
+	second := sampleRegion()
+	second.Alias = "work"
+	second.AccessKeyID = "GK_WORK_KEY"
+	if _, err := r.Create(ctx, second); err != nil {
+		t.Errorf("different alias at same endpoint should succeed: %v", err)
 	}
 
-	// Different user, same endpoint — allowed.
+	// Different user, same endpoint, same alias — still allowed (cross-user
+	// isolation hasn't changed).
 	other := sampleRegion()
 	other.UserID = "wife"
 	if _, err := r.Create(ctx, other); err != nil {
@@ -209,9 +216,22 @@ func TestUserRegions_UniquePerUserEndpoint(t *testing.T) {
 	if _, err := r.Create(ctx, otherEndpoint); err != nil {
 		t.Errorf("different endpoint should succeed: %v", err)
 	}
+
+	// matthew should now have 3 rows (home, work, aws).
+	rows, err := r.ListForUser(ctx, "matthew")
+	if err != nil {
+		t.Fatalf("ListForUser: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Errorf("matthew should have 3 regions after multi-key adds, got %d", len(rows))
+	}
 }
 
-func TestUserRegions_UniqueIgnoresAlias(t *testing.T) {
+// TestUserRegions_UniquePerUserEndpointAlias: same user + same
+// canonicalized endpoint + same alias still errors. Stylistic variants
+// of the endpoint URL collide too, because endpoints are canonicalized
+// before the alias comparison.
+func TestUserRegions_UniquePerUserEndpointAlias(t *testing.T) {
 	r, _ := newUserRegions(t)
 	ctx := context.Background()
 
@@ -221,17 +241,28 @@ func TestUserRegions_UniqueIgnoresAlias(t *testing.T) {
 		t.Fatalf("first Create: %v", err)
 	}
 
-	second := sampleRegion()
-	second.Alias = "work" // different alias
-	if _, err := r.Create(ctx, second); !errors.Is(err, ErrUserRegionDuplicate) {
-		t.Fatalf("expected ErrUserRegionDuplicate (alias should not bypass uniqueness), got %v", err)
+	// Same alias, same endpoint — collides.
+	dup := sampleRegion()
+	dup.Alias = "home"
+	if _, err := r.Create(ctx, dup); !errors.Is(err, ErrUserRegionDuplicate) {
+		t.Fatalf("expected ErrUserRegionDuplicate for same alias, got %v", err)
 	}
 
-	// Same user, same endpoint expressed differently — still duplicate.
+	// Same alias, endpoint expressed with stylistic noise — still
+	// collides because NormalizeEndpoint folds them.
 	stylistic := sampleRegion()
+	stylistic.Alias = "home"
 	stylistic.Endpoint = "https://S3.PQ.IO:443/"
 	if _, err := r.Create(ctx, stylistic); !errors.Is(err, ErrUserRegionDuplicate) {
 		t.Fatalf("expected ErrUserRegionDuplicate after canonicalization, got %v", err)
+	}
+
+	// Different alias — allowed (covered by the sibling test but
+	// re-asserted here so this test reads standalone).
+	diff := sampleRegion()
+	diff.Alias = "work"
+	if _, err := r.Create(ctx, diff); err != nil {
+		t.Errorf("different alias at same endpoint should succeed: %v", err)
 	}
 }
 
