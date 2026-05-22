@@ -61,13 +61,16 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("UserShell", () => {
-  it("renders Files, Keys, Shares nav items in Primary nav", async () => {
+  it("renders Files, Keys, Shares, Backups nav items in Primary nav", async () => {
     const { UserShell } = await import("@/shared/layout/UserShell");
     render(<UserShell><div data-testid="child">Content</div></UserShell>, { wrapper: Wrapper });
 
     expect(screen.getByText("Files")).toBeInTheDocument();
     expect(screen.getByText("Keys")).toBeInTheDocument();
     expect(screen.getByText("Shares")).toBeInTheDocument();
+    // v1.5.0a: scheduled backups land alongside the other user-tier
+    // primary-nav items.
+    expect(screen.getByText("Backups")).toBeInTheDocument();
   });
 
   it("does NOT render Clusters nav item", async () => {

@@ -1601,6 +1601,59 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.5a] /files/backups — scheduled backup wizard + list
+    // ============================================================
+    section("[v1.5a] /files/backups renders (v1.5.0a BACKUP.SCHEDULED)");
+
+    await check("[v1.5a] /files/backups renders header + empty state or list", async () => {
+      await page!.goto(`${BASE_URL}/files/backups`, { waitUntil: "networkidle" });
+      try {
+        await page!.waitForSelector('h1', { timeout: 5000 });
+      } catch {
+        throw new Error("/files/backups failed to render any h1 — page may have errored");
+      }
+
+      const hasHeader = await page!.locator('h1').filter({ hasText: "Backups" }).count();
+      if (hasHeader === 0) {
+        const actualH1 = await page!.locator('h1').first().textContent().catch(() => "<none>");
+        throw new Error(`/files/backups missing 'Backups' header (saw h1: ${actualH1})`);
+      }
+
+      // Either empty state ("No backups yet") OR a list of cards.
+      const hasEmpty = await page!.locator('text="No backups yet"').count();
+      const hasNewBtn = await page!.locator('button').filter({ hasText: /New backup/i }).count();
+      if (hasEmpty === 0 && hasNewBtn === 0) {
+        throw new Error("/files/backups shows neither empty state nor 'New backup' CTA");
+      }
+
+      await shot(page!, "v1.5a-backups-route");
+    });
+
+    await check("[v1.5a] /files/backups/new wizard renders step 1 (source)", async () => {
+      await page!.goto(`${BASE_URL}/files/backups/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1', { timeout: 5000 });
+
+      const hasHeader = await page!.locator('h1').filter({ hasText: "New backup" }).count();
+      if (hasHeader === 0) {
+        throw new Error("/files/backups/new missing 'New backup' header");
+      }
+
+      // Source label should be visible on step 1.
+      const hasSourceHeading = await page!.locator('text=/Source/i').count();
+      if (hasSourceHeading === 0) {
+        throw new Error("/files/backups/new step 1 missing Source heading");
+      }
+
+      // Step counter present
+      const hasStepText = await page!.locator('text=/Step 1 of 4/i').count();
+      if (hasStepText === 0) {
+        throw new Error("/files/backups/new missing 'Step 1 of 4' indicator");
+      }
+
+      await shot(page!, "v1.5a-backups-new-step1");
+    });
+
+    // ============================================================
     // [NN] v1.3 feature surfaces — invites, admin TTL, folder nav
     // ============================================================
     section("[v1.3a] /admin/users renders Pending Invites (v1.3.0d)");

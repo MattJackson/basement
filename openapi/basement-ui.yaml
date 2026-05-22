@@ -3866,6 +3866,193 @@ paths:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
 
+  # User backup endpoints (v1.5.0a BACKUP.SCHEDULED)
+  /user/backups:
+      post:
+        operationId: createUserBackup
+        summary: Create a new scheduled backup
+        description: Persists a named, scheduled bucket-to-bucket backup. Cron expression is validated eagerly; use the literal string "manual" to disable the schedule and only run on demand via /run.
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserBackupCreateRequest'
+        responses:
+          '201':
+            description: Backup created
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Backup'
+          '400':
+            description: Invalid body or schedule
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: No active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      get:
+        operationId: listUserBackups
+        summary: List the caller's backups
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        responses:
+          '200':
+            description: Array of backups
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Backup'
+
+  /user/backups/{id}:
+      get:
+        operationId: getUserBackup
+        summary: Get a backup detail (including run history)
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Backup with history
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Backup'
+          '404':
+            description: Not found (or not owned by caller)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      put:
+        operationId: updateUserBackup
+        summary: Update a backup
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserBackupCreateRequest'
+        responses:
+          '200':
+            description: Updated backup
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Backup'
+          '400':
+            description: Invalid body or schedule
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+      delete:
+        operationId: deleteUserBackup
+        summary: Delete a backup
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        responses:
+          '204':
+            description: Deleted
+          '404':
+            description: Not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
+  /user/backups/{id}/run:
+      post:
+        operationId: runUserBackup
+        summary: Trigger a backup run immediately
+        description: Kicks off a one-shot run that bypasses the cron schedule. Returns 202 immediately; the run completes in the background and the result appears in the backup's history.
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        responses:
+          '202':
+            description: Run queued
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    status:
+                      type: string
+                      enum: [queued]
+          '400':
+            description: Backup disabled
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
 components:
   securitySchemes:
       cookieAuth:
@@ -5088,5 +5275,119 @@ components:
           message:
             type: string
             example: Sync job created and queued
+      Backup:
+        type: object
+        required:
+        - id
+        - ownerUserId
+        - name
+        - srcRegionId
+        - srcBucket
+        - dstRegionId
+        - dstBucket
+        - schedule
+        - createdAt
+        - updatedAt
+        properties:
+          id:
+            type: string
+          ownerUserId:
+            type: string
+          name:
+            type: string
+          srcRegionId:
+            type: string
+          srcBucket:
+            type: string
+          srcPrefix:
+            type: string
+            nullable: true
+          dstRegionId:
+            type: string
+          dstBucket:
+            type: string
+          dstPrefix:
+            type: string
+            nullable: true
+          schedule:
+            type: string
+            description: 'Cron expression (5-field standard) or the literal "manual" to disable the recurring schedule.'
+          lastRunAt:
+            type: string
+            format: date-time
+            nullable: true
+          lastResult:
+            $ref: '#/components/schemas/BackupResult'
+          history:
+            type: array
+            items:
+              $ref: '#/components/schemas/BackupResult'
+          createdAt:
+            type: string
+            format: date-time
+          updatedAt:
+            type: string
+            format: date-time
+          disabled:
+            type: boolean
+      BackupResult:
+        type: object
+        required:
+        - startedAt
+        - completedAt
+        - objectsCopied
+        - bytesCopied
+        - success
+        properties:
+          startedAt:
+            type: string
+            format: date-time
+          completedAt:
+            type: string
+            format: date-time
+          objectsCopied:
+            type: integer
+            format: int64
+          bytesCopied:
+            type: integer
+            format: int64
+          errors:
+            type: array
+            items:
+              type: string
+          success:
+            type: boolean
+          jobId:
+            type: string
+      UserBackupCreateRequest:
+        type: object
+        required:
+        - name
+        - srcRegionId
+        - srcBucket
+        - dstRegionId
+        - dstBucket
+        - schedule
+        properties:
+          name:
+            type: string
+          srcRegionId:
+            type: string
+          srcBucket:
+            type: string
+          srcPrefix:
+            type: string
+            nullable: true
+          dstRegionId:
+            type: string
+          dstBucket:
+            type: string
+          dstPrefix:
+            type: string
+            nullable: true
+          schedule:
+            type: string
+          disabled:
+            type: boolean
 security:
 - cookieAuth: []

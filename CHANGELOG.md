@@ -4,6 +4,25 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.5.0a — 2026-05-22
+
+Backup story, cycle 1: scheduled, named bucket-to-bucket backup with
+a cron engine layered over the existing v0.8.x sync engine. New
+`internal/backup` package — `backup.Backups` store (atomic JSON
+under `{dataDir}/backups.json`), `backup.Scheduler` wrapping
+`github.com/robfig/cron/v3` with panic-recovery per job. Six new
+user-tier endpoints under `/api/v1/user/backups` (CRUD + `/run`),
+gated on the same USER auth as `/user/syncs` with 404-on-not-owner
+to avoid existence leaks. New routes `/files/backups` (list),
+`/files/backups/new` (4-step wizard: source / destination /
+schedule / name+review), `/files/backups/$id` (detail with last-10
+run history, edit-schedule inline, enable+disable, run-now button).
+Schedule UI: manual / daily HH:MM / weekly day+HH:MM / monthly
+day-of-month+HH:MM / custom cron. Backup runs go through the
+existing sync engine via a runner closure (no duplication of pull
+semantics). Tag + main land at the same commit; smoke extended
+with `/files/backups` + wizard step-1 checks.
+
 ## v1.4.0 — 2026-05-22
 
 Scale + perf milestone. Three cycles (v1.4.0a → v1.4.0c) sharpen
