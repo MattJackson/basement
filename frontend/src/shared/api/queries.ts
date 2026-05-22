@@ -2040,3 +2040,248 @@ export function useRotateServiceAccount() {
     },
   });
 }
+
+// v1.7.0e — user-tier webhook subscription hooks.
+//
+// Wraps the eight routes added by v1.7.0d under /api/v1/user/webhooks:
+//
+//   GET    /api/v1/user/webhooks                  → list (redacted secrets)
+//   POST   /api/v1/user/webhooks                  → create (mint: secret on response)
+//   GET    /api/v1/user/webhooks/{id}             → get (redacted)
+//   PUT    /api/v1/user/webhooks/{id}             → update (mint when Secret patch supplied)
+//   DELETE /api/v1/user/webhooks/{id}             → delete
+//   POST   /api/v1/user/webhooks/{id}/test        → emit synthetic event (202)
+//   POST   /api/v1/user/webhooks/{id}/enable      → flip enabled = true
+//   POST   /api/v1/user/webhooks/{id}/disable     → flip enabled = false
+//
+// Wire shapes mirror internal/api/user_webhooks.go + internal/webhook/types.go
+// verbatim (camelCase JSON). The plaintext Secret rides on Create and on
+// Update-with-Secret-patch only; every other read returns the redacted
+// shape (`secret === ""`, `hasSecret` tells the FE which way to render).
+//
+// Polling cadences:
+//   - useWebhooks (list): 10s — surfaces lastDelivery + failureCount
+//     updates within one engine tick of a delivery completing.
+//   - useWebhook (detail): 5s — tighter so the "Test webhook" button +
+//     a real /test fire surfaces its result without manual refresh.
+//
+// queryKey shape: ["user", "webhooks"] for the list, ["user", "webhooks", id]
+// for the detail. Mutations don't auto-invalidate — callers run their own
+// invalidate so the test page's optimistic "queued" toast doesn't fight
+// with the auto-refresh on the same render.
+
+export type WebhookEventType =
+  | "object.created"
+  | "object.deleted"
+  | "object.modified";
+
+export const WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
+  "object.created",
+  "object.deleted",
+  "object.modified",
+];
+
+export interface WebhookBucketFilter {
+  regionId: string;
+  bucket: string;
+}
+
+export interface WebhookDeliveryResult {
+  deliveredAt: string;
+  httpStatus: number;
+  durationMs: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface Webhook {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  targetUrl: string;
+  events: WebhookEventType[];
+  bucketFilter?: WebhookBucketFilter;
+  prefixFilter?: string;
+  // Always "" on every wire read except the mint response (Create +
+  // Update-with-Secret-patch). hasSecret tells the FE "the server holds
+  // a secret for this webhook" so List / Get can render "redacted"
+  // without re-fetching.
+  secret?: string;
+  hasSecret: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastDelivery?: WebhookDeliveryResult;
+  failureCount?: number;
+}
+
+export interface WebhookMintResponse extends Webhook {
+  // Cleartext secret — returned exactly once on Create + on Update
+  // when the caller supplied a non-empty Secret field. Drop from
+  // memory once the operator has copied it.
+  secret: string;
+}
+
+export interface WebhookCreateRequest {
+  name: string;
+  targetUrl: string;
+  events: WebhookEventType[];
+  bucketFilter?: WebhookBucketFilter;
+  prefixFilter?: string;
+  // Optional on create: omit (or supply a short string) to let the
+  // server mint a 32-char hex token. Omit on update to preserve the
+  // existing secret; supply a non-empty value to rotate.
+  secret?: string;
+  enabled?: boolean;
+}
+
+export function useWebhooks() {
+  return useQuery<Webhook[]>({
+    queryKey: ["user", "webhooks"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/user/webhooks", { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/webhooks", res.status, body);
+      return (body as Webhook[]) ?? [];
+    },
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    retry: 1,
+  });
+}
+
+export function useWebhook(id: string | null) {
+  return useQuery<Webhook>({
+    queryKey: ["user", "webhooks", id],
+    queryFn: async () => {
+      if (!id) throw new Error("Webhook ID required");
+      const res = await fetch(
+        `/api/v1/user/webhooks/${encodeURIComponent(id)}`,
+        { credentials: "include" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/webhooks/${id}`, res.status, body);
+      return body as Webhook;
+    },
+    enabled: !!id,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+    retry: 1,
+  });
+}
+
+export function useCreateWebhook() {
+  return useMutation<WebhookMintResponse, Error, WebhookCreateRequest>({
+    mutationFn: async (body) => {
+      const res = await fetch("/api/v1/user/webhooks", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const resp = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("user/webhooks/create", res.status, resp);
+      return resp as WebhookMintResponse;
+    },
+  });
+}
+
+// useUpdateWebhook patches a webhook. If the caller's body includes a
+// non-empty `secret`, the response is a WebhookMintResponse (with the
+// rotated cleartext); otherwise the response is the redacted shape.
+// We type the response as the wider union so the route can branch on
+// the rotated case at the call site.
+export function useUpdateWebhook() {
+  return useMutation<
+    Webhook | WebhookMintResponse,
+    Error,
+    { id: string; body: WebhookCreateRequest }
+  >({
+    mutationFn: async ({ id, body }) => {
+      const res = await fetch(
+        `/api/v1/user/webhooks/${encodeURIComponent(id)}`,
+        {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      const resp = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/webhooks/update/${id}`, res.status, resp);
+      return resp as Webhook | WebhookMintResponse;
+    },
+  });
+}
+
+export function useDeleteWebhook() {
+  return useMutation<void, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/user/webhooks/${encodeURIComponent(id)}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`user/webhooks/delete/${id}`, res.status, body);
+      }
+    },
+  });
+}
+
+// useTestWebhook emits a synthetic envelope through the delivery engine.
+// 202 Accepted comes back immediately; the operator polls the detail
+// page (auto-refresh on a 5s interval) to see lastDelivery flip.
+export function useTestWebhook() {
+  return useMutation<{ id: string; status: string; event: string }, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/user/webhooks/${encodeURIComponent(id)}/test`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/webhooks/test/${id}`, res.status, body);
+      return body as { id: string; status: string; event: string };
+    },
+  });
+}
+
+export function useEnableWebhook() {
+  return useMutation<Webhook, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/user/webhooks/${encodeURIComponent(id)}/enable`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/webhooks/enable/${id}`, res.status, body);
+      return body as Webhook;
+    },
+  });
+}
+
+export function useDisableWebhook() {
+  return useMutation<Webhook, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/user/webhooks/${encodeURIComponent(id)}/disable`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`user/webhooks/disable/${id}`, res.status, body);
+      return body as Webhook;
+    },
+  });
+}

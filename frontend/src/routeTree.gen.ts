@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from "./routes/index"
 import { Route as FilesIndexRouteImport } from "./routes/files/index"
 import { Route as AdminIndexRouteImport } from "./routes/admin/index"
 import { Route as ShareTokenRouteImport } from "./routes/share/$token"
+import { Route as FilesWebhooksRouteImport } from "./routes/files/webhooks"
 import { Route as FilesSyncsRouteImport } from "./routes/files/syncs"
 import { Route as FilesSharesRouteImport } from "./routes/files/shares"
 import { Route as FilesKeysRouteImport } from "./routes/files/keys"
@@ -27,6 +28,7 @@ import { Route as AdminPoliciesRouteImport } from "./routes/admin/policies"
 import { Route as AdminMigrateRouteImport } from "./routes/admin/migrate"
 import { Route as AdminLoginRouteImport } from "./routes/admin/login"
 import { Route as AdminAuditRouteImport } from "./routes/admin/audit"
+import { Route as FilesWebhooksIndexRouteImport } from "./routes/files/webhooks/index"
 import { Route as FilesSyncsIndexRouteImport } from "./routes/files/syncs/index"
 import { Route as FilesSharesIndexRouteImport } from "./routes/files/shares/index"
 import { Route as FilesKeysIndexRouteImport } from "./routes/files/keys/index"
@@ -38,6 +40,7 @@ import { Route as AdminServiceAccountsIndexRouteImport } from "./routes/admin/se
 import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
 import { Route as AdminBucketsIndexRouteImport } from "./routes/admin/buckets/index"
+import { Route as FilesWebhooksNewRouteImport } from "./routes/files/webhooks/new"
 import { Route as FilesSyncsNewRouteImport } from "./routes/files/syncs/new"
 import { Route as FilesSharesNewRouteImport } from "./routes/files/shares/new"
 import { Route as FilesRegionsNewRouteImport } from "./routes/files/regions/new"
@@ -47,6 +50,7 @@ import { Route as FilesBackupsNewRouteImport } from "./routes/files/backups/new"
 import { Route as AdminUsersNewRouteImport } from "./routes/admin/users/new"
 import { Route as AdminServiceAccountsNewRouteImport } from "./routes/admin/service-accounts/new"
 import { Route as AdminClustersNewRouteImport } from "./routes/admin/clusters/new"
+import { Route as FilesWebhooksIdIndexRouteImport } from "./routes/files/webhooks/$id/index"
 import { Route as FilesFederatedBucketsIdIndexRouteImport } from "./routes/files/federated-buckets/$id/index"
 import { Route as FilesBackupsIdIndexRouteImport } from "./routes/files/backups/$id/index"
 import { Route as AdminClustersCidIndexRouteImport } from "./routes/admin/clusters/$cid/index"
@@ -78,6 +82,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
 const ShareTokenRoute = ShareTokenRouteImport.update({
   id: "/share/$token",
   path: "/share/$token",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FilesWebhooksRoute = FilesWebhooksRouteImport.update({
+  id: "/files/webhooks",
+  path: "/files/webhooks",
   getParentRoute: () => rootRouteImport,
 } as any)
 const FilesSyncsRoute = FilesSyncsRouteImport.update({
@@ -150,6 +159,11 @@ const AdminAuditRoute = AdminAuditRouteImport.update({
   path: "/admin/audit",
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesWebhooksIndexRoute = FilesWebhooksIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => FilesWebhooksRoute,
+} as any)
 const FilesSyncsIndexRoute = FilesSyncsIndexRouteImport.update({
   id: "/",
   path: "/",
@@ -207,6 +221,11 @@ const AdminBucketsIndexRoute = AdminBucketsIndexRouteImport.update({
   path: "/admin/buckets/",
   getParentRoute: () => rootRouteImport,
 } as any)
+const FilesWebhooksNewRoute = FilesWebhooksNewRouteImport.update({
+  id: "/new",
+  path: "/new",
+  getParentRoute: () => FilesWebhooksRoute,
+} as any)
 const FilesSyncsNewRoute = FilesSyncsNewRouteImport.update({
   id: "/new",
   path: "/new",
@@ -252,6 +271,11 @@ const AdminClustersNewRoute = AdminClustersNewRouteImport.update({
   id: "/admin/clusters/new",
   path: "/admin/clusters/new",
   getParentRoute: () => rootRouteImport,
+} as any)
+const FilesWebhooksIdIndexRoute = FilesWebhooksIdIndexRouteImport.update({
+  id: "/$id/",
+  path: "/$id/",
+  getParentRoute: () => FilesWebhooksRoute,
 } as any)
 const FilesFederatedBucketsIdIndexRoute =
   FilesFederatedBucketsIdIndexRouteImport.update({
@@ -334,6 +358,7 @@ export interface FileRoutesByFullPath {
   "/files/keys": typeof FilesKeysRouteWithChildren
   "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRouteWithChildren
+  "/files/webhooks": typeof FilesWebhooksRouteWithChildren
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
@@ -346,6 +371,7 @@ export interface FileRoutesByFullPath {
   "/files/regions/new": typeof FilesRegionsNewRoute
   "/files/shares/new": typeof FilesSharesNewRoute
   "/files/syncs/new": typeof FilesSyncsNewRoute
+  "/files/webhooks/new": typeof FilesWebhooksNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
@@ -357,6 +383,7 @@ export interface FileRoutesByFullPath {
   "/files/keys/": typeof FilesKeysIndexRoute
   "/files/shares/": typeof FilesSharesIndexRoute
   "/files/syncs/": typeof FilesSyncsIndexRoute
+  "/files/webhooks/": typeof FilesWebhooksIndexRoute
   "/admin/clusters/$cid/edit": typeof AdminClustersCidEditRoute
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/admin/clusters/$cid/scrub": typeof AdminClustersCidScrubRoute
@@ -365,6 +392,7 @@ export interface FileRoutesByFullPath {
   "/admin/clusters/$cid/": typeof AdminClustersCidIndexRoute
   "/files/backups/$id/": typeof FilesBackupsIdIndexRoute
   "/files/federated-buckets/$id/": typeof FilesFederatedBucketsIdIndexRoute
+  "/files/webhooks/$id/": typeof FilesWebhooksIdIndexRoute
   "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
   "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
@@ -390,6 +418,7 @@ export interface FileRoutesByTo {
   "/files/regions/new": typeof FilesRegionsNewRoute
   "/files/shares/new": typeof FilesSharesNewRoute
   "/files/syncs/new": typeof FilesSyncsNewRoute
+  "/files/webhooks/new": typeof FilesWebhooksNewRoute
   "/admin/buckets": typeof AdminBucketsIndexRoute
   "/admin/clusters": typeof AdminClustersIndexRoute
   "/admin/keys": typeof AdminKeysIndexRoute
@@ -401,6 +430,7 @@ export interface FileRoutesByTo {
   "/files/keys": typeof FilesKeysIndexRoute
   "/files/shares": typeof FilesSharesIndexRoute
   "/files/syncs": typeof FilesSyncsIndexRoute
+  "/files/webhooks": typeof FilesWebhooksIndexRoute
   "/admin/clusters/$cid/edit": typeof AdminClustersCidEditRoute
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/admin/clusters/$cid/scrub": typeof AdminClustersCidScrubRoute
@@ -409,6 +439,7 @@ export interface FileRoutesByTo {
   "/admin/clusters/$cid": typeof AdminClustersCidIndexRoute
   "/files/backups/$id": typeof FilesBackupsIdIndexRoute
   "/files/federated-buckets/$id": typeof FilesFederatedBucketsIdIndexRoute
+  "/files/webhooks/$id": typeof FilesWebhooksIdIndexRoute
   "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
   "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
@@ -431,6 +462,7 @@ export interface FileRoutesById {
   "/files/keys": typeof FilesKeysRouteWithChildren
   "/files/shares": typeof FilesSharesRouteWithChildren
   "/files/syncs": typeof FilesSyncsRouteWithChildren
+  "/files/webhooks": typeof FilesWebhooksRouteWithChildren
   "/share/$token": typeof ShareTokenRoute
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
@@ -443,6 +475,7 @@ export interface FileRoutesById {
   "/files/regions/new": typeof FilesRegionsNewRoute
   "/files/shares/new": typeof FilesSharesNewRoute
   "/files/syncs/new": typeof FilesSyncsNewRoute
+  "/files/webhooks/new": typeof FilesWebhooksNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
@@ -454,6 +487,7 @@ export interface FileRoutesById {
   "/files/keys/": typeof FilesKeysIndexRoute
   "/files/shares/": typeof FilesSharesIndexRoute
   "/files/syncs/": typeof FilesSyncsIndexRoute
+  "/files/webhooks/": typeof FilesWebhooksIndexRoute
   "/admin/clusters/$cid/edit": typeof AdminClustersCidEditRoute
   "/admin/clusters/$cid/layout": typeof AdminClustersCidLayoutRoute
   "/admin/clusters/$cid/scrub": typeof AdminClustersCidScrubRoute
@@ -462,6 +496,7 @@ export interface FileRoutesById {
   "/admin/clusters/$cid/": typeof AdminClustersCidIndexRoute
   "/files/backups/$id/": typeof FilesBackupsIdIndexRoute
   "/files/federated-buckets/$id/": typeof FilesFederatedBucketsIdIndexRoute
+  "/files/webhooks/$id/": typeof FilesWebhooksIdIndexRoute
   "/admin/clusters/$cid/buckets/$id": typeof AdminClustersCidBucketsIdRouteWithChildren
   "/admin/clusters/$cid/keys/$id": typeof AdminClustersCidKeysIdRoute
   "/admin/clusters/$cid/buckets/$id/lifecycle/new": typeof AdminClustersCidBucketsIdLifecycleNewRoute
@@ -485,6 +520,7 @@ export interface FileRouteTypes {
     | "/files/keys"
     | "/files/shares"
     | "/files/syncs"
+    | "/files/webhooks"
     | "/share/$token"
     | "/admin/"
     | "/files/"
@@ -497,6 +533,7 @@ export interface FileRouteTypes {
     | "/files/regions/new"
     | "/files/shares/new"
     | "/files/syncs/new"
+    | "/files/webhooks/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
@@ -508,6 +545,7 @@ export interface FileRouteTypes {
     | "/files/keys/"
     | "/files/shares/"
     | "/files/syncs/"
+    | "/files/webhooks/"
     | "/admin/clusters/$cid/edit"
     | "/admin/clusters/$cid/layout"
     | "/admin/clusters/$cid/scrub"
@@ -516,6 +554,7 @@ export interface FileRouteTypes {
     | "/admin/clusters/$cid/"
     | "/files/backups/$id/"
     | "/files/federated-buckets/$id/"
+    | "/files/webhooks/$id/"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
     | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
@@ -541,6 +580,7 @@ export interface FileRouteTypes {
     | "/files/regions/new"
     | "/files/shares/new"
     | "/files/syncs/new"
+    | "/files/webhooks/new"
     | "/admin/buckets"
     | "/admin/clusters"
     | "/admin/keys"
@@ -552,6 +592,7 @@ export interface FileRouteTypes {
     | "/files/keys"
     | "/files/shares"
     | "/files/syncs"
+    | "/files/webhooks"
     | "/admin/clusters/$cid/edit"
     | "/admin/clusters/$cid/layout"
     | "/admin/clusters/$cid/scrub"
@@ -560,6 +601,7 @@ export interface FileRouteTypes {
     | "/admin/clusters/$cid"
     | "/files/backups/$id"
     | "/files/federated-buckets/$id"
+    | "/files/webhooks/$id"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
     | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
@@ -581,6 +623,7 @@ export interface FileRouteTypes {
     | "/files/keys"
     | "/files/shares"
     | "/files/syncs"
+    | "/files/webhooks"
     | "/share/$token"
     | "/admin/"
     | "/files/"
@@ -593,6 +636,7 @@ export interface FileRouteTypes {
     | "/files/regions/new"
     | "/files/shares/new"
     | "/files/syncs/new"
+    | "/files/webhooks/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
@@ -604,6 +648,7 @@ export interface FileRouteTypes {
     | "/files/keys/"
     | "/files/shares/"
     | "/files/syncs/"
+    | "/files/webhooks/"
     | "/admin/clusters/$cid/edit"
     | "/admin/clusters/$cid/layout"
     | "/admin/clusters/$cid/scrub"
@@ -612,6 +657,7 @@ export interface FileRouteTypes {
     | "/admin/clusters/$cid/"
     | "/files/backups/$id/"
     | "/files/federated-buckets/$id/"
+    | "/files/webhooks/$id/"
     | "/admin/clusters/$cid/buckets/$id"
     | "/admin/clusters/$cid/keys/$id"
     | "/admin/clusters/$cid/buckets/$id/lifecycle/new"
@@ -634,6 +680,7 @@ export interface RootRouteChildren {
   FilesKeysRoute: typeof FilesKeysRouteWithChildren
   FilesSharesRoute: typeof FilesSharesRouteWithChildren
   FilesSyncsRoute: typeof FilesSyncsRouteWithChildren
+  FilesWebhooksRoute: typeof FilesWebhooksRouteWithChildren
   ShareTokenRoute: typeof ShareTokenRoute
   AdminIndexRoute: typeof AdminIndexRoute
   FilesIndexRoute: typeof FilesIndexRoute
@@ -678,6 +725,13 @@ declare module "@tanstack/react-router" {
       path: "/share/$token"
       fullPath: "/share/$token"
       preLoaderRoute: typeof ShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/files/webhooks": {
+      id: "/files/webhooks"
+      path: "/files/webhooks"
+      fullPath: "/files/webhooks"
+      preLoaderRoute: typeof FilesWebhooksRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/files/syncs": {
@@ -778,6 +832,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminAuditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/files/webhooks/": {
+      id: "/files/webhooks/"
+      path: "/"
+      fullPath: "/files/webhooks/"
+      preLoaderRoute: typeof FilesWebhooksIndexRouteImport
+      parentRoute: typeof FilesWebhooksRoute
+    }
     "/files/syncs/": {
       id: "/files/syncs/"
       path: "/"
@@ -855,6 +916,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminBucketsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/files/webhooks/new": {
+      id: "/files/webhooks/new"
+      path: "/new"
+      fullPath: "/files/webhooks/new"
+      preLoaderRoute: typeof FilesWebhooksNewRouteImport
+      parentRoute: typeof FilesWebhooksRoute
+    }
     "/files/syncs/new": {
       id: "/files/syncs/new"
       path: "/new"
@@ -917,6 +985,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/admin/clusters/new"
       preLoaderRoute: typeof AdminClustersNewRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    "/files/webhooks/$id/": {
+      id: "/files/webhooks/$id/"
+      path: "/$id"
+      fullPath: "/files/webhooks/$id/"
+      preLoaderRoute: typeof FilesWebhooksIdIndexRouteImport
+      parentRoute: typeof FilesWebhooksRoute
     }
     "/files/federated-buckets/$id/": {
       id: "/files/federated-buckets/$id/"
@@ -1123,6 +1198,22 @@ const FilesSyncsRouteWithChildren = FilesSyncsRoute._addFileChildren(
   FilesSyncsRouteChildren,
 )
 
+interface FilesWebhooksRouteChildren {
+  FilesWebhooksNewRoute: typeof FilesWebhooksNewRoute
+  FilesWebhooksIndexRoute: typeof FilesWebhooksIndexRoute
+  FilesWebhooksIdIndexRoute: typeof FilesWebhooksIdIndexRoute
+}
+
+const FilesWebhooksRouteChildren: FilesWebhooksRouteChildren = {
+  FilesWebhooksNewRoute: FilesWebhooksNewRoute,
+  FilesWebhooksIndexRoute: FilesWebhooksIndexRoute,
+  FilesWebhooksIdIndexRoute: FilesWebhooksIdIndexRoute,
+}
+
+const FilesWebhooksRouteWithChildren = FilesWebhooksRoute._addFileChildren(
+  FilesWebhooksRouteChildren,
+)
+
 interface AdminClustersCidBucketsIdRouteChildren {
   AdminClustersCidBucketsIdLifecycleNewRoute: typeof AdminClustersCidBucketsIdLifecycleNewRoute
   AdminClustersCidBucketsIdLifecycleRuleIdEditRoute: typeof AdminClustersCidBucketsIdLifecycleRuleIdEditRoute
@@ -1157,6 +1248,7 @@ const rootRouteChildren: RootRouteChildren = {
   FilesKeysRoute: FilesKeysRouteWithChildren,
   FilesSharesRoute: FilesSharesRouteWithChildren,
   FilesSyncsRoute: FilesSyncsRouteWithChildren,
+  FilesWebhooksRoute: FilesWebhooksRouteWithChildren,
   ShareTokenRoute: ShareTokenRoute,
   AdminIndexRoute: AdminIndexRoute,
   FilesIndexRoute: FilesIndexRoute,

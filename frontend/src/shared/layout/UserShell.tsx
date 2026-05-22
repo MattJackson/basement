@@ -67,6 +67,18 @@ export function UserShell({ children }: UserShellProps): ReactNode {
               >
                 Federations
               </Link>
+              {/* v1.7.0e: webhook subscriptions — operator-defined HTTP */}
+              {/* callbacks on bucket events. Sits between Federations */}
+              {/* (multi-backend infrastructure) and Shares (per-object */}
+              {/* outbound access) because webhooks straddle the same */}
+              {/* "external integration" theme without belonging to either. */}
+              <Link
+                to="/files/webhooks"
+                className={NAV_LINK}
+                activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+              >
+                Webhooks
+              </Link>
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
