@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
@@ -11,12 +12,20 @@ import { humanizeTime } from "@/shared/lib/format";
 import { useKey, useClusterBuckets, useGetCluster } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 import { useUpdateKeyPermissions, useDeleteKey } from "@/shared/api/mutations";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { components } from "@/shared/api/types.gen";
 import { DangerZone } from "@/shared/ui/DangerZone";
 import { GrantBucketAccessDialog } from "@/shared/ui/GrantBucketAccessDialog";
 import { RevokeAccessConfirm } from "@/shared/ui/RevokeAccessConfirm";
 import { useElevationGuard } from "@/shared/auth/elevation";
+
+// v1.4.0b: pagination + filter + "only granted" toggle on the key
+// permissions edit screen. On a cluster with 1000+ buckets the flat
+// scroll-everything-and-checkbox UI was unusable. The page-size
+// constant keeps the DOM cost bounded per page; filter narrows the
+// list client-side (server-side search lands when the all-buckets list
+// endpoint adds q= support).
+const PAGE_SIZE = 50;
 
 export const Route = createFileRoute("/admin/clusters/$cid/keys/$id")({
   component: adminPage(KeyDetailScreen),
@@ -67,6 +76,64 @@ function KeyDetailScreen() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [grantOpen, setGrantOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{ bucketId: string; label: string } | null>(null);
+
+  // v1.4.0b: filter + pagination + only-granted toggle. Each control
+  // resets pagination so the operator never lands on an empty page
+  // after narrowing.
+  const [filter, setFilter] = useState("");
+  const [page, setPage] = useState(0);
+  const [onlyGranted, setOnlyGranted] = useState(false);
+
+  // Bucket-label lookup keyed by bucket id. Built once per editPermissions
+  // / clusterBuckets change so the filter input + rendered rows can
+  // resolve a label in O(1). Garage returns the alias on Bucket.aliases
+  // and on key.buckets[].globalAliases / localAliases; the per-row
+  // BucketName component already handles the fallback to a truncated
+  // hash, but the FILTER needs a single canonical string to substring
+  // against, so we precompute the same fallback here.
+  const bucketLabels = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const b of clusterBuckets ?? []) {
+      if (!b.id) continue;
+      out.set(b.id, b.aliases?.[0] ?? `${b.id.slice(0, 12)}…`);
+    }
+    for (const b of key?.buckets ?? []) {
+      if (out.has(b.bucketId)) continue;
+      const label =
+        b.globalAliases?.[0] ?? b.localAliases?.[0] ?? `${b.bucketId.slice(0, 12)}…`;
+      out.set(b.bucketId, label);
+    }
+    return out;
+  }, [clusterBuckets, key?.buckets]);
+
+  // The filtered + ordered list of permission rows visible to the user
+  // BEFORE pagination is applied. Filter matches the bucket label
+  // substring (case-insensitive); onlyGranted hides rows where every
+  // permission bit is false. This is recomputed cheaply on each render
+  // because the list maxes at "every bucket in the cluster", which is
+  // already bounded by the page-size below for scroll cost.
+  const visiblePermissions = useMemo(() => {
+    const needle = filter.trim().toLowerCase();
+    return editPermissions.filter((p) => {
+      if (onlyGranted && !p.read && !p.write && !p.owner) return false;
+      if (!needle) return true;
+      const label = (bucketLabels.get(p.bucketId) ?? p.bucketId).toLowerCase();
+      return label.includes(needle);
+    });
+  }, [editPermissions, filter, onlyGranted, bucketLabels]);
+
+  const totalPages = Math.max(1, Math.ceil(visiblePermissions.length / PAGE_SIZE));
+  // Clamp the current page in case a filter trimmed the list below it.
+  // Avoids a "Page 5 of 2" footer / blank table when the user types
+  // into the filter on a high page.
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageStart = clampedPage * PAGE_SIZE;
+  const pageRows = visiblePermissions.slice(pageStart, pageStart + PAGE_SIZE);
+
+  const grantedCount = useMemo(
+    () => editPermissions.filter((p) => p.read || p.write || p.owner).length,
+    [editPermissions],
+  );
 
   // Capability gate: per-key R/W/O bucket permissions are the Garage key
   // model. AWS-S3 / MinIO use IAM; those drivers return ErrUnsupported
@@ -133,17 +200,55 @@ function KeyDetailScreen() {
 
   const handleEditToggle = () => {
     if (!isEditing) {
-      setEditPermissions(key.buckets?.map(b => ({
-        bucketId: b.bucketId,
-        read: b.read,
-        write: b.write,
-        owner: b.owner,
-      })) ?? []);
+      // v1.4.0b: hydrate from the UNION of (every bucket in the cluster)
+      // and (every bucket the key already touches). Grants stay as-is;
+      // ungranted buckets render as unchecked rows the operator can
+      // tick. This is the "edit at scale" model — pagination + filter
+      // make it usable on 1000+ buckets, the "Only granted" toggle is
+      // the escape hatch when the operator just wants to audit/edit
+      // existing grants.
+      const granted = new Map<string, components["schemas"]["BucketPermission"]>();
+      for (const b of key.buckets ?? []) {
+        granted.set(b.bucketId, {
+          bucketId: b.bucketId,
+          read: b.read,
+          write: b.write,
+          owner: b.owner,
+        });
+      }
+      const merged: components["schemas"]["BucketPermission"][] = [];
+      // Granted first so they're easy to find at the top when "Only granted"
+      // is off too. Stable alphabetical sort below for the long tail.
+      for (const b of key.buckets ?? []) {
+        merged.push({
+          bucketId: b.bucketId,
+          read: b.read,
+          write: b.write,
+          owner: b.owner,
+        });
+      }
+      const tail: components["schemas"]["BucketPermission"][] = [];
+      for (const b of clusterBuckets ?? []) {
+        if (!b.id || granted.has(b.id)) continue;
+        tail.push({ bucketId: b.id, read: false, write: false, owner: false });
+      }
+      tail.sort((a, b) => {
+        const la = (bucketLabels.get(a.bucketId) ?? a.bucketId).toLowerCase();
+        const lb = (bucketLabels.get(b.bucketId) ?? b.bucketId).toLowerCase();
+        return la.localeCompare(lb);
+      });
+      setEditPermissions([...merged, ...tail]);
+      setFilter("");
+      setPage(0);
+      setOnlyGranted(false);
     }
     setIsEditing(!isEditing);
   };
 
   const handleSave = async () => {
+    // Send the full list — backend treats UpdateKeyPermissions as a
+    // wholesale replace, and rows with read=write=owner=false resolve
+    // to a deny on Garage (no-op on already-ungranted buckets).
     const perms = editPermissions;
     setIsEditing(false);
     try {
@@ -158,6 +263,9 @@ function KeyDetailScreen() {
 
   const handleCancel = () => {
     setEditPermissions([]);
+    setFilter("");
+    setPage(0);
+    setOnlyGranted(false);
     setIsEditing(false);
   };
 
@@ -247,7 +355,13 @@ function KeyDetailScreen() {
                   + Grant access
                 </Button>
               )}
-              {key.buckets && key.buckets.length > 0 && (
+              {/* v1.4.0b: "Edit permissions" now hydrates the FULL cluster
+                  bucket list (granted + ungranted) so the operator can
+                  tick/untick at scale. Available whenever any bucket
+                  exists in the cluster, even if this key has zero
+                  grants today — that's the "first-time setup" entry. */}
+              {((key.buckets && key.buckets.length > 0) ||
+                (clusterBuckets && clusterBuckets.length > 0)) && (
                 <Button variant="outline" size="sm" onClick={handleEditToggle}>
                   Edit permissions
                 </Button>
@@ -256,117 +370,221 @@ function KeyDetailScreen() {
           )}
         </CardHeader>
         <CardContent className="pt-6">
-          {key.buckets && key.buckets.length > 0 ? (
-            <>
-              {isEditing ? (
-                // Edit mode with checkboxes
-                <div className="space-y-4">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Bucket</TableHead>
-                        <TableHead className="w-40 text-center">Permissions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {editPermissions.map((perm) => (
-                        <TableRow key={perm.bucketId}>
-                          <TableCell>
-                            <BucketName
-                              globalAliases={key.buckets?.find(b => b.bucketId === perm.bucketId)?.globalAliases}
-                              localAliases={key.buckets?.find(b => b.bucketId === perm.bucketId)?.localAliases}
-                              bucketId={perm.bucketId}
-                            />
-                          </TableCell>
-                          <TableCell className="text-center space-x-2">
-                            <div className="flex items-center gap-2 justify-center">
-                              <Checkbox
-                                id={`read-${perm.bucketId}`}
-                                checked={perm.read}
-                                onCheckedChange={() => handlePermissionChange(perm.bucketId, "read")}
-                                disabled={updatePermissions.isPending}
-                              />
-                              <label htmlFor={`read-${perm.bucketId}`} className="text-sm">Read</label>
-                            </div>
-                            <div className="flex items-center gap-2 justify-center mt-1">
-                              <Checkbox
-                                id={`write-${perm.bucketId}`}
-                                checked={perm.write}
-                                onCheckedChange={() => handlePermissionChange(perm.bucketId, "write")}
-                                disabled={updatePermissions.isPending}
-                              />
-                              <label htmlFor={`write-${perm.bucketId}`} className="text-sm">Write</label>
-                            </div>
-                            <div className="flex items-center gap-2 justify-center mt-1">
-                              <Checkbox
-                                id={`owner-${perm.bucketId}`}
-                                checked={perm.owner}
-                                onCheckedChange={() => handlePermissionChange(perm.bucketId, "owner")}
-                                disabled={updatePermissions.isPending}
-                              />
-                              <label htmlFor={`owner-${perm.bucketId}`} className="text-sm">Owner</label>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  <div className="flex gap-2 pt-4">
-                    <Button onClick={handleSave} disabled={updatePermissions.isPending}>
-                      {updatePermissions.isPending ? "Saving…" : "Save"}
-                    </Button>
-                    <Button variant="outline" onClick={handleCancel} disabled={updatePermissions.isPending}>
-                      Cancel
-                    </Button>
-                  </div>
+          {isEditing ? (
+            // v1.4.0b: edit mode with filter + pagination + only-granted
+            // toggle + sticky save bar. The list is the FULL cluster
+            // bucket list (granted + ungranted) hydrated by
+            // handleEditToggle above; checkbox state survives pagination
+            // because we mutate the single editPermissions array, not
+            // per-page slices.
+            <div className="space-y-4" data-testid="key-perms-editor">
+              {/* Filter + toggle row. Both narrow the visible list;
+                  changing either resets pagination so the operator
+                  never lands on a now-empty page. */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <Input
+                  type="search"
+                  placeholder="Filter buckets..."
+                  value={filter}
+                  onChange={(e) => {
+                    setFilter(e.target.value);
+                    setPage(0);
+                  }}
+                  className="sm:max-w-xs"
+                  aria-label="Filter buckets"
+                  data-testid="key-perms-filter"
+                />
+                <div className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    id="only-granted-toggle"
+                    checked={onlyGranted}
+                    onCheckedChange={(v) => {
+                      setOnlyGranted(v === true);
+                      setPage(0);
+                    }}
+                    data-testid="key-perms-only-granted"
+                  />
+                  <label htmlFor="only-granted-toggle" className="select-none">
+                    Show only granted ({grantedCount})
+                  </label>
+                </div>
+              </div>
+
+              {pageRows.length === 0 ? (
+                <div className="rounded-lg border bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
+                  {filter || onlyGranted
+                    ? "No buckets match the current filter."
+                    : "This cluster has no buckets yet."}
                 </div>
               ) : (
-                // Read mode with PermissionChips
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Bucket</TableHead>
-                      <TableHead className="w-40">Permissions</TableHead>
-                      {supportsGrants && <TableHead className="w-24 text-right">Actions</TableHead>}
+                      <TableHead className="w-40 text-center">Permissions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {key.buckets.map((bucket) => {
-                      const bucketLabel =
-                        bucket.globalAliases?.[0] ??
-                        bucket.localAliases?.[0] ??
-                        `${bucket.bucketId.slice(0, 12)}…`;
+                    {pageRows.map((perm) => {
+                      // v1.4.0b: prefer the existing key.buckets entry's
+                      // aliases (set by Garage on already-granted edges)
+                      // when present, otherwise fall back to the cluster
+                      // bucket's first alias from the precomputed label
+                      // map. This makes ungranted rows show readable
+                      // names instead of "{12-char-hash}...".
+                      const grantedRow = key.buckets?.find((b) => b.bucketId === perm.bucketId);
+                      const fallbackLabel = bucketLabels.get(perm.bucketId);
                       return (
-                        <TableRow key={bucket.bucketId}>
-                          <TableCell>
+                      <TableRow key={perm.bucketId}>
+                        <TableCell>
+                          {grantedRow ? (
                             <BucketName
-                              globalAliases={bucket.globalAliases}
-                              localAliases={bucket.localAliases}
-                              bucketId={bucket.bucketId}
+                              globalAliases={grantedRow.globalAliases}
+                              localAliases={grantedRow.localAliases}
+                              bucketId={perm.bucketId}
                             />
-                          </TableCell>
-                          <TableCell>
-                            <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
-                          </TableCell>
-                          {supportsGrants && (
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setRevokeTarget({ bucketId: bucket.bucketId, label: bucketLabel })}
-                                disabled={updatePermissions.isPending}
-                              >
-                                Revoke
-                              </Button>
-                            </TableCell>
+                          ) : (
+                            <BucketName
+                              globalAliases={fallbackLabel ? [fallbackLabel] : undefined}
+                              bucketId={perm.bucketId}
+                            />
                           )}
-                        </TableRow>
+                        </TableCell>
+                        <TableCell className="text-center space-x-2">
+                          <div className="flex items-center gap-2 justify-center">
+                            <Checkbox
+                              id={`read-${perm.bucketId}`}
+                              checked={perm.read}
+                              onCheckedChange={() => handlePermissionChange(perm.bucketId, "read")}
+                              disabled={updatePermissions.isPending}
+                            />
+                            <label htmlFor={`read-${perm.bucketId}`} className="text-sm">Read</label>
+                          </div>
+                          <div className="flex items-center gap-2 justify-center mt-1">
+                            <Checkbox
+                              id={`write-${perm.bucketId}`}
+                              checked={perm.write}
+                              onCheckedChange={() => handlePermissionChange(perm.bucketId, "write")}
+                              disabled={updatePermissions.isPending}
+                            />
+                            <label htmlFor={`write-${perm.bucketId}`} className="text-sm">Write</label>
+                          </div>
+                          <div className="flex items-center gap-2 justify-center mt-1">
+                            <Checkbox
+                              id={`owner-${perm.bucketId}`}
+                              checked={perm.owner}
+                              onCheckedChange={() => handlePermissionChange(perm.bucketId, "owner")}
+                              disabled={updatePermissions.isPending}
+                            />
+                            <label htmlFor={`owner-${perm.bucketId}`} className="text-sm">Owner</label>
+                          </div>
+                        </TableCell>
+                      </TableRow>
                       );
                     })}
                   </TableBody>
                 </Table>
               )}
-            </>
+
+              {/* Pagination footer. Always rendered (even on a single
+                  page) so the operator has a stable "showing X-Y of Z"
+                  signal and never wonders if the list is truncated. */}
+              <div className="flex items-center justify-between gap-2 pt-2 text-sm text-muted-foreground">
+                <span data-testid="key-perms-page-indicator">
+                  {visiblePermissions.length === 0
+                    ? "0 buckets"
+                    : `Showing ${pageStart + 1}-${Math.min(pageStart + PAGE_SIZE, visiblePermissions.length)} of ${visiblePermissions.length}`}
+                  {totalPages > 1 ? ` (page ${clampedPage + 1} of ${totalPages})` : null}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={clampedPage === 0}
+                    data-testid="key-perms-prev"
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                    disabled={clampedPage >= totalPages - 1}
+                    data-testid="key-perms-next"
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+
+              {/* Sticky Save bar — pinned to the bottom of the viewport
+                  while editing so the operator never has to scroll the
+                  table to commit changes. position: sticky inside the
+                  CardContent (not fixed) so it stays inside the page
+                  flow and doesn't overlap the global nav on small
+                  screens. The negative bottom inset cancels the
+                  CardContent's own padding so the bar sits flush. */}
+              <div
+                className="sticky bottom-0 -mx-6 -mb-6 mt-4 flex items-center justify-end gap-2 border-t bg-background/95 px-6 py-3 backdrop-blur"
+                data-testid="key-perms-sticky-save"
+              >
+                <span className="mr-auto text-xs text-muted-foreground">
+                  {grantedCount} bucket{grantedCount === 1 ? "" : "s"} granted
+                </span>
+                <Button variant="outline" onClick={handleCancel} disabled={updatePermissions.isPending}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSave} disabled={updatePermissions.isPending}>
+                  {updatePermissions.isPending ? "Saving…" : "Save changes"}
+                </Button>
+              </div>
+            </div>
+          ) : key.buckets && key.buckets.length > 0 ? (
+            // Read mode with PermissionChips
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Bucket</TableHead>
+                  <TableHead className="w-40">Permissions</TableHead>
+                  {supportsGrants && <TableHead className="w-24 text-right">Actions</TableHead>}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {key.buckets.map((bucket) => {
+                  const bucketLabel =
+                    bucket.globalAliases?.[0] ??
+                    bucket.localAliases?.[0] ??
+                    `${bucket.bucketId.slice(0, 12)}…`;
+                  return (
+                    <TableRow key={bucket.bucketId}>
+                      <TableCell>
+                        <BucketName
+                          globalAliases={bucket.globalAliases}
+                          localAliases={bucket.localAliases}
+                          bucketId={bucket.bucketId}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <PermissionChips read={bucket.read} write={bucket.write} owner={bucket.owner} />
+                      </TableCell>
+                      {supportsGrants && (
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setRevokeTarget({ bucketId: bucket.bucketId, label: bucketLabel })}
+                            disabled={updatePermissions.isPending}
+                          >
+                            Revoke
+                          </Button>
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           ) : (
             <EmptyState
               icon="database"

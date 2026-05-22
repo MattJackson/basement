@@ -1687,6 +1687,87 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.4.0b] paginated key permissions + batch object selection
+    // ============================================================
+    section("[v1.4.0b/a] /admin/clusters/{cid}/keys/{kid} renders the v1.4.0b filter input when editing");
+    await check("key detail edit mode shows the v1.4.0b 'Filter buckets...' input", async () => {
+      // Discover one cluster + one key on that cluster. If either is
+      // empty (fresh deploy / dev DB) the check skips rather than fails.
+      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/admin/clusters`);
+      if (!clustersResp.ok()) {
+        skipLine("v1.4.0b key perms check", `clusters → ${clustersResp.status()}`);
+        return;
+      }
+      const clusters = await clustersResp.json();
+      if (!Array.isArray(clusters) || clusters.length === 0) {
+        skipLine("v1.4.0b key perms check", "no clusters configured");
+        return;
+      }
+      const cid = clusters[0].id as string;
+
+      const keysResp = await page!.request.get(`${BASE_URL}/api/v1/admin/clusters/${cid}/keys`);
+      if (!keysResp.ok()) {
+        skipLine("v1.4.0b key perms check", `keys → ${keysResp.status()}`);
+        return;
+      }
+      const keys = await keysResp.json();
+      if (!Array.isArray(keys) || keys.length === 0) {
+        skipLine("v1.4.0b key perms check", "cluster has no keys");
+        return;
+      }
+      const kid = keys[0].id as string;
+
+      await page!.goto(`${BASE_URL}/admin/clusters/${cid}/keys/${kid}`, { waitUntil: "networkidle" });
+      // Click "Edit permissions" if visible. Wrapped in a try so a
+      // driver that doesn't expose key:permissions (AWS IAM, e.g.)
+      // doesn't bring down the smoke.
+      const editBtn = page!.getByRole("button", { name: /Edit permissions/i });
+      if ((await editBtn.count()) === 0) {
+        skipLine("v1.4.0b key perms check", "Edit permissions button not rendered (driver capability?)");
+        return;
+      }
+      await editBtn.first().click();
+      await page!.waitForSelector('[data-testid="key-perms-filter"]', { timeout: 10_000 });
+      await page!.waitForSelector('[data-testid="key-perms-only-granted"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="key-perms-sticky-save"]', { timeout: 5_000 });
+      await shot(page!, "v1.4.0b-key-perms-editor");
+    });
+
+    section("[v1.4.0b/b] /files/{regionId}/b/{bid} renders the v1.4.0b select-all checkbox in the header");
+    await check("bucket browser shows the v1.4.0b select-all-visible checkbox", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.4.0b batch-select check", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.4.0b batch-select check", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.4.0b batch-select check", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.4.0b batch-select check", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+
+      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+      // Even on an empty bucket the header still mounts the select-all
+      // checkbox — it's disabled when there are no selectable rows.
+      await page!.waitForSelector('[data-testid="select-all-visible"]', { timeout: 10_000 });
+      await shot(page!, "v1.4.0b-bucket-batch-select");
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
     section("[NN] console + pageerror gate (v0.8.0c)");

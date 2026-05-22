@@ -1,10 +1,21 @@
 import { createFileRoute, useNavigate, useLocation } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   useUserRegionBuckets,
   useUserRegionObjectsInfinite,
@@ -131,6 +142,146 @@ function UserRegionBucketObjects() {
     refetch();
   };
 
+  // v1.4.0b: batch object operations — select + delete.
+  //
+  // Selection state is a Set<string> of object keys. Folders are NEVER
+  // selectable; recursive deletes would silently fan out to potentially
+  // millions of objects without the operator confirming the blast
+  // radius. Move/copy is punted to v1.5 per cycle plan.
+  //
+  // perRowError tracks the per-key error indicator after a partial
+  // failure. It's cleared whenever the operator starts a fresh batch.
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [perRowError, setPerRowError] = useState<Map<string, string>>(() => new Map());
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteSummary, setDeleteSummary] = useState<{ failures: number } | null>(null);
+
+  // Reset selection whenever the operator changes folders. Leaving
+  // selection stale across navigation is a footgun — the keys would
+  // still match the previous prefix's objects but show up greyed out
+  // against the new list.
+  useEffect(() => {
+    setSelectedKeys(new Set());
+    setPerRowError(new Map());
+    setDeleteSummary(null);
+  }, [prefix, bid, regionId]);
+
+  const toggleSelected = useCallback((key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    // Stale per-row error indicators clear once the operator interacts
+    // with the row again — keeps the next batch attempt visually clean.
+    setPerRowError((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+
+  // Visible file rows (folders excluded — they're not selectable).
+  // Used by select-all + count display + deletion fan-out.
+  const visibleFileKeys = useMemo(
+    () => rows.flatMap((r) => (r.kind === "file" ? [r.key] : [])),
+    [rows],
+  );
+
+  const allVisibleSelected =
+    visibleFileKeys.length > 0 &&
+    visibleFileKeys.every((k) => selectedKeys.has(k));
+  const someVisibleSelected =
+    !allVisibleSelected && visibleFileKeys.some((k) => selectedKeys.has(k));
+
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const k of visibleFileKeys) next.delete(k);
+      } else {
+        for (const k of visibleFileKeys) next.add(k);
+      }
+      return next;
+    });
+  }, [allVisibleSelected, visibleFileKeys]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedKeys(new Set());
+    setPerRowError(new Map());
+    setDeleteSummary(null);
+  }, []);
+
+  const handleBatchDelete = useCallback(async () => {
+    const keys = Array.from(selectedKeys);
+    if (keys.length === 0) {
+      setDeleteConfirmOpen(false);
+      return;
+    }
+    setIsDeleting(true);
+    setPerRowError(new Map());
+    setDeleteSummary(null);
+
+    // Fan out parallel DELETEs. Promise.allSettled so a single failure
+    // doesn't abort the batch — the operator gets per-row error
+    // indicators on the keys that survived. The backend endpoint
+    // (DELETE /api/v1/user/regions/{regionId}/buckets/{bid}/objects/{key},
+    // see internal/api/user_regions.go:1325) is idempotent on already-
+    // missing keys (S3 quirk — DeleteObject succeeds even if the key
+    // doesn't exist), so re-running the batch on the failed survivors
+    // after the operator addresses whatever caused the failure is safe.
+    const results = await Promise.allSettled(
+      keys.map(async (key) => {
+        const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}`;
+        const res = await fetch(url, { method: "DELETE", credentials: "include" });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(
+            (body && typeof body === "object" && "message" in body && typeof body.message === "string"
+              ? body.message
+              : `HTTP ${res.status}`),
+          );
+        }
+        return key;
+      }),
+    );
+
+    const nextErrors = new Map<string, string>();
+    let failures = 0;
+    const succeeded = new Set<string>();
+    results.forEach((r, idx) => {
+      const key = keys[idx]!;
+      if (r.status === "fulfilled") {
+        succeeded.add(key);
+      } else {
+        failures += 1;
+        nextErrors.set(key, r.reason instanceof Error ? r.reason.message : String(r.reason));
+      }
+    });
+
+    setPerRowError(nextErrors);
+    // Drop succeeded keys from the selection; keep failed ones so the
+    // operator can see what to retry. If everything succeeded, the
+    // selection drops to empty and the action bar dismounts.
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      for (const k of succeeded) next.delete(k);
+      return next;
+    });
+    setIsDeleting(false);
+    setDeleteConfirmOpen(false);
+    setDeleteSummary({ failures });
+
+    // Refresh the object list once any deletes landed so the rows drop
+    // from view. The infinite query refetches all pages on refresh.
+    if (succeeded.size > 0) {
+      refetch();
+    }
+  }, [selectedKeys, regionId, bid, refetch]);
+
   if (bucketsLoading) {
     return (
       <div className="space-y-6">
@@ -229,12 +380,105 @@ function UserRegionBucketObjects() {
             }
           }}
           isFetchingNextPage={isFetchingNextPage}
+          selectedKeys={selectedKeys}
+          onToggleSelected={toggleSelected}
+          onToggleSelectAllVisible={toggleSelectAllVisible}
+          allVisibleSelected={allVisibleSelected}
+          someVisibleSelected={someVisibleSelected}
+          hasSelectableRows={visibleFileKeys.length > 0}
+          perRowError={perRowError}
         />
       )}
 
       {presignMutation.isError && (
         <ErrorBanner message="Failed to generate download link. Try again." />
       )}
+
+      {/* v1.4.0b: post-batch summary. Surfaces failure count + the
+          per-row indicators below; success-only batches silently drop
+          off via setDeleteSummary({failures: 0}) since refetch already
+          tells the operator "they're gone". */}
+      {deleteSummary && deleteSummary.failures > 0 && (
+        <ErrorBanner
+          message={`${deleteSummary.failures} object${deleteSummary.failures === 1 ? "" : "s"} couldn't be deleted. See the rows marked below for details.`}
+        />
+      )}
+
+      {/* v1.4.0b: sticky batch action bar. Mounts when ≥1 object is
+          selected. Pinned to the bottom of the viewport (fixed) so the
+          operator can scroll the virtualized list without losing the
+          Delete button. The pointer-events guard on the wrapper lets
+          clicks fall through outside the bar's actual button area. */}
+      {selectedKeys.size > 0 && (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4"
+          data-testid="batch-action-bar"
+        >
+          <div className="pointer-events-auto flex items-center gap-3 rounded-lg border bg-card shadow-lg px-4 py-3">
+            <span className="text-sm font-medium" data-testid="batch-action-bar-count">
+              {selectedKeys.size} selected
+            </span>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setDeleteConfirmOpen(true)}
+              disabled={isDeleting}
+              data-testid="batch-action-bar-delete"
+            >
+              {isDeleting ? "Deleting…" : `Delete ${selectedKeys.size} object${selectedKeys.size === 1 ? "" : "s"}`}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearSelection}
+              disabled={isDeleting}
+              data-testid="batch-action-bar-cancel"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation dialog. Uses AlertDialog (same pattern as the
+          per-bucket / per-key delete confirms) — no type-name-to-confirm
+          here because object batches are higher-volume + typically
+          recoverable from backup if the bucket has versioning; the
+          delete-bucket flow keeps the harder gate. */}
+      <AlertDialog
+        open={deleteConfirmOpen}
+        onOpenChange={(next) => {
+          if (!next && !isDeleting) setDeleteConfirmOpen(false);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Permanently delete {selectedKeys.size} object{selectedKeys.size === 1 ? "" : "s"}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone unless the bucket has versioning enabled.
+              Per-object failures will be surfaced inline; succeeded objects drop from the list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => setDeleteConfirmOpen(false)}
+              disabled={isDeleting}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBatchDelete}
+              disabled={isDeleting}
+              data-testid="batch-delete-confirm-action"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <UploadDialog
         open={uploadOpen}
@@ -259,12 +503,26 @@ function VirtualObjectList({
   onDownload,
   onReachEnd,
   isFetchingNextPage,
+  selectedKeys,
+  onToggleSelected,
+  onToggleSelectAllVisible,
+  allVisibleSelected,
+  someVisibleSelected,
+  hasSelectableRows,
+  perRowError,
 }: {
   rows: VirtualRow[];
   onFolderClick: (prefix: string) => void;
   onDownload: (key: string) => void;
   onReachEnd: () => void;
   isFetchingNextPage: boolean;
+  selectedKeys: Set<string>;
+  onToggleSelected: (key: string) => void;
+  onToggleSelectAllVisible: () => void;
+  allVisibleSelected: boolean;
+  someVisibleSelected: boolean;
+  hasSelectableRows: boolean;
+  perRowError: Map<string, string>;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
 
@@ -319,8 +577,21 @@ function VirtualObjectList({
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
       {/* Sticky header row. Uses the same column widths as the body so
-          the eye doesn't jump between header + first body row. */}
-      <div className="grid grid-cols-[1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          the eye doesn't jump between header + first body row. v1.4.0b:
+          leading 40px column hosts the per-row checkbox + the
+          select-all-visible toggle in the header. Folder rows leave it
+          blank — selection is files-only by design. */}
+      <div className="grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center" data-testid="select-all-cell">
+          <Checkbox
+            checked={allVisibleSelected}
+            indeterminate={someVisibleSelected}
+            onCheckedChange={onToggleSelectAllVisible}
+            disabled={!hasSelectableRows}
+            aria-label="Select all visible files"
+            data-testid="select-all-visible"
+          />
+        </div>
         <div>Name</div>
         <div className="text-right">Size</div>
         <div className="text-right">Last modified</div>
@@ -347,6 +618,8 @@ function VirtualObjectList({
           {items.map((virtual) => {
             const row = rows[virtual.index];
             if (!row) return null;
+            const isSelectedFile = row.kind === "file" && selectedKeys.has(row.key);
+            const fileError = row.kind === "file" ? perRowError.get(row.key) : undefined;
             return (
               <div
                 key={virtual.key}
@@ -360,16 +633,33 @@ function VirtualObjectList({
                   transform: `translateY(${virtual.start}px)`,
                   height: ROW_HEIGHT,
                 }}
-                className="grid grid-cols-[1fr_140px_160px_120px] gap-2 items-center border-b px-3 hover:bg-muted/40"
+                className={`grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center border-b px-3 hover:bg-muted/40 ${
+                  isSelectedFile ? "bg-primary/5" : ""
+                } ${fileError ? "ring-1 ring-inset ring-destructive/50" : ""}`}
+                data-row-kind={row.kind}
               >
                 {row.kind === "folder" && (
-                  <FolderRow prefix={row.key} onFolderClick={onFolderClick} />
+                  <>
+                    {/* Empty cell — folders are not selectable. */}
+                    <div />
+                    <FolderRow prefix={row.key} onFolderClick={onFolderClick} />
+                  </>
                 )}
                 {row.kind === "file" && (
-                  <FileRow obj={row.obj} onDownload={onDownload} />
+                  <>
+                    <div className="flex items-center">
+                      <Checkbox
+                        checked={isSelectedFile}
+                        onCheckedChange={() => onToggleSelected(row.key)}
+                        aria-label={`Select ${row.key}`}
+                        data-testid={`file-select-${row.key}`}
+                      />
+                    </div>
+                    <FileRow obj={row.obj} onDownload={onDownload} errorMessage={fileError} />
+                  </>
                 )}
                 {row.kind === "loadMoreSentinel" && (
-                  <div className="col-span-4 text-center text-xs text-muted-foreground">
+                  <div className="col-span-5 text-center text-xs text-muted-foreground">
                     {isFetchingNextPage ? "Loading more..." : "Scroll for more"}
                   </div>
                 )}
@@ -422,12 +712,18 @@ function FolderRow({
 
 // FileRow renders one S3 object. Size + last-modified columns mirror
 // the previous table cells. Download is the single per-row action.
+// v1.4.0b: errorMessage surfaces a per-row failure indicator after a
+// partial-failure batch delete — the row stays in the list (so the
+// operator can retry), the icon turns red, and the title attribute
+// carries the failure reason for hover inspection.
 function FileRow({
   obj,
   onDownload,
+  errorMessage,
 }: {
   obj: ObjectInfo;
   onDownload: (key: string) => void;
+  errorMessage?: string;
 }) {
   const displayName = obj.key.split("/").pop() || obj.key;
   return (
@@ -437,12 +733,27 @@ function FileRow({
           xmlns="http://www.w3.org/2000/svg"
           viewBox="0 0 24 24"
           fill="currentColor"
-          className="h-5 w-5 text-gray-500 flex-shrink-0"
+          className={`h-5 w-5 flex-shrink-0 ${errorMessage ? "text-destructive" : "text-gray-500"}`}
+          aria-hidden="true"
         >
           <path d="M19.5 14.25v-9a3 3 0 0 0-3-3H7.5a3 3 0 0 0-3 3v13.5a3 3 0 0 0 3 3h9a3 3 0 0 0 3-3Z" />
           <path d="M16.5 7.5h-9v9h9a1.5 1.5 0 0 0 1.5-1.5v-6Z" fillOpacity={0} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        <span className="font-medium truncate" title={obj.key}>{displayName}</span>
+        <span
+          className="font-medium truncate"
+          title={errorMessage ? `${obj.key} — ${errorMessage}` : obj.key}
+          data-testid={errorMessage ? `file-row-error-${obj.key}` : undefined}
+        >
+          {displayName}
+        </span>
+        {errorMessage && (
+          <span
+            className="text-xs text-destructive whitespace-nowrap"
+            data-testid={`file-row-error-label-${obj.key}`}
+          >
+            delete failed
+          </span>
+        )}
       </div>
       <div className="text-right tabular-nums text-sm">{humanizeBytes(obj.size)}</div>
       <div className="text-right tabular-nums text-sm">
@@ -564,7 +875,8 @@ function Breadcrumb({
 function ObjectListSkeleton() {
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
-      <div className="grid grid-cols-[1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div />
         <div>Name</div>
         <div className="text-right">Size</div>
         <div className="text-right">Last modified</div>
@@ -574,9 +886,10 @@ function ObjectListSkeleton() {
         {[...Array(8)].map((_, i) => (
           <div
             key={i}
-            className="grid grid-cols-[1fr_140px_160px_120px] gap-2 items-center px-3"
+            className="grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center px-3"
             style={{ height: ROW_HEIGHT }}
           >
+            <Skeleton className="h-4 w-4" />
             <Skeleton className="h-4 w-64" />
             <Skeleton className="h-4 w-16 ml-auto" />
             <Skeleton className="h-4 w-32 ml-auto" />
