@@ -15,11 +15,22 @@
     <!-- iOS home screen icon -->
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
-    <!-- PWA manifest -->
-    <link rel="manifest" href="/site.webmanifest" />
+    <!-- PWA manifest (v1.8.0e: vite-plugin-pwa emits manifest.webmanifest;
+         /site.webmanifest is kept for back-compat with already-installed
+         PWAs that registered against it). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
 
     <!-- Mobile browser address-bar color -->
     <meta name="theme-color" content="#C9874B" />
+
+    <!-- v1.8.0e: iOS-specific PWA hints. Safari ignores the web
+         manifest's display:standalone — it requires these meta tags
+         instead to render the "Add to Home Screen" install in
+         standalone mode (no Safari chrome). -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Basement" />
+    <meta name="mobile-web-app-capable" content="yes" />
 
     <!-- Open Graph social card -->
     <meta property="og:title" content="Basement" />
