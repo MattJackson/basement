@@ -23,6 +23,7 @@ import { useCreateBucket, useDeleteBucket } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import { ClusterBadge } from "@/components/ClusterBadge";
 import { ClusterFilter } from "@/components/ClusterFilter";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 const _createBucketSchema = z.object({
   alias: z.string().min(1, "Alias is required"),
@@ -45,6 +46,10 @@ function AdminBucketsAggregated() {
   const deleteMutation = useDeleteBucket();
   const { data: bucketsData, isLoading, error } = useBuckets();
   const { data: clusters } = useListClusters();
+  // v1.3.0a.3: bucket:create is cluster-admin tier; bucket:delete is
+  // ELEVATED-min. Wrap both so a 403 ELEVATION_REQUIRED pops the modal
+  // and retries on success (one-click after elevate).
+  const runWithElevation = useElevationGuard();
 
   const noClusters = clusters !== undefined && clusters.length === 0;
   if (noClusters) {
@@ -62,13 +67,14 @@ function AdminBucketsAggregated() {
 
   const handleCreateSubmit = async (values: CreateBucketFormValues) => {
     if (!targetCid) return;
-    createMutation.mutate(
-      { cid: targetCid, alias: values.alias },
-      {
-        onError: () => {
-        },
-      },
-    );
+    try {
+      await runWithElevation(() =>
+        createMutation.mutateAsync({ cid: targetCid, alias: values.alias }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error banner above the form.
+    }
   };
 
   const deleteTarget = deleteDialogId
@@ -79,10 +85,15 @@ function AdminBucketsAggregated() {
     setDeleteDialogId(bucketId);
   };
 
-  const confirmDelete = () => {
-    if (deleteDialogId && deleteTarget?.connectionId) {
-      deleteMutation.mutate({ cid: deleteTarget.connectionId, id: deleteDialogId });
-      setDeleteDialogId(null);
+  const confirmDelete = async () => {
+    if (!deleteDialogId || !deleteTarget?.connectionId) return;
+    const payload = { cid: deleteTarget.connectionId, id: deleteDialogId };
+    setDeleteDialogId(null);
+    try {
+      await runWithElevation(() => deleteMutation.mutateAsync(payload));
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
     }
   };
 

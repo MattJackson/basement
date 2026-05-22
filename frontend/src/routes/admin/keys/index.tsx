@@ -35,6 +35,7 @@ import { useDeleteKey } from "@/shared/api/mutations";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ClusterBadge } from "@/components/ClusterBadge";
 import { ClusterFilter } from "@/components/ClusterFilter";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/keys/")({
   component: adminPage(KeysScreen),
@@ -59,6 +60,11 @@ function KeysScreen() {
   const deleteKey = useDeleteKey();
   const { data: clusters } = useListClusters();
   const targetCid = clusterFilter ?? clusters?.[0]?.id ?? null;
+  // v1.3.0a.3: key:delete + key:create are ADMIN-tier on the backend.
+  // Wrap the click handlers so a 403 ELEVATION_REQUIRED pops the
+  // modal and retries on success — one-click after elevate instead
+  // of "elevate → modal closes → re-click to actually delete".
+  const runWithElevation = useElevationGuard();
 
   const keys = keysData?.keys ?? [];
   const errors = keysData?.errors ?? [];
@@ -126,18 +132,19 @@ function KeysScreen() {
     );
   }
 
-  const handleCreateKey = () => {
+  const handleCreateKey = async () => {
     if (!newKeyName.trim() || !targetCid) return;
-    createKey.mutate(
-      { cid: targetCid, name: newKeyName.trim() },
-      {
-        onSuccess: (key) => {
-          setCreateOpen(false);
-          setNewKeyName("");
-          setCreatedKey(key);
-        },
-      },
-    );
+    try {
+      const key = await runWithElevation(() =>
+        createKey.mutateAsync({ cid: targetCid, name: newKeyName.trim() }),
+      );
+      setCreateOpen(false);
+      setNewKeyName("");
+      setCreatedKey(key);
+    } catch {
+      // Errors (including ELEVATION_CANCELLED) surface via the
+      // mutation's existing error banner above the input.
+    }
   };
 
   const handleDeleteClick = (cid: string, id: string, name?: string) => {
@@ -145,11 +152,19 @@ function KeysScreen() {
     setDeleteOpen(true);
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!keyToDelete) return;
-    deleteKey.mutate({ cid: keyToDelete.cid, id: keyToDelete.id });
+    const target = keyToDelete;
     setDeleteOpen(false);
     setKeyToDelete(null);
+    try {
+      await runWithElevation(() =>
+        deleteKey.mutateAsync({ cid: target.cid, id: target.id }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error toast.
+    }
   };
 
   return (

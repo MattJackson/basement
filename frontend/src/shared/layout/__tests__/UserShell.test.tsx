@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthModeProvider } from "@/shared/auth/mode";
+import { ElevationProvider } from "@/shared/auth/elevation";
 
 vi.mock("@/shared/api/queries", () => ({
   useVersion: vi.fn(() => ({
@@ -46,9 +48,14 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // v1.3.0a.3: UserMenu's "Switch to admin" handler reads useAuthMode +
+  // useElevationPrompt; the test tree needs both providers mounted or
+  // the component throws on first render.
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <AuthModeProvider>
+        <ElevationProvider>{children}</ElevationProvider>
+      </AuthModeProvider>
     </QueryClientProvider>
   );
 }

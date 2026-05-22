@@ -21,6 +21,7 @@ import { humanizeBytes } from "@/shared/lib/format";
 import { useLayout, useGetCluster } from "@/shared/api/queries";
 import { useStageLayoutChange, useApplyLayout, useRevertLayout } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/clusters/$cid/layout")({
   component: adminPage(ClusterLayoutScreen),
@@ -42,6 +43,12 @@ function ClusterLayoutScreen() {
   const stageChange = useStageLayoutChange(cid);
   const applyLayout = useApplyLayout(cid);
   const revertLayout = useRevertLayout(cid);
+  // v1.3.0a.3: cluster:edit_layout (stage/apply/revert) is ADMIN-min
+  // on the backend; apply in particular touches the cluster topology
+  // and may be ELEVATED-min. Wrap all three so the modal pops once
+  // and the mutation retries automatically — same one-click UX as
+  // cluster:delete already gets.
+  const runWithElevation = useElevationGuard();
 
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
@@ -109,26 +116,45 @@ function ClusterLayoutScreen() {
     setDrafts((d) => ({ ...d, [nodeId]: { ...getDraft(nodeId, {}), ...patch } }));
   };
 
-  const handleStage = (nodeId: string) => {
+  const handleStage = async (nodeId: string) => {
     const draft = getDraft(nodeId, {});
     const capGB = parseFloat(draft.capacityGB);
     const tags = draft.tags
       .split(",")
       .map((t) => t.trim())
       .filter(Boolean);
-    stageChange.mutate({
-      nodeId,
-      role: (draft.role || undefined) as "storage" | "gateway" | "" | undefined,
-      zone: draft.zone || undefined,
-      capacity: !isNaN(capGB) ? Math.round(capGB * 1024 ** 3) : undefined,
-      tags: tags.length > 0 ? tags : undefined,
-    });
+    try {
+      await runWithElevation(() =>
+        stageChange.mutateAsync({
+          nodeId,
+          role: (draft.role || undefined) as "storage" | "gateway" | "" | undefined,
+          zone: draft.zone || undefined,
+          capacity: !isNaN(capGB) ? Math.round(capGB * 1024 ** 3) : undefined,
+          tags: tags.length > 0 ? tags : undefined,
+        }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
+    }
   };
 
-  const handleApply = () => applyLayout.mutate();
-  const handleRevert = () => {
-    revertLayout.mutate();
+  const handleApply = async () => {
+    try {
+      await runWithElevation(() => applyLayout.mutateAsync());
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
+    }
+  };
+  const handleRevert = async () => {
     setRevertDialogOpen(false);
+    try {
+      await runWithElevation(() => revertLayout.mutateAsync());
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
+    }
   };
 
   return (

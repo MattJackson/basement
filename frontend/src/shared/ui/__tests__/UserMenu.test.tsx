@@ -1,0 +1,150 @@
+// v1.3.0a.3 — UserMenu "Switch to admin view" elevation flow.
+//
+// Before this cycle the menu item was a plain <Link> that navigated
+// straight into /admin/* — the first admin action then returned 403
+// ELEVATION_REQUIRED and forced a re-click cycle. The fix:
+//
+//   - USER mode click → elevation modal pops up first, navigates to
+//     /admin/clusters only after a successful submit.
+//   - ADMIN / ELEVATED mode click → navigates immediately (no
+//     redundant prompt).
+//   - Cancel from the modal → stays put, no navigation.
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+import { UserMenu } from "@/shared/ui/UserMenu";
+import { AuthModeProvider, type ModeState } from "@/shared/auth/mode";
+import { ElevationProvider } from "@/shared/auth/elevation";
+
+const navigateMock = vi.fn();
+
+vi.mock("@tanstack/react-router", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    Link: ({ children, ...rest }: { children: React.ReactNode } & Record<string, unknown>) => (
+      <a {...rest}>{children}</a>
+    ),
+    useNavigate: () => navigateMock,
+  };
+});
+
+vi.mock("@/shared/auth/useUser", () => ({
+  useUser: vi.fn(() => ({
+    data: { username: "matthew", role: "user", oidcUser: false },
+    isLoading: false,
+    error: null,
+  })),
+}));
+
+vi.mock("@/shared/api/queries", () => ({
+  useVersion: vi.fn(() => ({
+    data: { version: "v1.3.0a.3", commit: "abc1234", builtAt: "" },
+    isLoading: false,
+    error: null,
+  })),
+}));
+
+function Wrapper({
+  children,
+  initialMode = { mode: "user", expiresAt: 0 },
+}: {
+  children: React.ReactNode;
+  initialMode?: ModeState;
+}) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return (
+    <QueryClientProvider client={qc}>
+      <AuthModeProvider initial={initialMode}>
+        <ElevationProvider>{children}</ElevationProvider>
+      </AuthModeProvider>
+    </QueryClientProvider>
+  );
+}
+
+describe("UserMenu — Switch to admin elevation", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    // The elevation modal POSTs to /api/v1/auth/elevate. Default-stub
+    // it to a 200 so a "happy path" elevation just works; individual
+    // tests can override.
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          mode: "admin",
+          mode_expires_at: Math.floor(Date.now() / 1000) + 900,
+          mode_ttl_seconds: 900,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("USER mode: clicking 'Switch to admin view' opens the elevation modal and navigates on success", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+
+    // Open the dropdown.
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    // Click the switch-to-admin entry.
+    const switchItem = await screen.findByTestId("switch-to-admin");
+    fireEvent.click(switchItem);
+
+    // Modal should open (USER mode → needs elevate).
+    const password = await screen.findByTestId("elevation-password");
+    expect(password).toBeInTheDocument();
+    // Navigation should NOT have fired yet.
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    // Submit the password — stubbed fetch returns 200 → onSuccess
+    // resolves → navigation fires.
+    fireEvent.change(password, { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: /^submit$/i }));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
+    });
+  });
+
+  it("ADMIN mode: navigates immediately without opening the modal", async () => {
+    render(<UserMenu />, {
+      wrapper: ({ children }) => (
+        <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }}>
+          {children}
+        </Wrapper>
+      ),
+    });
+
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    fireEvent.click(await screen.findByTestId("switch-to-admin"));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
+    });
+    // No modal should be in the DOM.
+    expect(screen.queryByTestId("elevation-password")).not.toBeInTheDocument();
+  });
+
+  it("Cancel from elevation modal: does NOT navigate", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    fireEvent.click(await screen.findByTestId("switch-to-admin"));
+
+    await screen.findByTestId("elevation-password");
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    // Wait a tick — give the cancel promise a chance to reject + the
+    // catch block to swallow it.
+    await waitFor(() => {
+      expect(screen.queryByTestId("elevation-password")).not.toBeInTheDocument();
+    });
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+});

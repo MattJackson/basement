@@ -21,6 +21,7 @@ import { AttachKeyToBucketDialog } from "@/shared/ui/AttachKeyToBucketDialog";
 import { RevokeAccessConfirm } from "@/shared/ui/RevokeAccessConfirm";
 import { LifecycleSection } from "@/shared/ui/LifecycleSection";
 import type { components } from "@/shared/api/types.gen";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/clusters/$cid/buckets/$id")({
   component: adminPage(AdminBucketDetail),
@@ -31,6 +32,11 @@ function AdminBucketDetail() {
   const updateMutation = useUpdateBucket();
   const deleteMutation = useDeleteBucket();
   const updateKeyPerms = useUpdateKeyPermissions();
+  // v1.3.0a.3: bucket:delete is ELEVATED-min; bucket aliases/quotas
+  // + key:edit_permissions are ADMIN-min. All four destructive /
+  // state-changing handlers below get wrapped so a 403 ELEVATION_REQUIRED
+  // pops the modal and retries the mutation on success.
+  const runWithElevation = useElevationGuard();
   const [isEditingAlias, setIsEditingAlias] = useState(false);
   const [aliasInput, setAliasInput] = useState("");
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false);
@@ -120,17 +126,24 @@ function AdminBucketDetail() {
     );
   }
 
-  const handleAliasSave = () => {
+  const handleAliasSave = async () => {
     if (!aliasInput.trim()) return;
-    
+
     const aliases = bucket.aliases ?? [];
     const newAliases = [aliasInput, ...aliases.filter((a) => a !== aliases[0])];
-    updateMutation.mutate({
-      cid,
-      id: bucket.id,
-      update: { aliases: newAliases },
-    });
     setIsEditingAlias(false);
+    try {
+      await runWithElevation(() =>
+        updateMutation.mutateAsync({
+          cid,
+          id: bucket.id,
+          update: { aliases: newAliases },
+        }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
+    }
   };
 
   const handleCancelEdit = () => {
@@ -138,23 +151,37 @@ function AdminBucketDetail() {
     setIsEditingAlias(false);
   };
 
-  const handleQuotaSubmit = (maxSizeGB: number | null, maxObjects: number | null) => {
+  const handleQuotaSubmit = async (maxSizeGB: number | null, maxObjects: number | null) => {
     const quotas = {
       max_size: maxSizeGB !== null ? Math.round(maxSizeGB * 1024 ** 3) : null,
       max_objects: maxObjects !== null ? maxObjects : null,
     };
 
-    updateMutation.mutate({
-      cid,
-      id: bucket.id,
-      update: { quotas },
-    });
     setQuotaDialogOpen(false);
+    try {
+      await runWithElevation(() =>
+        updateMutation.mutateAsync({
+          cid,
+          id: bucket.id,
+          update: { quotas },
+        }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
+    }
   };
 
-  const handleDelete = () => {
-    deleteMutation.mutate({ cid, id: bucket.id });
+  const handleDelete = async () => {
     setDeleteDialogOpen(false);
+    try {
+      await runWithElevation(() =>
+        deleteMutation.mutateAsync({ cid, id: bucket.id }),
+      );
+    } catch {
+      // ELEVATION_CANCELLED / network errors surface via the
+      // mutation's existing error state.
+    }
   };
 
   return (
@@ -485,17 +512,22 @@ function AdminBucketDetail() {
                    }));
                })()}
                onCancel={() => setAttachKeyOpen(false)}
-               onSubmit={({ keyId, read, write, owner }) => {
+               onSubmit={async ({ keyId, read, write, owner }) => {
                  // Single-edge write: UpdateKeyPermissions only touches
                  // the bucket(s) named in the payload, so other grants
                  // on this key are untouched.
                  const perms: components["schemas"]["BucketPermission"][] = [
                    { bucketId: bucket.id, read, write, owner },
                  ];
-                 updateKeyPerms.mutate(
-                   { cid, id: keyId, permissions: perms },
-                   { onSuccess: () => setAttachKeyOpen(false) },
-                 );
+                 try {
+                   await runWithElevation(() =>
+                     updateKeyPerms.mutateAsync({ cid, id: keyId, permissions: perms }),
+                   );
+                   setAttachKeyOpen(false);
+                 } catch {
+                   // ELEVATION_CANCELLED / network errors surface via
+                   // the dialog's errorMessage prop.
+                 }
                }}
              />
            )}
@@ -509,18 +541,24 @@ function AdminBucketDetail() {
              target={bucket.aliases?.[0] ?? bucket.id.slice(0, 12)}
              isRevoking={updateKeyPerms.isPending}
              onCancel={() => setDetachTarget(null)}
-             onConfirm={() => {
+             onConfirm={async () => {
                if (!detachTarget) return;
-               updateKeyPerms.mutate(
-                 {
-                   cid,
-                   id: detachTarget.keyId,
-                   permissions: [
-                     { bucketId: bucket.id, read: false, write: false, owner: false },
-                   ],
-                 },
-                 { onSuccess: () => setDetachTarget(null) },
-               );
+               const target = detachTarget;
+               try {
+                 await runWithElevation(() =>
+                   updateKeyPerms.mutateAsync({
+                     cid,
+                     id: target.keyId,
+                     permissions: [
+                       { bucketId: bucket.id, read: false, write: false, owner: false },
+                     ],
+                   }),
+                 );
+                 setDetachTarget(null);
+               } catch {
+                 // ELEVATION_CANCELLED / network errors surface via the
+                 // mutation's existing error state.
+               }
              }}
            />
      </div>

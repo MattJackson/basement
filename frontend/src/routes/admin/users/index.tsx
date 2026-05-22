@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { client } from "@/shared/api/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 // Sibling /admin/users/new exists, so /admin/users is auto-derived
 // as a parent layout. Parent (users.tsx) is now Outlet-only; this
@@ -22,6 +23,12 @@ function UsersPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<User[]>([]);
+  // v1.3.0a.3: user:delete is ELEVATED-min on the backend. The
+  // openapi-fetch middleware pops the modal eagerly on a 403, but
+  // doesn't auto-retry — wrapping the click handler in
+  // runWithElevation closes that gap so one click after elevate
+  // actually finishes the delete.
+  const runWithElevation = useElevationGuard();
 
   useEffect(() => {
     fetchUsers();
@@ -41,15 +48,45 @@ function UsersPage() {
     }
   }
 
+  async function deleteUserOnce(username: string): Promise<void> {
+    // openapi-fetch returns { data, error, response } — it never
+    // throws, so we read response.status and synthesise the error
+    // shape that runWithElevation pattern-matches on (code +
+    // details.mode_required). Without this synthesis, a 403 just
+    // returns {error} and runWithElevation never sees it.
+    // @ts-ignore - API types not generated yet
+    const result = await client.DELETE("/admin/users", { query: { id: username } });
+    const { response, error } = result as { response: Response; error: unknown };
+    if (response.ok) return;
+    const body = error as
+      | { error?: { code?: string; message?: string; details?: { mode_required?: "admin" | "elevated" | "user" } } }
+      | null
+      | undefined;
+    const code = body?.error?.code ?? `HTTP_${response.status}`;
+    const message = body?.error?.message ?? `deleteUser failed (HTTP ${response.status})`;
+    const err = new Error(`${code}: ${message}`) as Error & {
+      code?: string;
+      status?: number;
+      details?: { mode_required?: "admin" | "elevated" | "user" };
+    };
+    err.code = code;
+    err.status = response.status;
+    err.details = body?.error?.details;
+    throw err;
+  }
+
   async function handleDeleteUser(username: string) {
     if (!confirm(`Delete user ${username}?`)) return;
 
     try {
-      // @ts-ignore - API types not generated yet
-      await client.DELETE("/admin/users", { query: { id: username } });
+      await runWithElevation(() => deleteUserOnce(username));
       toast.success("User deleted");
       fetchUsers();
     } catch (error) {
+      // ELEVATION_CANCELLED surfaces here as a plain Error; we
+      // suppress that case (operator chose to back out) and only
+      // surface real failures.
+      if ((error as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error("Failed to delete user");
     }
   }
