@@ -54,6 +54,23 @@ vi.mock("@/shared/auth/elevation", () => ({
   useElevationPrompt: () => promptSpy,
 }));
 
+// v1.7.0a.3: guard now defers until useUser() resolves so we don't
+// fire the prompt during the post-nav hydration gap. Mock a resolved
+// /auth/me payload — actual content doesn't matter, just that it's
+// present and not loading.
+vi.mock("@/shared/auth/useUser", () => ({
+  useUser: () => ({
+    data: {
+      username: "matthew",
+      role: "admin" as const,
+      uiAdmin: true,
+      oidcUser: false,
+    },
+    isLoading: false,
+    isError: false,
+  }),
+}));
+
 function newClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
@@ -171,6 +188,41 @@ describe("AdminEntryElevationGuard — auto-elevate on /admin/* entry", () => {
     await waitFor(() => {
       expect(promptSpy).toHaveBeenCalledTimes(2);
     });
+  });
+
+  // v1.7.0a.3 regression test — the guard must defer firing until
+  // /auth/me has resolved. Before the fix, the conservative USER default
+  // in AuthModeProvider caused a stale-modal pop on every nav for users
+  // who were already in ADMIN mode (the AuthModeHydrator hadn't synced
+  // yet). Verified live by the postdeploy-ui-smoke when 3 admin clicks
+  // were intercepted by the elevation modal overlay against v1.7.0e/f.
+  it("Defers prompting while useUser() is still loading", async () => {
+    // Re-mock useUser to simulate the loading state. Use vi.doMock + a
+    // fresh dynamic import so the mock is in place before the guard's
+    // module-level useUser binding is resolved.
+    vi.resetModules();
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({ data: undefined, isLoading: true, isError: false }),
+    }));
+    const { AdminEntryElevationGuard: GuardWithLoadingUser } = await import(
+      "@/components/auth/AdminEntryElevationGuard"
+    );
+    function LoadingHarness() {
+      return (
+        <QueryClientProvider client={newClient()}>
+          <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
+            <GuardWithLoadingUser />
+          </AuthModeProvider>
+        </QueryClientProvider>
+      );
+    }
+    render(<LoadingHarness />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(promptSpy).not.toHaveBeenCalled();
+    vi.doUnmock("@/shared/auth/useUser");
+    vi.resetModules();
   });
 
   it("Same /admin pathname re-render → does NOT re-prompt (debounce)", async () => {

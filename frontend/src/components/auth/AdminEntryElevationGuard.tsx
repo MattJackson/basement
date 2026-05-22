@@ -28,9 +28,11 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useAuthMode } from "@/shared/auth/mode";
 import { useElevationPrompt } from "@/shared/auth/elevation";
+import { useUser } from "@/shared/auth/useUser";
 
 export function AdminEntryElevationGuard() {
   const { mode } = useAuthMode();
+  const { data: user, isLoading: userLoading } = useUser();
   const location = useLocation();
   const navigate = useNavigate();
   const promptForElevation = useElevationPrompt();
@@ -72,6 +74,15 @@ export function AdminEntryElevationGuard() {
     if (pendingRef.current) return;
     // Already prompted for this exact pathname; respect the debounce.
     if (lastPromptedPathRef.current === location.pathname) return;
+    // Wait for the /auth/me query to resolve before deciding whether
+    // to prompt. The provider starts at the conservative USER default
+    // and the AuthModeHydrator upgrades it once /auth/me lands; firing
+    // the prompt during that gap pops the modal at every page nav for
+    // ADMIN sessions, which then sits in front of every subsequent
+    // click (the smoke caught this against v1.7.0e/f). If user data
+    // hasn't arrived yet, defer — the hydrator will sync mode and this
+    // effect re-runs with the truthful value.
+    if (userLoading || !user) return;
 
     lastPromptedPathRef.current = location.pathname;
     pendingRef.current = true;
@@ -95,7 +106,7 @@ export function AdminEntryElevationGuard() {
     return () => {
       cancelled = true;
     };
-  }, [onAdmin, mode, location.pathname, promptForElevation, navigate]);
+  }, [onAdmin, mode, location.pathname, promptForElevation, navigate, user, userLoading]);
 
   return null;
 }
