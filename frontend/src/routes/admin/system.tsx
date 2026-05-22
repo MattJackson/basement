@@ -26,7 +26,27 @@ type OrgCapabilities = {
   allowUserBackends?: boolean;
   userBackendDrivers?: string[];
   oidcOnly?: boolean;
+  /**
+   * ADR-0003 v1.3.0a.4 amendment: operator-configurable admin session
+   * TTL in seconds. Default 900 (15 min). Range 60-86400 (1 min - 24 h).
+   * Backend clamps on save so any value outside the range gets snapped.
+   */
+  adminSessionTtlSec?: number;
 };
+
+// TTL preset choices for the dropdown. Each entry's `value` is in
+// seconds; the "Custom" option toggles a number input so the operator
+// can type any value inside the [60, 86400] range.
+const TTL_PRESETS: Array<{ label: string; value: number }> = [
+  { label: "5 minutes", value: 300 },
+  { label: "15 minutes (default)", value: 900 },
+  { label: "30 minutes", value: 1800 },
+  { label: "1 hour", value: 3600 },
+  { label: "2 hours", value: 7200 },
+  { label: "8 hours", value: 28800 },
+];
+const TTL_MIN_SEC = 60;
+const TTL_MAX_SEC = 86400;
 
 function OrgCapabilitiesPage() {
   const navigate = useNavigate();
@@ -193,6 +213,22 @@ function OrgCapabilitiesPage() {
         <Button onClick={handleSave}>Save Changes</Button>
       </div>
 
+      {/* ADR-0003 v1.3.0a.4 amendment — operator-configurable admin */}
+      {/* session TTL. Card lives below the Save Changes button on its */}
+      {/* own row because it's a separate concern from feature flags + */}
+      {/* drivers; the auth-gating side of the system. */}
+      <AdminSessionTTLCard
+        value={data.adminSessionTtlSec ?? 900}
+        onChange={(next) =>
+          setData((prev) =>
+            prev ? { ...prev, adminSessionTtlSec: next } : prev,
+          )
+        }
+        onSave={async () => {
+          await handleSave();
+        }}
+      />
+
       {/* OIDC group-claim -> role auto-mapping (v1.3.0a). */}
       <OIDCGroupMappingsSection />
 
@@ -258,6 +294,173 @@ function OrgCapabilitiesPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+// AdminSessionTTLCard — ADR-0003 v1.3.0a.4 amendment.
+//
+// Lets a host admin pick how long an /auth/elevate session stays in
+// ADMIN mode before it falls back to USER. Dropdown of common presets
+// (5 min / 15 min / 30 min / 1 h / 2 h / 8 h) plus a Custom option that
+// reveals a number input for any value in [60, 86400]. The backend
+// clamps on save so out-of-band values get snapped silently, but we
+// validate on the FE too so the operator sees the floor/ceiling
+// inline rather than discovering it after the round-trip.
+function AdminSessionTTLCard({
+  value,
+  onChange,
+  onSave,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  onSave: () => Promise<void>;
+}) {
+  const matchedPreset = TTL_PRESETS.find((p) => p.value === value);
+  const [isCustom, setIsCustom] = useState(matchedPreset === undefined);
+  const [customStr, setCustomStr] = useState(String(value));
+  const [saving, setSaving] = useState(false);
+
+  // Keep customStr in sync when the parent changes value externally
+  // (e.g. on initial fetch).
+  useEffect(() => {
+    setCustomStr(String(value));
+    setIsCustom(TTL_PRESETS.find((p) => p.value === value) === undefined);
+  }, [value]);
+
+  const customError = (() => {
+    if (!isCustom) return null;
+    const n = parseInt(customStr, 10);
+    if (!Number.isFinite(n)) return "Enter a number of seconds";
+    if (n < TTL_MIN_SEC) return `Minimum ${TTL_MIN_SEC} seconds (1 minute)`;
+    if (n > TTL_MAX_SEC) return `Maximum ${TTL_MAX_SEC} seconds (24 hours)`;
+    return null;
+  })();
+
+  const humanReadable = (() => {
+    if (value <= 0) return "—";
+    if (value < 60) return `${value} s`;
+    if (value < 3600) return `${Math.round(value / 60)} min`;
+    if (value < 86400)
+      return `${(value / 3600).toFixed(value % 3600 === 0 ? 0 : 1)} h`;
+    return `${Math.round(value / 86400)} d`;
+  })();
+
+  const handlePresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const v = e.target.value;
+    if (v === "custom") {
+      setIsCustom(true);
+      return;
+    }
+    const n = parseInt(v, 10);
+    if (Number.isFinite(n)) {
+      setIsCustom(false);
+      onChange(n);
+    }
+  };
+
+  const handleCustomBlur = () => {
+    const n = parseInt(customStr, 10);
+    if (!Number.isFinite(n)) return;
+    const clamped = Math.min(TTL_MAX_SEC, Math.max(TTL_MIN_SEC, n));
+    setCustomStr(String(clamped));
+    onChange(clamped);
+  };
+
+  const handleSave = async () => {
+    if (customError) return;
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card data-testid="admin-session-ttl-card">
+      <CardHeader>
+        <CardTitle>Admin session timeout</CardTitle>
+        <CardDescription>
+          How long an elevated admin session stays active before
+          dropping back to user mode. Shorter values are safer; longer
+          values reduce friction for long admin tasks. Operators with
+          an expired session see a banner at the top of admin pages
+          inviting them to re-elevate &mdash; their work isn&rsquo;t
+          lost.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor="admin-ttl-preset">
+            Timeout
+          </label>
+          <select
+            id="admin-ttl-preset"
+            data-testid="admin-ttl-preset"
+            value={isCustom ? "custom" : String(value)}
+            onChange={handlePresetChange}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            {TTL_PRESETS.map((p) => (
+              <option key={p.value} value={String(p.value)}>
+                {p.label}
+              </option>
+            ))}
+            <option value="custom">Custom&hellip;</option>
+          </select>
+        </div>
+
+        {isCustom && (
+          <div className="space-y-1">
+            <label
+              className="text-sm font-medium"
+              htmlFor="admin-ttl-custom-sec"
+            >
+              Custom value (seconds)
+            </label>
+            <Input
+              id="admin-ttl-custom-sec"
+              data-testid="admin-ttl-custom-sec"
+              type="number"
+              min={TTL_MIN_SEC}
+              max={TTL_MAX_SEC}
+              step={1}
+              value={customStr}
+              onChange={(e) => setCustomStr(e.target.value)}
+              onBlur={handleCustomBlur}
+            />
+            <p className="text-xs text-muted-foreground">
+              Range: {TTL_MIN_SEC}&ndash;{TTL_MAX_SEC} seconds. Values
+              outside this range are clamped automatically.
+            </p>
+            {customError && (
+              <p
+                className="text-xs text-destructive"
+                data-testid="admin-ttl-custom-error"
+              >
+                {customError}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between">
+          <p
+            className="text-xs text-muted-foreground"
+            data-testid="admin-ttl-human"
+          >
+            Current setting: <span className="font-mono">{humanReadable}</span>
+          </p>
+          <Button
+            onClick={handleSave}
+            disabled={saving || customError !== null}
+            data-testid="admin-ttl-save"
+          >
+            {saving ? "Saving…" : "Save timeout"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

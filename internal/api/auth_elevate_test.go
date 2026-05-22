@@ -195,8 +195,9 @@ func TestElevate_WrongPassword(t *testing.T) {
 	}
 }
 
-// TestElevate_InvalidTargetMode: only "admin" and "elevated" are
-// valid. "user", "superuser", empty string, etc. all 400.
+// TestElevate_InvalidTargetMode: per the v1.3.0a.4 amendment only
+// "admin" (or its legacy alias "elevated") is valid. "user",
+// "superuser", empty string, "ADMIN" (case-sensitive) all 400.
 func TestElevate_InvalidTargetMode(t *testing.T) {
 	srv, secret := newElevateTestServer(t)
 	tok := tokenWithMode(t, secret, "admin", "user", 0)
@@ -218,34 +219,14 @@ func TestElevate_InvalidTargetMode(t *testing.T) {
 	}
 }
 
-// TestElevate_UserToElevatedDirectly_Rejected: the state machine
-// forbids a USER → ELEVATED jump. Must go through ADMIN first.
-func TestElevate_UserToElevatedDirectly_Rejected(t *testing.T) {
+// TestElevate_LegacyElevatedTarget_RewrittenToAdmin: v1.2 FE callers
+// may still send target_mode="elevated"; per the v1.3.0a.4 amendment
+// the backend silently rewrites that to "admin" so a half-upgraded
+// deploy doesn't reject in-flight elevation submits. The response
+// mode is the canonical "admin" string.
+func TestElevate_LegacyElevatedTarget_RewrittenToAdmin(t *testing.T) {
 	srv, secret := newElevateTestServer(t)
 	tok := tokenWithMode(t, secret, "admin", "user", 0)
-
-	rr := sendElevate(t, srv, tok, map[string]any{
-		"password":    "test",
-		"target_mode": "elevated",
-	})
-
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	var er ErrorResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &er)
-	if er.Error.Code != "INVALID_TARGET_MODE" {
-		t.Errorf("error code = %q, want INVALID_TARGET_MODE", er.Error.Code)
-	}
-}
-
-// TestElevate_AdminToElevated_Works: already in ADMIN, the elevation
-// to ELEVATED is allowed and gets the shorter (5min) TTL.
-func TestElevate_AdminToElevated_Works(t *testing.T) {
-	srv, secret := newElevateTestServer(t)
-	// Mint a token that's already ADMIN (15min from now).
-	adminExp := time.Now().Add(10 * time.Minute).Unix()
-	tok := tokenWithMode(t, secret, "admin", "admin", adminExp)
 
 	rr := sendElevate(t, srv, tok, map[string]any{
 		"password":    "test",
@@ -257,27 +238,19 @@ func TestElevate_AdminToElevated_Works(t *testing.T) {
 	}
 	var resp elevateResponse
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp.Mode != "elevated" {
-		t.Errorf("Mode = %q, want elevated", resp.Mode)
-	}
-	if resp.ModeTTLSeconds < int64(elevatedModeTTL.Seconds()-2) || resp.ModeTTLSeconds > int64(elevatedModeTTL.Seconds()+2) {
-		t.Errorf("ModeTTLSeconds = %d, want ~%d (elevated TTL)",
-			resp.ModeTTLSeconds, int64(elevatedModeTTL.Seconds()))
+	if resp.Mode != "admin" {
+		t.Errorf("Mode = %q, want admin (legacy 'elevated' must be rewritten)", resp.Mode)
 	}
 }
 
-// TestCurrentMode_ExpiredModeAutoDowngrade: a token in ELEVATED whose
-// ModeExpiresAt has passed is treated by currentMode() as ADMIN for
-// this request. A token in ADMIN whose ModeExpiresAt has passed is
-// treated as USER. Per ADR-0003 the cookie itself is not rewritten
-// here; downstream handlers that mint fresh cookies pick up the
-// downgrade.
+// TestCurrentMode_ExpiredModeAutoDowngrade: a token in ADMIN whose
+// ModeExpiresAt has passed is treated by currentMode() as USER for
+// this request. Per ADR-0003 the cookie itself is not rewritten here;
+// downstream handlers that mint fresh cookies pick up the downgrade.
+// v1.3.0a.4: legacy "elevated" cookies silently migrate to ADMIN on
+// read (then follow the same expiry-drops-to-USER rule).
 func TestCurrentMode_ExpiredModeAutoDowngrade(t *testing.T) {
 	srv, secret := newElevateTestServer(t)
-	// Token in ELEVATED but expired 1s ago — currentMode should
-	// return ADMIN.
-	expired := time.Now().Add(-1 * time.Second).Unix()
-	tok := tokenWithMode(t, secret, "admin", "elevated", expired)
 
 	// Wrap a tiny handler that captures currentMode for us.
 	var observed string
@@ -287,21 +260,14 @@ func TestCurrentMode_ExpiredModeAutoDowngrade(t *testing.T) {
 	// Use the real auth middleware so the claims context gets populated.
 	wrapped := auth.Middleware(secret)(captured)
 
+	expired := time.Now().Add(-1 * time.Second).Unix()
+
+	// ADMIN → USER downgrade on expiry.
+	tok := tokenWithMode(t, secret, "admin", "admin", expired)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
 	rr := httptest.NewRecorder()
 	wrapped.ServeHTTP(rr, req)
-
-	if observed != "admin" {
-		t.Errorf("expired ELEVATED: observed mode = %q, want admin", observed)
-	}
-
-	// Same trick for ADMIN → USER downgrade on expiry.
-	tok = tokenWithMode(t, secret, "admin", "admin", expired)
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
-	req2.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
-	rr2 := httptest.NewRecorder()
-	wrapped.ServeHTTP(rr2, req2)
 	if observed != "user" {
 		t.Errorf("expired ADMIN: observed mode = %q, want user", observed)
 	}
@@ -310,15 +276,139 @@ func TestCurrentMode_ExpiredModeAutoDowngrade(t *testing.T) {
 	// stated mode.
 	future := time.Now().Add(10 * time.Minute).Unix()
 	tok = tokenWithMode(t, secret, "admin", "admin", future)
-	req3 := httptest.NewRequest(http.MethodGet, "/", nil)
-	req3.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
-	rr3 := httptest.NewRecorder()
-	wrapped.ServeHTTP(rr3, req3)
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+	rr2 := httptest.NewRecorder()
+	wrapped.ServeHTTP(rr2, req2)
 	if observed != "admin" {
 		t.Errorf("live ADMIN: observed mode = %q, want admin", observed)
 	}
 
 	_ = srv // server unused beyond setup; this test exercises currentMode directly
+}
+
+// newElevateTestServerWithStore is the variant that wires a real
+// on-disk store so tests can exercise the operator-configurable
+// AdminSessionTTLSec (v1.3.0a.4). Returns the server + secret + the
+// store so callers can poke OrgCapabilities directly.
+func newElevateTestServerWithStore(t *testing.T) (*Server, []byte, *store.Store) {
+	t.Helper()
+	secret := make([]byte, 32)
+	for i := range secret {
+		secret[i] = byte(i)
+	}
+	st, err := store.Open(t.TempDir(), 24*time.Hour)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	cfg := &config.Config{
+		Listen:     ":0",
+		SessionTTL: 24 * time.Hour,
+		Admin: config.AdminConfig{
+			User:         "admin",
+			PasswordHash: elevateTestPasswordHash,
+		},
+		JWT: config.JWTConfig{Secret: secret},
+	}
+	srv := New(cfg, st, nil, nil, nil)
+	return srv, secret, st
+}
+
+// TestElevate_ConfigurableTTL_Applied: when an operator sets
+// AdminSessionTTLSec via OrgCapabilities the next /auth/elevate
+// stamps that value on the cookie instead of the legacy 15-min default.
+// Confirms the v1.3.0a.4 amendment's core promise: TTL lives in
+// operator config, not in code.
+func TestElevate_ConfigurableTTL_Applied(t *testing.T) {
+	srv, secret, st := newElevateTestServerWithStore(t)
+
+	// Operator picks 2 hours via /admin/system (modelled here as a
+	// direct Update — the handler does the same Update under the hood).
+	caps := st.OrgCapabilities().Get()
+	caps.AdminSessionTTLSec = 7200 // 2h
+	if err := st.OrgCapabilities().Update(caps); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	tok := tokenWithMode(t, secret, "admin", "user", 0)
+	rr := sendElevate(t, srv, tok, map[string]any{
+		"password":    "test",
+		"target_mode": "admin",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp elevateResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.ModeTTLSeconds < 7198 || resp.ModeTTLSeconds > 7202 {
+		t.Errorf("ModeTTLSeconds = %d, want ~7200 (operator-configured)", resp.ModeTTLSeconds)
+	}
+}
+
+// TestElevate_ConfigurableTTL_ClampedToRange: out-of-band TTL values
+// (sub-min or super-max) get clamped on the write side. The Update()
+// path enforces the [60, 86400] window so the live elevate flow never
+// sees an absurd value even if the on-disk JSON is hand-edited.
+func TestElevate_ConfigurableTTL_ClampedToRange(t *testing.T) {
+	_, _, st := newElevateTestServerWithStore(t)
+
+	// Below the floor → snaps to AdminSessionTTLMinSec.
+	caps := st.OrgCapabilities().Get()
+	caps.AdminSessionTTLSec = 5
+	_ = st.OrgCapabilities().Update(caps)
+	if got := st.OrgCapabilities().Get().AdminSessionTTLSec; got != store.AdminSessionTTLMinSec {
+		t.Errorf("clamp(5) = %d, want %d (floor)", got, store.AdminSessionTTLMinSec)
+	}
+
+	// Above the ceiling → snaps to AdminSessionTTLMaxSec.
+	caps.AdminSessionTTLSec = 1_000_000
+	_ = st.OrgCapabilities().Update(caps)
+	if got := st.OrgCapabilities().Get().AdminSessionTTLSec; got != store.AdminSessionTTLMaxSec {
+		t.Errorf("clamp(1_000_000) = %d, want %d (ceiling)", got, store.AdminSessionTTLMaxSec)
+	}
+
+	// Zero (legacy) → snaps to the default.
+	caps.AdminSessionTTLSec = 0
+	_ = st.OrgCapabilities().Update(caps)
+	if got := st.OrgCapabilities().Get().AdminSessionTTLSec; got != store.AdminSessionTTLDefaultSec {
+		t.Errorf("clamp(0) = %d, want %d (default)", got, store.AdminSessionTTLDefaultSec)
+	}
+}
+
+// TestCurrentMode_LegacyElevatedSilentlyMigrated: a v1.2-era cookie
+// minted with mode="elevated" reads as ADMIN per the v1.3.0a.4 silent
+// migration. No log-out required across the upgrade.
+func TestCurrentMode_LegacyElevatedSilentlyMigrated(t *testing.T) {
+	_, secret := newElevateTestServer(t)
+
+	var observed string
+	captured := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		observed = string(currentMode(r))
+	})
+	wrapped := auth.Middleware(secret)(captured)
+
+	// Live ELEVATED cookie (future expiry) — should surface as "admin".
+	future := time.Now().Add(10 * time.Minute).Unix()
+	tok := tokenWithMode(t, secret, "admin", "elevated", future)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+	rr := httptest.NewRecorder()
+	wrapped.ServeHTTP(rr, req)
+	if observed != "admin" {
+		t.Errorf("live ELEVATED legacy cookie: observed mode = %q, want admin (silent migration)", observed)
+	}
+
+	// Expired ELEVATED cookie — should drop to USER (the same path
+	// ADMIN takes on expiry, since elevated is treated as admin first).
+	expired := time.Now().Add(-1 * time.Second).Unix()
+	tok = tokenWithMode(t, secret, "admin", "elevated", expired)
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+	rr2 := httptest.NewRecorder()
+	wrapped.ServeHTTP(rr2, req2)
+	if observed != "user" {
+		t.Errorf("expired ELEVATED legacy cookie: observed mode = %q, want user", observed)
+	}
 }
 
 // TestLogoutElevation_DropsToUser: hitting POST /auth/logout-elevation

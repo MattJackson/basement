@@ -1,15 +1,17 @@
-// ADR-0003 / v1.2.0b — persona pill with live mode countdown.
+// ADR-0003 + v1.3.0a.4 amendment — persona pill with live mode countdown.
 //
-// Renders one of three states next to the user menu in the AppShell:
+// Two states (per the amendment that collapsed ELEVATED into ADMIN):
 //
-//   USER     → neutral gray pill, no countdown, no drop button.
-//   ADMIN    → amber pill + countdown chip (mm:ss left) + drop button.
-//   ELEVATED → orange pill + lightning bolt SVG + countdown + drop.
+//   USER  → neutral gray pill, no countdown, no drop button.
+//   ADMIN → amber pill + countdown chip (mm:ss left) + drop button.
+//           At <2 min: pill goes brighter amber as a heads-up.
+//           At <30s: pill flips red + flashes + a toast offers a
+//                    one-click extend ("Stay admin") that just calls
+//                    /auth/elevate again with the same target_mode.
 //
-// Countdown re-renders once per second. At <30s before expiry the pill
-// flashes amber for 2s and a toast warns the operator. At expiry the
-// AuthModeProvider's auto-downgrade kicks in independently; here we
-// only render the live timer.
+// Countdown re-renders once per second. At expiry the AuthModeProvider's
+// auto-downgrade kicks in independently — and AuthModeHydrator surfaces
+// a drop-in-place banner at /admin/* rather than yanking the user.
 //
 // "Drop privileges" hits POST /api/v1/auth/logout-elevation, then
 // pushes mode=user into the provider so the pill flips instantly
@@ -18,28 +20,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
+import { useElevationPrompt } from "@/shared/auth/elevation";
 
-/** formatRemaining renders a countdown as mm:ss (clamped at 0). */
+/** formatRemaining renders a countdown as h:mm:ss when ≥1h, otherwise mm:ss. */
 export function formatRemaining(msRemaining: number): string {
   const clamped = Math.max(0, Math.floor(msRemaining / 1000));
-  const m = Math.floor(clamped / 60);
+  const h = Math.floor(clamped / 3600);
+  const m = Math.floor((clamped % 3600) / 60);
   const s = clamped % 60;
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
   return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-/** LightningBolt is the ELEVATED indicator — SVG, never an emoji. */
-function LightningBolt({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      className={className ?? "h-3 w-3"}
-      aria-hidden="true"
-    >
-      <path d="M13 2L4.5 13.5h6L9 22l9.5-12h-6L13 2z" />
-    </svg>
-  );
 }
 
 /** Cross icon for the "Drop privileges" button. */
@@ -57,17 +49,24 @@ function CrossIcon({ className }: { className?: string }) {
   );
 }
 
+// Warning thresholds (ms). The v1.3.0a.4 amendment widened these:
+// amber at <2 min (previously <30s) so the operator has actual lead
+// time; red + flashing + toast at <30s.
+const WARN_AMBER_MS = 2 * 60 * 1000;
+const WARN_RED_MS = 30 * 1000;
+
 export function PersonaPill() {
   const { mode, expiresAt } = useAuthMode();
   const setAuthMode = useSetAuthMode();
+  const promptForElevation = useElevationPrompt();
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
-  // warnedRef tracks whether we've already fired the <30s toast for
-  // this particular expiry window — without it the 1Hz tick would
-  // spam toasts every second from t-29 down to t-0. The "ended"
-  // sentinel is set on the falling edge (admin → user) so the same
-  // ref doubles as the "session ended" latch — both consumers only
-  // ever compare for inequality, so the union type is safe.
+  // warnedRef tracks the latest expiresAt for which we've fired the
+  // 30s toast — keyed on expiresAt so a re-elevation (= new expiresAt)
+  // re-arms the warning. The "ended" sentinel is set on the falling
+  // edge (admin → user) so subsequent ticks don't re-fire the ended
+  // toast. Both consumers only compare for inequality so the union
+  // type is safe.
   const warnedRef = useRef<number | "ended" | null>(null);
   const [dropping, setDropping] = useState(false);
 
@@ -77,24 +76,19 @@ export function PersonaPill() {
   }, []);
 
   // Reset the warning latch only on RISING-edge mode transitions
-  // (user → admin/elevated, i.e. a fresh elevation). The previous
-  // implementation reset on every expiresAt change, which the server
-  // can perturb on each /auth/me refetch (the downgrade cookie carries
-  // a current-time-ish expiresAt) — that re-armed the "ended" toast
-  // every tick and produced an indefinite toast loop.
+  // (user → admin, i.e. a fresh elevation). Falling-edge fires the
+  // ended toast once and leaves the latch set so user-mode ticks
+  // don't re-fire it.
   const prevModeRef = useRef<string>(mode);
   useEffect(() => {
     const elevated = mode === "admin" || mode === "elevated";
-    const wasElevated = prevModeRef.current === "admin" || prevModeRef.current === "elevated";
-    // Rising edge: just elevated. Reset the warning latch.
+    const wasElevated =
+      prevModeRef.current === "admin" || prevModeRef.current === "elevated";
     if (elevated && !wasElevated) {
       warnedRef.current = null;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFlashing(false);
     }
-    // Falling edge: admin/elevated → user. Fire the ended toast once,
-    // then leave the latch set so subsequent ticks with mode=user don't
-    // re-fire.
     if (!elevated && wasElevated) {
       toast.info("Admin session ended");
       warnedRef.current = "ended";
@@ -103,24 +97,41 @@ export function PersonaPill() {
   }, [mode]);
 
   const remainingMs = expiresAt > 0 ? expiresAt - now : 0;
-  const showCountdown = expiresAt > 0 && (mode === "admin" || mode === "elevated");
+  const elevated = mode === "admin" || mode === "elevated";
+  const showCountdown = expiresAt > 0 && elevated;
+  const inAmberWindow = showCountdown && remainingMs > 0 && remainingMs <= WARN_AMBER_MS;
+  const inRedWindow = showCountdown && remainingMs > 0 && remainingMs <= WARN_RED_MS;
 
-  // <30s warning + flash. Trigger once per elevation window. The latch
-  // is keyed on expiresAt (a new elevation = new expiresAt = warn again).
+  // <30s warning + flash + extend toast. Fires once per elevation
+  // window. The toast carries an inline action that triggers a
+  // re-elevation via the global prompt — no extra hops, the modal
+  // opens directly.
   useEffect(() => {
     if (!showCountdown) return;
-    if (remainingMs > 0 && remainingMs <= 30_000) {
-      if (warnedRef.current !== expiresAt) {
-        warnedRef.current = expiresAt;
-        toast.warning(
-          "Admin session ending in 30s — re-elevate to continue",
-          { duration: 5000 },
-        );
-        setFlashing(true);
-        window.setTimeout(() => setFlashing(false), 2000);
-      }
-    }
-  }, [remainingMs, expiresAt, showCountdown]);
+    if (!inRedWindow) return;
+    if (warnedRef.current === expiresAt) return;
+    warnedRef.current = expiresAt;
+    setFlashing(true);
+    toast.warning("Admin session expires in 30s", {
+      duration: 25000,
+      action: {
+        label: "Stay admin",
+        onClick: () => {
+          // Re-elevate to admin; same target_mode the original
+          // elevation used. The modal opens, password (or SSO) goes
+          // in, the cookie is reissued with a fresh expiresAt and the
+          // countdown picks up the new value via /auth/me.
+          promptForElevation("admin", "Extend your admin session.").catch(
+            () => {
+              // user cancelled — nothing to do; the original toast
+              // already gave them the warning and the existing
+              // countdown will run to zero on its own.
+            },
+          );
+        },
+      },
+    });
+  }, [showCountdown, inRedWindow, expiresAt, promptForElevation]);
 
   const handleDrop = async () => {
     if (dropping) return;
@@ -155,39 +166,27 @@ export function PersonaPill() {
         </span>
       );
     }
-    if (mode === "admin") {
-      return (
-        <span
-          className={
-            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
-            (flashing
-              ? "bg-amber-300 text-amber-950 animate-pulse"
-              : "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200")
-          }
-          data-testid="persona-pill"
-          data-mode="admin"
-        >
-          ADMIN
-        </span>
-      );
-    }
-    // elevated
+    // admin (incl. legacy "elevated" alias)
+    const classes = inRedWindow
+      ? "bg-red-300 text-red-950 dark:bg-red-500/40 dark:text-red-50 animate-pulse"
+      : inAmberWindow
+        ? "bg-amber-300 text-amber-950 dark:bg-amber-500/30 dark:text-amber-100"
+        : "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200";
     return (
       <span
         className={
-          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
-          (flashing
-            ? "bg-orange-300 text-orange-950 animate-pulse"
-            : "bg-orange-200 text-orange-900 dark:bg-orange-500/20 dark:text-orange-200")
+          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
+          classes +
+          (flashing && inRedWindow ? " ring-2 ring-red-400" : "")
         }
         data-testid="persona-pill"
-        data-mode="elevated"
+        data-mode="admin"
+        data-warn={inRedWindow ? "red" : inAmberWindow ? "amber" : "none"}
       >
         ADMIN
-        <LightningBolt className="h-3 w-3" />
       </span>
     );
-  }, [mode, flashing]);
+  }, [mode, flashing, inAmberWindow, inRedWindow]);
 
   return (
     <div className="flex items-center gap-1.5">
@@ -195,7 +194,14 @@ export function PersonaPill() {
       {showCountdown && (
         <>
           <span
-            className="inline-flex items-center rounded-md bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground tabular-nums"
+            className={
+              "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[10px] tabular-nums " +
+              (inRedWindow
+                ? "bg-red-100 text-red-900 dark:bg-red-500/20 dark:text-red-100"
+                : inAmberWindow
+                  ? "bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-100"
+                  : "bg-muted/60 text-muted-foreground")
+            }
             data-testid="persona-countdown"
             aria-label={`Admin session ending in ${formatRemaining(remainingMs)}`}
           >

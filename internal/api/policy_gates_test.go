@@ -262,20 +262,22 @@ func jsonBody(b []byte) io.Reader {
 	return bytes.NewReader(b)
 }
 
-// ---- ADR-0003 mode-gate tests (v1.2.0a) ----------------------------
+// ---- ADR-0003 mode-gate tests (v1.2.0a + v1.3.0a.4) ----------------
 //
 // These exercise the requireCapability extension that adds a
 // MinModeFor(capability) check on top of the existing Can() check.
-// USER mode hitting an ELEVATED-required capability gets 403
+// USER mode hitting an ADMIN-required capability gets 403
 // ELEVATION_REQUIRED with the structured payload the FE consumes;
-// ELEVATED mode hits the same capability cleanly.
+// ADMIN mode hits the same capability cleanly.
 //
 // We call requireCapability directly (rather than going through a
 // chi route) because the registered admin handlers all check
-// cluster:create / bucket:create — caps which default to ADMIN, not
-// ELEVATED. Direct calls let us prove the gate's branching for the
-// exact capability classes the ADR catalogues, without inventing a
-// fake handler that wires a destructive cap.
+// cluster:create / bucket:create. Direct calls let us prove the gate's
+// branching for the exact capability classes the ADR catalogues,
+// without inventing a fake handler that wires a destructive cap.
+//
+// v1.3.0a.4 collapsed ELEVATED into ADMIN; every admin capability —
+// destructive or not — requires ADMIN now.
 
 // newModeGateEnv extends newGateTestEnv by also returning the JWT
 // secret so callers can mint tokens with explicit modes.
@@ -319,11 +321,14 @@ func callRequireCapabilityWithMode(t *testing.T, srv *Server, secret []byte, mod
 	return rr, capturedUID, capturedOK
 }
 
-// TestRequireCapability_UserMode_ElevatedCapability_403: a user with
-// the Can() bit for cluster:delete still hits 403 ELEVATION_REQUIRED
-// when their session mode is USER. Response carries the structured
-// payload the FE uses to pop the elevation modal in-line.
-func TestRequireCapability_UserMode_ElevatedCapability_403(t *testing.T) {
+// TestRequireCapability_UserMode_AdminCapability_403: a user with the
+// Can() bit for cluster:delete still hits 403 ELEVATION_REQUIRED when
+// their session mode is USER. Response carries the structured payload
+// the FE uses to pop the elevation modal in-line. Per the v1.3.0a.4
+// amendment cluster:delete is ADMIN-required (the previous
+// ELEVATED-tier collapsed into ADMIN); the payload's mode_required is
+// "admin", not "elevated".
+func TestRequireCapability_UserMode_AdminCapability_403(t *testing.T) {
 	srv, enf, secret, cleanup := newModeGateEnv(t)
 	defer cleanup()
 
@@ -358,8 +363,8 @@ func TestRequireCapability_UserMode_ElevatedCapability_403(t *testing.T) {
 	if er.Error.Code != "ELEVATION_REQUIRED" {
 		t.Errorf("error code = %q, want ELEVATION_REQUIRED", er.Error.Code)
 	}
-	if got := er.Error.Details["mode_required"]; got != "elevated" {
-		t.Errorf("details.mode_required = %v, want elevated", got)
+	if got := er.Error.Details["mode_required"]; got != "admin" {
+		t.Errorf("details.mode_required = %v, want admin", got)
 	}
 	if got := er.Error.Details["current_mode"]; got != "user" {
 		t.Errorf("details.current_mode = %v, want user", got)
@@ -369,10 +374,11 @@ func TestRequireCapability_UserMode_ElevatedCapability_403(t *testing.T) {
 	}
 }
 
-// TestRequireCapability_ElevatedMode_ElevatedCapability_Passes: same
-// capability, but session is ELEVATED with a future expiry → gate
-// passes and returns the userID.
-func TestRequireCapability_ElevatedMode_ElevatedCapability_Passes(t *testing.T) {
+// TestRequireCapability_AdminMode_DestructiveCapability_Passes: same
+// capability (cluster:delete), but session is ADMIN with a future
+// expiry → gate passes and returns the userID. Confirms the v1.3.0a.4
+// collapse: ADMIN alone is enough for destructive ops.
+func TestRequireCapability_AdminMode_DestructiveCapability_Passes(t *testing.T) {
 	srv, enf, secret, cleanup := newModeGateEnv(t)
 	defer cleanup()
 
@@ -384,7 +390,7 @@ func TestRequireCapability_ElevatedMode_ElevatedCapability_Passes(t *testing.T) 
 
 	expiresAt := time.Now().Add(5 * time.Minute).Unix()
 	rr, uid, ok := callRequireCapabilityWithMode(t, srv, secret,
-		"elevated", expiresAt, "cluster:delete", "cluster:abc")
+		"admin", expiresAt, "cluster:delete", "cluster:abc")
 
 	if !ok {
 		t.Fatalf("expected gate to pass; got 403 body=%s", rr.Body.String())
@@ -424,8 +430,7 @@ func TestRequireCapability_UserMode_UserCapability_Passes(t *testing.T) {
 // TestRequireCapability_AdminMode_AdminCapability_Passes: ADMIN
 // session on an ADMIN-min cap (cluster:edit) — the most common admin
 // flow. Confirms the default branch of MinModeFor (everything not on
-// the USER or ELEVATED list) plays nicely with a freshly-elevated
-// session.
+// the USER list) plays nicely with a freshly-elevated session.
 func TestRequireCapability_AdminMode_AdminCapability_Passes(t *testing.T) {
 	srv, enf, secret, cleanup := newModeGateEnv(t)
 	defer cleanup()

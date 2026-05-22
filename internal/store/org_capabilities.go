@@ -7,13 +7,29 @@ import (
 	"sync"
 )
 
+// AdminSessionTTLSec bounds for the v1.3.0a.4 operator-configurable
+// admin session timeout (ADR-0003 amendment). Default 15 min; range
+// 60s – 24h. Stored in org_capabilities.json so a restart preserves
+// it; gated on host:manage_org_caps so only host admins can change it.
+const (
+	AdminSessionTTLDefaultSec = 900    // 15 min
+	AdminSessionTTLMinSec     = 60     // 1 min — anything shorter is useless
+	AdminSessionTTLMaxSec     = 86_400 // 24 h — anything longer defeats the safety
+)
+
 // OrgCapabilities represents org-level feature flags and configuration.
 type OrgCapabilities struct {
-	SignupMode         string   `json:"signupMode"`          // "closed" | "invite" | "open"
-	EnabledDrivers     []string `json:"enabledDrivers"`      // list of driver names
-	AllowUserBackends  bool     `json:"allowUserBackends"`   // whether users can register their own clusters
-	UserBackendDrivers []string `json:"userBackendDrivers"`  // subset of enabled drivers for user backends
-	OIDCOnly           bool     `json:"oidcOnly"`            // hide local password login, OIDC only
+	SignupMode         string   `json:"signupMode"`         // "closed" | "invite" | "open"
+	EnabledDrivers     []string `json:"enabledDrivers"`     // list of driver names
+	AllowUserBackends  bool     `json:"allowUserBackends"`  // whether users can register their own clusters
+	UserBackendDrivers []string `json:"userBackendDrivers"` // subset of enabled drivers for user backends
+	OIDCOnly           bool     `json:"oidcOnly"`           // hide local password login, OIDC only
+	// AdminSessionTTLSec is the per-elevation TTL (in seconds) the
+	// /auth/elevate endpoint stamps on the cookie. Per ADR-0003 v1.3.0a.4
+	// amendment this is operator-configurable from /admin/system instead
+	// of env-only. Defaults to AdminSessionTTLDefaultSec when zero (older
+	// org_capabilities.json files predate this field).
+	AdminSessionTTLSec int `json:"adminSessionTtlSec,omitempty"`
 }
 
 // DefaultOrgCapabilities returns the default org capabilities.
@@ -24,7 +40,26 @@ func DefaultOrgCapabilities() OrgCapabilities {
 		AllowUserBackends:  false,
 		UserBackendDrivers: []string{},
 		OIDCOnly:           false,
+		AdminSessionTTLSec: AdminSessionTTLDefaultSec,
 	}
+}
+
+// ClampAdminSessionTTL returns the input clamped into the
+// [AdminSessionTTLMinSec, AdminSessionTTLMaxSec] window. Zero (or any
+// sub-min value) snaps to the default — that lets older
+// org_capabilities.json files (pre-v1.3.0a.4, no field) read as
+// "use the default" without a separate migration pass.
+func ClampAdminSessionTTL(v int) int {
+	if v <= 0 {
+		return AdminSessionTTLDefaultSec
+	}
+	if v < AdminSessionTTLMinSec {
+		return AdminSessionTTLMinSec
+	}
+	if v > AdminSessionTTLMaxSec {
+		return AdminSessionTTLMaxSec
+	}
+	return v
 }
 
 // OrgCapabilitiesStore handles org capabilities persistence.
@@ -95,15 +130,30 @@ func (s *OrgCapabilitiesStore) Save() error {
 	return os.WriteFile(s.path, data, 0644)
 }
 
-// Get returns a copy of the current capabilities.
+// Get returns a copy of the current capabilities. Legacy
+// org_capabilities.json files predating v1.3.0a.4 lack the
+// AdminSessionTTLSec field; we substitute the default at read time
+// rather than mutating the on-disk file behind the operator's back —
+// they'll see the default reflected in /admin/system and can persist
+// a deliberate choice from there.
 func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.data
+	out := s.data
+	if out.AdminSessionTTLSec <= 0 {
+		out.AdminSessionTTLSec = AdminSessionTTLDefaultSec
+	}
+	return out
 }
 
-// Update replaces all capabilities and persists.
+// Update replaces all capabilities and persists. Per v1.3.0a.4 the
+// admin session TTL is clamped into the supported range on the way in
+// so an operator hand-editing the JSON (or a buggy FE) can't smuggle a
+// 0-second or week-long TTL into the live config — the floor + ceiling
+// are part of the contract, not advisory.
 func (s *OrgCapabilitiesStore) Update(capabilities OrgCapabilities) error {
+	capabilities.AdminSessionTTLSec = ClampAdminSessionTTL(capabilities.AdminSessionTTLSec)
+
 	s.mu.Lock()
 	s.data = capabilities
 	s.mu.Unlock()

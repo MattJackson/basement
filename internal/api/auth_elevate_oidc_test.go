@@ -153,22 +153,28 @@ func TestElevateOIDCStart_ReturnsRedirectURLWithPromptAndState(t *testing.T) {
 	}
 }
 
-// TestElevateOIDCStart_UserToElevatedRejected: same state-machine rule
-// as the password endpoint — USER → ELEVATED is forbidden.
-func TestElevateOIDCStart_UserToElevatedRejected(t *testing.T) {
-	srv, secret, _, st := newOIDCElevateTestServer(t)
+// TestElevateOIDCStart_LegacyElevatedRewritten: v1.2-era FE callers
+// may send target_mode="elevated"; per the v1.3.0a.4 amendment the
+// backend silently rewrites that to "admin" so a half-upgraded deploy
+// doesn't reject in-flight elevation submits. The state entry stores
+// the canonical "admin".
+func TestElevateOIDCStart_LegacyElevatedRewritten(t *testing.T) {
+	srv, secret, fake, st := newOIDCElevateTestServer(t)
 	addOIDCUser(t, st, "alice")
 	tok := tokenWithMode(t, secret, "alice", "user", 0)
 
 	rr := sendElevateOIDCStart(t, srv, tok, map[string]any{"target_mode": "elevated"})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status=%d, want 400", rr.Code)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200. Body: %s", rr.Code, rr.Body.String())
 	}
-	var er ErrorResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &er)
-	if er.Error.Code != "INVALID_TARGET_MODE" {
-		t.Errorf("code=%q, want INVALID_TARGET_MODE", er.Error.Code)
+
+	entry, ok := srv.ensureOIDCElevationStore().take(fake.lastState)
+	if !ok {
+		t.Fatalf("state %q not stored", fake.lastState)
+	}
+	if string(entry.TargetMode) != "admin" {
+		t.Errorf("entry.TargetMode=%q, want admin (legacy 'elevated' must be rewritten)", entry.TargetMode)
 	}
 }
 

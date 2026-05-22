@@ -4,6 +4,43 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0a.4 — 2026-05-21
+
+Two-mode auth model + operator-configurable admin TTL + drop-in-place
+expiry banner (ADR-0003 amendment). The v1.2 USER/ADMIN/ELEVATED
+state machine collapses to USER/ADMIN — the ELEVATED sub-mode was
+cognitive overhead without real protection; the per-elevation TTL
+remains the safety. `MinModeFor()` now returns only `ModeUser` or
+`ModeAdmin`; every previously-ELEVATED capability (cluster:delete,
+bucket:delete, key:delete, host:manage_users, host:manage_policies,
+policy:edit_matrix, policy:assign_role, cluster:edit_layout)
+collapses into the same ADMIN tier as cluster:edit + friends.
+`ModeElevated` survives as a string alias for `ModeAdmin` for one
+release cycle so v1.2 call sites compile unchanged; v1.2-era cookies
+with `mode="elevated"` silently migrate to ADMIN on read in
+`currentMode()` — no logout required across the upgrade. Likewise
+`POST /auth/elevate` and `/auth/elevate/oidc/start` accept
+`target_mode="elevated"` as a synonym for `"admin"`. New
+`OrgCapabilities.AdminSessionTTLSec` (default 900, range 60–86400)
+is the operator-configured per-elevation TTL, set from
+`/admin/system` &rarr; "Admin session timeout" card (dropdown of
+5m/15m/30m/1h/2h/8h presets + Custom seconds input). The
+`/auth/elevate` handler reads this on each call instead of the
+hardcoded 15-min default; clamping happens on write so an
+out-of-band on-disk JSON value still produces a sane live TTL.
+Frontend: `PersonaPill` loses the ELEVATED variant — just one
+ADMIN variant with a wider warning ramp (amber at &lt;2 min, red +
+flashing + "Stay admin" extend toast at &lt;30s) so the operator
+gets real lead time and a one-click extend. New
+`ElevationExpiredBanner` renders at the top of `/admin/*` after an
+ADMIN&rarr;USER expiry transition; the banner offers a Re-elevate
+button that pops the standard elevation modal, and dismisses on
+successful re-elevation or on navigation away from `/admin/*` — the
+page itself stays mounted so any in-progress form keeps its
+state. Tests: drop the ELEVATED-specific assertions, add two-mode
+tests + TTL config + clamp tests + banner tests + warning-ramp
+tests.
+
 ## v1.3.0b — 2026-05-21
 
 Driver-aware endpoint hints in cluster + key forms. New public
