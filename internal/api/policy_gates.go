@@ -23,11 +23,82 @@ package api
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
+	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
 )
+
+// preV12GraceUntil is how long the gate treats pre-v1.2.0a cookies
+// (no Mode claim) as ADMIN for back-compat. After the grace window
+// elapses, such cookies drop to USER and the user must log in again
+// to mint a v1.2-shaped token. See ADR-0003 "Backwards compatibility".
+//
+// Resolved at startup time, not request time, so the window starts on
+// the v1.2.0a deploy date — operators upgrading mid-month don't see
+// the window slide. 7 * 24h per the prompt.
+var preV12GraceUntil = time.Now().Add(7 * 24 * time.Hour)
+
+// nowFunc is overrideable in tests so expiry/mode tests don't have to
+// sleep through real time.
+var nowFunc = time.Now
+
+// currentMode reads the session's current mode from the JWT claims in
+// the request context, applying the two rules from ADR-0003:
+//
+//  1. ModeExpiresAt < now() → downgrade to USER for this request (the
+//     cookie itself is not re-issued here; downstream handlers that
+//     mint a fresh cookie will pick up the downgraded mode).
+//  2. No Mode claim at all (pre-v1.2 cookie) → treat as ADMIN for the
+//     v1.2-grace window so matthew's existing session keeps working,
+//     then drop to USER after the window. A slog.Warn fires the first
+//     time per call.
+//
+// Returns ModeUser if there are no claims at all (handler will 401
+// downstream anyway).
+func currentMode(r *http.Request) policy.Mode {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		return policy.ModeUser
+	}
+
+	now := nowFunc()
+
+	// Pre-v1.2 cookie: no Mode claim at all. Back-compat: treat as
+	// ADMIN for the grace window so the matthew session minted before
+	// the v1.2.0a deploy doesn't get a wave of 403s on next request.
+	if claims.Mode == "" {
+		if now.Before(preV12GraceUntil) {
+			slog.Warn("auth: pre-v1.2 JWT claims seen; treating as admin for back-compat grace window",
+				"user", claims.UserID, "grace_until", preV12GraceUntil.Format(time.RFC3339))
+			return policy.ModeAdmin
+		}
+		// Past the grace: pre-v1.2 cookie loses its admin privilege.
+		slog.Warn("auth: pre-v1.2 JWT claims past grace window; dropping to user mode",
+			"user", claims.UserID)
+		return policy.ModeUser
+	}
+
+	mode := policy.Mode(claims.Mode)
+
+	// Mode expired since the cookie was minted → downgrade this
+	// request. ELEVATED falls back to ADMIN (per ADR-0003: "5 min idle
+	// in ELEVATED" returns to ADMIN, not USER), ADMIN falls back to
+	// USER. USER never expires.
+	if claims.ModeExpiresAt > 0 && now.Unix() >= claims.ModeExpiresAt {
+		switch mode {
+		case policy.ModeElevated:
+			return policy.ModeAdmin
+		case policy.ModeAdmin:
+			return policy.ModeUser
+		}
+	}
+
+	return mode
+}
 
 // permissiveEnforcer is the default enforcer installed by api.New() to
 // keep test callers that don't care about RBAC working. It grants
@@ -98,6 +169,40 @@ func (s *Server) requireCapability(w http.ResponseWriter, r *http.Request, capab
 
 		writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN",
 			fmt.Sprintf("Requires %s on %s", capability, scope))
+		return "", false
+	}
+
+	// ADR-0003 mode gate: a user may HOLD the capability via their
+	// role assignments yet still need to elevate their session before
+	// exercising it. cluster:delete in USER mode → 403 ELEVATION_REQUIRED
+	// with a structured payload the FE uses to pop the elevation modal
+	// in-line (v1.2.0b) instead of navigating to a re-auth page.
+	required := policy.MinModeFor(capability)
+	current := currentMode(r)
+	if !current.Includes(required) {
+		// Audit the elevation prompt. Records what they tried + what
+		// mode they were in so an operator scanning for unusual
+		// patterns sees "alice tried bucket:delete in USER mode" as
+		// a distinct event from a forbidden capability denial.
+		s.audit.Log(audit.Event{
+			Time:      nowFunc().UTC(),
+			Actor:     claims.UserID,
+			ActorRole: string(current),
+			Action:    "auth:elevation_required",
+			Resource:  capability + "@" + scope,
+			Detail:    fmt.Sprintf("required=%s current=%s", required, current),
+			Result:    audit.ResultFailure,
+			IP:        clientIP(r),
+			UserAgent: r.UserAgent(),
+		})
+
+		writeError(w, http.StatusForbidden, "ELEVATION_REQUIRED",
+			"Re-authentication required to perform this action.",
+			map[string]any{
+				"mode_required": string(required),
+				"current_mode":  string(current),
+				"endpoint":      "/api/v1/auth/elevate",
+			})
 		return "", false
 	}
 

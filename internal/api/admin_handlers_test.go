@@ -253,8 +253,18 @@ var testSecret = func() []byte {
 }()
 
 // generateAdminToken creates a valid admin JWT token for testing.
+//
+// Per ADR-0003 (v1.2.0a): tokens are minted in ELEVATED mode with a
+// 1-hour mode-expiry. Admin tests exercise both ADMIN-min capabilities
+// (cluster:edit, etc.) and ELEVATED-min capabilities (cluster:delete,
+// bucket:delete, etc.); minting ELEVATED satisfies both branches of
+// the gate. Tests that specifically want to exercise USER- or
+// ADMIN-mode behaviour mint their own token via auth.IssueToken (USER
+// default) or auth.IssueTokenWithMode.
 func generateAdminToken() string {
-	token, err := auth.IssueToken(testSecret, "admin", "admin", true, 24*time.Hour)
+	modeExpiresAt := time.Now().Add(1 * time.Hour).Unix()
+	token, err := auth.IssueTokenWithMode(testSecret, "admin", "admin", true,
+		"elevated", modeExpiresAt, 24*time.Hour)
 	if err != nil {
 		panic(err)
 	}

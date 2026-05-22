@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/store"
 )
@@ -259,4 +260,186 @@ func bodyHasCode(rr *httptest.ResponseRecorder, code string) bool {
 // http.NewRequest. Centralised so the EOF semantics stay correct.
 func jsonBody(b []byte) io.Reader {
 	return bytes.NewReader(b)
+}
+
+// ---- ADR-0003 mode-gate tests (v1.2.0a) ----------------------------
+//
+// These exercise the requireCapability extension that adds a
+// MinModeFor(capability) check on top of the existing Can() check.
+// USER mode hitting an ELEVATED-required capability gets 403
+// ELEVATION_REQUIRED with the structured payload the FE consumes;
+// ELEVATED mode hits the same capability cleanly.
+//
+// We call requireCapability directly (rather than going through a
+// chi route) because the registered admin handlers all check
+// cluster:create / bucket:create — caps which default to ADMIN, not
+// ELEVATED. Direct calls let us prove the gate's branching for the
+// exact capability classes the ADR catalogues, without inventing a
+// fake handler that wires a destructive cap.
+
+// newModeGateEnv extends newGateTestEnv by also returning the JWT
+// secret so callers can mint tokens with explicit modes.
+func newModeGateEnv(t *testing.T) (*Server, policy.Enforcer, []byte, func()) {
+	t.Helper()
+	srv, _, enf, cleanup := newGateTestEnv(t)
+	return srv, enf, srv.cfg.JWT.Secret, cleanup
+}
+
+// callRequireCapabilityWithMode mints a token at the given mode,
+// stuffs it into a request, runs the auth middleware, then invokes
+// requireCapability against the resulting context. Returns the
+// recorder + the (userID, ok) the gate returned.
+func callRequireCapabilityWithMode(t *testing.T, srv *Server, secret []byte, mode string, modeExpiresAtUnix int64, capability, scope string) (*httptest.ResponseRecorder, string, bool) {
+	t.Helper()
+
+	// Mint a fresh token at the requested mode.
+	var tok string
+	var err error
+	if mode == "" {
+		tok, err = auth.IssueToken(secret, "matthew", "admin", true, 24*time.Hour)
+	} else {
+		tok, err = auth.IssueTokenWithMode(secret, "matthew", "admin", true,
+			mode, modeExpiresAtUnix, 24*time.Hour)
+	}
+	if err != nil {
+		t.Fatalf("IssueToken: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+	rr := httptest.NewRecorder()
+
+	// Run through auth middleware so claims land in context.
+	var capturedUID string
+	var capturedOK bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedUID, capturedOK = srv.requireCapability(w, r, capability, scope)
+	})
+	auth.Middleware(secret)(handler).ServeHTTP(rr, req)
+	return rr, capturedUID, capturedOK
+}
+
+// TestRequireCapability_UserMode_ElevatedCapability_403: a user with
+// the Can() bit for cluster:delete still hits 403 ELEVATION_REQUIRED
+// when their session mode is USER. Response carries the structured
+// payload the FE uses to pop the elevation modal in-line.
+func TestRequireCapability_UserMode_ElevatedCapability_403(t *testing.T) {
+	srv, enf, secret, cleanup := newModeGateEnv(t)
+	defer cleanup()
+
+	// Give matthew the policy to delete clusters — but the gate
+	// should STILL block him because his session mode is USER.
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "*",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	rr, _, ok := callRequireCapabilityWithMode(t, srv, secret, "user", 0,
+		"cluster:delete", "cluster:abc")
+
+	if ok {
+		t.Fatal("expected gate to short-circuit; got ok=true")
+	}
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var er struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &er); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if er.Error.Code != "ELEVATION_REQUIRED" {
+		t.Errorf("error code = %q, want ELEVATION_REQUIRED", er.Error.Code)
+	}
+	if got := er.Error.Details["mode_required"]; got != "elevated" {
+		t.Errorf("details.mode_required = %v, want elevated", got)
+	}
+	if got := er.Error.Details["current_mode"]; got != "user" {
+		t.Errorf("details.current_mode = %v, want user", got)
+	}
+	if got := er.Error.Details["endpoint"]; got != "/api/v1/auth/elevate" {
+		t.Errorf("details.endpoint = %v, want /api/v1/auth/elevate", got)
+	}
+}
+
+// TestRequireCapability_ElevatedMode_ElevatedCapability_Passes: same
+// capability, but session is ELEVATED with a future expiry → gate
+// passes and returns the userID.
+func TestRequireCapability_ElevatedMode_ElevatedCapability_Passes(t *testing.T) {
+	srv, enf, secret, cleanup := newModeGateEnv(t)
+	defer cleanup()
+
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "*",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	expiresAt := time.Now().Add(5 * time.Minute).Unix()
+	rr, uid, ok := callRequireCapabilityWithMode(t, srv, secret,
+		"elevated", expiresAt, "cluster:delete", "cluster:abc")
+
+	if !ok {
+		t.Fatalf("expected gate to pass; got 403 body=%s", rr.Body.String())
+	}
+	if uid != "matthew" {
+		t.Errorf("returned userID = %q, want matthew", uid)
+	}
+}
+
+// TestRequireCapability_UserMode_UserCapability_Passes: a USER mode
+// caller exercising a USER-min capability (objects:list) passes the
+// gate cleanly — no elevation prompt for read ops.
+func TestRequireCapability_UserMode_UserCapability_Passes(t *testing.T) {
+	srv, enf, secret, cleanup := newModeGateEnv(t)
+	defer cleanup()
+
+	// objects:list at any scope: give matthew the policy-level
+	// grant via host_admin@*. The mode gate is what we're really
+	// testing; the policy.Can side must pass independently.
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "*",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	rr, uid, ok := callRequireCapabilityWithMode(t, srv, secret,
+		"user", 0, "objects:list", "bucket:abc:lsi")
+
+	if !ok {
+		t.Fatalf("expected gate to pass; got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if uid != "matthew" {
+		t.Errorf("returned userID = %q, want matthew", uid)
+	}
+}
+
+// TestRequireCapability_AdminMode_AdminCapability_Passes: ADMIN
+// session on an ADMIN-min cap (cluster:edit) — the most common admin
+// flow. Confirms the default branch of MinModeFor (everything not on
+// the USER or ELEVATED list) plays nicely with a freshly-elevated
+// session.
+func TestRequireCapability_AdminMode_AdminCapability_Passes(t *testing.T) {
+	srv, enf, secret, cleanup := newModeGateEnv(t)
+	defer cleanup()
+
+	if err := enf.AssignRole(policy.RoleAssignment{
+		UserID: "matthew", RoleID: "host_admin", Scope: "*",
+	}); err != nil {
+		t.Fatalf("AssignRole: %v", err)
+	}
+
+	expiresAt := time.Now().Add(15 * time.Minute).Unix()
+	rr, _, ok := callRequireCapabilityWithMode(t, srv, secret,
+		"admin", expiresAt, "cluster:edit", "cluster:abc")
+	if !ok {
+		t.Fatalf("expected gate to pass; got %d body=%s", rr.Code, rr.Body.String())
+	}
 }
