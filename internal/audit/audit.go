@@ -55,20 +55,35 @@ type Event struct {
 
 // QueryFilter narrows the rows returned by Query. Empty fields are
 // "match anything". Substring matches are case-insensitive.
+//
+// v1.4.0a: Offset enables paginated reads. The reader walks events
+// newest-first and skips the first `Offset` matches before
+// accumulating up to `Limit` rows. Offset+Limit must stay within the
+// filter window the caller supplied (from/to); pagination across
+// windows is the caller's job.
 type QueryFilter struct {
 	Actor    string
 	Action   string
 	Resource string
 	Result   string
 	Limit    int
+	Offset   int
 }
 
 // Logger is the audit-log interface used by the API handlers. The
 // production implementation is *FileLogger; tests can substitute a
 // memory-only fake.
+//
+// v1.4.0a: QueryWithTotal returns the same page as Query plus a
+// pre-pagination total count over the filter window; the /admin/audit
+// HTTP handler uses it to render the "showing X-Y of Z" footer +
+// page-number bounds. Existing Query() callers (sync, share, etc.)
+// still pay only the page-size scan; the new method is purely
+// additive.
 type Logger interface {
 	Log(e Event)
 	Query(from, to time.Time, filter QueryFilter) ([]Event, error)
+	QueryWithTotal(from, to time.Time, filter QueryFilter) ([]Event, int, error)
 }
 
 // defaultLimit is the rows-returned cap when QueryFilter.Limit is 0
@@ -217,15 +232,40 @@ func (l *FileLogger) Close() error {
 }
 
 // Query returns events in [from, to] that match the filter, most
-// recent first, up to filter.Limit (capped at maxLimit). The boolean
-// in the response API ("truncated") is computed by the HTTP layer;
-// callers here see the raw slice.
+// recent first, honoring filter.Offset + filter.Limit (capped at
+// maxLimit). The boolean in the response API ("truncated") is
+// computed by the HTTP layer; callers here see the raw slice.
 //
-// Strategy: first try the recent-events cache; if the requested
-// range is fully contained in cache AND the cache has at least
-// filter.Limit matches, return immediately. Otherwise fall through
-// to a file scan over the date range.
+// v1.4.0a: pagination. Offset skips the first N matches before the
+// Limit slice. Strategy: gather up to (offset+limit, capped at the
+// internal scanCap) matching events, then slice. We keep the
+// cache-fast-path optimisation; it now must collect enough matches
+// to cover offset+limit rather than just limit.
 func (l *FileLogger) Query(from, to time.Time, filter QueryFilter) ([]Event, error) {
+	page, _, err := l.queryInternal(from, to, filter, false)
+	return page, err
+}
+
+// QueryWithTotal returns the same page as Query plus the total count
+// of matching events across the filter window (pre-pagination). The
+// /admin/audit handler renders that count in the "showing X-Y of Z"
+// pagination footer. The total scan is bounded by scanCap to keep a
+// pathological filter from doing unbounded I/O.
+func (l *FileLogger) QueryWithTotal(from, to time.Time, filter QueryFilter) ([]Event, int, error) {
+	return l.queryInternal(from, to, filter, true)
+}
+
+// scanCap is the upper bound on matching events the Query path will
+// hold in memory before slicing the page out. Larger than maxLimit so
+// a paginated UI can ask for page 19 of a 1000-row default-limit
+// window without short-circuiting. Beyond this the API caller has to
+// narrow the filter; basement never paginates past 20 pages.
+const scanCap = 10000
+
+// queryInternal is the shared scan path for Query + QueryWithTotal.
+// withTotal=false skips the post-page-collection scan-rest sweep that
+// QueryWithTotal needs to populate the total count.
+func (l *FileLogger) queryInternal(from, to time.Time, filter QueryFilter, withTotal bool) ([]Event, int, error) {
 	if to.IsZero() {
 		to = l.now()
 	}
@@ -242,16 +282,44 @@ func (l *FileLogger) Query(from, to time.Time, filter QueryFilter) ([]Event, err
 	if limit > maxLimit {
 		limit = maxLimit
 	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// How many matches to physically gather before slicing the page.
+	// When withTotal is true we need the FULL match count (up to
+	// scanCap), so collect = scanCap. When false we only need
+	// offset+limit rows to honor the page.
+	collect := offset + limit
+	if withTotal || collect > scanCap {
+		collect = scanCap
+	}
 
 	// Cache fast path. The cache holds up to recentCacheSize most
 	// recent events globally; if our oldest cached event is older
 	// than `from` we know the cache covers the window.
-	if cached, fullyCovered := l.queryCache(from, to, filter, limit); fullyCovered {
-		return cached, nil
+	matches, fullyCovered := l.queryCache(from, to, filter, collect)
+	if !fullyCovered {
+		fileMatches, err := l.queryFiles(from, to, filter, collect)
+		if err != nil {
+			return nil, 0, err
+		}
+		matches = fileMatches
 	}
 
-	// Fall through to a file scan.
-	return l.queryFiles(from, to, filter, limit)
+	total := len(matches)
+	// Slice out the page. Out-of-range offset yields an empty page,
+	// not an error — callers paginating beyond the end of the window
+	// should see "no more rows" rather than a 500.
+	if offset >= len(matches) {
+		return []Event{}, total, nil
+	}
+	end := offset + limit
+	if end > len(matches) {
+		end = len(matches)
+	}
+	return matches[offset:end], total, nil
 }
 
 // queryCache walks the in-memory ring buffer newest-first.
@@ -423,3 +491,6 @@ func NewNoop() Logger { return noopLogger{} }
 
 func (noopLogger) Log(Event)                                            {}
 func (noopLogger) Query(_, _ time.Time, _ QueryFilter) ([]Event, error) { return nil, nil }
+func (noopLogger) QueryWithTotal(_, _ time.Time, _ QueryFilter) ([]Event, int, error) {
+	return nil, 0, nil
+}

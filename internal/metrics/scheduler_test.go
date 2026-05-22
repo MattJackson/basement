@@ -140,6 +140,7 @@ func (d *schedulerStubDriver) GetLifecycle(_ context.Context, _ string) ([]drive
 func (d *schedulerStubDriver) PutLifecycle(_ context.Context, _ string, _ []driver.LifecycleRule) error {
 	return nil
 }
+func (d *schedulerStubDriver) PerBucketStatsAvailable() bool { return false }
 
 // TestRunOneCycle_HappyPath drives one cycle across two clusters
 // with two buckets each and asserts four snapshots were recorded.

@@ -28,3 +28,15 @@ func (d *driver) GetLifecycle(_ context.Context, _ string) ([]driverpkg.Lifecycl
 func (d *driver) PutLifecycle(_ context.Context, _ string, _ []driverpkg.LifecycleRule) error {
 	return d.unsupported("PutLifecycle")
 }
+
+// PerBucketStatsAvailable reports whether the user-region tier
+// surfaces Objects + Bytes on its bucket list. v1.4.0a: Garage v1
+// returns false here because the public ListBuckets path the user-key
+// driver signs against does not carry counters, and the admin bridge
+// (s.garageRegionBucketsBridge) is a per-deployment opt-in rather
+// than a guarantee. Returning false keeps the FE column visibility
+// honest for matthew's basement.pq.io until v2 + the admin-bridge
+// stats path matures.
+func (d *driver) PerBucketStatsAvailable() bool {
+	return false
+}

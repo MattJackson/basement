@@ -26,6 +26,17 @@ var minioLifecycleTiers = []string{
 	string(types.TransitionStorageClassDeepArchive),
 }
 
+// PerBucketStatsAvailable reports whether ListBuckets / GetBucket on
+// the user-region tier surfaces Objects + Bytes. v1.4.0a: MinIO
+// returns true — its admin metrics surface (Prometheus + the
+// /minio/v2/metrics/bucket endpoint) carries the counters and the
+// driver wraps them into bucket flows when the basement caller
+// requests stats. FE keeps Size + Objects columns visible against
+// MinIO-backed regions.
+func (d *driver) PerBucketStatsAvailable() bool {
+	return true
+}
+
 // LifecycleSupport reports lifecycle capabilities for MinIO. Mirrors
 // the aws_s3 driver — same SDK, same API surface; the tier slice
 // could legitimately differ on a per-cluster basis but the wizard's

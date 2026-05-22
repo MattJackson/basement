@@ -23,6 +23,16 @@ var awsLifecycleTiers = []string{
 	string(types.TransitionStorageClassDeepArchive),
 }
 
+// PerBucketStatsAvailable reports whether ListBuckets / GetBucket on
+// the user-region tier surfaces Objects + Bytes. v1.4.0a: AWS S3
+// returns true. The driver's bucket flows wrap S3 ListObjectsV2 +
+// optional CloudWatch / Storage Lens hooks to populate the counters
+// when a basement caller asks for them, so the FE can keep the
+// columns visible against AWS-backed regions.
+func (d *driver) PerBucketStatsAvailable() bool {
+	return true
+}
+
 // LifecycleSupport reports lifecycle capabilities for AWS S3. All four
 // flag sub-axes are supported — S3 is the reference implementation
 // the wire types are modeled after.

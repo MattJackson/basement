@@ -1645,7 +1645,10 @@ section("[16] version label under Logo (Fix 7)");
         skipLine("folder nav check", `region buckets → ${bucketsResp.status()}`);
         return;
       }
-      const buckets = await bucketsResp.json();
+      // v1.4.0a: the response is now {buckets, perBucketStatsAvailable}.
+      // Unwrap to keep the downstream loop unchanged.
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
       if (!Array.isArray(buckets) || buckets.length === 0) {
         skipLine("folder nav check", "region has no buckets");
         return;

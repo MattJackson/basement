@@ -8,6 +8,16 @@ import (
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
+// PerBucketStatsAvailable reports whether the user-region tier
+// surfaces Objects + Bytes on its bucket list. v1.4.0a: Garage v2's
+// admin GetBucketInfo carries `objects` + `bytes` and the user-region
+// bridge wraps them through, so the FE can keep the columns visible
+// against Garage v2 regions. (Garage v1 returns false — its admin
+// surface predates the bridge integration.)
+func (d *driver) PerBucketStatsAvailable() bool {
+	return true
+}
+
 // LifecycleSupport reports Garage v2's lifecycle capabilities. Garage
 // v2's admin API surfaces lifecycle via UpdateBucket.lifecycleRules
 // (garage-admin-v2.json:4546-4587 + schema lifecycle.Rule lines

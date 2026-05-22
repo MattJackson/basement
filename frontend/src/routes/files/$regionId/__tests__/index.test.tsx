@@ -176,3 +176,51 @@ describe("/files/$regionId — USER_KEY_REJECTED handling", () => {
     });
   });
 });
+
+// v1.4.0a: per-driver capability flag (PerBucketStatsAvailable) drives
+// whether the Size + Objects columns render. Garage v1 returns false
+// today — hide the columns rather than render rows of em-dashes.
+describe("/files/$regionId — Size/Objects column gating (v1.4.0a)", () => {
+  it("hides Size + Objects columns when perBucketStatsAvailable=false", () => {
+    vi.mocked(useUserRegionBuckets).mockReturnValue({
+      data: {
+        buckets: [
+          { id: "lsi", aliases: ["lsi"], objects: 0, bytes: 0, unfinishedUploads: 0 },
+        ],
+        perBucketStatsAvailable: false,
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderRegion();
+
+    // Bucket name renders. ("lsi" also appears in the page header
+    // as the region alias; assert at least one occurrence.)
+    expect(screen.getAllByText("lsi").length).toBeGreaterThan(0);
+    // Size + Objects column headers are absent.
+    expect(screen.queryByText("Size")).toBeNull();
+    expect(screen.queryByText("Objects")).toBeNull();
+  });
+
+  it("shows Size + Objects columns when perBucketStatsAvailable=true", () => {
+    vi.mocked(useUserRegionBuckets).mockReturnValue({
+      data: {
+        buckets: [
+          { id: "lsi", aliases: ["lsi"], objects: 42, bytes: 1024, unfinishedUploads: 0 },
+        ],
+        perBucketStatsAvailable: true,
+      },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderRegion();
+
+    // Headers present.
+    expect(screen.getByText("Size")).toBeInTheDocument();
+    expect(screen.getByText("Objects")).toBeInTheDocument();
+    // Counters render.
+    expect(screen.getByText("42")).toBeInTheDocument();
+  });
+});

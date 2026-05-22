@@ -39,7 +39,12 @@ function RegionBuckets() {
   }
 
   const activeRegion = region ?? regions?.find((r) => r.id === regionId);
-  const buckets = bucketsData ?? [];
+  // v1.4.0a: the bucket-list hook now returns an envelope carrying
+  // the list + a per-driver capability flag. When the driver can't
+  // surface Objects + Bytes (Garage v1 today), the table hides
+  // those columns entirely rather than render em-dash rows.
+  const buckets = bucketsData?.buckets ?? [];
+  const statsAvailable = bucketsData?.perBucketStatsAvailable ?? false;
 
   // v1.3.0a.1: the backend now returns 401 USER_KEY_REJECTED (with the
   // region detail in the error payload) when the access key the region
@@ -114,8 +119,12 @@ function RegionBuckets() {
             <TableHeader>
               <TableRow>
                 <TableHead>Bucket</TableHead>
-                <TableHead className="text-right w-[140px]">Size</TableHead>
-                <TableHead className="text-right w-[120px]">Objects</TableHead>
+                {statsAvailable && (
+                  <>
+                    <TableHead className="text-right w-[140px]">Size</TableHead>
+                    <TableHead className="text-right w-[120px]">Objects</TableHead>
+                  </>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -127,6 +136,7 @@ function RegionBuckets() {
                   aliases={bucket.aliases ?? []}
                   bytes={bucket.bytes ?? 0}
                   objects={bucket.objects ?? 0}
+                  statsAvailable={statsAvailable}
                 />
               ))}
             </TableBody>
@@ -143,12 +153,14 @@ function BucketRow({
   aliases,
   bytes,
   objects,
+  statsAvailable,
 }: {
   regionId: string;
   bucketId: string;
   aliases: string[];
   bytes: number;
   objects: number;
+  statsAvailable: boolean;
 }) {
   const primaryAlias = aliases[0];
   const onNavigate = () => {
@@ -158,10 +170,10 @@ function BucketRow({
   // ADR-0002 deliberately drops the per-bucket "stat me" hydration
   // pattern (the old /files/$cid/index relied on a useUserBucket()
   // per row to fill in bytes/objects, because Garage's ListBuckets
-  // returns zeros). At the region tier we don't have a per-bucket
-  // detail endpoint yet — the user's key is the grant, not a
-  // basement record. Until the backend gains a region-tier
-  // GetBucket, the table just shows whatever ListBuckets returned.
+  // returns zeros). v1.4.0a takes the next honest step: if the driver
+  // has told us PerBucketStatsAvailable is false, we don't render
+  // Size + Objects columns at all — a row of em-dashes was confusing
+  // operators ("is this bucket empty, or does basement not know?").
   return (
     <TableRow className="cursor-pointer hover:bg-muted/50" onClick={onNavigate}>
       <TableCell>
@@ -171,12 +183,16 @@ function BucketRow({
           <span className="text-sm italic text-muted-foreground">{bucketId}</span>
         )}
       </TableCell>
-      <TableCell className="text-right tabular-nums">
-        {bytes > 0 ? humanizeBytes(bytes) : <span className="text-muted-foreground">{"—"}</span>}
-      </TableCell>
-      <TableCell className="text-right tabular-nums">
-        {objects > 0 ? objects.toLocaleString() : <span className="text-muted-foreground">{"—"}</span>}
-      </TableCell>
+      {statsAvailable && (
+        <>
+          <TableCell className="text-right tabular-nums">
+            {bytes > 0 ? humanizeBytes(bytes) : <span className="text-muted-foreground">{"—"}</span>}
+          </TableCell>
+          <TableCell className="text-right tabular-nums">
+            {objects > 0 ? objects.toLocaleString() : <span className="text-muted-foreground">{"—"}</span>}
+          </TableCell>
+        </>
+      )}
     </TableRow>
   );
 }
@@ -258,6 +274,11 @@ function KeyRejectedAlert({
   );
 }
 
+// BucketListSkeleton always renders the three-column skeleton: at
+// load time we don't yet know whether the driver supports stats, and
+// showing a wider skeleton avoids the table flickering narrower once
+// the real data arrives on a no-stats driver. The Bucket column on
+// its own is the dominant width regardless.
 function BucketListSkeleton() {
   return (
     <div className="rounded-lg border bg-card overflow-x-auto">

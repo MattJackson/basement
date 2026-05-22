@@ -4,6 +4,23 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.4.0a — 2026-05-22
+
+Scale + perf cycle 1 of v1.4. Bucket browser virtualized via
+`@tanstack/react-virtual` — a flat directory with 10K+ rows scrolls
+smoothly at fixed-row-height (48px); folders sort to the top, files
+in S3 order, sticky header, scroll resets on prefix change. Infinite
+scroll auto-fetches the next continuation token when the user nears
+the bottom of a truncated page. New `Driver.PerBucketStatsAvailable()`
+capability flag gates the Size + Objects columns on the per-region
+bucket list — Garage v1 returns false (no public stats at the
+user-region tier) and the columns hide rather than render rows of
+em-dashes; AWS S3 / MinIO / Garage v2 return true. `/admin/audit`
+gains pagination (50/page default, Prev/Next with "showing X-Y of Z"
+footer, "Page N of M"), an `offset` query param backed by
+`Audit.QueryWithTotal` on the file logger, and a client-side
+"Export CSV" button that dumps the currently filtered page.
+
 ## v1.3.0 — 2026-05-22
 
 Multi-user onboarding + key-first model refinement + sudo elevation

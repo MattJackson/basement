@@ -21,14 +21,19 @@ import (
 	"github.com/mattjackson/basement/internal/audit"
 )
 
-// auditResponse is the wire shape for GET /api/v1/admin/audit. The
-// `truncated` boolean signals "there were more matching events but
-// the limit cut the result short" so the UI can render a "load more"
-// affordance honestly. `total` mirrors len(events) (the audit logger
-// doesn't pre-count without scanning).
+// auditResponse is the wire shape for GET /api/v1/admin/audit.
+//
+// v1.4.0a: pagination. `total` is now the FULL count of matches over
+// the filter window (across all pages), and `offset` + `limit` echo
+// the page the caller saw. `truncated` stays for one release as a
+// deprecated hint so older FE builds don't break — it now mirrors
+// (offset + len(events) < total). Newer FE renders the page footer
+// + Prev/Next purely from total + offset + limit.
 type auditResponse struct {
 	Events    []audit.Event `json:"events"`
 	Total     int           `json:"total"`
+	Offset    int           `json:"offset"`
+	Limit     int           `json:"limit"`
 	Truncated bool          `json:"truncated"`
 }
 
@@ -41,7 +46,9 @@ type auditResponse struct {
 //   - action    substring filter, case-insensitive.
 //   - resource  substring filter, case-insensitive.
 //   - result    "success" | "failure" | "" (any).
-//   - limit     int, default 200, max 1000.
+//   - limit     int, default 50 (v1.4.0a), max 1000.
+//   - offset    int, default 0 (v1.4.0a). Rows skipped from the
+//                 newest-first ordering before the page is sliced.
 //
 // 503 AUDIT_NOT_WIRED if the logger hasn't been configured (matches
 // the POLICY_NOT_WIRED pattern from policy_gates.go — surface
@@ -93,8 +100,20 @@ func (s *Server) listAuditHandler(w http.ResponseWriter, r *http.Request) {
 			filter.Limit = n
 		}
 	}
+	if offStr := q.Get("offset"); offStr != "" {
+		if n, err := strconv.Atoi(offStr); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+	// v1.4.0a: handler-level default of 50, overriding the audit
+	// package's 200. Long unfiltered scrolls were the operator pain
+	// point flagged in the v1.3.0f cycle report; the new page size
+	// + Prev/Next chrome replaces them.
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
 
-	events, err := s.audit.Query(from, to, filter)
+	events, total, err := s.audit.QueryWithTotal(from, to, filter)
 	if err != nil {
 		writeErrorSimple(w, http.StatusInternalServerError, "AUDIT_QUERY_FAILED", err.Error())
 		return
@@ -103,22 +122,31 @@ func (s *Server) listAuditHandler(w http.ResponseWriter, r *http.Request) {
 		events = []audit.Event{}
 	}
 
-	// `truncated` is true when the caller's effective limit equals
-	// the actual returned count — we cannot tell from here whether
-	// there were MORE events; the calling UI uses this as a hint
-	// to render "load more, narrow your window" copy.
+	// Effective limit echoed to the FE so the page-count math is
+	// stable when the caller sent no limit (or one over the cap).
+	// v1.4.0a: default flipped from 200 to 50 — long unfiltered
+	// scrolls were a known UX wart per the v1.3.0f cycle report.
 	effectiveLimit := filter.Limit
 	if effectiveLimit <= 0 {
-		effectiveLimit = 200
+		effectiveLimit = 50
 	}
 	if effectiveLimit > 1000 {
 		effectiveLimit = 1000
 	}
-	truncated := len(events) >= effectiveLimit
+	effectiveOffset := filter.Offset
+	if effectiveOffset < 0 {
+		effectiveOffset = 0
+	}
+	// Deprecated `truncated` hint: there are more rows past this
+	// page's window. The new FE drives Prev/Next from total alone;
+	// the field stays one release for in-flight clients.
+	truncated := effectiveOffset+len(events) < total
 
 	writeJSON(w, http.StatusOK, auditResponse{
 		Events:    events,
-		Total:     len(events),
+		Total:     total,
+		Offset:    effectiveOffset,
+		Limit:     effectiveLimit,
 		Truncated: truncated,
 	})
 }

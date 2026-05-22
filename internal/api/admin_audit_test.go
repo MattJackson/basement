@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -164,6 +165,87 @@ func TestAuditHandler_InvalidTime(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status=%d, want 400", rr.Code)
+	}
+}
+
+// TestAuditHandler_Pagination_v1_4_0a seeds 75 events and walks two
+// pages of 50 each, asserting Total, Offset, Limit echo back and the
+// second page picks up where the first left off.
+func TestAuditHandler_Pagination_v1_4_0a(t *testing.T) {
+	srv, logger, cleanup := newAuditTestEnv(t, true)
+	defer cleanup()
+	defer logger.Close()
+
+	// Seed 75 events in order. Each carries a sequence number in
+	// Detail so we can assert the second page's first row is the 26th
+	// newest (i.e. seed #50, zero-indexed from the latest at #74).
+	for i := 0; i < 75; i++ {
+		logger.Log(audit.Event{
+			Actor:    "matthew",
+			Action:   "test:event",
+			Resource: "r",
+			Result:   audit.ResultSuccess,
+			Detail:   fmt.Sprintf("seq=%03d", i),
+		})
+	}
+
+	// Page 1: default limit 50, offset 0.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit", nil)
+	req.AddCookie(adminCookie())
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("page 1 status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var page1 auditResponse
+	if err := json.NewDecoder(rr.Body).Decode(&page1); err != nil {
+		t.Fatalf("decode page 1: %v", err)
+	}
+	if len(page1.Events) != 50 {
+		t.Errorf("page 1 len(Events)=%d, want 50", len(page1.Events))
+	}
+	if page1.Total != 75 {
+		t.Errorf("page 1 Total=%d, want 75", page1.Total)
+	}
+	if page1.Offset != 0 || page1.Limit != 50 {
+		t.Errorf("page 1 offset/limit=%d/%d, want 0/50", page1.Offset, page1.Limit)
+	}
+	if !page1.Truncated {
+		t.Errorf("page 1 Truncated=false, want true (75>50)")
+	}
+
+	// Page 2: offset=50.
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit?offset=50", nil)
+	req.AddCookie(adminCookie())
+	rr = httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("page 2 status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var page2 auditResponse
+	if err := json.NewDecoder(rr.Body).Decode(&page2); err != nil {
+		t.Fatalf("decode page 2: %v", err)
+	}
+	// Remaining 25 rows.
+	if len(page2.Events) != 25 {
+		t.Errorf("page 2 len(Events)=%d, want 25", len(page2.Events))
+	}
+	if page2.Total != 75 {
+		t.Errorf("page 2 Total=%d, want 75", page2.Total)
+	}
+	if page2.Offset != 50 {
+		t.Errorf("page 2 Offset=%d, want 50", page2.Offset)
+	}
+	if page2.Truncated {
+		t.Errorf("page 2 Truncated=true, want false (offset+len >= total)")
+	}
+
+	// Sanity: page 1's last event differs from page 2's first.
+	last1 := page1.Events[len(page1.Events)-1].Detail
+	first2 := page2.Events[0].Detail
+	if last1 == first2 {
+		t.Errorf("page 1 last (%q) == page 2 first (%q); pagination is dropping or duplicating rows",
+			last1, first2)
 	}
 }
 

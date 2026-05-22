@@ -325,4 +325,23 @@ type Driver interface {
 	LifecycleSupport() LifecycleCapabilities
 	GetLifecycle(ctx context.Context, bucketID string) ([]LifecycleRule, error)
 	PutLifecycle(ctx context.Context, bucketID string, rules []LifecycleRule) error
+
+	// PerBucketStatsAvailable reports whether ListBuckets / GetBucket
+	// populates the Objects + Bytes fields on a Bucket reliably. The
+	// UI uses this to hide the Size / Objects columns on the per-region
+	// bucket list when the driver can't provide them — fewer dashes,
+	// less "is this broken or empty?" confusion (v1.4.0a).
+	//
+	// Doctrine: this is a per-DRIVER capability flag, not a per-call
+	// "did we populate it this time" — the UI consults it once to
+	// decide column visibility and stays consistent across reloads.
+	//
+	// Garage v1 returns false today: the v1 admin API does not expose
+	// per-bucket stats on its public ListBuckets endpoint at the
+	// user-region tier. AWS S3 / MinIO / Garage v2 advertise true
+	// because their respective admin / bucket-metrics surfaces can be
+	// wrapped into a stats-populating ListBuckets variant (the FE just
+	// renders whatever the bucket carries — zero is a real "this bucket
+	// is empty", not the "we don't know" sentinel).
+	PerBucketStatsAvailable() bool
 }

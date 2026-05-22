@@ -35,6 +35,13 @@ func (m *memAuditLogger) Query(_, _ time.Time, _ audit.QueryFilter) ([]audit.Eve
 	return nil, nil
 }
 
+// v1.4.0a: pagination requires a separate read variant that surfaces
+// the pre-pagination total. The in-memory tests don't exercise the
+// audit query handler, so a quiet stub is fine here.
+func (m *memAuditLogger) QueryWithTotal(_, _ time.Time, _ audit.QueryFilter) ([]audit.Event, int, error) {
+	return nil, 0, nil
+}
+
 func (m *memAuditLogger) snapshot() []audit.Event {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -220,12 +227,22 @@ func TestUserRegions_HappyPath_CreateListGetUseDelete(t *testing.T) {
 	if rrBuckets.Code != http.StatusOK {
 		t.Fatalf("buckets: expected 200, got %d (body=%s)", rrBuckets.Code, rrBuckets.Body.String())
 	}
-	var buckets []driver.Bucket
-	if err := json.NewDecoder(rrBuckets.Body).Decode(&buckets); err != nil {
+	// v1.4.0a: response wraps the bucket list in
+	// {buckets, perBucketStatsAvailable} so the FE can gate column
+	// visibility per driver.
+	var bucketsResp struct {
+		Buckets                 []driver.Bucket `json:"buckets"`
+		PerBucketStatsAvailable bool            `json:"perBucketStatsAvailable"`
+	}
+	if err := json.NewDecoder(rrBuckets.Body).Decode(&bucketsResp); err != nil {
 		t.Fatalf("decode buckets: %v", err)
 	}
-	if len(buckets) != 2 {
-		t.Errorf("expected 2 buckets from mock, got %d", len(buckets))
+	if len(bucketsResp.Buckets) != 2 {
+		t.Errorf("expected 2 buckets from mock, got %d", len(bucketsResp.Buckets))
+	}
+	// Default mock returns false; the capability flag should mirror it.
+	if bucketsResp.PerBucketStatsAvailable {
+		t.Errorf("expected PerBucketStatsAvailable=false from default mock, got true")
 	}
 
 	// LastUsedAt was bumped

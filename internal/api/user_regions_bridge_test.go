@@ -171,13 +171,25 @@ func TestRegionBuckets_GarageBridge_ReturnsAdminList(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("buckets: expected 200, got %d (%s)", rr.Code, rr.Body.String())
 	}
-	var got []driver.Bucket
-	if err := json.NewDecoder(rr.Body).Decode(&got); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	got := decodeBridgeBuckets(t, rr.Body.Bytes())
 	if len(got) != 2 {
 		t.Fatalf("expected 2 buckets from admin bridge, got %d (%+v)", len(got), got)
 	}
+}
+
+// decodeBridgeBuckets unwraps the v1.4.0a {buckets,
+// perBucketStatsAvailable} envelope so the bridge tests can keep
+// asserting on the bucket slice directly.
+func decodeBridgeBuckets(t *testing.T, body []byte) []driver.Bucket {
+	t.Helper()
+	var env struct {
+		Buckets                 []driver.Bucket `json:"buckets"`
+		PerBucketStatsAvailable bool            `json:"perBucketStatsAvailable"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode bridge bucket list: %v", err)
+	}
+	return env.Buckets
 }
 
 // TestRegionBuckets_GarageBridge_FiltersByUserKey verifies the
@@ -213,8 +225,7 @@ func TestRegionBuckets_GarageBridge_FiltersByUserKey(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("buckets: %d (%s)", rr.Code, rr.Body.String())
 	}
-	var got []driver.Bucket
-	_ = json.NewDecoder(rr.Body).Decode(&got)
+	got := decodeBridgeBuckets(t, rr.Body.Bytes())
 	if len(got) != 1 || got[0].Aliases[0] != "lsi" {
 		t.Errorf("expected only [lsi] after user-key intersection, got %+v", got)
 	}
@@ -239,8 +250,7 @@ func TestRegionBuckets_NoAdminBridge_FallsThroughToUserDriver(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("buckets: %d (%s)", rr.Code, rr.Body.String())
 	}
-	var got []driver.Bucket
-	_ = json.NewDecoder(rr.Body).Decode(&got)
+	got := decodeBridgeBuckets(t, rr.Body.Bytes())
 	if len(got) != 1 || got[0].ID != "user-side-only" {
 		t.Errorf("expected user-driver fallback list, got %+v", got)
 	}
@@ -274,8 +284,7 @@ func TestRegionBuckets_NonGarageAdmin_SkipsBridge(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("buckets: %d (%s)", rr.Code, rr.Body.String())
 	}
-	var got []driver.Bucket
-	_ = json.NewDecoder(rr.Body).Decode(&got)
+	got := decodeBridgeBuckets(t, rr.Body.Bytes())
 	if len(got) != 1 || got[0].ID != "user-aws" {
 		t.Errorf("expected user-driver path for AWS, got %+v", got)
 	}
@@ -309,8 +318,7 @@ func TestRegionBuckets_BridgeEndpointCanonicalization(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("buckets: %d (%s)", rr.Code, rr.Body.String())
 	}
-	var got []driver.Bucket
-	_ = json.NewDecoder(rr.Body).Decode(&got)
+	got := decodeBridgeBuckets(t, rr.Body.Bytes())
 	if len(got) != 1 || got[0].Aliases[0] != "canonical" {
 		t.Errorf("expected canonical-form bridge to match, got %+v", got)
 	}

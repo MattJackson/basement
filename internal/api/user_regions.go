@@ -741,7 +741,25 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 	s.auditEmit(r, "region:list_buckets", regionListResource(region), audit.ResultSuccess,
 		"accessKey="+region.AccessKeyID)
 
-	writeJSON(w, http.StatusOK, buckets)
+	// v1.4.0a: wrap the bucket list with a capability flag the FE uses
+	// to decide whether to render the Size + Objects columns. Garage
+	// v1's user-region path can't surface counters; hiding the columns
+	// is cleaner than rendering rows of em-dashes.
+	writeJSON(w, http.StatusOK, userRegionBucketListResponse{
+		Buckets:                 buckets,
+		PerBucketStatsAvailable: drv.PerBucketStatsAvailable(),
+	})
+}
+
+// userRegionBucketListResponse is the wire shape returned by GET
+// /api/v1/user/regions/{regionId}/buckets. v1.4.0a wraps the prior
+// raw []Bucket response so the FE can read a per-driver capability
+// flag (PerBucketStatsAvailable) alongside the list without a second
+// round trip. Field order on the wire: buckets first (the main
+// payload), capability flag second (the meta).
+type userRegionBucketListResponse struct {
+	Buckets                 []driver.Bucket `json:"buckets"`
+	PerBucketStatsAvailable bool            `json:"perBucketStatsAvailable"`
 }
 
 // regionListResource builds the canonical Resource string for

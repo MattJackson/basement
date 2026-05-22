@@ -148,7 +148,7 @@ function NewSyncPage() {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
               <option value="">— pick a bucket —</option>
-              {srcBuckets?.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0, 12)}</option>))}
+              {srcBuckets?.buckets.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0, 12)}</option>))}
             </select>
           </div>
           <div className="grid gap-2 sm:col-span-2">
@@ -185,7 +185,7 @@ function NewSyncPage() {
               className="w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-50"
             >
               <option value="">— pick a bucket —</option>
-              {dstBuckets?.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0, 12)}</option>))}
+              {dstBuckets?.buckets.map((b) => (<option key={b.id} value={b.id}>{b.aliases?.[0] || b.id.slice(0, 12)}</option>))}
             </select>
           </div>
           <div className="grid gap-2 sm:col-span-2">
