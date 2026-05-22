@@ -6,6 +6,9 @@ import { RouterProvider, createRouter } from "@tanstack/react-router";
 import "./index.css";
 import { routeTree } from "./routeTree.gen";
 import { applyCookieThemeEarly } from "./shared/theme/useTheme";
+import { AuthModeProvider } from "./shared/auth/mode";
+import { AuthModeHydrator } from "./shared/auth/AuthModeHydrator";
+import { ElevationProvider } from "./shared/auth/elevation";
 
 // Apply the cookie-stored theme before React paints so users with a
 // non-system preference don't see a flash of the wrong palette.
@@ -35,7 +38,17 @@ declare module "@tanstack/react-router" {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      {/* ADR-0003 v1.2.0b: sudo-style mode state lives at the root */}
+      {/* so the persona pill, elevation modal, and any per-route */}
+      {/* guard all read the same source. Hydrator pulls the */}
+      {/* initial mode off /auth/me; ElevationProvider exposes the */}
+      {/* modal + runWithElevation wrapper for destructive ops. */}
+      <AuthModeProvider>
+        <AuthModeHydrator />
+        <ElevationProvider>
+          <RouterProvider router={router} />
+        </ElevationProvider>
+      </AuthModeProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

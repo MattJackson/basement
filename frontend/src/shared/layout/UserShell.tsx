@@ -4,6 +4,7 @@ import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
+import { PersonaPill } from "@/components/layout/PersonaPill";
 
 interface UserShellProps {
   children?: ReactNode;
@@ -53,6 +54,12 @@ export function UserShell({ children }: UserShellProps): ReactNode {
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
+            {/* ADR-0003 v1.2.0b: persona pill — same one as AppShell. */}
+            {/* Shown in the user shell too so a USER → ADMIN flip */}
+            {/* (operator stepping up to do an admin op without */}
+            {/* leaving /files) renders the countdown wherever they */}
+            {/* happen to be. */}
+            <PersonaPill />
             <ThemeToggle />
             <UserMenu />
           </div>

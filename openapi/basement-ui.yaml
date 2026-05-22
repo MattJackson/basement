@@ -2450,6 +2450,41 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
+  /auth/logout-elevation:
+      post:
+        operationId: dropPrivileges
+        summary: Drop sudo-style privileges back to USER (ADR-0003)
+        description: |
+          Re-issues the session cookie with mode=user, modeExpiresAt=0.
+          The session itself stays valid (user id, role, uiAdmin, outer
+          session TTL preserved); only the elevation state collapses.
+          Wired to the "drop privileges" button next to the persona
+          pill countdown in the v1.2.0b frontend.
+        tags:
+        - Auth
+        x-basement-since: '1.2.0b'
+        security:
+        - cookieAuth: []
+        responses:
+          '200':
+            description: Privileges dropped; cookie re-issued at USER mode
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      enum: [user]
+                    mode_expires_at:
+                      type: integer
+                      format: int64
+          '401':
+            description: UNAUTHORIZED — no active session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
   /auth/oidc/callback:
       get:
         operationId: oidcCallback
@@ -3932,6 +3967,25 @@ components:
             - admin
             - user
             description: User role for RBAC checks.
+          uiAdmin:
+            type: boolean
+            description: True if the user holds the UI-admin role (ADR-0001).
+          mode:
+            type: string
+            enum: [user, admin, elevated]
+            description: |
+              ADR-0003 sudo-style session mode at the time /auth/me was
+              called. May reflect a back-compat grace promotion (a
+              pre-v1.2 cookie returns "admin" inside the 7-day window).
+              v1.2.0b+.
+          modeExpiresAt:
+            type: integer
+            format: int64
+            description: |
+              Unix seconds when the current mode reverts (USER for
+              ADMIN, ADMIN for ELEVATED). 0 means "never expires at the
+              mode layer" (USER, or pre-v1.2 cookies inside the grace
+              window). v1.2.0b+.
           oidc_subject:
             type: string
             nullable: true

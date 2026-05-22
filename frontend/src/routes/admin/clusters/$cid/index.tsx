@@ -16,6 +16,7 @@ import { useDeleteCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
 import { DriverBadge } from "@/components/clusters/DriverBadge";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/clusters/$cid/")({
   component: adminPage(ClusterDetailScreen),
@@ -31,6 +32,10 @@ function ClusterDetailScreen() {
   const { data: buckets, isLoading: bucketsLoading } = useClusterBuckets(cid);
   const { data: keys, isLoading: keysLoading } = useClusterKeys(cid);
   const deleteCluster = useDeleteCluster();
+  // ADR-0003 v1.2.0b: cluster:delete is ELEVATED-min — wrap the
+  // click handler so a 403 ELEVATION_REQUIRED triggers the password
+  // modal and retries the delete on success.
+  const runWithElevation = useElevationGuard();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
@@ -352,9 +357,14 @@ function ClusterDetailScreen() {
         open={deleteDialogOpen}
         clusterLabel={cluster.label}
         isDeleting={deleteCluster.isPending}
-        onConfirm={() => {
-          deleteCluster.mutate(cid);
+        onConfirm={async () => {
           setDeleteDialogOpen(false);
+          try {
+            await runWithElevation(() => deleteCluster.mutateAsync(cid));
+          } catch {
+            // ELEVATION_CANCELLED / network errors surface via the
+            // mutation's existing error toast / banner.
+          }
         }}
         onCancel={() => setDeleteDialogOpen(false)}
       />

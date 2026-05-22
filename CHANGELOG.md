@@ -18,6 +18,19 @@ write-up; this file is the at-a-glance index.
   cookies (no mode claim) treated as ADMIN for a 7-day back-compat
   grace window so the existing matthew session keeps working
   across the deploy.
+- **v1.2.0b** — Frontend elevation modal + persona pill countdown.
+  `/auth/me` now echoes the live mode + expiry; new
+  `POST /auth/logout-elevation` lets the operator drop privileges
+  back to USER without re-logging-in. `<AuthModeProvider>` mirrors
+  the cookie state in React with a 1Hz auto-downgrade tick;
+  `<ElevationProvider>` exposes `useElevationGuard()` so destructive
+  click handlers re-prompt for the password and retry on success;
+  the openapi-fetch middleware opens the modal eagerly on any
+  unhandled 403 ELEVATION_REQUIRED. `<PersonaPill>` lives in
+  AppShell + UserShell: USER neutral pill, ADMIN amber pill +
+  mm:ss countdown, ELEVATED orange pill + SVG lightning bolt,
+  flash + toast at <30s, "drop privileges" button next to the
+  countdown chip.
 
 ## v1.1.0 — 2026-05-21
 

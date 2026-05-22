@@ -30,6 +30,7 @@ import { useListClusters, useTestClusterQuery, useClusterBuckets, useClusterKeys
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { DeleteClusterConfirm } from "@/shared/ui/DeleteClusterConfirm";
 import { DriverBadge } from "@/components/clusters/DriverBadge";
+import { useElevationGuard } from "@/shared/auth/elevation";
 
 export const Route = createFileRoute("/admin/clusters/")({
   component: adminPage(ClustersScreen),
@@ -39,6 +40,12 @@ function ClustersScreen() {
   const navigate = useNavigate();
   const { data: clustersData, isLoading, error } = useListClusters();
   const deleteCluster = useDeleteCluster();
+  // ADR-0003 v1.2.0b: cluster:delete is an ELEVATED-min capability,
+  // so a USER/ADMIN session 403s with ELEVATION_REQUIRED on first
+  // try. Wrapping the click handler in runWithElevation pops the
+  // password modal and retries automatically on success, giving the
+  // operator a one-click experience instead of a 403 → modal → re-click.
+  const runWithElevation = useElevationGuard();
 
   // Delete dialog state (Create + Edit now navigate to dedicated
   // routes — popups-max-2-fields rule from v0.8.0d.15).
@@ -56,11 +63,17 @@ function ClustersScreen() {
     setDeleteDialogOpen(true);
   };
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!clusterToDelete) return;
-    deleteCluster.mutate(clusterToDelete.id);
+    const target = clusterToDelete;
     setDeleteDialogOpen(false);
     setClusterToDelete(null);
+    try {
+      await runWithElevation(() => deleteCluster.mutateAsync(target.id));
+    } catch {
+      // Errors (including ELEVATION_CANCELLED) surface via the
+      // mutation's existing error state / banner; nothing to do here.
+    }
   };
 
 

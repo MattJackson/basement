@@ -21,10 +21,19 @@ type LoginRequest struct {
 }
 
 // UserResponse represents a user profile response.
+//
+// Mode + ModeExpiresAt (ADR-0003, v1.2.0b) ride along on /auth/me so the
+// frontend can hydrate its sudo-state machine on first render without a
+// separate roundtrip. The login handler still returns the legacy shape
+// (mode is always "user" right after login, expiry zero); meHandler is
+// the one place that needs the live values because the gate's grace-
+// window logic can downgrade a pre-v1.2 cookie to ADMIN on the wire.
 type UserResponse struct {
-	Username  string `json:"username"`
-	Role      string `json:"role"`
-	UIAdmin   bool   `json:"uiAdmin,omitempty"`
+	Username      string `json:"username"`
+	Role          string `json:"role"`
+	UIAdmin       bool   `json:"uiAdmin,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	ModeExpiresAt int64  `json:"modeExpiresAt,omitempty"`
 }
 
 var adminCredsOnce sync.Once
@@ -144,14 +153,84 @@ func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mode comes through currentMode() so a pre-v1.2 cookie inside the
+	// 7-day grace window shows up as "admin" — matching what the gate
+	// actually enforces. Without this, the FE pill would render USER
+	// while the backend honoured ADMIN, and the operator would see
+	// admin pages they couldn't access via the UI.
+	mode := currentMode(r)
 	resp := UserResponse{
-		Username: claims.UserID,
-		Role:     claims.Role,
-		UIAdmin:  claims.UIAdmin,
+		Username:      claims.UserID,
+		Role:          claims.Role,
+		UIAdmin:       claims.UIAdmin,
+		Mode:          string(mode),
+		ModeExpiresAt: claims.ModeExpiresAt,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// logoutElevationHandler handles POST /api/v1/auth/logout-elevation
+// (ADR-0003 v1.2.0b "drop privileges"). Issues a new session cookie
+// with mode=user, ModeExpiresAt=0; the rest of the JWT (user id, role,
+// uiAdmin, session expiry) is preserved.
+//
+// This is NOT a full logout — the session cookie stays valid, just
+// downgraded to USER mode. The FE wires this to the "X / Drop" button
+// next to the persona-pill countdown so the operator can instantly
+// shed admin privileges without re-logging-in to come back up.
+func (s *Server) logoutElevationHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "POST required")
+		return
+	}
+
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil || claims.UserID == "" {
+		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
+		return
+	}
+
+	current := currentMode(r)
+
+	sessionTTL := s.cfg.SessionTTL
+	if sessionTTL <= 0 {
+		sessionTTL = 24 * time.Hour
+	}
+
+	token, err := auth.IssueTokenWithMode(
+		s.cfg.JWT.Secret,
+		claims.UserID,
+		claims.Role,
+		claims.UIAdmin,
+		"user",
+		0,
+		sessionTTL,
+	)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "TOKEN_ISSUE", "Failed to issue session token")
+		return
+	}
+
+	auth.SetSessionCookie(w, token, sessionTTL)
+
+	s.audit.Log(audit.Event{
+		Time:      time.Now().UTC(),
+		Actor:     claims.UserID,
+		ActorRole: "user",
+		Action:    "auth:drop_privileges",
+		Resource:  "mode:user",
+		Detail:    "dropped privileges from " + string(current) + " to user",
+		Result:    audit.ResultSuccess,
+		IP:        clientIP(r),
+		UserAgent: r.UserAgent(),
+	})
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"mode":            "user",
+		"mode_expires_at": int64(0),
+	})
 }
 
 // subtleConstantTimeString compares two strings in constant time.
