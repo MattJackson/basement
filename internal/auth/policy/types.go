@@ -16,6 +16,16 @@ type Role struct {
 	// Seed marks built-in roles. Seed roles can be edited but cannot be
 	// deleted — prevents accidental lockout.
 	Seed bool `json:"seed"`
+	// Deprecated marks roles that still exist for back-compat but whose
+	// capabilities no longer have effect at the gates they used to cover.
+	// ADR-0002 (v1.1.0f) introduces this for `bucket_user`: the
+	// `objects:*` capabilities on bucket-scoped assignments are inert
+	// post-v1.1.0e because user-tier bucket access now flows through the
+	// region keychain's S3 key, NOT through basement's policy gates.
+	// The UI uses this flag to render a badge + banner + assignment
+	// guardrail; the enforcer itself doesn't change behaviour based on
+	// it. Existing assignments stay valid + deletable.
+	Deprecated bool `json:"deprecated,omitempty"`
 }
 
 // RoleAssignment binds a user to a role at a given scope. A user with no

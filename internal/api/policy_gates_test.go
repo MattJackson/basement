@@ -146,13 +146,20 @@ func TestAdminCreateCluster_WithCapability(t *testing.T) {
 	}
 }
 
-// TestSeedEnvAdmin_GrantsFourBlankets: SeedEnvAdmin gives the env
-// admin host_admin / cluster_admin / bucket_user blanket assignments
-// PLUS host_admin @ "*" (true superuser scope, v0.9.0m.1), satisfying
-// capabilities at every relevant scope domain — including domains
-// added by future cycles (key:*, lifecycle:*, etc.) which the
-// per-domain seeds alone don't cover.
-func TestSeedEnvAdmin_GrantsFourBlankets(t *testing.T) {
+// TestSeedEnvAdmin_GrantsThreeBlankets: SeedEnvAdmin gives the env
+// admin host_admin / cluster_admin blanket assignments PLUS host_admin
+// @ "*" (true superuser scope, v0.9.0m.1), satisfying capabilities at
+// every relevant scope domain — including domains added by future
+// cycles (key:*, lifecycle:*, etc.) which the per-domain seeds alone
+// don't cover.
+//
+// ADR-0002 (v1.1.0f) dropped the fourth `bucket_user @ bucket:*` seed
+// because the bucket_user role retired post-region-keychain. The
+// host_admin @ "*" superuser row still covers any bucket-scoped check
+// the env admin needs, so removing the bucket_user seed doesn't
+// regress any gate (verified by the per-domain Can checks below
+// continuing to pass).
+func TestSeedEnvAdmin_GrantsThreeBlankets(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "seed-env-admin-")
 	if err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -196,14 +203,14 @@ func TestSeedEnvAdmin_GrantsFourBlankets(t *testing.T) {
 		t.Errorf("re-SeedEnvAdmin: %v", err)
 	}
 	assignments := enf.AssignmentsFor("matthew")
-	if len(assignments) != 4 {
-		t.Errorf("expected 4 assignments after idempotent re-seed, got %d: %#v",
+	if len(assignments) != 3 {
+		t.Errorf("expected 3 assignments after idempotent re-seed, got %d: %#v",
 			len(assignments), assignments)
 	}
 
-	// One of those four must be host_admin @ "*" — the superuser row
+	// One of those three must be host_admin @ "*" — the superuser row
 	// is the cycle's whole point. Other tests assert the role/scope
-	// combos for the other three.
+	// combos for the other two.
 	var hasSuperuser bool
 	for _, a := range assignments {
 		if a.RoleID == "host_admin" && a.Scope == "*" {
@@ -213,6 +220,17 @@ func TestSeedEnvAdmin_GrantsFourBlankets(t *testing.T) {
 	}
 	if !hasSuperuser {
 		t.Errorf("v0.9.0m.1 expected host_admin @ \"*\" assignment, missing from %#v", assignments)
+	}
+
+	// ADR-0002 (v1.1.0f): SeedEnvAdmin must NOT create a new
+	// bucket_user @ bucket:* assignment on a fresh deployment. Existing
+	// rows (back-compat) stay via AssignRole's idempotency, but a clean
+	// install starts without one. The role exists deprecated; new
+	// installs simply don't bind matthew to it.
+	for _, a := range assignments {
+		if a.RoleID == "bucket_user" {
+			t.Errorf("v1.1.0f: SeedEnvAdmin must not create bucket_user assignments on fresh deploys; got %#v", a)
+		}
 	}
 
 	// Empty username is a no-op (preserves tests that don't seed an env admin).

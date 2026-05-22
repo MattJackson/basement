@@ -750,6 +750,13 @@ export type PolicyRole = {
   description: string;
   capabilities: string[];
   seed: boolean;
+  // ADR-0002 (v1.1.0f): roles whose gates retired but whose row stays
+  // in the matrix for back-compat. The UI renders a deprecation badge,
+  // banner, and an editor alert; new assignments to deprecated roles
+  // are gated off in /admin/policies. Field is optional on the wire
+  // because Go marshals `omitempty` — older snapshots without the
+  // flag still parse.
+  deprecated?: boolean;
 };
 export type PolicyAssignment = {
   userId: string;
@@ -777,7 +784,7 @@ export function usePolicies() {
 
 export function useUpsertRole() {
   return useMutation({
-    mutationFn: async (role: Omit<PolicyRole, "seed"> & { seed?: boolean }) => {
+    mutationFn: async (role: Omit<PolicyRole, "seed" | "deprecated"> & { seed?: boolean; deprecated?: boolean }) => {
       const res = await fetch("/api/v1/admin/policies/roles", {
         method: "POST",
         credentials: "include",

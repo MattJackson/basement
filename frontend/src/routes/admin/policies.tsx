@@ -95,6 +95,7 @@ function PoliciesPage() {
           </p>
         </header>
 
+        <DeprecationBanner />
         <CapabilitiesPane capabilities={data.capabilities} />
         <RolesPane roles={data.roles} capabilities={data.capabilities} />
         <AssignmentsPane
@@ -107,6 +108,33 @@ function PoliciesPage() {
         />
       </div>
     </TooltipProvider>
+  );
+}
+
+// DeprecationBanner — ADR-0002 (v1.1.0f) primer.
+//
+// Renders once at the top of /admin/policies so operators understand,
+// before they scan the matrix, that the legacy bucket_user role's
+// gates retired in v1.1.0e. New assignments to bucket_user have no
+// effect; the path forward is the region keychain. Banner stays even
+// when no deprecated roles are present in the matrix (a custom
+// deployment that wiped the seed) because the message is also about
+// the architectural model, not just one role's status.
+function DeprecationBanner() {
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
+      <strong className="font-semibold">
+        Bucket-level access is now controlled by S3 key assignment on the
+        cluster admin side, not by basement roles.
+      </strong>{" "}
+      When a user connects a region (
+      <code className="font-mono text-xs">/files/regions/new</code>), they
+      bring an S3 key that already has the backend's bucket grants attached.
+      basement no longer enforces per-bucket access — the backend does.
+      The <code className="font-mono text-xs">bucket_user</code> role
+      remains for backward compatibility but new assignments will have no
+      effect.
+    </div>
   );
 }
 
@@ -360,16 +388,34 @@ function RoleCard({
               {role.id}
             </div>
           </div>
-          {role.seed && (
-            <Badge variant="secondary" className="shrink-0">
-              Seed
-            </Badge>
-          )}
+          <div className="flex shrink-0 flex-wrap items-center gap-1">
+            {role.deprecated && (
+              <Badge
+                variant="outline"
+                className="border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              >
+                Deprecated
+              </Badge>
+            )}
+            {role.seed && (
+              <Badge variant="secondary">Seed</Badge>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {editing ? (
           <>
+            {role.deprecated && (
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                This role is deprecated. New assignments have no effect — use{" "}
+                <code className="font-mono">/files/regions/new</code> instead.
+                Bucket-level access is decided by the backend S3 key attached to
+                the user's UserRegion, not by basement policy. Existing
+                assignments remain valid for back-compat but should be revoked
+                once users have migrated to the region keychain.
+              </div>
+            )}
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground">Label</label>
               <Input value={label} onChange={(e) => setLabel(e.target.value)} />
@@ -547,8 +593,16 @@ function AssignmentsPane({
   // Inline add form state — three fields means a dialog would violate
   // popups-max-2-fields. Keeping it inline at the top of the table.
   const [newUser, setNewUser] = useState("");
-  const [newRole, setNewRole] = useState(roles[0]?.id ?? "");
+  // Default the role picker to the first non-deprecated role so the
+  // form doesn't open already-blocked. ADR-0002 (v1.1.0f): deprecated
+  // roles can still be SELECTED (so operators see what they're not
+  // doing) but the Assign action is gated below.
+  const defaultRole = roles.find((r) => !r.deprecated)?.id ?? roles[0]?.id ?? "";
+  const [newRole, setNewRole] = useState(defaultRole);
   const [newScope, setNewScope] = useState("");
+
+  const selectedRole = roles.find((r) => r.id === newRole);
+  const selectedIsDeprecated = !!selectedRole?.deprecated;
 
   const filtered = useMemo(() => {
     return assignments.filter((a) => {
@@ -565,6 +619,17 @@ function AssignmentsPane({
   const handleAssign = async () => {
     if (!newUser.trim() || !newRole || !newScope.trim()) {
       toast.error("All three fields are required");
+      return;
+    }
+    // ADR-0002 (v1.1.0f): belt-and-suspenders guard alongside the
+    // disabled button — keyboard-triggered submits or stale state
+    // shouldn't sneak a deprecated assignment through. The disabled
+    // <Button> above is the primary UI signal; this is the
+    // last-resort check.
+    if (selectedIsDeprecated) {
+      toast.error(
+        `Role ${newRole} is deprecated — new assignments have no effect. Use /files/regions/new instead.`,
+      );
       return;
     }
     try {
@@ -629,6 +694,7 @@ function AssignmentsPane({
                 {roles.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.label || r.id}
+                    {r.deprecated ? " (deprecated)" : ""}
                   </option>
                 ))}
               </select>
@@ -643,9 +709,33 @@ function AssignmentsPane({
                 placeholder="e.g. bucket:cid-abc:family-photos"
               />
             </div>
-            <Button size="sm" onClick={handleAssign} disabled={assign.isPending}>
-              {assign.isPending ? "Assigning..." : "Assign"}
-            </Button>
+            {selectedIsDeprecated ? (
+              // ADR-0002 (v1.1.0f): can't create new assignments to a
+              // deprecated role. Tooltip explains why so the operator
+              // doesn't think the button is just broken.
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button size="sm" disabled>
+                      Assign
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <code className="font-mono text-[10px]">{newRole}</code> is
+                  deprecated — new assignments would have no effect.
+                  Bucket-level access is now decided by the backend S3 key
+                  attached to a user's UserRegion (
+                  <code className="font-mono text-[10px]">/files/regions/new</code>
+                  ), not by basement policy. Existing assignments remain
+                  visible below and can be revoked for cleanup.
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button size="sm" onClick={handleAssign} disabled={assign.isPending}>
+                {assign.isPending ? "Assigning..." : "Assign"}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
