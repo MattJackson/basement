@@ -4,6 +4,32 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.8.0c — 2026-05-22
+
+MCP server binary (`basement-mcp`). New stdio-based Model Context
+Protocol server exposes a curated subset of basement-server's API
+as MCP tools so AI agents (Claude Code, Claude Desktop, Cursor)
+can drive storage workflows via natural language. JSON-RPC 2.0 on
+newline-delimited stdin/stdout (no HTTP variant); protocol version
+2024-11-05; advertises `tools` capability only. Ten tools ship —
+seven read (`basement_list_regions`, `basement_list_buckets`,
+`basement_list_objects`, `basement_get_object_metadata`,
+`basement_list_backups`, `basement_list_federations`,
+`basement_list_audit`), two write (`basement_create_share`,
+`basement_create_backup_run`), and one forward-compatible
+placeholder (`basement_search` returns `NOT_IMPLEMENTED` until the
+v1.9 search-index cycle). Auth is bearer-only via v1.7.0b service-
+account credentials read from `~/.config/basement/config.yaml`;
+the MCP server inherits whatever capabilities the SA was granted
+and does not define its own role model. New `internal/clilib`
+shared package factors out the YAML config loader + HTTP client
+so a future `basement` CLI can reuse the same plumbing without a
+fork. Install paths documented for Claude Desktop, Claude Code,
+and Cursor in `cmd/basement-mcp/README.md`. No driver changes; no
+new env vars except the existing `$BASEMENT_PROFILE` /
+`$BASEMENT_SECRET_KEY` from the CLI substrate. Tool calls log to
+stderr (JSON) so the stdout transport stays clean.
+
 ## v1.7.0 — 2026-05-22
 
 Service accounts + webhooks milestone. Six primary cycles (v1.7.0a

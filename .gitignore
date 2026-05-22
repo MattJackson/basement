@@ -47,4 +47,9 @@ internal/web/dist/*
 # JSON store runtime data (for local dev)
 data/
 *.local.json
-basement
+# Built binaries dropped in the repo root by `go build ./cmd/...`
+# Anchored with a leading slash so the rules only match files at the
+# repo root — not the cmd/basement{,-mcp,-server}/ source directories.
+/basement
+/basement-mcp
+/basement-server
