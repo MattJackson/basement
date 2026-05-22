@@ -1900,3 +1900,143 @@ export function useResyncFederation() {
     },
   });
 }
+
+// v1.7.0c — service-account admin hooks.
+//
+// Wraps the six routes added by v1.7.0a under
+// /api/v1/admin/service-accounts. The plaintext secret only rides
+// on Create + Rotate responses (serviceAccountWithSecret on the
+// server side); read paths never surface it.
+//
+// queryKey shape: ["admin", "service-accounts"] for the list,
+// ["admin", "service-accounts", id] for a single row. Mutations
+// invalidate the list key so the table re-fetches after any change.
+export type ServiceAccountCapability = { id: string; scope: string };
+export type ServiceAccount = {
+  id: string;
+  ownerUserId: string;
+  name: string;
+  accessKeyId: string;
+  capabilities: ServiceAccountCapability[];
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string;
+  lastUsedAt?: string;
+  revokedAt?: string;
+};
+export type ServiceAccountWithSecret = {
+  serviceAccount: ServiceAccount;
+  // Plaintext secret — returned exactly once on mint/rotate. The
+  // hook callers must surface this to the operator immediately +
+  // drop the value from memory once they've copied it.
+  secret: string;
+};
+
+export type CreateServiceAccountRequest = {
+  name: string;
+  capabilities: ServiceAccountCapability[];
+  scopes: string[];
+  expiresAt?: string | null;
+};
+
+export type UpdateServiceAccountRequest = {
+  name?: string;
+  capabilities?: ServiceAccountCapability[];
+  scopes?: string[];
+  expiresAt?: string | null;
+};
+
+export function useServiceAccounts() {
+  return useQuery<ServiceAccount[]>({
+    queryKey: ["admin", "service-accounts"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/service-accounts", { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/service-accounts", res.status, body);
+      return (body as ServiceAccount[] | null) ?? [];
+    },
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useServiceAccount(id: string | null) {
+  return useQuery<ServiceAccount>({
+    queryKey: ["admin", "service-accounts", id],
+    queryFn: async () => {
+      const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id!)}`, {
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/service-accounts/${id}`, res.status, body);
+      return body as ServiceAccount;
+    },
+    enabled: !!id,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useCreateServiceAccount() {
+  return useMutation<ServiceAccountWithSecret, Error, CreateServiceAccountRequest>({
+    mutationFn: async (req) => {
+      const res = await fetch("/api/v1/admin/service-accounts", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/service-accounts/create", res.status, body);
+      return body as ServiceAccountWithSecret;
+    },
+  });
+}
+
+export function useUpdateServiceAccount() {
+  return useMutation<ServiceAccount, Error, { id: string; patch: UpdateServiceAccountRequest }>({
+    mutationFn: async ({ id, patch }) => {
+      const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/service-accounts/update/${id}`, res.status, body);
+      return body as ServiceAccount;
+    },
+  });
+}
+
+export function useDeleteServiceAccount() {
+  return useMutation<null, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`admin/service-accounts/delete/${id}`, res.status, body);
+      }
+      return null;
+    },
+  });
+}
+
+export function useRotateServiceAccount() {
+  return useMutation<ServiceAccountWithSecret, Error, string>({
+    mutationFn: async (id) => {
+      const res = await fetch(
+        `/api/v1/admin/service-accounts/${encodeURIComponent(id)}/rotate`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/service-accounts/rotate/${id}`, res.status, body);
+      return body as ServiceAccountWithSecret;
+    },
+  });
+}

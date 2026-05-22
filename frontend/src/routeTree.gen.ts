@@ -22,6 +22,7 @@ import { Route as FilesRegionIdRouteImport } from "./routes/files/$regionId"
 import { Route as AdminUsersRouteImport } from "./routes/admin/users"
 import { Route as AdminUsageRouteImport } from "./routes/admin/usage"
 import { Route as AdminSystemRouteImport } from "./routes/admin/system"
+import { Route as AdminServiceAccountsRouteImport } from "./routes/admin/service-accounts"
 import { Route as AdminPoliciesRouteImport } from "./routes/admin/policies"
 import { Route as AdminMigrateRouteImport } from "./routes/admin/migrate"
 import { Route as AdminLoginRouteImport } from "./routes/admin/login"
@@ -33,6 +34,7 @@ import { Route as FilesFederatedBucketsIndexRouteImport } from "./routes/files/f
 import { Route as FilesBackupsIndexRouteImport } from "./routes/files/backups/index"
 import { Route as FilesRegionIdIndexRouteImport } from "./routes/files/$regionId/index"
 import { Route as AdminUsersIndexRouteImport } from "./routes/admin/users/index"
+import { Route as AdminServiceAccountsIndexRouteImport } from "./routes/admin/service-accounts/index"
 import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
 import { Route as AdminBucketsIndexRouteImport } from "./routes/admin/buckets/index"
@@ -43,6 +45,7 @@ import { Route as FilesKeysNewRouteImport } from "./routes/files/keys/new"
 import { Route as FilesFederatedBucketsNewRouteImport } from "./routes/files/federated-buckets/new"
 import { Route as FilesBackupsNewRouteImport } from "./routes/files/backups/new"
 import { Route as AdminUsersNewRouteImport } from "./routes/admin/users/new"
+import { Route as AdminServiceAccountsNewRouteImport } from "./routes/admin/service-accounts/new"
 import { Route as AdminClustersNewRouteImport } from "./routes/admin/clusters/new"
 import { Route as FilesFederatedBucketsIdIndexRouteImport } from "./routes/files/federated-buckets/$id/index"
 import { Route as FilesBackupsIdIndexRouteImport } from "./routes/files/backups/$id/index"
@@ -122,6 +125,11 @@ const AdminSystemRoute = AdminSystemRouteImport.update({
   path: "/admin/system",
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminServiceAccountsRoute = AdminServiceAccountsRouteImport.update({
+  id: "/admin/service-accounts",
+  path: "/admin/service-accounts",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminPoliciesRoute = AdminPoliciesRouteImport.update({
   id: "/admin/policies",
   path: "/admin/policies",
@@ -178,6 +186,12 @@ const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
   path: "/",
   getParentRoute: () => AdminUsersRoute,
 } as any)
+const AdminServiceAccountsIndexRoute =
+  AdminServiceAccountsIndexRouteImport.update({
+    id: "/",
+    path: "/",
+    getParentRoute: () => AdminServiceAccountsRoute,
+  } as any)
 const AdminKeysIndexRoute = AdminKeysIndexRouteImport.update({
   id: "/admin/keys/",
   path: "/admin/keys/",
@@ -228,6 +242,11 @@ const AdminUsersNewRoute = AdminUsersNewRouteImport.update({
   id: "/new",
   path: "/new",
   getParentRoute: () => AdminUsersRoute,
+} as any)
+const AdminServiceAccountsNewRoute = AdminServiceAccountsNewRouteImport.update({
+  id: "/new",
+  path: "/new",
+  getParentRoute: () => AdminServiceAccountsRoute,
 } as any)
 const AdminClustersNewRoute = AdminClustersNewRouteImport.update({
   id: "/admin/clusters/new",
@@ -305,6 +324,7 @@ export interface FileRoutesByFullPath {
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/policies": typeof AdminPoliciesRoute
+  "/admin/service-accounts": typeof AdminServiceAccountsRouteWithChildren
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRouteWithChildren
@@ -318,6 +338,7 @@ export interface FileRoutesByFullPath {
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
+  "/admin/service-accounts/new": typeof AdminServiceAccountsNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
   "/files/federated-buckets/new": typeof FilesFederatedBucketsNewRoute
@@ -328,6 +349,7 @@ export interface FileRoutesByFullPath {
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
+  "/admin/service-accounts/": typeof AdminServiceAccountsIndexRoute
   "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$regionId/": typeof FilesRegionIdIndexRoute
   "/files/backups/": typeof FilesBackupsIndexRoute
@@ -360,6 +382,7 @@ export interface FileRoutesByTo {
   "/admin": typeof AdminIndexRoute
   "/files": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
+  "/admin/service-accounts/new": typeof AdminServiceAccountsNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
   "/files/federated-buckets/new": typeof FilesFederatedBucketsNewRoute
@@ -370,6 +393,7 @@ export interface FileRoutesByTo {
   "/admin/buckets": typeof AdminBucketsIndexRoute
   "/admin/clusters": typeof AdminClustersIndexRoute
   "/admin/keys": typeof AdminKeysIndexRoute
+  "/admin/service-accounts": typeof AdminServiceAccountsIndexRoute
   "/admin/users": typeof AdminUsersIndexRoute
   "/files/$regionId": typeof FilesRegionIdIndexRoute
   "/files/backups": typeof FilesBackupsIndexRoute
@@ -397,6 +421,7 @@ export interface FileRoutesById {
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/policies": typeof AdminPoliciesRoute
+  "/admin/service-accounts": typeof AdminServiceAccountsRouteWithChildren
   "/admin/system": typeof AdminSystemRoute
   "/admin/usage": typeof AdminUsageRoute
   "/admin/users": typeof AdminUsersRouteWithChildren
@@ -410,6 +435,7 @@ export interface FileRoutesById {
   "/admin/": typeof AdminIndexRoute
   "/files/": typeof FilesIndexRoute
   "/admin/clusters/new": typeof AdminClustersNewRoute
+  "/admin/service-accounts/new": typeof AdminServiceAccountsNewRoute
   "/admin/users/new": typeof AdminUsersNewRoute
   "/files/backups/new": typeof FilesBackupsNewRoute
   "/files/federated-buckets/new": typeof FilesFederatedBucketsNewRoute
@@ -420,6 +446,7 @@ export interface FileRoutesById {
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
   "/admin/keys/": typeof AdminKeysIndexRoute
+  "/admin/service-accounts/": typeof AdminServiceAccountsIndexRoute
   "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$regionId/": typeof FilesRegionIdIndexRoute
   "/files/backups/": typeof FilesBackupsIndexRoute
@@ -448,6 +475,7 @@ export interface FileRouteTypes {
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/policies"
+    | "/admin/service-accounts"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -461,6 +489,7 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/files/"
     | "/admin/clusters/new"
+    | "/admin/service-accounts/new"
     | "/admin/users/new"
     | "/files/backups/new"
     | "/files/federated-buckets/new"
@@ -471,6 +500,7 @@ export interface FileRouteTypes {
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
+    | "/admin/service-accounts/"
     | "/admin/users/"
     | "/files/$regionId/"
     | "/files/backups/"
@@ -503,6 +533,7 @@ export interface FileRouteTypes {
     | "/admin"
     | "/files"
     | "/admin/clusters/new"
+    | "/admin/service-accounts/new"
     | "/admin/users/new"
     | "/files/backups/new"
     | "/files/federated-buckets/new"
@@ -513,6 +544,7 @@ export interface FileRouteTypes {
     | "/admin/buckets"
     | "/admin/clusters"
     | "/admin/keys"
+    | "/admin/service-accounts"
     | "/admin/users"
     | "/files/$regionId"
     | "/files/backups"
@@ -539,6 +571,7 @@ export interface FileRouteTypes {
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/policies"
+    | "/admin/service-accounts"
     | "/admin/system"
     | "/admin/usage"
     | "/admin/users"
@@ -552,6 +585,7 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/files/"
     | "/admin/clusters/new"
+    | "/admin/service-accounts/new"
     | "/admin/users/new"
     | "/files/backups/new"
     | "/files/federated-buckets/new"
@@ -562,6 +596,7 @@ export interface FileRouteTypes {
     | "/admin/buckets/"
     | "/admin/clusters/"
     | "/admin/keys/"
+    | "/admin/service-accounts/"
     | "/admin/users/"
     | "/files/$regionId/"
     | "/files/backups/"
@@ -589,6 +624,7 @@ export interface RootRouteChildren {
   AdminLoginRoute: typeof AdminLoginRoute
   AdminMigrateRoute: typeof AdminMigrateRoute
   AdminPoliciesRoute: typeof AdminPoliciesRoute
+  AdminServiceAccountsRoute: typeof AdminServiceAccountsRouteWithChildren
   AdminSystemRoute: typeof AdminSystemRoute
   AdminUsageRoute: typeof AdminUsageRoute
   AdminUsersRoute: typeof AdminUsersRouteWithChildren
@@ -707,6 +743,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminSystemRouteImport
       parentRoute: typeof rootRouteImport
     }
+    "/admin/service-accounts": {
+      id: "/admin/service-accounts"
+      path: "/admin/service-accounts"
+      fullPath: "/admin/service-accounts"
+      preLoaderRoute: typeof AdminServiceAccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/admin/policies": {
       id: "/admin/policies"
       path: "/admin/policies"
@@ -784,6 +827,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AdminUsersIndexRouteImport
       parentRoute: typeof AdminUsersRoute
     }
+    "/admin/service-accounts/": {
+      id: "/admin/service-accounts/"
+      path: "/"
+      fullPath: "/admin/service-accounts/"
+      preLoaderRoute: typeof AdminServiceAccountsIndexRouteImport
+      parentRoute: typeof AdminServiceAccountsRoute
+    }
     "/admin/keys/": {
       id: "/admin/keys/"
       path: "/admin/keys"
@@ -853,6 +903,13 @@ declare module "@tanstack/react-router" {
       fullPath: "/admin/users/new"
       preLoaderRoute: typeof AdminUsersNewRouteImport
       parentRoute: typeof AdminUsersRoute
+    }
+    "/admin/service-accounts/new": {
+      id: "/admin/service-accounts/new"
+      path: "/new"
+      fullPath: "/admin/service-accounts/new"
+      preLoaderRoute: typeof AdminServiceAccountsNewRouteImport
+      parentRoute: typeof AdminServiceAccountsRoute
     }
     "/admin/clusters/new": {
       id: "/admin/clusters/new"
@@ -947,6 +1004,19 @@ declare module "@tanstack/react-router" {
     }
   }
 }
+
+interface AdminServiceAccountsRouteChildren {
+  AdminServiceAccountsNewRoute: typeof AdminServiceAccountsNewRoute
+  AdminServiceAccountsIndexRoute: typeof AdminServiceAccountsIndexRoute
+}
+
+const AdminServiceAccountsRouteChildren: AdminServiceAccountsRouteChildren = {
+  AdminServiceAccountsNewRoute: AdminServiceAccountsNewRoute,
+  AdminServiceAccountsIndexRoute: AdminServiceAccountsIndexRoute,
+}
+
+const AdminServiceAccountsRouteWithChildren =
+  AdminServiceAccountsRoute._addFileChildren(AdminServiceAccountsRouteChildren)
 
 interface AdminUsersRouteChildren {
   AdminUsersNewRoute: typeof AdminUsersNewRoute
@@ -1077,6 +1147,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminLoginRoute: AdminLoginRoute,
   AdminMigrateRoute: AdminMigrateRoute,
   AdminPoliciesRoute: AdminPoliciesRoute,
+  AdminServiceAccountsRoute: AdminServiceAccountsRouteWithChildren,
   AdminSystemRoute: AdminSystemRoute,
   AdminUsageRoute: AdminUsageRoute,
   AdminUsersRoute: AdminUsersRouteWithChildren,
