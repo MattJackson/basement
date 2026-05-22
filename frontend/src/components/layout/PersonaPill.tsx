@@ -15,10 +15,14 @@
 //
 // "Drop privileges" hits POST /api/v1/auth/logout-elevation, then
 // pushes mode=user into the provider so the pill flips instantly
-// without waiting for a /auth/me refetch.
+// without waiting for a /auth/me refetch. v1.7.0a.2: also invalidate
+// the cached ["auth","me"] query so AuthModeHydrator's next sync
+// reads the freshly-rotated cookie (mode=user) and doesn't snap the
+// pill back to ADMIN from a stale React Query cache.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 import { useElevationPrompt } from "@/shared/auth/elevation";
 
@@ -59,6 +63,7 @@ export function PersonaPill() {
   const { mode, expiresAt } = useAuthMode();
   const setAuthMode = useSetAuthMode();
   const promptForElevation = useElevationPrompt();
+  const queryClient = useQueryClient();
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
   // warnedRef tracks the latest expiresAt for which we've fired the
@@ -145,7 +150,14 @@ export function PersonaPill() {
         toast.error(`Failed to drop privileges (HTTP ${res.status})`);
         return;
       }
+      // 1. Snap local state to USER so the pill flips instantly.
       setAuthMode({ mode: "user", expiresAt: 0 });
+      // 2. Invalidate the /auth/me cache so AuthModeHydrator's next
+      //    sync sees the just-rotated cookie (mode=user) instead of
+      //    the stale ADMIN payload — without this, the hydrator
+      //    detects current.mode !== user.mode and snaps the pill
+      //    back to ADMIN within one tick.
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       toast.success("Privileges dropped");
     } catch {
       toast.error("Failed to drop privileges — network error");

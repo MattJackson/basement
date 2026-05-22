@@ -6,8 +6,9 @@
 // thresholds (the operator's lead-time guarantee is in code, not in
 // vibes).
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { PersonaPill, formatRemaining } from "./PersonaPill";
@@ -79,6 +80,118 @@ describe("PersonaPill warning windows", () => {
     render(<Harness initial={{ mode: "admin", expiresAt }} />);
     const pill = screen.getByTestId("persona-pill");
     expect(pill.getAttribute("data-warn")).toBe("red");
+  });
+});
+
+describe("PersonaPill drop privileges (v1.7.0a.2)", () => {
+  // Bug: clicking the × on the ADMIN pill called the backend + the
+  // local setter but didn't invalidate the /auth/me cache, so the
+  // hydrator's next tick read the stale ADMIN payload and snapped
+  // the pill back. This pins the cache invalidation so the regression
+  // can't sneak back in.
+
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  function HarnessWithClient({
+    client,
+    initial,
+  }: {
+    client: QueryClient;
+    initial: { mode: "user" | "admin" | "elevated"; expiresAt: number };
+  }) {
+    return (
+      <QueryClientProvider client={client}>
+        <AuthModeProvider initial={initial}>
+          <PersonaPill />
+        </AuthModeProvider>
+      </QueryClientProvider>
+    );
+  }
+
+  it("invalidates [auth, me] cache on successful drop", async () => {
+    const client = newClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+    render(
+      <HarnessWithClient
+        client={client}
+        initial={{ mode: "admin", expiresAt }}
+      />,
+    );
+
+    const dropBtn = screen.getByTestId("persona-drop");
+    await userEvent.click(dropBtn);
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/api/v1/auth/logout-elevation",
+        expect.objectContaining({ method: "POST", credentials: "include" }),
+      );
+    });
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["auth", "me"] });
+    });
+  });
+
+  it("flips pill to USER + drops countdown after a successful drop", async () => {
+    const client = newClient();
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+    render(
+      <HarnessWithClient
+        client={client}
+        initial={{ mode: "admin", expiresAt }}
+      />,
+    );
+
+    expect(screen.getByTestId("persona-pill").getAttribute("data-mode")).toBe(
+      "admin",
+    );
+    expect(screen.getByTestId("persona-countdown")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("persona-drop"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("persona-pill").getAttribute("data-mode")).toBe(
+        "user",
+      );
+    });
+    expect(screen.queryByTestId("persona-countdown")).not.toBeInTheDocument();
+  });
+
+  it("does not invalidate cache when the backend rejects the drop", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    const client = newClient();
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+    render(
+      <HarnessWithClient
+        client={client}
+        initial={{ mode: "admin", expiresAt }}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId("persona-drop"));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    // Pill stays in ADMIN on failure.
+    expect(screen.getByTestId("persona-pill").getAttribute("data-mode")).toBe(
+      "admin",
+    );
   });
 });
 
