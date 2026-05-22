@@ -71,6 +71,10 @@ describe("UserShell", () => {
     // v1.5.0a: scheduled backups land alongside the other user-tier
     // primary-nav items.
     expect(screen.getByText("Backups")).toBeInTheDocument();
+    // v1.6.0d: federations.
+    expect(screen.getByText("Federations")).toBeInTheDocument();
+    // v1.7.0e: webhook subscriptions.
+    expect(screen.getByText("Webhooks")).toBeInTheDocument();
   });
 
   it("does NOT render Clusters nav item", async () => {
