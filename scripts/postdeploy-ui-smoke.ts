@@ -652,90 +652,41 @@ async function main(): Promise<number> {
     });
 
     // ============================================================
-    // 11. User endpoints (v0.5.2 USER.BACKEND)
+    // 11. User-tier endpoints (post-ADR-0002: regions, not clusters)
     // ============================================================
-    section("[11] user endpoints (v0.5.2 USER.BACKEND)");
-    
-    await check("[NN] /api/v1/user/clusters returns admin's clusters", async () => {
-      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
-      if (!resp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${resp.status()} ${await resp.text()}`);
-      const clusters = await resp.json();
-      
-      if (!Array.isArray(clusters)) {
-        throw new Error("Expected array response from /api/v1/user/clusters");
+    section("[11] user-tier endpoints (v1.1.0 USER.REGIONS)");
+
+    await check("[NN] /api/v1/user/regions returns array (may be empty)", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!resp.ok()) throw new Error(`GET /api/v1/user/regions failed: ${resp.status()} ${await resp.text()}`);
+      const regions = await resp.json();
+
+      if (!Array.isArray(regions)) {
+        throw new Error("Expected array response from /api/v1/user/regions");
       }
-      
-      if (clusters.length === 0) {
-        warnLine("/api/v1/user/clusters is empty — may be expected on fresh deploy");
+
+      if (regions.length === 0) {
+        warnLine("/api/v1/user/regions is empty — operator hasn't connected any regions yet");
       } else {
-        // Verify at least one cluster has required fields
-        const first = clusters[0] as any;
-        if (!first.id || !first.label || !first.driver) {
-          throw new Error("Cluster missing required fields (id, label, driver)");
+        const first = regions[0] as any;
+        if (!first.id || !first.endpoint || !first.accessKeyId) {
+          throw new Error("Region missing required fields (id, endpoint, accessKeyId)");
         }
-      }
-    });
-
-    await check("[NN] /api/v1/user/keys returns key list", async () => {
-      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/keys`);
-      if (!resp.ok()) throw new Error(`GET /api/v1/user/keys failed: ${resp.status()} ${await resp.text()}`);
-      const data = await resp.json();
-      
-      // Response should have keys array and optional errors array
-      if (!data || typeof data !== "object") {
-        throw new Error("Expected object response from /api/v1/user/keys");
-      }
-      
-      if (!Array.isArray(data.keys)) {
-        throw new Error("Response missing 'keys' array");
-      }
-    });
-
-    await check("[NN] /api/v1/user/clusters/{cid} returns cluster detail", async () => {
-      const clustersResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
-      if (!clustersResp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${clustersResp.status()}`);
-      const clusters = await clustersResp.json();
-      
-      if (clusters.length === 0) {
-        skipLine("user cluster detail check", "no user-visible clusters");
-        return;
-      }
-      
-      const firstClusterId = Array.isArray(clusters) ? clusters[0].id : null;
-      if (!firstClusterId) throw new Error("No cluster id found in /api/v1/user/clusters response");
-      
-      const detailResp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters/${firstClusterId}`);
-      if (!detailResp.ok()) throw new Error(`GET /api/v1/user/clusters/${firstClusterId} failed: ${detailResp.status()}`);
-      
-      const clusterDetail = await detailResp.json();
-      if (!clusterDetail.id || !clusterDetail.label) {
-        throw new Error("Cluster detail missing required fields");
+        if ("secretKey" in first || "secretKeyEnc" in first) {
+          throw new Error("Region response leaked secret material — should never appear on the wire");
+        }
       }
     });
 
     // ============================================================
     // [NN] /files/{first-cid} renders bucket list (v0.5.2 USER.MYBUCKETS-IN-CLUSTER)
     // ============================================================
-    section("[14] user bucket list under cluster (/files/{cid}) — OBSOLETE post v1.1.0c");
+    section("[14] user bucket list under cluster (/files/{cid}) — OBSOLETE post v1.1.0c/e");
 
-    // ADR-0002 v1.1.0c retired the /files/{cid} cluster-tier route in
-    // favour of /files/{regionId}. The legacy /api/v1/user/clusters
-    // endpoint still answers (until v1.1.0e removes it) so we keep
-    // discovering a cluster ID for the later admin-tier sections that
-    // depend on `discoveredCid` (e.g. section [17]). The /files/{cid}
-    // UI assertions below are skipped because the route is gone.
-    await check("discover first cluster via /api/v1/user/clusters (legacy)", async () => {
-      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/clusters`);
-      if (!resp.ok()) throw new Error(`GET /api/v1/user/clusters failed: ${resp.status()}`);
-      const clusters = await resp.json();
-
-      if (!Array.isArray(clusters) || clusters.length === 0) {
-        skipLine("/files/{cid} test", "no user-visible clusters");
-        return;
-      }
-
-      discoveredCid = clusters[0].id;
-    });
+    // ADR-0002 retired the /files/{cid} cluster-tier route in v1.1.0c
+    // and the /api/v1/user/clusters endpoint in v1.1.0e. `discoveredCid`
+    // is already populated upstream by the admin UI scrape at section [04]
+    // (Admin → cluster row click), so no rediscovery needed here.
 
     // Section [14] UI checks intentionally skipped — see retired-route note above.
     if (false) {
