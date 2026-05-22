@@ -20,6 +20,8 @@ import (
 	_ "github.com/mattjackson/basement/internal/drivers/garage"
 	_ "github.com/mattjackson/basement/internal/drivers/garage_v1"
 	_ "github.com/mattjackson/basement/internal/drivers/minio"
+	"github.com/mattjackson/basement/internal/federation"
+	"github.com/mattjackson/basement/internal/federationwire"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
 )
@@ -309,8 +311,21 @@ func main() {
 	backupSched.Start()
 	defer backupSched.Stop()
 
+	// Per ADR-0005 (v1.6.0b): federation replication engine. Polls each
+	// continuous-sync FederatedBucket every 10s, replicates primary →
+	// replica deltas, and surfaces per-replica health. Boot wiring:
+	// resolver bridges the engine's narrow ReplicationClient surface to
+	// the production driver.Registry + per-user region keychain. Start
+	// fans out one goroutine per persisted federation; Stop drains
+	// in-flight replicates cleanly on shutdown.
+	fedResolver := federationwire.NewResolver(st.UserRegions(), reg)
+	fedEngine := federation.NewEngine(st.Federated(), fedResolver, auditLogger, slog.Default())
+
 	ctxSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	fedEngine.Start(ctxSignal)
+	defer fedEngine.Stop()
 
 	// v1.0.0d: kick off the hourly metrics snapshot scheduler. Fires
 	// once immediately so first-time deploys get a data point without

@@ -127,6 +127,59 @@ func TestFederatedBuckets_ListForUser(t *testing.T) {
 	}
 }
 
+// TestFederatedBuckets_All: returns every federation across every
+// owner, used by the v1.6.0b replication engine at boot.
+func TestFederatedBuckets_All(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	// Empty store: All returns an empty (non-nil) slice.
+	all, err := store.All(ctx)
+	if err != nil {
+		t.Fatalf("All on empty store: %v", err)
+	}
+	if all == nil {
+		t.Fatalf("All on empty store should return non-nil slice")
+	}
+	if len(all) != 0 {
+		t.Fatalf("expected empty All on fresh store, got %d", len(all))
+	}
+
+	if _, err := store.Create(ctx, newFed("matthew", "a")); err != nil {
+		t.Fatalf("Create matthew/a: %v", err)
+	}
+	if _, err := store.Create(ctx, newFed("matthew", "b")); err != nil {
+		t.Fatalf("Create matthew/b: %v", err)
+	}
+	if _, err := store.Create(ctx, newFed("alice", "a")); err != nil {
+		t.Fatalf("Create alice/a: %v", err)
+	}
+
+	all, err = store.All(ctx)
+	if err != nil {
+		t.Fatalf("All: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 federations from All, got %d", len(all))
+	}
+
+	// Both owners must appear.
+	owners := map[string]int{}
+	for _, fb := range all {
+		owners[fb.OwnerUserID]++
+	}
+	if owners["matthew"] != 2 {
+		t.Fatalf("expected 2 matthew federations in All, got %d", owners["matthew"])
+	}
+	if owners["alice"] != 1 {
+		t.Fatalf("expected 1 alice federation in All, got %d", owners["alice"])
+	}
+}
+
 // TestFederatedBuckets_Update: replicas can be added/removed and
 // policy can change via a patch; identity fields (ID, OwnerUserID,
 // CreatedAt) survive.
