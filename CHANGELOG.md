@@ -4,6 +4,34 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0d — 2026-05-22
+
+Webhook subscription type + delivery engine. New `internal/webhook`
+package (types + atomic-JSON store + delivery dispatcher) and
+`/api/v1/user/webhooks` CRUD wire up bucket-event webhooks: an operator
+declares "POST to this URL when an object is created / modified /
+deleted in bucket X", supplies a shared HMAC secret (or lets the
+server mint one), and the engine signs every outbound body with
+`X-Basement-Signature: sha256=<hex>`. Retry policy is 3 attempts with
+1s/5s/15s exponential backoff; ten consecutive failures auto-disable
+the webhook + emit `webhook:auto_disabled`. Per-delivery audit
+(`webhook:fired_success` / `webhook:fired_failure`) plus mutation
+audit (`webhook:create/update/delete/test/enable/disable`). Secret
+handling matches the v1.7.0a service-account mint-only pattern — the
+cleartext is returned on Create + on rotated Update, redacted from
+every List/Get response. `POST /test` emits a synthetic envelope so
+operators can validate target + secret without waiting for real
+traffic; the user-region object DELETE handler now fires a real
+`object.deleted` event after a successful server-side delete. Engine
+is robust to per-delivery panics (recover-shielded), saturated queue
+drops the oldest envelope rather than blocking emit, and Stop drains
+in-flight deliveries cleanly. Real-world coverage of create / modify
+events lands with the v2.0 gateway; v1.7.0e brings the FE,
+v1.7.0f hooks webhooks into federation. 21 new tests across the
+package + handlers (store CRUD + ownership, engine retry/auto-disable/
+filter/signature roundtrip/panic-safety, API mint + redaction +
+rotation + enable/disable).
+
 ## v1.7.0a.1 — 2026-05-22
 
 UX hotfix: auto-elevate on `/admin/*` entry + persistent fallback

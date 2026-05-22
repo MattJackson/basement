@@ -23,6 +23,7 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 	"github.com/mattjackson/basement/internal/sync"
 	"github.com/mattjackson/basement/internal/web"
+	"github.com/mattjackson/basement/internal/webhook"
 )
 
 // oidcProvider is the subset of *auth.OIDCProvider the API server needs.
@@ -69,6 +70,11 @@ type Server struct {
 	// engine is nil (the store still persists, just no live ticking).
 	federations      federation.FederatedBuckets
 	federationEngine federationEngine
+	// v1.7.0d webhook subsystem. Both can be nil — handlers return
+	// 503 WEBHOOKS_NOT_WIRED, and emission sites silently skip when
+	// the engine is missing. Production main.go wires both.
+	webhooks      webhook.Store
+	webhookEngine webhookEmitter
 	oidc        oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
@@ -192,6 +198,17 @@ func (s *Server) SetBackups(store backup.Backups, sched *backup.Scheduler) {
 func (s *Server) SetFederation(store federation.FederatedBuckets, engine federationEngine) {
 	s.federations = store
 	s.federationEngine = engine
+}
+
+// SetWebhooks wires the v1.7.0d webhook store + delivery engine into
+// the server. Passing nil for the store disables the /user/webhooks
+// endpoint family (handlers return 503 WEBHOOKS_NOT_WIRED). The engine
+// arg accepts webhookEmitter — production passes a *webhook.Engine;
+// tests substitute a recording mock that captures Emit calls without
+// actually POSTing anywhere.
+func (s *Server) SetWebhooks(store webhook.Store, engine webhookEmitter) {
+	s.webhooks = store
+	s.webhookEngine = engine
 }
 
 // SetMetricsRecorder wires the metrics-snapshot recorder into the
@@ -495,6 +512,19 @@ func (s *Server) routes() {
 			userG.Delete("/user/federated-buckets/{id}", s.userDeleteFederationHandler)
 			userG.Post("/user/federated-buckets/{id}/failover", s.userFailoverFederationHandler)
 			userG.Post("/user/federated-buckets/{id}/resync", s.userResyncFederationHandler)
+
+			// v1.7.0d WEBHOOK.SUBSCRIPTIONS — user-tier CRUD over
+			// bucket-event webhook subscriptions. Handlers return
+			// 503 WEBHOOKS_NOT_WIRED when the store wasn't opened
+			// at boot (tests).
+			userG.Post("/user/webhooks", s.userCreateWebhookHandler)
+			userG.Get("/user/webhooks", s.userListWebhooksHandler)
+			userG.Get("/user/webhooks/{id}", s.userGetWebhookHandler)
+			userG.Put("/user/webhooks/{id}", s.userUpdateWebhookHandler)
+			userG.Delete("/user/webhooks/{id}", s.userDeleteWebhookHandler)
+			userG.Post("/user/webhooks/{id}/test", s.userTestWebhookHandler)
+			userG.Post("/user/webhooks/{id}/enable", s.userEnableWebhookHandler)
+			userG.Post("/user/webhooks/{id}/disable", s.userDisableWebhookHandler)
 
 			// User region keychain endpoints (ADR-0002, cycle
 			// v1.1.0b). The region's S3 key IS the permission —
