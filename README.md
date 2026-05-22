@@ -66,7 +66,19 @@ part of a federation. Builds directly on v1.5's sync engine — no
 driver changes; pure store + engine + API + UI additions. This is
 also the substrate for v2.0's S3 gateway: when the gateway lands it
 routes inbound requests using the federation topology (read →
-nearest healthy replica; write → primary).
+nearest healthy replica; write → primary). v1.7 is the **M2M auth +
+event-driven** cycle: **service accounts** at
+`/admin/service-accounts` issue long-lived `BMNT`-prefixed bearer
+credentials scoped per-capability (substrate for v1.8's CLI +
+MCP server + Mobile PWA); **webhooks** at `/files/webhooks` ship
+HMAC-SHA256-signed HTTP callbacks on bucket events with retry +
+auto-disable + a Python verification snippet; an **internal pub/sub**
+turns v1.6's 10s polling federation into event-driven replication —
+deletes propagate to every replica within seconds instead of
+waiting up to the polling tick, with polling staying as the
+fallback for backends without webhook coverage. No driver changes;
+no new env vars; bearer auth runs parallel to the existing JWT
+session cookie.
 
 ## Features
 
@@ -98,6 +110,10 @@ nearest healthy replica; write → primary).
 - **Polling-based replication engine** (v1.6) — Per-federation goroutines tick every 10s, diff primary against each replica, queue missing objects to a per-replica worker pool (default 4 workers); reuses the v1.5 sync engine's stream / server-side-copy primitive as the copy code path (no duplication); audit-per-object via `federation:replicate_object` (high-volume, filtered out of the default `/admin/audit` view)
 - **Opt-in auto-failover watchdog** (v1.6) — When `Policy.AutoFailover=true`, a watchdog goroutine pings the primary every 30s; after `AutoFailoverSec` consecutive failures, promotes the healthiest replica (ranked by `(health, lagBytes, lagObjects, lastSync)`); audited as `federation:failover` with `actor=system, reason=auto_watchdog`. Default: off
 - **Bucket-browser federation badge** (v1.6) — `/files/{regionId}/b/{bucketId}` calls a reverse-lookup endpoint (`/api/v1/user/federated-buckets/by-target?regionId=X&bucket=Y`) and renders a "Federated · N replicas, M in-sync" badge when the bucket is part of a federation; clicks through to the federation detail page
+- **Service accounts: M2M bearer auth** (v1.7) — `/admin/service-accounts` mints `BMNT`-prefixed long-lived bearer credentials scoped per-capability for scripts / CI / CLI tools; secret is shown exactly once (refuses dismissal on Escape/outside-click); bearer auth runs parallel to the JWT cookie via `Authorization: Bearer AKID:SECRET`; audit attributes machine activity to `sa:{ID}` distinct from cookie-bound human activity; bearer tokens cannot elevate to ADMIN (`ELEVATION_NOT_AVAILABLE` distinct from `ELEVATION_REQUIRED`)
+- **Webhook subscriptions: event-driven workloads** (v1.7) — `/files/webhooks` lists the caller's HMAC-SHA256-signed bucket-event subscriptions; `/files/webhooks/new` creates one with target URL + auto-generated or operator-supplied secret + event-type filter + region/bucket/prefix scope; detail page surfaces a copy-pasteable Python verification snippet + recent delivery history + Test affordance (synthetic envelope); 3-attempt retry policy (1s/5s/15s backoff); 10 consecutive failures auto-disable the subscription with `webhook:auto_disabled` audit
+- **Event-driven federation** (v1.7) — an in-process pub/sub (`webhook.Engine.Subscribe`) lets v1.6's federation engine react to bucket events directly; `ObjectCreated/Modified/Deleted` envelopes drive sub-second per-replica streamPut / DeleteObject instead of waiting up to v1.6's 10s polling tick; polling stays as fallback for backends without webhook source coverage; both paths share the same `recordSuccess`/`recordFailure` semantics so broken-after-3 / auto-failover behave identically
+- **Auto-elevation on /admin/\* deep links** (v1.7) — `AdminEntryElevationGuard` opens the elevation modal whenever the operator lands on `/admin/*` in USER mode (URL bar, bookmark, manual nav); cancel routes to `/files` with an info toast; success leaves the page in place with mode = ADMIN; debounced per-pathname so navigating within `/admin/*` doesn't fire N modals; `AdminUserModeBanner` provides a sticky amber fallback affordance one click from elevate
 - **Persistent invite tokens** (v1.3) — `/admin/users` "Pending invites" section: mint, label, revoke, rotate, copy-full-URL; 30-day default expiry; optional label feeds the auto-generated username
 - **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
 - **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
@@ -140,7 +156,7 @@ See `docs/configuration.md` for production env vars.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v1.6 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.7 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
@@ -153,12 +169,15 @@ See `docs/configuration.md` for production env vars.
 | Scheduled backups + GFS retention    | yes (v1.5)       | no                      | no                | no              |
 | Point-in-time restore wizard         | yes (v1.5)       | no                      | no                | no              |
 | Multi-backend federation + failover  | yes (v1.6)       | no                      | no                | no              |
+| M2M service accounts (bearer auth)   | yes (v1.7)       | no                      | no                | (MinIO-driven)  |
+| HMAC-signed bucket webhooks          | yes (v1.7)       | no                      | no                | (MinIO-driven)  |
+| Event-driven federation replication  | yes (v1.7)       | no                      | no                | no              |
 | Bucket lifecycle wizard              | yes              | no                      | no                | (MinIO-driven)  |
 | Policy simulator (what-if)           | yes              | no                      | no                | no              |
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | MIT              | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-22)            | active v1.6      | active v1.1.0           | active v0.5       | active fork     |
+| Status (as of 2026-05-22)            | active v1.7      | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -177,9 +196,10 @@ Full competitive write-up:
 - v1.3 — multi-user polish: OIDC group → role auto-mapping; driver-aware endpoint hints; per-region S3 addressing toggle (path-style / virtual-host); rotate-key flow; folder navigation in the bucket browser; invite-token polish + bulk-import keys; per-cluster `cluster_admin` assignment UI; two-mode elevation (USER / ADMIN) with operator-configurable TTL per [ADR-0003 amendment](docs/adr/0003-sudo-style-admin-elevation.md#amendment-v130a4--two-mode-simplification--operator-configurable-ttl) (shipped — see [docs/release-notes/v1.3.0.md](docs/release-notes/v1.3.0.md))
 - v1.4 — scale + perf: virtualized bucket browser for 10K+ object directories; `Driver.PerBucketStatsAvailable()` capability gate; paginated audit log + Export CSV; paginated key permissions editor with filter + sticky Save bar; batch object operations + sticky action bar; storage growth analytics (`Growth (Nd)` column, top-growing-buckets panel, anomaly banner, 7d / 30d / 90d range selector); Garage block-scrub UI at `/admin/clusters/{cid}/scrub` (shipped — see [docs/release-notes/v1.4.0.md](docs/release-notes/v1.4.0.md))
 - v1.5 — backup story: scheduled bucket-to-bucket backups with cron engine; mirror + snapshot modes; GFS retention with auto-prune; 3-step restore wizard with snapshot-level deep-link; mirror-mode short-circuit for backups that don't keep history (shipped — see [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md))
-- **v1.6 (current)** — federation + multi-backend replication: `FederatedBucket` first-class concept; polling-based replication engine with per-federation goroutines + per-replica worker pool + lag tracking; user-tier CRUD + manual failover + opt-in auto-failover watchdog; 5-step wizard at `/files/federated-buckets/new`; per-replica health table on the detail page; bucket-browser federation badge via a reverse-lookup endpoint. Builds directly on v1.5's sync engine, no driver changes. Substrate for the v2.0 S3 gateway (shipped — see [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md), [ADR-0005](docs/adr/0005-federation.md))
-- v1.7 — service accounts (M2M auth, CLI / MCP surface) + webhook upgrade (event-driven federation replacing polling on the happy path). Critical path before the v2.0 S3 gateway
-- **v2.0 — S3 gateway.** Major-version slot. Inbound S3 requests routed through basement's gateway, which dispatches via the v1.6 federation topology (read → nearest healthy replica; write → primary). Carry-over from the v1.x backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself
+- v1.6 — federation + multi-backend replication: `FederatedBucket` first-class concept; polling-based replication engine with per-federation goroutines + per-replica worker pool + lag tracking; user-tier CRUD + manual failover + opt-in auto-failover watchdog; 5-step wizard at `/files/federated-buckets/new`; per-replica health table on the detail page; bucket-browser federation badge via a reverse-lookup endpoint. Builds directly on v1.5's sync engine, no driver changes. Substrate for the v2.0 S3 gateway (shipped — see [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md), [ADR-0005](docs/adr/0005-federation.md))
+- **v1.7 (current)** — service accounts (M2M bearer auth substrate for v1.8's CLI / MCP / Mobile PWA) + webhook subscriptions (HMAC-signed bucket events + auto-disable + Python verification snippet) + event-driven federation (in-process pub/sub flips v1.6's 10s polling to sub-second convergence; polling stays as fallback) + `/admin/*` auto-elevation guard + AdminUserModeBanner. No driver changes; no new env vars; bearer auth runs parallel to JWT cookie (shipped — see [docs/release-notes/v1.7.0.md](docs/release-notes/v1.7.0.md))
+- v1.8 — CLI binary (`cmd/basement-cli/`, authenticates via v1.7 service accounts) + MCP server (read-mostly initially, exposes a subset of capabilities to LLM-driven tools via Anthropic's Model Context Protocol) + Mobile PWA (installable wrapper + mobile-tuned chrome, bearer auth for offline-to-online)
+- **v2.0 — S3 gateway.** Major-version slot. Inbound S3 requests routed through basement's gateway, which dispatches via the v1.6 federation topology (read → nearest healthy replica; write → primary). Service-account-minted SigV4 keys gate ingress; webhooks emit inbound-write events that drive event-driven federation. Carry-over from the v1.x backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself
 
 ## Architecture
 
@@ -196,7 +216,8 @@ Full competitive write-up:
   - [`docs/adr/0003-sudo-style-admin-elevation.md`](docs/adr/0003-sudo-style-admin-elevation.md) — USER → ADMIN → ELEVATED state machine (v1.2)
 
 See `docs/configuration.md` for env reference,
-`docs/release-notes/v1.6.0.md` for the current release changelog,
+`docs/release-notes/v1.7.0.md` for the current release changelog,
+`docs/release-notes/v1.6.0.md` for the v1.6 federation write-up,
 `docs/release-notes/v1.5.0.md` for the v1.5 backup-story write-up,
 `docs/release-notes/v1.4.0.md` for the v1.4 scale + perf write-up,
 `docs/release-notes/v1.3.0.md` for the v1.3 multi-user-onboarding

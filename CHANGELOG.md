@@ -4,6 +4,102 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.7.0 — 2026-05-22
+
+Service accounts + webhooks milestone. Six primary cycles (v1.7.0a
+→ v1.7.0f) plus four hotfix cycles (v1.7.0a.1 / a.2 / a.3 / a.4)
+plus this milestone tag give basement its M2M auth substrate +
+event-driven workload primitives end-to-end: long-lived `BMNT`-
+prefixed bearer credentials scoped per-capability (the substrate
+for v1.8's CLI + MCP server + Mobile PWA); HMAC-SHA256-signed
+bucket-event webhooks with retry + auto-disable + Python
+verification snippet; an in-process pub/sub that flips v1.6's
+federation engine from 10s polling to sub-second convergence
+(polling stays as fallback). No driver changes; no new env vars;
+bearer auth runs parallel to the existing JWT session cookie.
+Audit attribution distinguishes machine-bearer activity from human-
+cookie activity at a glance (`actor=sa:{ID}` vs `actor=username`).
+Two hydration-race hotfixes (v1.7.0a.3 + v1.7.0a.4) landed because
+the milestone smoke gate caught a regression in v1.7.0a.1's
+auto-elevation guard — same pattern as the v1.5.0c.1 routing hotfix
+that the v1.5 smoke caught. Smoke 56/56 pass against live; 44
+routes screenshot-verified including the new SA + webhook surfaces.
+
+Full notes: [`docs/release-notes/v1.7.0.md`](docs/release-notes/v1.7.0.md)
+
+### Cycles
+
+- **v1.7.0a** — ServiceAccount data layer + admin API:
+  `internal/serviceaccount` package, atomic JSON store, bcrypt-hashed
+  secrets, `BMNT`-prefixed access keys, six admin endpoints under
+  `/api/v1/admin/service-accounts` gated on `host:manage_users` with
+  404-on-not-owner; soft delete preserves audit-greppability.
+- **v1.7.0a.1** — UX hotfix: AdminEntryElevationGuard auto-elevates
+  on `/admin/*` deep-link entry in USER mode + AdminUserModeBanner
+  belt-and-braces persistent fallback. Closes URL-bar bypass.
+- **v1.7.0a.2** — Drop-privileges UI cache invalidation fix:
+  `handleDrop` now invalidates `["auth","me"]` after `setAuthMode`
+  so the hydrator agrees with local state instead of fighting it.
+- **v1.7.0b** — Bearer-auth middleware: `Authorization: Bearer
+  AKID:SECRET` parallel to JWT cookie; cookie wins when both
+  present; `policy.ServiceAccountAllows` AND's SA capabilities
+  against scope envelope (SA bundle is floor + ceiling); audit
+  attribution rewrites actor to `sa:{ID}`.
+- **v1.7.0c** — Service-account admin UI: list page + mint route
+  (page not modal) + shared `<SecretShownOnceDialog>` reused by
+  Create + Rotate; capability picker domain-grouped + searchable;
+  per-cap scope editor pre-fills sensible defaults.
+- **v1.7.0d** — Webhook subscription type + delivery engine:
+  `internal/webhook` package, atomic JSON store, HMAC-SHA256-signed
+  delivery, 3-attempt 1s/5s/15s retry, 10-failure auto-disable,
+  per-delivery + mutation audit, `POST /test` synthetic envelope.
+- **v1.7.0e** — Webhook subscription UI: list + form (single route,
+  not wizard) + detail with Python verification snippet (copy-
+  pasteable into Flask / FastAPI receivers) + recent delivery
+  history + Enable / Disable / Test / Delete actions.
+- **v1.7.0f** — Federation event-driven via internal pub/sub:
+  `webhook.Engine.Subscribe(name, cb)` exposes in-process pub/sub;
+  `federation.Engine.SubscribeToEvents` bridges it;
+  `ObjectCreated/Modified/Deleted` envelopes drive per-replica
+  streamPut / DeleteObject in seconds; polling stays as fallback
+  for backends without webhook source coverage.
+- **v1.7.0a.3** — Smoke-caught regression: AdminEntryElevationGuard
+  deferred until `useUser()` resolves (was firing during the post-
+  nav hydration gap).
+- **v1.7.0a.4** — Follow-on hotfix: guard also short-circuits when
+  `user.mode === "admin" || "elevated"` directly off /auth/me — the
+  AuthModeHydrator's setMode runs in a SUBSEQUENT render so the
+  provider's mode is still the conservative default in the first
+  render where user data arrives.
+
+## v1.7.0a.4 — 2026-05-22
+
+AdminEntryElevationGuard hydration-race hotfix follow-on. v1.7.0a.3
+deferred the prompt until `useUser()` resolved — but the
+AuthModeHydrator's `setMode` runs in a SUBSEQUENT render, not the
+same render where user data first arrives. Within that first render
+the provider's mode is still the conservative USER default, so the
+guard fired anyway. Smoke against v1.7.0a.3 still saw the elevation
+modal pop on every `/admin/*` goto, intercepting subsequent clicks.
+Fix: also short-circuit when `user.mode === "admin" || "elevated"`
+read directly off the `/auth/me` payload, side-stepping the
+one-render gap between user-data-arrives and hydrator-runs-setMode.
+One new test pins the new branch; 292/292 frontend tests pass.
+
+## v1.7.0a.3 — 2026-05-22
+
+AdminEntryElevationGuard hydration-race hotfix. The v1.7.0a.1 guard
+read mode from AuthModeProvider, which defaults to "user" until
+AuthModeHydrator syncs the actual mode from `/auth/me`. Every full-
+page navigation to an admin route raced: the guard's `useEffect`
+fired one tick before the hydrator updated mode to admin, popping
+the elevation modal even for sessions already in ADMIN. The
+milestone smoke gate caught this against v1.7.0e/f as three admin-
+side clicks intercepted by the modal overlay. Fix: guard now defers
+while `useUser()` is loading and skips the prompt when user data is
+present. One new test pins the loading-state branch; 291/291
+frontend tests pass.
+
 ## v1.7.0f — 2026-05-22
 
 Federation event-driven replication via internal pub/sub. The

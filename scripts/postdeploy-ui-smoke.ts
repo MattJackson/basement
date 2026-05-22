@@ -2306,6 +2306,74 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.7a] /admin/service-accounts list page (v1.7.0c)
+    // ============================================================
+    section("[v1.7a] /admin/service-accounts renders (list or empty state)");
+    await check("/admin/service-accounts renders 'Service accounts' header + list or empty state + New CTA", async () => {
+      await page!.goto(`${BASE_URL}/admin/service-accounts`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Service accounts")', { timeout: 10_000 });
+      // Either at least one row OR the "No service accounts yet" empty state.
+      const hasRows = await page!.locator('table tbody tr').count();
+      const hasEmpty = await page!.locator('text="No service accounts yet"').count();
+      if (hasRows === 0 && hasEmpty === 0) {
+        throw new Error("/admin/service-accounts shows neither rows nor 'No service accounts yet' empty state");
+      }
+      // The "+ New service account" CTA renders in both branches
+      // (header button on a non-empty list, EmptyState action on empty).
+      const hasNewCta = await page!.locator('text="+ New service account"').count();
+      if (hasNewCta === 0) {
+        throw new Error("/admin/service-accounts missing '+ New service account' CTA");
+      }
+      await shot(page!, "v1.7a-service-accounts-list");
+    });
+
+    section("[v1.7b] /admin/service-accounts/new renders mint form (v1.7.0c)");
+    await check("/admin/service-accounts/new shows 'Mint a service account' header + name input + capability search + submit", async () => {
+      await page!.goto(`${BASE_URL}/admin/service-accounts/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Mint a service account")', { timeout: 10_000 });
+      // Form mounts with the testid-marked surfaces.
+      await page!.waitForSelector('[data-testid="new-sa-form"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="sa-name-input"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="sa-cap-search"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="sa-submit-button"]', { timeout: 5_000 });
+      await shot(page!, "v1.7b-service-accounts-new");
+    });
+
+    // ============================================================
+    // [v1.7c] /files/webhooks list page (v1.7.0e)
+    // ============================================================
+    section("[v1.7c] /files/webhooks renders (list or empty state)");
+    await check("/files/webhooks renders 'Webhooks' header + list or empty state + New CTA", async () => {
+      await page!.goto(`${BASE_URL}/files/webhooks`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Webhooks")', { timeout: 10_000 });
+      // Either at least one row OR the "No webhooks configured" empty state.
+      const hasRows = await page!.locator('table tbody tr').count();
+      const hasEmpty = await page!.locator('text="No webhooks configured"').count();
+      if (hasRows === 0 && hasEmpty === 0) {
+        throw new Error("/files/webhooks shows neither rows nor 'No webhooks configured' empty state");
+      }
+      // "+ New webhook" CTA renders in both branches (header button on
+      // a non-empty list, EmptyState action on empty).
+      const hasNewCta = await page!.locator('text="+ New webhook"').count();
+      if (hasNewCta === 0) {
+        throw new Error("/files/webhooks missing '+ New webhook' CTA");
+      }
+      await shot(page!, "v1.7c-webhooks-list");
+    });
+
+    section("[v1.7d] /files/webhooks/new renders subscription form (v1.7.0e)");
+    await check("/files/webhooks/new shows 'New webhook' header + identity + events + target URL form", async () => {
+      await page!.goto(`${BASE_URL}/files/webhooks/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("New webhook")', { timeout: 10_000 });
+      // Form mounts with the testid-marked surfaces.
+      await page!.waitForSelector('[data-testid="new-webhook-form"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="webhook-name-input"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="webhook-target-url-input"]', { timeout: 5_000 });
+      await page!.waitForSelector('[data-testid="webhook-create-submit"]', { timeout: 5_000 });
+      await shot(page!, "v1.7d-webhooks-new");
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
     section("[NN] console + pageerror gate (v0.8.0c)");
