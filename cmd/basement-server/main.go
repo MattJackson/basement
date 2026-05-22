@@ -321,6 +321,14 @@ func main() {
 	fedResolver := federationwire.NewResolver(st.UserRegions(), reg)
 	fedEngine := federation.NewEngine(st.Federated(), fedResolver, auditLogger, slog.Default())
 
+	// v1.6.0c FEDERATION.API: hand the store + engine to the API
+	// server so /api/v1/user/federated-buckets/* handlers can persist
+	// records (store) and signal the engine for EnsureLoop / RemoveLoop
+	// / TriggerNow on each mutation. Order matters: SetFederation must
+	// run BEFORE srv.Start so the routes have non-nil dependencies on
+	// first request.
+	srv.SetFederation(st.Federated(), fedEngine)
+
 	ctxSignal, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
