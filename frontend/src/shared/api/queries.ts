@@ -41,6 +41,34 @@ function apiError(
   return err;
 }
 
+// v1.3.0b — per-driver endpoint placeholder + hint catalogue served
+// from GET /api/v1/system/driver-defaults. Public (no auth) and the
+// payload is static for a given binary, so we cache forever — the
+// only refresh path is a page reload after a deploy.
+export interface DriverDefaults {
+  driver: string;
+  displayName: string;
+  adminUrl: string;
+  adminUrlHint: string;
+  s3Endpoint: string;
+  s3EndpointHint: string;
+  regionLabel: string;
+  secretUrl?: string;
+}
+
+export function useDriverDefaults() {
+  return useQuery<DriverDefaults[]>({
+    queryKey: ["system", "driver-defaults"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/system/driver-defaults");
+      if (!res.ok) throw new Error(`driver-defaults fetch ${res.status}`);
+      return (await res.json()) as DriverDefaults[];
+    },
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+}
+
 /** Build-time version/commit/builtAt from /api/v1/version (public, no auth). */
 export function useVersion() {
   return useQuery<{ version: string; commit: string; builtAt: string }>({

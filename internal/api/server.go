@@ -198,6 +198,10 @@ func (s *Server) routes() {
 		apiR.Get("/health", s.healthHandler)
 		apiR.Get("/version", s.versionHandler)
 		apiR.Get("/auth/methods", s.authMethodsHandler)
+		// v1.3.0b: per-driver placeholder + hint catalogue used by
+		// the cluster + key forms. Public — config hints, not secrets;
+		// FE caches forever.
+		apiR.Get("/system/driver-defaults", s.driverDefaultsHandler)
 		apiR.Post("/auth/login", s.loginHandler)
 		apiR.Get("/auth/oidc/start", s.oidcStartHandler)
 		apiR.Get("/auth/oidc/callback", s.oidcCallbackHandler)

@@ -4,6 +4,23 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.3.0b — 2026-05-21
+
+Driver-aware endpoint hints in cluster + key forms. New public
+`GET /api/v1/system/driver-defaults` returns the curated
+`EndpointDefaults` catalogue (admin URL, S3 endpoint, region label,
+one-sentence hints, optional docs link) for every registered driver;
+FE caches forever. Add Cluster + Edit Cluster forms now render
+driver-specific placeholders (`http://garage-host:3903` for Garage,
+`https://s3.us-east-1.amazonaws.com` for AWS S3, `http://minio-host:9000`
+for MinIO) and inline hints under each input. Add Key form gains a
+"Common endpoints" expandable with one-click "Use this" buttons for
+each driver, plus an auto-suggest that fills the region label when
+the operator pastes an endpoint matching a known pattern
+(`amazonaws.com` → `us-east-1`, `garage` → `garage`, `minio` →
+`us-east-1`) — never overwrites a region the operator has already
+typed. Pure UX surface, no schema change.
+
 ## v1.3.0a.1 — 2026-05-21
 
 Graceful handling of backend-revoked user keys. Region endpoints
