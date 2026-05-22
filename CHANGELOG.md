@@ -21,6 +21,23 @@ the operator pastes an endpoint matching a known pattern
 `us-east-1`) — never overwrites a region the operator has already
 typed. Pure UX surface, no schema change.
 
+## v1.3.0a.2 — 2026-05-21
+
+Force path-style S3 addressing across every driver via a shared
+`driver.NewS3PathStyleClient` helper (`internal/driver/s3client.go`).
+Garage requires path-style; IP-addressed MinIO requires it (no DNS
+wildcard for `bucket.10.x.y.z`); AWS S3 accepts it on every region.
+Inline copies in `internal/drivers/{aws_s3,garage,garage_v1,minio}`
+collapse into one call site so future driver work cannot drift back
+to virtual-host. Fixes the `404 NotFound` on user-region ListObjects
+against Garage (request was routing to `http://lsi.10.1.7.10:3902/`
+instead of `http://10.1.7.10:3902/lsi/`). Adds
+`TestNewS3PathStyleClient_ForcesPathStyle` as the regression guard;
+no behavioural change for the AWS-S3 / MinIO admin paths that
+already had the flag set inline. Builds on the cycle v1.3.0b
+follow-ups (`81b4928`, `f1f0bc3`) that updated garage_v1 to call
+the helper — this commit lands the helper itself.
+
 ## v1.3.0a.1 — 2026-05-21
 
 Graceful handling of backend-revoked user keys. Region endpoints
