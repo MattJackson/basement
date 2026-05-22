@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
 // s3Client wraps the AWS S3 client and provides a convenient interface for
@@ -23,6 +22,11 @@ type s3Client struct {
 //   - "access_key": AWS access key ID (required)
 //   - "secret_key": AWS secret access key (required)
 //   - "endpoint": optional S3-compatible endpoint URL for non-AWS backends
+//
+// Delegates to driver.NewS3PathStyleClient so the path-style guarantee
+// (see helper doc) lives in one place across all four drivers. MinIO
+// recommends path-style and IP-addressed deploys *require* it — there
+// is no DNS wildcard for "bucket.10.x.y.z:9000".
 func newS3Client(cfg map[string]string) (*s3Client, error) {
 	region := cfg["region"]
 	if region == "" {
@@ -39,34 +43,10 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 		return nil, fmt.Errorf("missing required config key: secret_key")
 	}
 
-	var opts []func(*config.LoadOptions) error
-
-	opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-		accessKey,
-		secretKey,
-		"", // no token for static creds
-	)))
-
-	opts = append(opts, config.WithRegion(region))
-
-	if endpoint := cfg["endpoint"]; endpoint != "" {
-		opts = append(opts, config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(_, _ string, _ ...interface{}) (aws.Endpoint, error) { //nolint:staticcheck // Using deprecated API for custom endpoint support
-			return aws.Endpoint{ //nolint:staticcheck // Using deprecated type for custom endpoint support
-				URL:               endpoint,
-				HostnameImmutable: true,
-				SigningRegion:     "",
-			}, nil
-		})))
-	}
-
-	cfgLoaded, err := config.LoadDefaultConfig(context.TODO(), opts...)
+	client, err := driverpkg.NewS3PathStyleClient(cfg["endpoint"], accessKey, secretKey, region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+		return nil, fmt.Errorf("failed to create S3 client: %w", err)
 	}
-
-	client := s3.NewFromConfig(cfgLoaded, func(o *s3.Options) {
-		o.UsePathStyle = true
-	})
 
 	return &s3Client{client: client}, nil
 }

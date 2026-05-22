@@ -6,10 +6,9 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
 // s3Client wraps the AWS S3 client and provides a convenient interface for
@@ -23,6 +22,15 @@ type s3Client struct {
 //   - "s3_endpoint": S3-compatible endpoint URL (required, e.g., http://garage:3972)
 //   - "access_key_id": AWS access key ID for Garage's S3 API
 //   - "secret_key": AWS secret access key for Garage's S3 API
+//   - "region": optional SigV4 region label; empty defaults to us-east-1
+//     inside the helper. Garage 1.x ignores the signed region but Garage
+//     2.x rejects mismatched scope with AuthorizationHeaderMalformed —
+//     pass through cfg["region"] so an operator-configured "garage"
+//     label flows down to the signer.
+//
+// Delegates to driver.NewS3PathStyleClient so the path-style guarantee
+// (required by Garage — see helper doc) lives in one place across all
+// four drivers.
 func newS3Client(cfg map[string]string) (*s3Client, error) {
 	endpoint := cfg["s3_endpoint"]
 	if endpoint == "" {
@@ -39,33 +47,10 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 		return nil, fmt.Errorf("missing required config key: secret_key")
 	}
 
-	var opts []func(*config.LoadOptions) error
-
-	opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-		accessKey,
-		secretKey,
-		"", // no token for static creds
-	)))
-
-	// Region doesn't matter for Garage's S3 endpoint; use us-east-1 as default.
-	opts = append(opts, config.WithRegion("us-east-1"))
-
-	opts = append(opts, config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(func(_, _ string, _ ...interface{}) (aws.Endpoint, error) { //nolint:staticcheck // Using deprecated API for custom endpoint support
-		return aws.Endpoint{ //nolint:staticcheck // Using deprecated type for custom endpoint support
-			URL:               endpoint,
-			HostnameImmutable: true,
-			SigningRegion:     "",
-		}, nil
-	})))
-
-	cfgLoaded, err := config.LoadDefaultConfig(context.TODO(), opts...)
+	client, err := driverpkg.NewS3PathStyleClient(endpoint, accessKey, secretKey, cfg["region"])
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config for S3 endpoint %q: %w", endpoint, err)
+		return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", endpoint, err)
 	}
-
-	client := s3.NewFromConfig(cfgLoaded, func(o *s3.Options) {
-		o.UsePathStyle = true // Garage requires path-style addressing
-	})
 
 	return &s3Client{client: client}, nil
 }
