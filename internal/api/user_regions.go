@@ -33,6 +33,61 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 )
 
+// isUserKeyRejected returns true if the driver error indicates the
+// supplied access key was rejected by the backend (revoked, rotated,
+// or wrong). Used by every region handler to convert a generic 500
+// INTERNAL into a typed 401 USER_KEY_REJECTED so the UI can render
+// an actionable "delete this key + add a fresh one" prompt instead of
+// just "internal error".
+//
+// v1.3.0a.1: detection works off driver.Error.Message because the
+// per-driver S3 wrappers (internal/drivers/{aws_s3,garage,...}/s3.go)
+// collapse every transport error into Err=ErrInvalid with Message =
+// underlying err.Error(). The AWS SDK formats those as
+// `api error <Code>: <text>` (e.g. "api error InvalidAccessKeyId: The
+// AWS Access Key Id you provided does not exist in our records.") so
+// a substring scan over the canonical codes is the cheapest reliable
+// signal without changing the driver wrap surface.
+func isUserKeyRejected(err error) bool {
+	if err == nil {
+		return false
+	}
+	var derr *driver.Error
+	if !errors.As(err, &derr) {
+		return false
+	}
+	msg := derr.Message
+	// Canonical S3 / Garage / MinIO auth-rejection codes. SignatureDoesNotMatch
+	// also covers a stale-key edge where the secret on disk is wrong.
+	for _, code := range []string{
+		"InvalidAccessKeyId",
+		"SignatureDoesNotMatch",
+		"AccessDenied",
+		"Forbidden",
+		"InvalidSignature",
+	} {
+		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	return false
+}
+
+// writeUserKeyRejected emits the standard 401 USER_KEY_REJECTED
+// response with the region context the FE needs to render its
+// "delete this region" call-to-action. Centralised so every handler
+// surfaces the same payload shape.
+func writeUserKeyRejected(w http.ResponseWriter, region store.UserRegion) {
+	writeError(w, http.StatusUnauthorized, "USER_KEY_REJECTED",
+		"Your access key was rejected by the backend. The key may have been revoked, rotated, or never existed. Delete this key from /files/keys and add a fresh one.",
+		map[string]interface{}{
+			"regionId":    region.ID,
+			"alias":       region.Alias,
+			"endpoint":    region.Endpoint,
+			"accessKeyId": region.AccessKeyID,
+		})
+}
+
 // userRegionResponse is the wire shape for a UserRegion — strips the
 // encrypted secret so it never leaves the server. The plaintext secret
 // is never returned anywhere; the user only ever PUTs it, not GETs.
@@ -366,6 +421,15 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 		// failed — surface that rather than silently fall through, so
 		// the operator can fix the cluster wiring.
 		s.auditFailure(r, "region:list_buckets", regionListResource(region), bridgeErr)
+		// v1.3.0a.1: bridge errors flow through the admin driver, but
+		// the per-bucket access probe inside the bridge uses the user
+		// key — if the key is revoked at the backend the probe surfaces
+		// AccessDenied here too. Convert to 401 USER_KEY_REJECTED so
+		// the FE can prompt for re-keying instead of "internal error".
+		if isUserKeyRejected(bridgeErr) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "ListBuckets", bridgeErr)
 		return
 	}
@@ -374,6 +438,10 @@ func (s *Server) userListRegionBucketsHandler(w http.ResponseWriter, r *http.Req
 		buckets, err = drv.ListBuckets(r.Context())
 		if err != nil {
 			s.auditFailure(r, "region:list_buckets", regionListResource(region), err)
+			if isUserKeyRejected(err) {
+				writeUserKeyRejected(w, region)
+				return
+			}
 			writeDriverError(w, "ListBuckets", err)
 			return
 		}
@@ -604,6 +672,10 @@ func (s *Server) userListRegionBucketObjectsHandler(w http.ResponseWriter, r *ht
 	page, err := drv.ListObjects(r.Context(), bid, prefix, token, limit)
 	if err != nil {
 		s.auditFailure(r, "region:list_objects", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "ListObjects", err)
 		return
 	}
@@ -665,6 +737,10 @@ func (s *Server) userPresignGetRegionObjectHandler(w http.ResponseWriter, r *htt
 	presign, err := drv.PresignGet(r.Context(), bid, key, presignTTL(r))
 	if err != nil {
 		s.auditFailure(r, "region:presign_get", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "PresignGet", err)
 		return
 	}
@@ -711,6 +787,10 @@ func (s *Server) userPresignPutRegionObjectHandler(w http.ResponseWriter, r *htt
 	presign, err := drv.PresignPut(r.Context(), bid, key, presignTTL(r), body.ContentType)
 	if err != nil {
 		s.auditFailure(r, "region:presign_put", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "PresignPut", err)
 		return
 	}
@@ -759,6 +839,10 @@ func (s *Server) userInitRegionMultipartHandler(w http.ResponseWriter, r *http.R
 	upload, err := drv.CreateMultipart(r.Context(), bid, req.Key, req.ContentType)
 	if err != nil {
 		s.auditFailure(r, "region:multipart_init", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "CreateMultipart", err)
 		return
 	}
@@ -815,6 +899,10 @@ func (s *Server) userCompleteRegionMultipartHandler(w http.ResponseWriter, r *ht
 
 	if err := drv.CompleteMultipart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}, parts); err != nil {
 		s.auditFailure(r, "region:multipart_complete", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "CompleteMultipart", err)
 		return
 	}
@@ -850,6 +938,10 @@ func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.
 
 	if err := drv.AbortMultipart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}); err != nil {
 		s.auditFailure(r, "region:multipart_abort", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "AbortMultipart", err)
 		return
 	}
@@ -900,6 +992,10 @@ func (s *Server) userPresignRegionUploadPartHandler(w http.ResponseWriter, r *ht
 	presign, err := drv.PresignUploadPart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}, partNum)
 	if err != nil {
 		s.auditFailure(r, "region:multipart_part", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "PresignUploadPart", err)
 		return
 	}
@@ -941,6 +1037,10 @@ func (s *Server) userDeleteRegionObjectHandler(w http.ResponseWriter, r *http.Re
 
 	if err := drv.DeleteObject(r.Context(), bid, key); err != nil {
 		s.auditFailure(r, "region:delete_object", regionObjectResource(region, bid), err)
+		if isUserKeyRejected(err) {
+			writeUserKeyRejected(w, region)
+			return
+		}
 		writeDriverError(w, "DeleteObject", err)
 		return
 	}

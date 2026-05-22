@@ -1,11 +1,16 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { humanizeBytes } from "@/shared/lib/format";
-import { useUserRegion, useUserRegionBuckets, useUserRegions } from "@/shared/api/queries";
+import {
+  useDeleteUserRegion,
+  useUserRegion,
+  useUserRegionBuckets,
+  useUserRegions,
+} from "@/shared/api/queries";
 
 // Bucket list for a single UserRegion (ADR-0002, v1.1.0c). Replaces
 // /files/$cid/index. Calls ListBuckets via the user's region key —
@@ -26,6 +31,7 @@ function RegionBuckets() {
   const { data: regions, error: regionsError } = useUserRegions();
   const { data: region } = useUserRegion(regionId);
   const { data: bucketsData, isLoading, error: bucketsError } = useUserRegionBuckets(regionId);
+  const deleteRegion = useDeleteUserRegion();
 
   const noRegions = regions !== undefined && regions.length === 0;
   if (noRegions) {
@@ -34,6 +40,16 @@ function RegionBuckets() {
 
   const activeRegion = region ?? regions?.find((r) => r.id === regionId);
   const buckets = bucketsData ?? [];
+
+  // v1.3.0a.1: the backend now returns 401 USER_KEY_REJECTED (with the
+  // region detail in the error payload) when the access key the region
+  // is bound to was revoked / rotated on the backend. The query hook's
+  // `apiError` augments the Error with a `.code` field, so we can
+  // branch off that to render an actionable alert instead of the
+  // generic "Can't list buckets — internal error" fallthrough.
+  const bucketsErrCode =
+    bucketsError && (bucketsError as Error & { code?: string }).code;
+  const isKeyRejected = bucketsErrCode === "USER_KEY_REJECTED";
 
   // Bucket-list errors (e.g. expired key, endpoint unreachable) get
   // surfaced inline instead of forcing the user back to /files — they
@@ -69,7 +85,16 @@ function RegionBuckets() {
         }
       />
 
-      {bucketsError ? (
+      {isKeyRejected ? (
+        <KeyRejectedAlert
+          onDelete={async () => {
+            await deleteRegion.mutateAsync(regionId);
+            navigate({ to: "/files/keys", replace: true });
+          }}
+          isDeleting={deleteRegion.isPending}
+          deleteError={deleteRegion.error?.message}
+        />
+      ) : bucketsError ? (
         <EmptyState
           icon="alert-circle"
           title="Can't list buckets"
@@ -173,6 +198,63 @@ function PageHeader({
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </header>
+  );
+}
+
+// KeyRejectedAlert is the v1.3.0a.1 inline UI shown when the region
+// endpoints return USER_KEY_REJECTED (401). It tells the user the key
+// stored in basement is no longer valid at the backend and gives
+// them two ways out: delete the bad region in-place, or jump to the
+// keychain to add a fresh key. Renders red but is not a toast — the
+// user lands on this region's URL expecting buckets, so a full panel
+// is the right weight.
+function KeyRejectedAlert({
+  onDelete,
+  isDeleting,
+  deleteError,
+}: {
+  onDelete: () => void | Promise<void>;
+  isDeleting: boolean;
+  deleteError?: string;
+}) {
+  return (
+    <div
+      className="rounded-lg border border-destructive/40 bg-destructive/5 p-6 space-y-4"
+      data-testid="user-key-rejected-alert"
+      role="alert"
+    >
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold text-destructive">
+          Your access key was rejected
+        </h2>
+        <p className="text-sm text-foreground">
+          The backend no longer accepts the access key stored for this
+          region. The key was probably revoked, rotated, or never existed
+          on this cluster. basement can&apos;t list any buckets until
+          you swap in a working key.
+        </p>
+      </div>
+
+      {deleteError ? (
+        <p className="text-sm text-destructive">{deleteError}</p>
+      ) : null}
+
+      <div className="flex flex-col sm:flex-row gap-2">
+        <Button
+          variant="destructive"
+          onClick={onDelete}
+          disabled={isDeleting}
+          data-testid="delete-rejected-region-button"
+        >
+          {isDeleting ? "Deleting..." : "Delete this region"}
+        </Button>
+        <Link to="/files/keys/new">
+          <Button variant="outline" data-testid="add-new-key-link">
+            Add a fresh key
+          </Button>
+        </Link>
+      </div>
+    </div>
   );
 }
 
