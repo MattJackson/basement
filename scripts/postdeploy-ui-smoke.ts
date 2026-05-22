@@ -149,6 +149,29 @@ function attachListeners(page: Page) {
   });
 }
 
+// elevateToAdmin re-auths the current session to ADMIN mode via
+// /api/v1/auth/elevate (ADR-0003 v1.2.0a, simplified to two modes in
+// the v1.3.0a.4 amendment). Idempotent — calling while already
+// ADMIN simply bumps the expiry.
+//
+// The smoke needs this before exercising any /admin/* page that
+// auto-fires capabilities above USER (the clusters list auto-tests
+// cluster:test on each row, /admin/audit reads audit:view, etc.) —
+// without elevation, the openapi-fetch middleware pops the elevation
+// modal and intercepts subsequent clicks.
+//
+// Uses page.request so the session cookie travels with the call and
+// the new mode cookie updates the browser context automatically.
+async function elevateToAdmin(page: Page, password: string): Promise<void> {
+  const resp = await page.request.post(`${BASE_URL}/api/v1/auth/elevate`, {
+    headers: { "Content-Type": "application/json" },
+    data: { target_mode: "admin", password },
+  });
+  if (!resp.ok()) {
+    throw new Error(`POST /api/v1/auth/elevate → ${resp.status()} ${await resp.text()}`);
+  }
+}
+
 async function shot(page: Page, name: string) {
   try {
     // Wait briefly for skeleton loaders to resolve so the screenshot
@@ -204,7 +227,7 @@ async function main(): Promise<number> {
       await shot(page!, "01-login");
     });
 
-    await check("submit credentials → land on authenticated shell", async () => {
+    await check("submit credentials → land on /files (user shell)", async () => {
       // Auth via Node fetch then inject the Set-Cookie into the
       // browser context. The Playwright-browser-context login flow
       // (form-fill + click + waitForResponse) has been observed to
@@ -212,6 +235,11 @@ async function main(): Promise<number> {
       // body via Node fetch returns 200 — the failure mode is timing-
       // sensitive and not worth chasing for a smoke. Form rendering
       // is still validated by the preceding waitForSelector calls.
+      //
+      // v1.3.0 (fcb7e0d): login no longer auto-redirects admins to
+      // /admin — every user lands on /files (user shell). Operators
+      // step into admin mode via the UserMenu "Switch to admin view"
+      // affordance per ADR-0003. Assertion updated accordingly.
       const baseUrl = new URL(BASE_URL);
       const loginResp = await fetch(`${BASE_URL}/api/v1/auth/login`, {
         method: "POST",
@@ -239,26 +267,30 @@ async function main(): Promise<number> {
       ]);
       // Navigate to the post-login default landing.
       await page!.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
-      // Authenticated chrome present (AppShell nav with "Clusters" link).
-      await page!.waitForSelector('nav[aria-label="Primary"] >> text=Clusters', { timeout: 10_000 });
+      // v1.3.0 (fcb7e0d): / now resolves to /files for everyone, not
+      // /admin/clusters for admins. The user shell renders Files /
+      // Keys / Shares in the Primary nav.
+      await page!.waitForURL(/\/files($|\?|#)/, { timeout: 10_000 });
+      await page!.waitForSelector('nav[aria-label="Primary"] >> text=Files', { timeout: 10_000 });
       await shot(page!, "02-post-login");
     });
 
     // ============================================================
-    // 1.5 role-gated root redirect (v0.6.0a USER.ROUTING)
+    // 1.5 root resolves to /files for everyone (v1.3.0 fcb7e0d)
     // ============================================================
-    section("[1.5] role-gated root redirect");
-    
-    await check("role-gated root redirect: matthew is admin, / navigates to /admin/clusters", async () => {
+    section("[1.5] root resolves to /files for everyone (v1.3.0)");
+
+    await check("/ → /files for all users (no admin auto-redirect)", async () => {
       await page!.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
-      // Since matthew has role=admin today, the gate routes to /admin/clusters
-      await page!.waitForURL(/\/admin\/clusters$/, { timeout: 10_000 });
-      await page!.waitForSelector('h1:has-text("Clusters")', { timeout: 10_000 });
+      // v1.3.0 (fcb7e0d): everyone lands on the user shell after login.
+      // Admins step into /admin via the UserMenu "Switch to admin view"
+      // affordance per ADR-0003 — no implicit role-based redirect.
+      await page!.waitForURL(/\/files($|\?|#)/, { timeout: 10_000 });
+      await page!.waitForSelector('h1:has-text("My Regions")', { timeout: 10_000 });
     });
 
     await check("/files renders user shell placeholder", async () => {
-      // Direct navigation is allowed even for admin users; role-gated UI nav comes in v0.6.1.
-      // ADR-0002 (v1.1.0c) renamed "My Clusters" -> "My Regions".
+      // Direct navigation lands on the user shell with "My Regions" header.
       await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
       await page!.waitForSelector('h1:has-text("My Regions")', { timeout: 10_000 });
     });
@@ -300,60 +332,92 @@ async function main(): Promise<number> {
     // ============================================================
     section("[1.7] My Regions card grid (v1.1.0c)");
 
-    await check("/files renders region cards or empty state", async () => {
+    await check("/files renders key cards or empty state (v1.2.0d key-first)", async () => {
       await page!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
 
-      // Assert header is present — v1.1.0c renamed "My Clusters" -> "My Regions"
+      // v1.2.0d (key-first model): heading stays "My Regions" but the
+      // subtitle reframes around access keys. Each card is a
+      // UserKeyCard with data-testid="user-key-card-link".
       await page!.waitForSelector('h1:has-text("My Regions")', { timeout: 10_000 });
-      await page!.waitForSelector('p:has-text("S3 endpoints you have a key for")', { timeout: 10_000 });
+      await page!.waitForSelector('p:has-text("Each card is one of your access keys")', { timeout: 10_000 });
 
-      // Wait for either region cards or empty state. The link wrapper
-      // testid (-link suffix) ensures getAttribute('href') hits the
-      // <a> element, not the Card inside.
-      const hasCards = await page!.locator('[data-testid="user-region-card-link"]').count();
+      const hasCards = await page!.locator('[data-testid="user-key-card-link"]').count();
       if (hasCards === 0) {
-        const hasEmptyState = await page!.locator('text="No regions yet"').count();
+        // Empty-state CTA points at the canonical /files/keys/new form
+        // (v1.2.0d). The legacy /files/regions/new still redirects but
+        // the empty-state copy was retargeted at the canonical URL.
+        const hasEmptyState = await page!.locator('text="No keys yet"').count();
         if (hasEmptyState > 0) {
-          // Empty-state CTA must be the Connect button pointing at /files/regions/new
-          const connectCta = page!.locator('a:has-text("+ Connect a region")').first();
+          const connectCta = page!.locator('a:has-text("+ Add a key"), a:has-text("Add a key")').first();
           const href = await connectCta.getAttribute('href');
-          if (href !== "/files/regions/new") {
-            throw new Error(`Connect CTA href is '${href}', expected '/files/regions/new'`);
+          if (href !== "/files/keys/new") {
+            throw new Error(`Empty-state CTA href is '${href}', expected '/files/keys/new'`);
           }
           warnLine("/files shows empty state — expected on fresh deploy");
           return;
         }
+        throw new Error("/files rendered neither key cards nor 'No keys yet' empty state");
       }
 
-      // Assert at least one region card is visible
-      const cardCount = await page!.locator('[data-testid="user-region-card-link"]').count();
-      if (cardCount > 0) {
-        const firstCard = page!.locator('[data-testid="user-region-card-link"]').first();
-        const href = await firstCard.getAttribute('href');
-        if (!href || !href.match(/^\/files\/[^/]+$/)) {
-          throw new Error(`First region card has invalid href: ${href}`);
-        }
-
-        await firstCard.click({ waitUntil: 'networkidle' });
-        const currentUrl = page!.url();
-        if (!currentUrl.match(/\/files\/[^/]+$/)) {
-          throw new Error(`Navigation did not go to /files/{regionId}: ${currentUrl}`);
-        }
+      // First card href must point at /files/{regionId}
+      const firstCard = page!.locator('[data-testid="user-key-card-link"]').first();
+      const href = await firstCard.getAttribute('href');
+      if (!href || !href.match(/^\/files\/[^/]+$/)) {
+        throw new Error(`First key card has invalid href: ${href}`);
       }
+
+      await firstCard.click();
+      await page!.waitForURL(/\/files\/[^/]+$/, { timeout: 10_000 });
 
       await shot(page!, "14-files-regions");
     });
 
-    // /files/regions/new must render the Connect-a-region form
-    await check("/files/regions/new renders the connect form", async () => {
+    // v1.2.0d: /files/regions/new is a legacy alias that 301-redirects
+    // to the canonical /files/keys/new "Add a key" form. We assert the
+    // redirect lands on the right URL and renders the canonical heading.
+    await check("/files/regions/new redirects to /files/keys/new (v1.2.0d)", async () => {
       await page!.goto(`${BASE_URL}/files/regions/new`, { waitUntil: "networkidle" });
-      await page!.waitForSelector('h1:has-text("Connect a region")', { timeout: 10_000 });
-      // All five fields must exist
+      await page!.waitForURL(/\/files\/keys\/new$/, { timeout: 10_000 });
+      await page!.waitForSelector('h1:has-text("Add a key")', { timeout: 10_000 });
+      // All five fields must exist on the canonical form
       for (const id of ["alias", "endpoint", "accessKeyId", "secretKey", "region"]) {
         const has = await page!.locator(`#${id}`).count();
-        if (has === 0) throw new Error(`/files/regions/new missing field #${id}`);
+        if (has === 0) throw new Error(`/files/keys/new missing field #${id}`);
       }
-      await shot(page!, "14b-files-regions-new");
+      await shot(page!, "14b-files-keys-new");
+    });
+
+    // v1.3.0d: /files/keys/new now ships a "Bulk import" toggle that
+    // swaps the single-key form for a paste-area accepting CSV / TSV
+    // / aws credentials-file blocks.
+    await check("/files/keys/new exposes the 'Bulk import' toggle (v1.3.0d)", async () => {
+      await page!.goto(`${BASE_URL}/files/keys/new`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1:has-text("Add a key")', { timeout: 10_000 });
+      const hasBulkToggle = await page!.locator('text=/Bulk import/i').count();
+      if (hasBulkToggle === 0) {
+        throw new Error("/files/keys/new missing 'Bulk import' toggle (v1.3.0d)");
+      }
+      await shot(page!, "14c-files-keys-new-bulk-import");
+    });
+
+    // ============================================================
+    // 1.8 elevate to ADMIN before exercising /admin/* (ADR-0003)
+    // ============================================================
+    section("[1.8] elevate to ADMIN (ADR-0003 / v1.3.0a.4)");
+
+    await check("POST /api/v1/auth/elevate (target_mode=admin)", async () => {
+      await elevateToAdmin(page!, PASSWORD);
+      // Confirm the mode cookie now reports admin in /auth/me.
+      const meResp = await page!.request.get(`${BASE_URL}/api/v1/auth/me`);
+      if (!meResp.ok()) throw new Error(`/auth/me → ${meResp.status()}`);
+      const me = await meResp.json();
+      if (me.mode !== "admin") {
+        throw new Error(`expected mode=admin after elevate, got mode=${me.mode}`);
+      }
+      // Reload any open page so the AuthModeProvider picks up the new
+      // cookie and the openapi-fetch middleware stops popping the
+      // elevation modal on the auto-fired admin queries.
+      await page!.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
     });
 
     // ============================================================
@@ -413,7 +477,7 @@ async function main(): Promise<number> {
     // 3. Cluster detail navigation (v0.3.1 regression test)
     // ============================================================
     section("[3] cluster detail navigation (v0.3.1 regression)");
-    await check("click first cluster row → /admin/clusters/{cid} renders Buckets + Keys sections", async () => {
+    await check("click first cluster row → /admin/clusters/{cid} renders Cluster Admins + Buckets + Keys", async () => {
       // Click the label cell (column 2) rather than the row itself —
       // the row also contains the actions dropdown and Test button
       // which stopPropagation, and Playwright's row.click() can pick
@@ -425,10 +489,14 @@ async function main(): Promise<number> {
       if (!match) throw new Error(`unexpected URL after click: ${page!.url()}`);
       discoveredCid = match[1];
 
-      // The v0.3.1 regression was that this page rendered as the
-      // cluster-row form (parent layout) instead of the detail page.
-      // The detail page has CardHeader text "Buckets" + "Keys" + an
-      // h1 with the cluster label. Match the section headers.
+      // v0.3.1 regression: parent-layout-without-Outlet bug — assert
+      // Buckets + Keys section headers are still present.
+      // v1.3.0e added a new "Cluster admins" section above Buckets;
+      // assert that one too. The h2 wraps the literal text "Cluster
+      // admins" followed by an optional "(N)" count <span>, so we
+      // match the whole h2 case-insensitive with hasText to tolerate
+      // both the text-only and text+count shapes.
+      await page!.locator('h2', { hasText: /^Cluster admins/i }).first().waitFor({ timeout: 10_000 });
       await page!.waitForSelector('text=/^Buckets( \\(|$)/', { timeout: 10_000 });
       await page!.waitForSelector('text=/^Keys( \\(|$)/', { timeout: 10_000 });
       await shot(page!, "04-cluster-detail");
@@ -1229,18 +1297,19 @@ async function main(): Promise<number> {
     }
 
     // ============================================================
-    // [NN] /files/keys renders region-key cards (ADR-0002 v1.1.0d)
+    // [NN] /files/keys renders region-key cards (ADR-0002 v1.1.0d,
+    // renamed to "My Keys" in v1.2.0d as part of the key-first model)
     // ============================================================
     section("[NN] /files/keys renders region-key cards or empty state");
-    await check("/files/keys is the 'My Region Keys' page", async () => {
+    await check("/files/keys is the 'My Keys' page (v1.2.0d rename)", async () => {
       await page!.goto(`${BASE_URL}/files/keys`, { waitUntil: "networkidle" });
 
-      // v1.1.0d renames /files/keys from "My Keys" (cluster-tier
-      // aggregation) to "My Region Keys" (the user's UserRegion
-      // keychain). Card test-id changed accordingly.
-      const heading = await page!.locator('h1', { hasText: "My Region Keys" }).count();
+      // v1.2.0d renames /files/keys from "My Region Keys" -> "My Keys"
+      // (key-first user model). The region-key-card test-id stayed —
+      // it tracks the underlying UserRegion record, not the heading.
+      const heading = await page!.locator('h1', { hasText: "My Keys" }).count();
       if (heading === 0) {
-        throw new Error("/files/keys missing 'My Region Keys' heading (v1.1.0d rename)");
+        throw new Error("/files/keys missing 'My Keys' heading (v1.2.0d rename)");
       }
 
       const hasCards = await page!.locator('[data-testid="region-key-card"]').count();
@@ -1299,11 +1368,12 @@ async function main(): Promise<number> {
       await page!.waitForSelector('h1', { timeout: 10_000 });
     });
 
-    // v1.0.0c: audit log page. The route renders for the
-    // host_admin (matthew); the table either has rows (matthew
-    // performed at least the login event when we hit /api/v1/auth/login
+    // v1.0.0c: audit log page, gated on `audit:view`. v1.2.0a moved
+    // that capability behind ADMIN mode (ADR-0003) — the prior
+    // [1.8] elevateToAdmin step lifts matthew there. The table either
+    // has rows (matthew performed at least the login + elevate events
     // earlier in the run) or shows the empty-state copy.
-    await check("/admin/audit renders the audit log (host_admin gate)", async () => {
+    await check("/admin/audit renders the audit log (host_admin + ADMIN mode)", async () => {
       await page!.goto(`${BASE_URL}/admin/audit`, { waitUntil: "networkidle" });
       const url = page!.url();
       if (/\/admin\/login/.test(url)) {
@@ -1330,31 +1400,30 @@ async function main(): Promise<number> {
     // ============================================================
     // 13. Fix 7: version label under Logo wordmark
     // ============================================================
-    // USER.CONNECTREGION — ADR-0002 v1.1.0c: /files/regions/new
-    // (replaces /files/buckets/connect from v0.9.0e). Creates a
-    // UserRegion keychain entry per ADR-0002.
+    // USER.ADDKEY — v1.2.0d. /files/keys/new is the canonical
+    // "Add a key" form; /files/regions/new redirects there.
     // ============================================================
-    section("[15a] USER.CONNECTREGION — /files/regions/new renders the region-centric form (v1.1.0c)");
-    await check("navigate to /files/regions/new and verify form", async () => {
-      await page!.goto(`${BASE_URL}/files/regions/new`, { waitUntil: "networkidle" });
+    section("[15a] USER.ADDKEY — /files/keys/new renders the key form (v1.2.0d)");
+    await check("navigate to /files/keys/new and verify form", async () => {
+      await page!.goto(`${BASE_URL}/files/keys/new`, { waitUntil: "networkidle" });
 
       const url = page!.url();
       if (/\/admin/.test(url)) {
         throw new Error("redirected to /admin — should stay in user shell");
       }
 
-      const hasHeading = await page!.locator('h1').filter({ hasText: /Connect a region/ }).count() > 0;
+      const hasHeading = await page!.locator('h1').filter({ hasText: /Add a key/ }).count() > 0;
       if (!hasHeading) {
-        throw new Error("Could not find 'Connect a region' heading on /files/regions/new");
+        throw new Error("Could not find 'Add a key' heading on /files/keys/new");
       }
 
       // Form should have alias + endpoint + accessKeyId + secretKey + region inputs
       for (const id of ["alias", "endpoint", "accessKeyId", "secretKey", "region"]) {
         const has = await page!.locator(`#${id}`).count();
-        if (has === 0) throw new Error(`/files/regions/new missing field #${id}`);
+        if (has === 0) throw new Error(`/files/keys/new missing field #${id}`);
       }
 
-      await shot(page!, "15a-connect-region-page");
+      await shot(page!, "15a-add-key-page");
     });
 
 
@@ -1529,6 +1598,89 @@ section("[16] version label under Logo (Fix 7)");
       }
       
       await shot(page!, "nn-syncs-route");
+    });
+
+    // ============================================================
+    // [NN] v1.3 feature surfaces — invites, admin TTL, folder nav
+    // ============================================================
+    section("[v1.3a] /admin/users renders Pending Invites (v1.3.0d)");
+    await check("/admin/users shows 'Pending invites' section", async () => {
+      await page!.goto(`${BASE_URL}/admin/users`, { waitUntil: "networkidle" });
+      // Section heading is "Pending invites" — exact case matches the
+      // h2 in PendingInvitesSection. Either the table is rendered (one
+      // or more outstanding invites) OR the empty-state copy is.
+      await page!.waitForSelector('text=/Pending invites/i', { timeout: 10_000 });
+      const hasTable = await page!.locator('[data-testid="invites-table"]').count();
+      const hasEmpty = await page!.locator('[data-testid="invites-empty"]').count();
+      if (hasTable === 0 && hasEmpty === 0) {
+        throw new Error("/admin/users — Pending Invites section missing both table and empty-state");
+      }
+      await shot(page!, "v1.3a-admin-users-pending-invites");
+    });
+
+    section("[v1.3b] /admin/system Admin session timeout card (v1.3.0a.4)");
+    await check("/admin/system shows 'Admin session timeout' card", async () => {
+      await page!.goto(`${BASE_URL}/admin/system`, { waitUntil: "networkidle" });
+      // The TTL card lives inside the AdminSessionTTLCard component
+      // and carries the CardTitle "Admin session timeout". The dropdown
+      // surfaces preset TTLs (5m / 15m / 30m / 1h / 2h / 8h / Custom).
+      await page!.waitForSelector('text=/Admin session timeout/i', { timeout: 10_000 });
+      await shot(page!, "v1.3b-admin-system-ttl");
+    });
+
+    section("[v1.3c] /files/{regionId}/b/{bid} renders commonPrefixes as folders (v1.3.0c.1)");
+    await check("object browser shows folder rows from commonPrefixes", async () => {
+      // Discover a region with at least one bucket.
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) throw new Error(`GET /api/v1/user/regions → ${regionsResp.status()}`);
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("folder nav check", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("folder nav check", `region buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const buckets = await bucketsResp.json();
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("folder nav check", "region has no buckets");
+        return;
+      }
+
+      // Probe each bucket for one with commonPrefixes at the root so
+      // the visual check has something to look at. Falls back to the
+      // first bucket if none expose folders.
+      let bucketWithFolders = buckets[0].id as string;
+      for (const b of buckets) {
+        const objResp = await page!.request.get(
+          `${BASE_URL}/api/v1/user/regions/${regionId}/buckets/${b.id}/objects?delimiter=%2F`,
+        );
+        if (!objResp.ok()) continue;
+        const page1 = await objResp.json();
+        if (Array.isArray(page1.commonPrefixes) && page1.commonPrefixes.length > 0) {
+          bucketWithFolders = b.id;
+          break;
+        }
+      }
+
+      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bucketWithFolders}`, {
+        waitUntil: "networkidle",
+      });
+
+      // Either folder rows render (one or more commonPrefixes) or the
+      // empty-state ("This folder is empty" / "No objects here"). Smoke
+      // accepts both — the gate is "page renders without crashing".
+      const hasFolderRow = await page!.locator('text=/\\/$/').count();
+      const hasEmpty = await page!.locator('text=/No objects here|This folder is empty/i').count();
+      const hasFileRow = await page!.locator('tbody tr').count();
+      if (hasFolderRow === 0 && hasEmpty === 0 && hasFileRow === 0) {
+        throw new Error("object browser shows neither folder rows, file rows, nor empty state");
+      }
+      await shot(page!, "v1.3c-folder-nav");
     });
 
     // ============================================================
