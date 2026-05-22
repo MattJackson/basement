@@ -25,13 +25,6 @@ export function AppShell({ children }: AppShellProps): ReactNode {
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
           <div className="flex items-center gap-6">
             <Logo />
-            <span
-              className="hidden sm:inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-              title="You are in the admin section. User section is at /files."
-              aria-label="Admin section"
-            >
-              Admin
-            </span>
             <nav className="flex items-center gap-5" aria-label="Primary">
               {/* 'Buckets' previously pointed at '/' which the role */}
               {/* gate redirects to '/admin/clusters' for UIAdmins — */}
