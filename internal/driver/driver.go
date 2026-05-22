@@ -190,10 +190,10 @@ type ObjectPage struct {
 type ObjectInfo struct {
 	Key          string    `json:"key"`
 	Size         int64     `json:"size"`
-	LastModified time.Time `json:"lastModified,omitempty"`
+	LastModified time.Time `json:"last_modified,omitempty"`
 	ETag         string    `json:"etag,omitempty"`
-	ContentType  string    `json:"contentType,omitempty"`
-	IsDir        bool      `json:"isDir,omitempty"`
+	ContentType  string    `json:"content_type,omitempty"`
+	IsDir        bool      `json:"is_dir,omitempty"`
 }
 
 // PresignedURL represents a presigned URL.
