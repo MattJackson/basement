@@ -1009,6 +1009,26 @@ export function useRunUserBackup() {
   });
 }
 
+// v1.5.0c — restore a snapshot back to a chosen destination.
+// Synchronous: the mutation resolves once the copy is finished, so
+// the wizard can render the summary inline. The body matches
+// RestoreRequest from the OpenAPI spec.
+export type RestoreRequest = components["schemas"]["RestoreRequest"];
+export type RestoreResult = components["schemas"]["RestoreResult"];
+
+export function useRestoreUserBackup() {
+  return useMutation({
+    mutationFn: async (args: { id: string; body: RestoreRequest }) => {
+      const { data, error, response } = await client.POST("/user/backups/{id}/restore", {
+        params: { path: { id: args.id } },
+        body: args.body,
+      });
+      if (!response.ok || !data) throw apiError(`user/backups/restore/${args.id}`, response.status, error);
+      return data as RestoreResult;
+    },
+  });
+}
+
 // useUserBackupSnapshots powers the detail page's snapshot table.
 // Returns up to 10 most recent snapshots; server short-circuits to
 // [] for mirror-mode backups. We poll alongside the backup record

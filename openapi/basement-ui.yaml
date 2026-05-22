@@ -4053,6 +4053,53 @@ paths:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
 
+  /user/backups/{id}/restore:
+      post:
+        operationId: restoreUserBackup
+        summary: Restore a snapshot back to a chosen target
+        description: |
+          Copies the contents of {dstBucket}/{slug(name)}/{timestamp}/ back
+          out to an operator-chosen destination. Synchronous: the response
+          carries the per-object summary so the wizard can render it
+          inline. Only snapshot-mode backups support restore — mirror-mode
+          backups already keep "the latest copy" at the destination.
+        tags:
+        - Backup
+        x-basement-since: '1.5'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreRequest'
+        responses:
+          '200':
+            description: Restore completed (success may still be false — check the result)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/RestoreResult'
+          '400':
+            description: Invalid request (mirror-mode backup, missing snapshotTimestamp, etc.)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Backup or snapshot not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+
   /user/backups/{id}/snapshots:
       get:
         operationId: listUserBackupSnapshots
@@ -5447,6 +5494,68 @@ components:
           bytesReclaimed:
             type: integer
             format: int64
+      RestoreRequest:
+        type: object
+        required:
+        - snapshotTimestamp
+        properties:
+          snapshotTimestamp:
+            type: string
+            description: |
+              Either the literal "latest" (resolved server-side to the
+              newest available snapshot at request time) or a string in
+              the layout YYYY-MM-DD_HH:MM:SS matching a snapshot prefix
+              that currently exists on disk.
+          dstRegionId:
+            type: string
+            description: Destination region — defaults to the backup's original source region when empty.
+          dstBucket:
+            type: string
+            description: Destination bucket — defaults to the backup's original source bucket when empty.
+          dstPrefix:
+            type: string
+            description: Optional sub-path under the destination bucket; empty means restore into the bucket root.
+          overwriteExisting:
+            type: boolean
+            description: |
+              When false (default) any object whose key already exists at
+              the destination is skipped, regardless of ETag. When true,
+              every object is unconditionally re-written.
+      RestoreResult:
+        type: object
+        required:
+        - startedAt
+        - completedAt
+        - objectsCopied
+        - objectsSkipped
+        - bytesCopied
+        - success
+        properties:
+          startedAt:
+            type: string
+            format: date-time
+          completedAt:
+            type: string
+            format: date-time
+          objectsCopied:
+            type: integer
+            format: int64
+          objectsSkipped:
+            type: integer
+            format: int64
+            description: Files dropped by the overwriteExisting=false guard.
+          bytesCopied:
+            type: integer
+            format: int64
+          errors:
+            type: array
+            items:
+              type: string
+          success:
+            type: boolean
+          resolvedSnapshot:
+            type: string
+            description: The on-disk timestamp the runner actually read from (useful when snapshotTimestamp was "latest").
       UserBackupCreateRequest:
         type: object
         required:

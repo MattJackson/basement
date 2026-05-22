@@ -414,6 +414,10 @@ func (s *Server) routes() {
 			// render the "browse this snapshot" table. Returns an
 			// empty array for mirror-mode backups.
 			userG.Get("/user/backups/{id}/snapshots", s.userListBackupSnapshotsHandler)
+			// v1.5.0c: restore a snapshot back to a chosen target.
+			// Synchronous — the wizard wants the per-object summary
+			// inline. See backup_restore.go for the engine.
+			userG.Post("/user/backups/{id}/restore", s.userRestoreBackupHandler)
 
 			// User region keychain endpoints (ADR-0002, cycle
 			// v1.1.0b). The region's S3 key IS the permission —
