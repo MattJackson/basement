@@ -14,6 +14,7 @@ import (
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/backup"
+	"github.com/mattjackson/basement/internal/clustersecret"
 	"github.com/mattjackson/basement/internal/config"
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 	_ "github.com/mattjackson/basement/internal/drivers/aws_s3"
@@ -281,6 +282,21 @@ func main() {
 	}
 
 	srv := api.New(cfg, st, connStore, defaultDrv, reg)
+
+	// v1.12.0a (ADR-0007): per-cluster envelope encryption manager.
+	// Persistent store under {dataDir}/cluster_secrets.json — wrapped
+	// CSK records per (clusterID, adminUserID); plaintext CSK lives
+	// only in process memory between unlock and lock or restart.
+	cskStore, err := clustersecret.NewFileStore(cfg.DataDir)
+	if err != nil {
+		slog.Error("failed to open cluster-secret store", "error", err)
+		os.Exit(1)
+	}
+	cskManager := clustersecret.New(cskStore)
+	srv.SetClusterSecrets(cskManager)
+	// Ensure cached CSKs are zeroed on graceful shutdown so a crash
+	// dump can't recover them.
+	defer cskManager.LockAll()
 
 	// Per ADR-0001 (v0.9.0b/e): policy enforcer + matthew->host_admin
 	// seed assignment. The user-tier "Add bucket access" endpoint and
