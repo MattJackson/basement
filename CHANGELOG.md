@@ -4,6 +4,64 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.12 — 2026-05-23
+
+Tier 1 CI quality gates — every release ships through 10 automated
+checks before tag push.
+
+- **New `.github/workflows/quality.yml`** — runs on every push to
+  main + every PR. Independent parallel jobs: golangci-lint, go vet,
+  gosec, govulncheck, gitleaks, spectral (OpenAPI), eslint, tsc
+  --noEmit. Each gate is warn-mode or block-mode per its baseline
+  state; `docs/security-audit-baseline.md` tracks tightening per
+  follow-up cycle.
+- **`release.yml` extended with Trivy** — image vulnerability scan
+  on Critical/High after the GHCR push. Warn-mode for the first
+  cycle while the baseline is characterised; flips to block-mode
+  next release.
+- **`.github/dependabot.yml`** — weekly grouped updates for gomod,
+  npm (frontend), docker, and github-actions ecosystems. One PR per
+  ecosystem per week keeps the noise low.
+- **`.github/workflows/lighthouse.yml`** + `.lighthouserc.json` —
+  per-PR perf + a11y check against the live deploy on any
+  `frontend/**` touch. Thresholds: performance ≥ 0.7, accessibility
+  ≥ 0.9, best-practices ≥ 0.8.
+- **`Makefile`** — `make quality` orchestrates the same gates
+  locally. Also: `make lint`, `make vet`, `make test`, `make sec`,
+  `make vulns`, `make frontend`, `make smoke`, `make smoke-full`,
+  `make fuzz-audit`.
+- **`.pre-commit-config.yaml`** — pre-commit hooks: whitespace,
+  YAML/JSON validation, gitleaks, gofmt + go vet on commit, full
+  `go test -race` on push. Install with `pre-commit install`.
+- **`.gosec.yml`** — gosec configuration. Rule-level global
+  suppressions (G104 unhandled errors, G304 file inclusion via
+  variable, G404 weak random) are documented inline with rationale
+  per-rule. Severity floor is `high`.
+- **Axe-core a11y integration in `scripts/comprehensive-smoke.ts`**
+  — every desktop screenshot pass now runs an axe-core audit and
+  rolls violations into the final summary. Non-blocking (a11y is
+  tracked over time, not gated). Loads `@axe-core/playwright` via
+  dynamic import; the script still runs without it (graceful skip
+  with install instructions). Install: `pnpm -C frontend add -D
+  @axe-core/playwright`.
+- **First fuzz test as starter pattern** — `internal/audit/
+  filter_fuzz_test.go` exercises `matchFilter` + the Event-JSON
+  parse path with adversarial inputs. Verified locally at 90k+
+  execs/sec for 5+ seconds with zero panics. Pattern + add-a-target
+  recipe documented in `CONTRIBUTING.md`.
+- **`CONTRIBUTING.md` — test pyramid section** — documents the
+  unit → integration smoke → UI smoke → fuzz → quality gates →
+  pre-commit ladder, with the exact command per layer.
+- **`docs/security-audit-baseline.md`** — operator-facing log of
+  what each gate surfaces and the triage decision per finding.
+  Locks down the contract that flipping any gate from warn to block
+  requires updating this file.
+
+Hard constraint honoured: pure CI/test-infrastructure cycle, zero
+product-code changes. `go test -race ./...` green, `pnpm build`
+green. See `docs/release-notes/v1.11.0.md` for the broader v1.11.x
+narrative.
+
 ## v1.11.0.5 — 2026-05-23
 
 Feature-coverage smoke + Garage v2 driver bugfix.

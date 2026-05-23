@@ -1,0 +1,50 @@
+# gosec configuration for basement. Cycle v1.11.0.12.
+#
+# basement intentionally swallows errors in several fire-and-forget
+# paths (notably audit log writes — ADR-0001 mandates they MUST NOT
+# block the request path). Those sites are documented in code with
+# slog.Warn() side effects and are not gosec-actionable.
+#
+# Rule reference: https://github.com/securego/gosec#available-rules
+#
+# Suppressions live here rather than as `// #nosec` comments so the
+# rationale is centralised and review-visible. Per-line nosec must
+# include a justification per CONTRIBUTING.md.
+
+global:
+  # Match gosec defaults; explicit so future bumps are obvious.
+  nosec: enabled
+  audit: enabled
+
+# Rule-level suppressions. Each rule listed here is INTENTIONALLY
+# disabled project-wide — re-enable only with a follow-up cycle that
+# triages every site flagged.
+
+rules:
+  # G104: unhandled errors. basement deliberately ignores errors on
+  # audit log appends (ADR-0001), on best-effort federation cleanup,
+  # and on response body close in the HTTP client (idiomatic Go). The
+  # signal-to-noise ratio at this rule is too low to act on globally;
+  # callsites that DO care use slog.Warn explicitly.
+  G104:
+    ignore: true
+
+  # G304: file inclusion via variable. basement reads admin-configured
+  # paths (data dir, config dir, audit dir) from the operator's config
+  # file — those are trusted operator inputs, not user inputs. The
+  # rule would flag every os.ReadFile in the codebase.
+  G304:
+    ignore: true
+
+  # G404: weak random. basement uses math/rand for non-cryptographic
+  # purposes (request ID jitter, smoke test nonces). Cryptographic
+  # randomness paths (JWT secrets, session tokens) use crypto/rand
+  # and are not flagged.
+  G404:
+    ignore: true
+
+# Severity filtering — only block on high+critical. medium/low are
+# advisory while baseline is being cleaned. Tighten in a follow-up
+# once docs/security-audit-baseline.md is at zero outstanding.
+severity: high
+confidence: medium
