@@ -16,6 +16,7 @@ import (
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/backup"
+	"github.com/mattjackson/basement/internal/clustersecret"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/federation"
@@ -97,6 +98,14 @@ type Server struct {
 	// Prometheus convention of "operator fronts with allowlist".
 	promCollector *metrics.Collector
 	promToken     string
+	// v1.12.0a (ADR-0007) per-cluster envelope encryption manager.
+	// Nil in tests that don't care about CSK; handlers return 503
+	// CLUSTER_SECRETS_NOT_WIRED in that case. Production main.go
+	// wires a FileStore-backed manager before Start. See
+	// admin_cluster_secrets.go for the HTTP surface and
+	// docs/adr/0007-per-cluster-envelope-encryption.md for the
+	// model.
+	clusterSecrets *clustersecret.ClusterSecretManager
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
@@ -400,6 +409,17 @@ func (s *Server) routes() {
 			adminG.Delete("/admin/clusters/{cid}", s.deleteClusterHandler)
 			adminG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
 			adminG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
+
+			// v1.12.0a (ADR-0007) per-cluster envelope encryption.
+			// Five endpoints power the unlock-modal + multi-admin
+			// password management flow. Other handlers that touch
+			// CSK-protected secrets gate on s.requireUnlocked(w, cid)
+			// to return 423 LOCKED with a structured hint.
+			adminG.Post("/admin/clusters/{cid}/unlock", s.unlockClusterHandler)
+			adminG.Post("/admin/clusters/{cid}/lock", s.lockClusterHandler)
+			adminG.Get("/admin/clusters/{cid}/lock-status", s.lockStatusHandler)
+			adminG.Post("/admin/clusters/{cid}/admins", s.addAdminHandler)
+			adminG.Delete("/admin/clusters/{cid}/admins/{adminUserId}", s.removeAdminHandler)
 
 			// v1.11.0.6 — per-cluster capability matrix. The global
 			// /api/v1/capabilities endpoint reads from s.drv (default
