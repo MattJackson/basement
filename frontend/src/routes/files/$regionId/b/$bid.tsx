@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  useBucketVersioning,
   useFederationByTarget,
   useUserRegionBuckets,
   useUserRegionObjectsInfinite,
@@ -26,6 +27,8 @@ import { humanizeBytes, humanizeTime } from "@/shared/lib/format";
 import type { components } from "@/shared/api/types.gen";
 import type { FederatedBucket } from "@/shared/api/queries";
 import { UploadDialog } from "@/components/upload/UploadDialog";
+import { VersioningSection } from "@/shared/ui/VersioningSection";
+import { ObjectVersionsPanel } from "@/shared/ui/ObjectVersionsPanel";
 
 // Object browser for buckets reached via a UserRegion (ADR-0002, v1.1.0c).
 // Every backend call goes through /api/v1/user/regions/{regionId}/buckets/
@@ -103,6 +106,41 @@ function UserRegionBucketObjects() {
   // render nothing. Best-effort: a hook error doesn't block the
   // bucket browser from rendering.
   const { data: federation } = useFederationByTarget(regionId, bucketAlias);
+
+  // v1.10.0b — versioning state for this bucket. Drives:
+  //   (1) the VersioningSection card at the bottom of the page
+  //       (enable / suspend toggle)
+  //   (2) the per-row "Versions" button — only meaningful when the
+  //       bucket has versioning on (enabled or suspended) AND the
+  //       driver supports it, otherwise the button stays hidden so
+  //       the operator isn't tempted by a dead control
+  //   (3) the "Show all versions" toggle on the search/filter row,
+  //       which is also gated by `supported`.
+  const { data: versioningState } = useBucketVersioning(regionId, bid);
+  const versioningActive =
+    !!versioningState?.supported &&
+    (versioningState?.status === "enabled" ||
+      versioningState?.status === "suspended");
+
+  // "Show all versions" toggle — surfaces per-row Versions buttons
+  // prominently when ON, and auto-opens the panel for the last-clicked
+  // row. When OFF the per-row Versions button is a subtle ghost button.
+  // The v1.10.0a backend doesn't expose a prefix-wide list-versions
+  // endpoint, so we don't fan out N parallel reads here — each row
+  // opens its own panel on demand (the per-key endpoint is what's
+  // available today).
+  const [showAllVersions, setShowAllVersions] = useState(false);
+
+  // Active versions panel — exactly one row's history at a time.
+  // Clicking Versions on a second row swaps the panel to that key.
+  // null means no panel is open.
+  const [versionsForKey, setVersionsForKey] = useState<string | null>(null);
+
+  // Reset the open panel whenever the operator navigates folders or
+  // buckets — the key would no longer match the current listing.
+  useEffect(() => {
+    setVersionsForKey(null);
+  }, [prefix, bid, regionId]);
 
   // Flatten the merged page set into a single VirtualRow list. Folders
   // are taken from the FIRST page only (S3 only returns CommonPrefixes
@@ -367,6 +405,33 @@ function UserRegionBucketObjects() {
         />
       )}
 
+      {/* v1.10.0b — "Show all versions" toggle. Only surfaces when
+          versioning is supported by the driver AND turned on (enabled
+          or suspended) for this bucket — there's no signal to surface
+          on an unversioned bucket. Each row's Versions button stays
+          available regardless of this toggle; the toggle makes the
+          buttons visually prominent and pre-opens the panel for the
+          most recently clicked row. */}
+      {versioningActive && (
+        <div
+          className="flex items-center gap-2 text-sm"
+          data-testid="show-all-versions-toolbar"
+        >
+          <Checkbox
+            id="show-all-versions"
+            checked={showAllVersions}
+            onCheckedChange={(checked) => setShowAllVersions(!!checked)}
+            data-testid="show-all-versions-toggle"
+          />
+          <label
+            htmlFor="show-all-versions"
+            className="cursor-pointer select-none"
+          >
+            Show all versions including delete markers
+          </label>
+        </div>
+      )}
+
       {objectsLoading ? (
         <ObjectListSkeleton />
       ) : objectsError ? (
@@ -405,8 +470,30 @@ function UserRegionBucketObjects() {
           someVisibleSelected={someVisibleSelected}
           hasSelectableRows={visibleFileKeys.length > 0}
           perRowError={perRowError}
+          showVersionsButton={versioningActive}
+          highlightVersionsButton={showAllVersions}
+          onVersionsClick={(k) => setVersionsForKey(k)}
         />
       )}
+
+      {/* v1.10.0b — per-object version history panel. Mounts when the
+          operator clicks "Versions" on any file row. Stays open until
+          the operator closes it or navigates folders / buckets. */}
+      {versionsForKey && versioningActive && (
+        <ObjectVersionsPanel
+          regionId={regionId}
+          bucket={bid}
+          objectKey={versionsForKey}
+          onClose={() => setVersionsForKey(null)}
+        />
+      )}
+
+      {/* v1.10.0b — versioning settings card. Renders at the bottom of
+          the page so it sits below the file list (the operator's main
+          working surface) but stays one scroll away. The card itself
+          handles the "Not supported by this driver" branch internally
+          so we can mount it unconditionally. */}
+      <VersioningSection regionId={regionId} bucket={bid} />
 
       {presignMutation.isError && (
         <ErrorBanner message="Failed to generate download link. Try again." />
@@ -557,6 +644,9 @@ function VirtualObjectList({
   someVisibleSelected,
   hasSelectableRows,
   perRowError,
+  showVersionsButton,
+  highlightVersionsButton,
+  onVersionsClick,
 }: {
   rows: VirtualRow[];
   onFolderClick: (prefix: string) => void;
@@ -570,6 +660,16 @@ function VirtualObjectList({
   someVisibleSelected: boolean;
   hasSelectableRows: boolean;
   perRowError: Map<string, string>;
+  // v1.10.0b: per-row Versions button gating.
+  //   - showVersionsButton: render the button at all (true when the
+  //     bucket has versioning enabled or suspended AND the driver
+  //     supports it — otherwise the button would open an empty panel)
+  //   - highlightVersionsButton: render it as a solid outline button
+  //     instead of ghost (reflects the "Show all versions" toggle)
+  //   - onVersionsClick(key): open the versions panel for the key
+  showVersionsButton: boolean;
+  highlightVersionsButton: boolean;
+  onVersionsClick: (key: string) => void;
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null);
   const isMobile = useIsMobile();
@@ -640,7 +740,7 @@ function VirtualObjectList({
           column headers are meaningless without column alignment. The
           select-all checkbox lives in the mobile action bar above the
           list instead (see select-all-mobile below). */}
-      <div className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_220px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center" data-testid="select-all-cell">
           <Checkbox
             checked={allVisibleSelected}
@@ -699,7 +799,7 @@ function VirtualObjectList({
             const fileError = row.kind === "file" ? perRowError.get(row.key) : undefined;
             const layoutClass = isMobile
               ? "flex items-center gap-3"
-              : "grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center";
+              : "grid grid-cols-[40px_1fr_140px_160px_220px] gap-2 items-center";
             return (
               <div
                 key={virtual.key}
@@ -746,6 +846,9 @@ function VirtualObjectList({
                       onDownload={onDownload}
                       errorMessage={fileError}
                       isMobile={isMobile}
+                      showVersionsButton={showVersionsButton}
+                      highlightVersionsButton={highlightVersionsButton}
+                      onVersionsClick={onVersionsClick}
                     />
                   </>
                 )}
@@ -846,11 +949,20 @@ function FileRow({
   onDownload,
   errorMessage,
   isMobile,
+  showVersionsButton,
+  highlightVersionsButton,
+  onVersionsClick,
 }: {
   obj: ObjectInfo;
   onDownload: (key: string) => void;
   errorMessage?: string;
   isMobile: boolean;
+  // v1.10.0b: Versions button surfaces per-row when the bucket has
+  // versioning on AND the driver supports it. Hidden otherwise so the
+  // operator isn't tempted by a dead control.
+  showVersionsButton: boolean;
+  highlightVersionsButton: boolean;
+  onVersionsClick: (key: string) => void;
 }) {
   const displayName = obj.key.split("/").pop() || obj.key;
   const sizeText = humanizeBytes(obj.size);
@@ -898,6 +1010,37 @@ function FileRow({
             {modifiedText}
           </div>
         </div>
+        {showVersionsButton && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onVersionsClick(obj.key);
+            }}
+            aria-label={`Versions of ${displayName}`}
+            // Mobile Versions icon — clock-style glyph, 44x44 hit
+            // area to match the Download button below. Visible only
+            // when versioning is on for the bucket + driver supports
+            // it; otherwise the row stays single-action.
+            className={`inline-flex h-11 w-11 -my-2 flex-shrink-0 items-center justify-center rounded-md ${highlightVersionsButton ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+            data-testid={`file-versions-${obj.key}`}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <polyline points="12 7 12 12 15 14" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={(e) => {
@@ -963,7 +1106,20 @@ function FileRow({
       <div className="text-right tabular-nums text-sm">
         {modifiedText ?? "—"}
       </div>
-      <div className="text-right">
+      <div className="flex items-center justify-end gap-1">
+        {showVersionsButton && (
+          <Button
+            variant={highlightVersionsButton ? "outline" : "ghost"}
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onVersionsClick(obj.key);
+            }}
+            data-testid={`file-versions-${obj.key}`}
+          >
+            Versions
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -1139,7 +1295,7 @@ function ObjectListSkeleton() {
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
       {/* v1.8.0e: header hidden on mobile to match the live layout. */}
-      <div className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_220px] gap-2 border-b bg-muted/30 px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
         <div />
         <div>Name</div>
         <div className="text-right">Size</div>
@@ -1150,7 +1306,7 @@ function ObjectListSkeleton() {
         {[...Array(8)].map((_, i) => (
           <div
             key={i}
-            className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_120px] gap-2 items-center px-3"
+            className="hidden sm:grid grid-cols-[40px_1fr_140px_160px_220px] gap-2 items-center px-3"
             style={{ height: ROW_HEIGHT_DESKTOP }}
           >
             <Skeleton className="h-4 w-4" />

@@ -2346,3 +2346,177 @@ export function useGatewaysRegistry() {
     retry: 1,
   });
 }
+
+// v1.10.0b BUCKET.VERSIONING — user-tier hooks for the FE controls
+// shipped against the v1.10.0a backend surface
+// (/api/v1/user/regions/{regionId}/buckets/{bid}/versioning + the
+// per-object /o/{key}/versions[/{versionId}] family).
+//
+// Doctrine:
+//   - GET versioning folds the capability flag into the payload so the
+//     UI can render the "your backend doesn't support this" branch from
+//     the SAME fetch that drives the toggle on supported drivers (mirror
+//     of useClusterScrub above).
+//   - mutations don't carry built-in invalidation — the bucket detail
+//     section calls invalidateQueries from its own onSuccess so it can
+//     refresh sibling reads (the object listing toggle, the per-object
+//     versions list) in the same callback.
+//   - the "list versions for one object" hook takes an `enabled` flag so
+//     the bucket browser can mount it lazily when the side panel opens;
+//     without the flag every row would speculatively fan out one list
+//     per visible object.
+
+// VersioningStatus mirrors driver.VersioningStatus on the Go side. The
+// "disabled" state means versioning has never been enabled (S3's "no
+// Status field") and is only reachable via the GET, never via the PUT.
+export type VersioningStatus = "enabled" | "suspended" | "disabled";
+
+export interface VersioningStatusResponse {
+  status: VersioningStatus;
+  supported: boolean;
+}
+
+export function useBucketVersioning(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useQuery<VersioningStatusResponse>({
+    queryKey: ["user", "regions", regionId, "buckets", bucket, "versioning"],
+    queryFn: async () => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/versioning`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/versioning`, res.status, body);
+      }
+      return body as VersioningStatusResponse;
+    },
+    enabled: !!regionId && !!bucket,
+    // Versioning state rarely changes between toggles; 30s is enough
+    // to catch a backend-side flip from another tool while keeping the
+    // bucket detail page snappy on tab switches.
+    staleTime: 30_000,
+    retry: 1,
+  });
+}
+
+// usePutBucketVersioning covers both transitions — enable and suspend
+// — because the wire shape is identical (PUT versioning, body
+// {"status": ...}) and a single mutation hook keeps the FE button
+// disable / loading flags consistent. The caller passes "enabled" or
+// "suspended" via the mutate variables.
+export function usePutBucketVersioning(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<VersioningStatusResponse, Error, { status: "enabled" | "suspended" }>({
+    mutationFn: async ({ status }) => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/versioning`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/versioning/put`, res.status, body);
+      }
+      return body as VersioningStatusResponse;
+    },
+  });
+}
+
+// ObjectVersion mirrors driver.ObjectVersion. isDeleteMarker is true
+// for tombstone rows S3 inserts on a DELETE in a versioned bucket —
+// the UI renders these distinctly so the operator can spot "this
+// version was the delete event on T" vs "this version was overwritten
+// on T".
+export interface ObjectVersion {
+  versionId: string;
+  key: string;
+  size: number;
+  etag?: string;
+  lastModified?: string;
+  isLatest: boolean;
+  isDeleteMarker?: boolean;
+}
+
+export interface ObjectVersionsResponse {
+  versions: ObjectVersion[];
+  nextVersionIdMarker?: string;
+}
+
+// useObjectVersions lists every version (current, noncurrent, delete
+// marker) for a single object. The backend filters to exact key
+// matches before returning so the FE doesn't have to second-guess
+// adjacent prefixes (e.g. "foo" + "foobar"). The hook stays disabled
+// until the caller opens the versions panel — see VersionsPanel in
+// the bucket browser route.
+export function useObjectVersions(
+  regionId: string | null,
+  bucket: string | null,
+  key: string | null,
+  enabled: boolean = true,
+) {
+  return useQuery<ObjectVersionsResponse>({
+    queryKey: ["user", "regions", regionId, "buckets", bucket, "object-versions", key],
+    queryFn: async () => {
+      if (!regionId || !bucket || !key) {
+        throw new Error("Region id, bucket, and key required");
+      }
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/versions`, res.status, body);
+      }
+      return body as ObjectVersionsResponse;
+    },
+    enabled: enabled && !!regionId && !!bucket && !!key,
+    staleTime: 10_000,
+    retry: 1,
+  });
+}
+
+// objectVersionDownloadURL is a pure URL builder for the per-version
+// GET endpoint. Used by the Versions panel's Download button — the
+// browser navigates directly to this URL (credentials: include
+// auto-applies via same-origin cookies) and the backend streams the
+// version body with Content-Type / Content-Length forwarded from the
+// backend.
+export function objectVersionDownloadURL(
+  regionId: string,
+  bucket: string,
+  key: string,
+  versionId: string,
+): string {
+  return `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions/${encodeURIComponent(versionId)}`;
+}
+
+// useDeleteObjectVersion permanently removes a single version row,
+// including delete markers. Distinct from useDeleteUserRegionObject
+// which inserts a delete marker on a versioned bucket — this one
+// actually drops the historical row forever and has no S3 "undo".
+export function useDeleteObjectVersion(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<void, Error, { key: string; versionId: string }>({
+    mutationFn: async ({ key, versionId }) => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions/${encodeURIComponent(versionId)}`;
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(
+          `user/regions/${regionId}/buckets/${bucket}/o/${key}/versions/${versionId}`,
+          res.status,
+          body,
+        );
+      }
+    },
+  });
+}
