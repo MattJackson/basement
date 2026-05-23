@@ -4,6 +4,31 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.9.0c — 2026-05-22
+
+Gateway architecture cycle. The WebDAV gateway shipped in v1.9.0a/b
+generalised into a pluggable `gateway.Gateway` interface so v1.10+ can
+drop in SMB, NFS, FTP, and S3 by implementing the same contract. New
+package `internal/gateway/` holds the `Gateway` + `Backend` +
+`Registry` interfaces and the production `Backend` that composes
+existing primitives (`config.Admin`, `store.UserRegions`,
+`serviceaccount.ServiceAccounts`, `driver.Registry`, `store.Connections`)
+into a single data-plane surface. WebDAV moved from `internal/webdav`
+into `internal/gateway/webdav` and now drives every storage call
+through `Backend.{ListRegions, ListBuckets, ListObjects, HeadObject,
+GetObject, PutObject, DeleteObject, CopyObject, CreateBucket,
+DeleteBucket}` — the protocol code no longer reaches into the driver
+registry or the user-region store directly. Four stub registrations
+(SMB, NFS, FTP, S3) are wired into the registry at boot so
+`/admin/gateways` lists the full protocol roster with "coming soon"
+badges driven by `Implemented() = false`. New endpoint
+`GET /api/v1/admin/gateways` returns the registry roster (name,
+displayName, description, capabilities, status, implemented, enabled)
+for the v1.9.0d generalized UI cycle. Behaviour-preserving: every
+existing WebDAV verb test migrated unchanged; the `/webdav/` mount
+path + auth shapes + kill-switch contract carry through the refactor
+unmodified.
+
 ## v1.9.0b — 2026-05-22
 
 Gateways settings + status UI + Time Machine docs. The WebDAV gateway

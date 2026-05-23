@@ -22,9 +22,14 @@ import (
 	_ "github.com/mattjackson/basement/internal/drivers/minio"
 	"github.com/mattjackson/basement/internal/federation"
 	"github.com/mattjackson/basement/internal/federationwire"
+	"github.com/mattjackson/basement/internal/gateway"
+	"github.com/mattjackson/basement/internal/gateway/ftp"
+	"github.com/mattjackson/basement/internal/gateway/nfs"
+	"github.com/mattjackson/basement/internal/gateway/s3"
+	"github.com/mattjackson/basement/internal/gateway/smb"
+	"github.com/mattjackson/basement/internal/gateway/webdav"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
-	"github.com/mattjackson/basement/internal/webdav"
 	"github.com/mattjackson/basement/internal/webhook"
 )
 
@@ -363,28 +368,64 @@ func main() {
 	webhookEngine.Start(ctxSignal)
 	defer webhookEngine.Stop()
 
-	// v1.9.0a WEBDAV gateway. Mounts under /webdav/ on the same chi
-	// router as /api/v1. Pulls the user store + SA store off the
-	// already-wired *store.Store so a Basic-auth header is resolved
-	// against the same identity surface the JSON login uses. The
-	// admin Connections handle drives the Garage bucket-list bridge
-	// so a Garage-backed region's WebDAV PROPFIND surfaces real
-	// buckets instead of the empty-list that user-key ListBuckets
-	// returns for Garage today.
-	webdavHandler := webdav.New(webdav.Deps{
+	// v1.9.0c GATEWAY registry. The protocol surface (WebDAV today;
+	// SMB / NFS / FTP / S3 in v1.10+) is now pluggable via the
+	// gateway.Registry interface. main.go assembles a production
+	// Backend (composing existing primitives) and registers the
+	// WebDAV gateway (real impl) plus four stubs that surface in
+	// /admin/gateways with "coming soon" badges.
+	//
+	// The Backend wraps store + driver + SA so the protocol code
+	// never reaches into those packages directly — adding a new
+	// gateway in v1.10+ is a Registry.Register call plus the
+	// protocol-specific http.Handler / port-bound bind.
+	gwBackend := gateway.NewProductionBackend(gateway.BackendDeps{
 		Cfg:         cfg,
-		Regions:     st.UserRegions(),
-		Registry:    reg,
 		Users:       st,
 		SAs:         st.ServiceAccounts(),
-		Audit:       auditLogger,
-		Logger:      slog.Default(),
+		Regions:     st.UserRegions(),
+		DriverReg:   reg,
 		Connections: connStore,
+	})
+	gwRegistry := gateway.New()
+
+	webdavGW := webdav.New(webdav.Deps{
+		Backend: gwBackend,
 		// v1.9.0b: gate the gateway on the operator-configurable
 		// toggle at /admin/system → Gateways → WebDAV.Enabled.
-		OrgCaps: st.OrgCapabilities(),
+		// Bridge through a tiny adapter so the gateway package
+		// doesn't depend on internal/store.
+		OrgCaps: webdavOrgCapsBridge{caps: st.OrgCapabilities()},
+		Audit:   auditLogger,
+		Logger:  slog.Default(),
 	})
-	srv.SetWebDAVHandler(webdavHandler)
+	if err := gwRegistry.Register(webdavGW); err != nil {
+		slog.Error("failed to register webdav gateway", "error", err)
+		os.Exit(1)
+	}
+	// Stub registrations — v1.9.0c lights up /admin/gateways with the
+	// full protocol roster ahead of v1.10+'s real implementations.
+	for _, g := range []gateway.Gateway{smb.New(), nfs.New(), ftp.New(), s3.New()} {
+		if err := gwRegistry.Register(g); err != nil {
+			slog.Error("failed to register gateway stub", "name", g.Name(), "error", err)
+			os.Exit(1)
+		}
+	}
+	if err := gwRegistry.StartAll(ctxSignal); err != nil {
+		// StartAll continues past the first failure; log and proceed
+		// so the rest of the gateways come up.
+		slog.Warn("gateway registry: StartAll surfaced an error", "error", err)
+	}
+	defer func() {
+		_ = gwRegistry.StopAll(context.Background())
+	}()
+
+	srv.SetGatewayRegistry(gwRegistry)
+	// The WebDAV gateway is the only HTTP-mounted gateway today; wire
+	// its handler into the legacy SetWebDAVHandler slot so the chi
+	// route under /webdav/ keeps dispatching. When more HTTP-mounted
+	// gateways land (v2.0 S3 gateway) we'll iterate the registry.
+	srv.SetWebDAVHandler(webdavGW.HTTPHandler())
 
 	// v1.7.0f FEDERATION.EVENT-DRIVEN: subscribe the federation engine
 	// to the webhook event bus so writes hitting the primary trigger
@@ -414,4 +455,19 @@ func main() {
 	}
 
 	slog.Info("server shutdown complete")
+}
+
+// webdavOrgCapsBridge adapts *store.OrgCapabilitiesStore (which has a
+// Get() returning store.OrgCapabilities) to the webdav package's
+// narrow IsEnabled() interface. Keeps the gateway package free of any
+// internal/store dependency — the bridge lives entirely in main.go.
+type webdavOrgCapsBridge struct {
+	caps *store.OrgCapabilitiesStore
+}
+
+func (b webdavOrgCapsBridge) IsEnabled() bool {
+	if b.caps == nil {
+		return true
+	}
+	return b.caps.Get().Gateways.WebDAV.Enabled
 }
