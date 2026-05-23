@@ -156,11 +156,16 @@ async function doUpload(
       }
 
       if (!partSuccess) {
-        // Abort multipart on failure
-        await fetch(`${base}/multipart/${encodeURIComponent(uploadId)}`, {
-          method: "DELETE",
-          credentials: "include",
-        }).catch(() => {});
+        // Abort multipart on failure. v1.11.0.6: the abort handler now
+        // requires the object key (S3's AbortMultipartUpload needs it)
+        // — pass it as ?key= query param per BUG04 fix.
+        await fetch(
+          `${base}/multipart/${encodeURIComponent(uploadId)}?key=${encodeURIComponent(key)}`,
+          {
+            method: "DELETE",
+            credentials: "include",
+          },
+        ).catch(() => {});
 
         throw new Error(`Part ${partNumber} failed after retries`);
       }

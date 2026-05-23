@@ -351,24 +351,33 @@ func TestCreateBucket_400(t *testing.T) {
 }
 
 func TestUpdateBucket(t *testing.T) {
+	var putHit, getHit bool
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/bucket" || r.Method != "PUT" {
-			t.Errorf("expected PUT /v1/bucket, got %s %s", r.Method, r.URL.Path)
+		switch {
+		case r.URL.Path == "/v1/bucket" && r.Method == "PUT":
+			putHit = true
+			if r.URL.Query().Get("id") != "b-1" {
+				t.Errorf("id = %q, want b-1", r.URL.Query().Get("id"))
+			}
+			var body updateBucketRequestV1
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body.Quotas == nil {
+				t.Fatal("expected quotas in body")
+			}
+			if body.Quotas.MaxSize == nil || *body.Quotas.MaxSize != 999 {
+				t.Errorf("MaxSize = %v, want 999", body.Quotas.MaxSize)
+			}
+			_ = json.NewEncoder(w).Encode(bucketInfoV1{ID: "b-1", Quotas: &bucketQuotasV1{MaxSize: int64Ptr(999)}})
+		case r.URL.Path == "/v1/bucket" && r.Method == "GET":
+			// v1.11.0.6: post-update re-fetch returns the canonical
+			// bucket info to the caller.
+			getHit = true
+			_ = json.NewEncoder(w).Encode(bucketInfoV1{ID: "b-1", Quotas: &bucketQuotasV1{MaxSize: int64Ptr(999)}})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		if r.URL.Query().Get("id") != "b-1" {
-			t.Errorf("id = %q, want b-1", r.URL.Query().Get("id"))
-		}
-		var body updateBucketRequestV1
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if body.Quotas == nil {
-			t.Fatal("expected quotas in body")
-		}
-		if body.Quotas.MaxSize == nil || *body.Quotas.MaxSize != 999 {
-			t.Errorf("MaxSize = %v, want 999", body.Quotas.MaxSize)
-		}
-		_ = json.NewEncoder(w).Encode(bucketInfoV1{ID: "b-1", Quotas: &bucketQuotasV1{MaxSize: int64Ptr(999)}})
 	}))
 	defer ts.Close()
 
@@ -379,6 +388,12 @@ func TestUpdateBucket(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("UpdateBucket: %v", err)
+	}
+	if !putHit {
+		t.Error("expected PUT /v1/bucket to be called")
+	}
+	if !getHit {
+		t.Error("expected final GET /v1/bucket re-fetch to be called")
 	}
 }
 
@@ -392,6 +407,67 @@ func TestUpdateBucket_NotFound(t *testing.T) {
 	_, err := d.UpdateBucket(context.Background(), "nope", driverpkg.BucketUpdate{})
 	if !errors.Is(err, driverpkg.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestUpdateBucket_Aliases_Diff verifies v1.11.0.6 BUG01 fix: passing
+// update.Aliases on the v1 driver diffs against the bucket's current
+// globalAliases and fans out PUT/DELETE /v1/bucket/alias/global calls
+// for the deltas. Specifically tests a rename ({"old"} -> {"new"}):
+//   - GET to read current = ["old"]
+//   - PUT alias=new (Add the new one first)
+//   - DELETE alias=old (Then remove the old one — adds-before-removes
+//     so the bucket never has zero aliases mid-flight)
+//   - Final GET to return the canonical post-update bucket
+func TestUpdateBucket_Aliases_Diff(t *testing.T) {
+	var (
+		getCount      int
+		putAliasHit   string
+		deleteAliasHit string
+	)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/bucket" && r.Method == "GET":
+			getCount++
+			// First GET (pre-diff): bucket has just "old".
+			// Second GET (final re-fetch): bucket has just "new".
+			aliases := []string{"old"}
+			if getCount == 2 {
+				aliases = []string{"new"}
+			}
+			_ = json.NewEncoder(w).Encode(bucketInfoV1{ID: "b-2", GlobalAliases: aliases})
+		case r.URL.Path == "/v1/bucket/alias/global" && r.Method == "PUT":
+			if id := r.URL.Query().Get("id"); id != "b-2" {
+				t.Errorf("PUT alias id = %q, want b-2", id)
+			}
+			putAliasHit = r.URL.Query().Get("alias")
+		case r.URL.Path == "/v1/bucket/alias/global" && r.Method == "DELETE":
+			if id := r.URL.Query().Get("id"); id != "b-2" {
+				t.Errorf("DELETE alias id = %q, want b-2", id)
+			}
+			deleteAliasHit = r.URL.Query().Get("alias")
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	d := newTestDriver(ts.URL)
+	newAliases := []string{"new"}
+	got, err := d.UpdateBucket(context.Background(), "b-2", driverpkg.BucketUpdate{
+		Aliases: &newAliases,
+	})
+	if err != nil {
+		t.Fatalf("UpdateBucket: %v", err)
+	}
+	if putAliasHit != "new" {
+		t.Errorf("PUT alias = %q, want %q", putAliasHit, "new")
+	}
+	if deleteAliasHit != "old" {
+		t.Errorf("DELETE alias = %q, want %q", deleteAliasHit, "old")
+	}
+	if len(got.Aliases) != 1 || got.Aliases[0] != "new" {
+		t.Errorf("returned aliases = %v, want [new]", got.Aliases)
 	}
 }
 

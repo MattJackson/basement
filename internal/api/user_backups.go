@@ -451,6 +451,17 @@ type snapshotListEntry struct {
 // currently on disk for a snapshot-mode backup, oldest-first,
 // capped at the most recent 10 entries (matches the detail page
 // table layout). Mirror-mode backups return [].
+//
+// v1.11.0.6 (BUG05): when the destination is a UserRegion (vs. an
+// admin Connection), resolveBackupConn fails with "region has no
+// admin bridge" and the old code path returned a bare 500 with that
+// raw error string. The fix: snapshot listing only needs S3
+// ListObjects against the destination bucket with the snapshot
+// prefix — that's a data-plane op the UserRegion's own S3 key can
+// perform without any admin credentials. So when the admin-bridge
+// resolve fails, fall back to building a region-scoped driver
+// directly from the UserRegion's stored credentials (per ADR-0002,
+// the region IS the permission boundary).
 func (s *Server) userListBackupSnapshotsHandler(w http.ResponseWriter, r *http.Request) {
 	b, ok := s.loadOwnedBackup(w, r)
 	if !ok {
@@ -465,12 +476,8 @@ func (s *Server) userListBackupSnapshotsHandler(w http.ResponseWriter, r *http.R
 		writeErrorSimple(w, http.StatusServiceUnavailable, "DRIVERS_NOT_WIRED", "Driver registry is not wired")
 		return
 	}
-	dstConn, err := s.resolveBackupConn(r.Context(), b.OwnerUserID, b.DstRegionID)
-	if err != nil {
-		writeErrorSimple(w, http.StatusInternalServerError, "SNAPSHOT_LIST_FAILED", err.Error())
-		return
-	}
-	drv, err := s.reg.For(r.Context(), dstConn)
+
+	drv, err := s.snapshotListingDriver(r.Context(), b.OwnerUserID, b.DstRegionID)
 	if err != nil {
 		writeErrorSimple(w, http.StatusInternalServerError, "SNAPSHOT_LIST_FAILED", err.Error())
 		return
@@ -502,6 +509,70 @@ func (s *Server) userListBackupSnapshotsHandler(w http.ResponseWriter, r *http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(entries)
+}
+
+// snapshotListingDriver resolves a backup destination to a driver
+// usable for the S3-only snapshot-listing operations (ListObjects to
+// enumerate timestamp prefixes; ListObjects again per prefix to count
+// objects/bytes). Two paths:
+//
+//  1. Admin bridge available — the destination is registered as an
+//     admin Connection (matched by canonical endpoint), so we hand
+//     back the admin-tier driver instance the way every other
+//     backup-runner code path does.
+//  2. UserRegion destination, no admin bridge — fall back to building
+//     a region-scoped driver directly from the UserRegion's stored
+//     S3 credentials. The snapshot listing is pure data-plane (S3
+//     ListObjects), so the user's own key suffices; we don't need
+//     admin endpoints to enumerate the snapshot prefixes that the
+//     backup runner itself wrote with that same key.
+//
+// Centralised so the helper can also be reused by restore + future
+// snapshot-driven readers without re-implementing the fallback chain.
+// Added in v1.11.0.6 to close BUG05.
+func (s *Server) snapshotListingDriver(ctx context.Context, ownerUserID, dstRegionID string) (driver.Driver, error) {
+	// Try the admin-bridge path first — when an admin Connection is
+	// registered at the destination's endpoint, that's strictly more
+	// capable than the user's region key (covers cross-bucket reads,
+	// future admin-only metadata, etc.) so we prefer it.
+	dstConn, err := s.resolveBackupConn(ctx, ownerUserID, dstRegionID)
+	if err == nil {
+		drv, derr := s.reg.For(ctx, dstConn)
+		if derr == nil {
+			return drv, nil
+		}
+		// Connection lookup failed — fall through to the UserRegion
+		// path. The lookup error is informational only; the user-
+		// region fallback either succeeds with its own driver or
+		// surfaces its own (more actionable) error.
+	}
+
+	// Admin-bridge path failed — try the UserRegion path. dstRegionID
+	// may BE a UserRegion ID (the ADR-0002 user-tier case the smoke
+	// caught); look it up against the caller's keychain and build a
+	// region-scoped driver. The store's ownership check (region.UserID
+	// == ownerUserID) closes the cross-tenant leak.
+	regions := s.regionsStore()
+	if regions == nil {
+		return nil, errors.New("region keychain store is not wired")
+	}
+	region, err := regions.Get(ctx, dstRegionID)
+	if err != nil || region.UserID != ownerUserID {
+		// Match the wire-error style of the admin-bridge path so the
+		// caller sees a consistent INTERNAL_ERROR / 500 message rather
+		// than a leak that distinguishes "not yours" from "doesn't
+		// exist".
+		return nil, fmt.Errorf("backup destination %q not resolvable (admin bridge unavailable and not a known user region)", dstRegionID)
+	}
+	secret, err := regions.Decrypt(region)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt region key: %w", err)
+	}
+	drv, err := s.reg.ForUserRegion(ctx, region.Endpoint, region.AccessKeyID, secret, region.Region, region.AddressingStyle)
+	if err != nil {
+		return nil, fmt.Errorf("build region driver: %w", err)
+	}
+	return drv, nil
 }
 
 // summariseSnapshotPrefix counts objects + bytes under a prefix.

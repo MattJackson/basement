@@ -661,11 +661,17 @@ export function useUserRegionMultipartComplete(regionId: string | null, bid: str
   });
 }
 
+// useUserRegionMultipartAbort cancels an in-progress multipart upload.
+//
+// v1.11.0.6 (BUG04): the backend handler now requires the object key
+// (S3 AbortMultipartUpload's Key parameter is mandatory). Callers pass
+// {uploadId, key}; key is encoded into ?key= so the DELETE stays
+// bodyless across all the HTTP stacks involved.
 export function useUserRegionMultipartAbort(regionId: string | null, bid: string | null) {
   return useMutation({
-    mutationFn: async (uploadId: string) => {
-      if (!regionId || !bid || !uploadId) throw new Error("Missing required parameters");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}`;
+    mutationFn: async ({ uploadId, key }: { uploadId: string; key: string }) => {
+      if (!regionId || !bid || !uploadId || !key) throw new Error("Missing required parameters");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}?key=${encodeURIComponent(key)}`;
       const res = await fetch(url, { method: "DELETE", credentials: "include" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);

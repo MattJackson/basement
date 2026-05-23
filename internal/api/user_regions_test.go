@@ -711,6 +711,135 @@ func TestUserRegions_PresignUploadPart_BadPartNumber(t *testing.T) {
 	}
 }
 
+// TestUserRegions_AbortMultipart_RequiresKey verifies the v1.11.0.6
+// BUG04 fix: the abort handler returns 400 INVALID_REQUEST when the
+// caller forgets to pass ?key=, instead of silently calling
+// AbortMultipartUpload with an empty Key (which the AWS SDK rejects
+// locally with a confusing "input member Key must not be empty"
+// message, and which leaves the multipart upload in-flight on the
+// backend — blocking subsequent bucket-delete).
+func TestUserRegions_AbortMultipart_RequiresKey(t *testing.T) {
+	mock := newRegionMockDriver()
+	called := false
+	mock.abortMultipartFunc = func(_ context.Context, _ driver.MultipartUpload) error {
+		called = true
+		return nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	// No ?key= — must return 400 BEFORE hitting the driver.
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/multipart/U-1"
+	req := regionUserCookieReq(httptest.NewRequest(http.MethodDelete, url, nil))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("missing key: expected 400, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Error("driver.AbortMultipart called with empty key — handler should have rejected before driver dispatch")
+	}
+}
+
+// TestUserRegions_AbortMultipart_HappyPath verifies the v1.11.0.6
+// BUG04 fix forwards a non-empty key into the driver's MultipartUpload
+// when the caller passes ?key=. Covers the canonical wire shape used
+// by the upload dialog and the smoke harness.
+func TestUserRegions_AbortMultipart_HappyPath(t *testing.T) {
+	mock := newRegionMockDriver()
+	var got driver.MultipartUpload
+	mock.abortMultipartFunc = func(_ context.Context, upload driver.MultipartUpload) error {
+		got = upload
+		return nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/multipart/U-1?key=" +
+		"feat-smoke%2Fobj.bin"
+	req := regionUserCookieReq(httptest.NewRequest(http.MethodDelete, url, nil))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("abort: expected 204, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	if got.UploadID != "U-1" || got.Bucket != "lsi" || got.Key != "feat-smoke/obj.bin" {
+		t.Errorf("driver got upload=%+v, want UploadID=U-1 Bucket=lsi Key=feat-smoke/obj.bin", got)
+	}
+}
+
+// TestUserRegions_AbortMultipart_KeyInBody accepts a JSON-body key as
+// a backward-compatible alternate to ?key= — forward-compat for any
+// client that prefers the body form. Either path lands the same Key on
+// the driver call.
+func TestUserRegions_AbortMultipart_KeyInBody(t *testing.T) {
+	mock := newRegionMockDriver()
+	var got driver.MultipartUpload
+	mock.abortMultipartFunc = func(_ context.Context, upload driver.MultipartUpload) error {
+		got = upload
+		return nil
+	}
+
+	srv, _, cleanup := newRegionsTestEnv(t, mock)
+	defer cleanup()
+
+	rrCreate := httptest.NewRecorder()
+	srv.router.ServeHTTP(rrCreate, regionUserCookieReq(newJSONRequest("/api/v1/user/regions", map[string]string{
+		"alias":       "home",
+		"endpoint":    "https://s3.example.com",
+		"accessKeyId": "AK",
+		"secretKey":   "SK",
+	})))
+	if rrCreate.Code != http.StatusCreated {
+		t.Fatalf("create: %d", rrCreate.Code)
+	}
+	var region userRegionResponse
+	_ = json.NewDecoder(rrCreate.Body).Decode(&region)
+
+	body, _ := json.Marshal(map[string]string{"key": "from-body.bin"})
+	url := "/api/v1/user/regions/" + region.ID + "/buckets/lsi/multipart/U-2"
+	req := regionUserCookieReq(httptest.NewRequest(http.MethodDelete, url, bytes.NewReader(body)))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("abort: expected 204, got %d (body=%s)", rr.Code, rr.Body.String())
+	}
+	if got.Key != "from-body.bin" {
+		t.Errorf("driver got Key=%q, want from-body.bin", got.Key)
+	}
+}
+
 // TestUserRegions_DeleteObject_HappyPath verifies the v1.1.0c object
 // delete endpoint hits the region driver and returns 204.
 func TestUserRegions_DeleteObject_HappyPath(t *testing.T) {

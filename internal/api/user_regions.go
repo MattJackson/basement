@@ -1224,6 +1224,24 @@ func (s *Server) userCompleteRegionMultipartHandler(w http.ResponseWriter, r *ht
 // /api/v1/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}.
 //
 // v1.1.0h: audits as region:multipart_abort.
+//
+// v1.11.0.6 (BUG04): the S3 AbortMultipartUpload call requires the
+// object key as well as the uploadId — without it the AWS SDK rejects
+// the request locally with "input member Key must not be empty" and
+// the multipart upload stays in flight on the backend, which then
+// blocks subsequent bucket-delete with BucketNotEmpty.
+//
+// The route doesn't carry the key in a path segment (kept the public
+// shape stable so existing clients don't break), so we accept it as
+// either:
+//
+//   - ?key=<urlencoded> query param  (preferred — keeps DELETE bodyless)
+//   - {"key":"..."} JSON body         (back-compat for any FE that may
+//     have already started passing it that way)
+//
+// Either form is required; an empty key returns 400 INVALID_REQUEST
+// with KEY_REQUIRED rather than relying on the SDK's downstream error
+// message which doesn't tell the caller what to do.
 func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.Request) {
 	region, _, ok := s.requireOwnedRegion(w, r)
 	if !ok {
@@ -1236,6 +1254,29 @@ func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// Query string first (the FE's natural place — DELETE bodies are
+	// awkward across all the HTTP stacks involved). Fall back to a
+	// JSON body for forward-compat with clients that prefer that
+	// shape; the AllowContentType middleware on /api/v1 means a JSON
+	// body has Content-Type: application/json, otherwise we skip the
+	// decode.
+	key := r.URL.Query().Get("key")
+	if key == "" && r.Header.Get("Content-Type") == "application/json" {
+		var body struct {
+			Key string `json:"key"`
+		}
+		// Defensive decode: an empty / malformed body just means
+		// "no body" — we already require the query param as the
+		// canonical path. Errors fall through to the empty-key 400.
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		key = body.Key
+	}
+	if key == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST",
+			"object key required (pass as ?key=<encoded> query param)")
+		return
+	}
+
 	drv, err := s.regionDriver(r, region)
 	if err != nil {
 		s.auditFailure(r, "region:multipart_abort", regionObjectResource(region, bid), err)
@@ -1243,7 +1284,11 @@ func (s *Server) userAbortRegionMultipartHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if err := drv.AbortMultipart(r.Context(), driver.MultipartUpload{UploadID: uploadID, Bucket: bid}); err != nil {
+	if err := drv.AbortMultipart(r.Context(), driver.MultipartUpload{
+		UploadID: uploadID,
+		Bucket:   bid,
+		Key:      key,
+	}); err != nil {
 		s.auditFailure(r, "region:multipart_abort", regionObjectResource(region, bid), err)
 		if isUserKeyRejected(err) {
 			writeUserKeyRejected(w, region)

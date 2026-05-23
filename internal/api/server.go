@@ -401,6 +401,14 @@ func (s *Server) routes() {
 			adminG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
 			adminG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
 
+			// v1.11.0.6 — per-cluster capability matrix. The global
+			// /api/v1/capabilities endpoint reads from s.drv (default
+			// driver) only; this per-cluster variant runs the active
+			// driver for {cid} so a deploy with mixed drivers can
+			// render the right UI per cluster. Routes through
+			// driverForRouteCluster per the v1.11.0.2 dispatch fix.
+			adminG.Get("/admin/clusters/{cid}/driver-info", s.driverInfoHandler)
+
 			// v1.3.0e CLUSTER.ADMINS — convenience read for the
 			// cluster detail page that filters the global assignment
 			// list down to this cluster (including wildcard

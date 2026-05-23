@@ -131,6 +131,79 @@ func (s *Server) getClusterHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, conn)
 }
 
+// driverInfoResponse is the GET /admin/clusters/{cid}/driver-info shape.
+//
+// `driver` is the configured driver name from the Connection record
+// (authoritative source — Caps.Driver tracks it but the wire response
+// includes the storage-side name for parity with /admin/clusters/{cid}).
+// `capabilities` is the live driver.Caps payload — same shape the
+// global /api/v1/capabilities returns, but per-cluster so a deploy with
+// mixed drivers can render the right UI per cluster.
+//
+// `version` is intentionally omitted at v1.11.0.6: surfacing a backend
+// version requires a per-driver admin call (Garage's GetClusterStatus,
+// MinIO's ServerInfo, S3 has none) and we'd rather skip the field than
+// either fan out a second round-trip per request or return a misleading
+// empty string. A follow-up can add it once each driver exposes a
+// uniform Version() method on the interface.
+type driverInfoResponse struct {
+	Driver       string      `json:"driver"`
+	Capabilities driver.Caps `json:"capabilities"`
+}
+
+// driverInfoHandler handles GET /api/v1/admin/clusters/{cid}/driver-info.
+//
+// Resolves the per-cluster driver via the v1.11.0.2 driverForRouteCluster
+// pattern so a multi-cluster deploy gets the correct Caps per cluster —
+// the global /api/v1/capabilities endpoint reads from s.drv only and
+// can't answer "what does THIS cluster's driver support" for the
+// capability matrix the UI renders on the cluster detail page.
+//
+// Added in v1.11.0.6 (BUG03 from the v1.11.0.5 feature smoke).
+func (s *Server) driverInfoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
+		return
+	}
+
+	cid := chi.URLParam(r, "cid")
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+
+	// Read the Connection record for the authoritative driver name.
+	// Returning Caps.Driver alone would coalesce both garage drivers
+	// to "garage", losing the v1/v2 distinction the UI needs to
+	// render the correct setup hints.
+	conn, err := s.conns.Get(r.Context(), cid)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
+	caps, err := drv.Capabilities(r.Context())
+	if err != nil {
+		if errors.Is(err, driver.ErrUnsupported) {
+			writeErrorSimple(w, http.StatusNotImplemented, "DRIVER_UNSUPPORTED", err.Error())
+			return
+		}
+		writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, driverInfoResponse{
+		Driver:       conn.Driver,
+		Capabilities: caps,
+	})
+}
+
 // updateClusterHandler handles PATCH /api/v1/admin/clusters/{cid}.
 //
 // Per ADR-0001 v0.9.0f: gated on cluster:edit at "cluster:{cid}".
