@@ -4,6 +4,43 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.10.0.1 — 2026-05-22
+
+Smoke-caught bug-fix cycle on top of v1.10.0e. Three findings from
+the comprehensive smoke audit (section [C] form validation + section
+[E] mobile touch targets) addressed in one tag:
+
+- **`/files/keys/new` blank submit silently did nothing.** The submit
+  button was `disabled` on blank required fields, so a click produced
+  no feedback. Now the button stays enabled; clicking with blanks
+  surfaces inline `role="alert"` messages next to each empty field
+  and flips `aria-invalid` on each offending input. Mutation only
+  fires once everything is filled in.
+- **`/files/federated-buckets/new` Next button silently did nothing.**
+  Same shape: the wizard's Next was `disabled` until the current
+  step validated. Now Next stays enabled, clicking with an incomplete
+  step surfaces an inline `role="alert"` describing exactly what's
+  missing (per step), the wizard refuses to advance. Step 5 Create
+  carries the same treatment.
+- **UserShell mobile nav tap targets <44px.** Top-nav links rendered
+  at the text line-height (~20px) and the Logo lockup at 40px — both
+  below the WCAG/iOS HIG 44×44 threshold flagged in smoke section
+  [E]. Added `min-h-[44px]` to `NAV_LINK` and `min-h-[44px]
+  min-w-[44px]` to the Logo anchor; desktop visuals unchanged (the
+  utilities only expand the hit-area box, not the rendered text /
+  SVG).
+
+Tests: new unit tests cover (a) blank-submit inline alerts on the
+Add-a-key form, (b) blank Next on each federation wizard step
+surfacing the right inline error, (c) tap-target utilities present on
+UserShell nav + Logo. Touched: `frontend/src/routes/files/keys/new.tsx`,
+`frontend/src/routes/files/federated-buckets/new.tsx`,
+`frontend/src/shared/layout/UserShell.tsx`,
+`frontend/src/shared/ui/Logo.tsx`, plus their `__tests__/`. 353/353
+frontend tests + `go test -race ./...` green; comprehensive smoke
+re-run against the deploy promotes from `bug` to `no-bug` for the
+three affected checks.
+
 ## v1.10.0 — 2026-05-22
 
 Compliance + integrity milestone — versioning + Object Lock + SSE.

@@ -90,6 +90,15 @@ function NewFederationPage() {
   const [autoFailover, setAutoFailover] = useState<boolean>(false);
   const [autoFailoverSec, setAutoFailoverSec] = useState<number>(60);
 
+  // v1.10.0.1 — per-step validation errors. Pre-fix the Next button
+  // was simply `disabled` whenever the current step's fields weren't
+  // satisfied; an operator clicking it on a pristine wizard got no
+  // feedback at all (smoke flagged this as "blank submit silently does
+  // nothing"). Now Next stays enabled, clicking with incomplete fields
+  // surfaces inline `role="alert"` messages, and the wizard refuses to
+  // advance until things are filled in.
+  const [stepError, setStepError] = useState<string | null>(null);
+
   // Derived: the (region|bucket) keys already claimed by primary +
   // sibling replica rows. Used to disable already-picked options in the
   // per-replica dropdowns so the operator can't pick the same target
@@ -145,6 +154,53 @@ function NewFederationPage() {
     return true;
   };
 
+  // v1.10.0.1 — produce the inline message we show when Next is
+  // clicked but the current step isn't satisfied. Lives alongside
+  // `canNextFromStep` rather than inside it so the existing boolean
+  // call sites (the disabled-on-click guard, the autofill check) stay
+  // unchanged.
+  const errorForStep = (s: Step): string | null => {
+    if (s === 1) {
+      if (!primaryRegion) return "Please pick a primary region.";
+      if (!primaryBucket) return "Please pick a primary bucket.";
+    }
+    if (s === 2) {
+      if (replicas.some((r) => !r.regionId || !r.bucket)) {
+        return "Each replica row needs both a region and a bucket.";
+      }
+      if (duplicateReplica) {
+        return "A (region, bucket) pair is duplicated. Each replica must be unique.";
+      }
+    }
+    if (s === 3) {
+      if (syncMode === "scheduled" && !schedule.trim()) {
+        return "Scheduled mode requires a cron expression.";
+      }
+      if (writeQuorum < 1 || writeQuorum > 1 + replicas.length) {
+        return `Write quorum must be between 1 and ${1 + replicas.length}.`;
+      }
+    }
+    if (s === 4) {
+      if (!name.trim()) return "Federation name is required.";
+    }
+    return null;
+  };
+
+  const handleNext = () => {
+    const err = errorForStep(step);
+    if (err) {
+      setStepError(err);
+      return;
+    }
+    setStepError(null);
+    setStep((s) => (s + 1) as Step);
+  };
+
+  const handleBack = () => {
+    setStepError(null);
+    setStep((s) => (s - 1) as Step);
+  };
+
   const addReplica = () => {
     if (replicas.length >= 10) return;
     setReplicas([...replicas, { regionId: "", bucket: "" }]);
@@ -161,7 +217,11 @@ function NewFederationPage() {
   };
 
   const handleSubmit = () => {
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setStepError("Federation name is required (go back to Review to set it).");
+      return;
+    }
+    setStepError(null);
     const body: FederatedBucketCreateRequest = {
       name: name.trim(),
       primary: { regionId: primaryRegion, bucket: primaryBucket },
@@ -525,6 +585,20 @@ function NewFederationPage() {
         </section>
       )}
 
+      {/* v1.10.0.1 — inline step error surfaces when Next/Create is
+          clicked but the current step isn't satisfied. Pre-fix the
+          button was simply disabled, giving the operator nothing to
+          act on. Now we tell them exactly what's missing. */}
+      {stepError && (
+        <div
+          role="alert"
+          data-testid="step-error"
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+        >
+          {stepError}
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-2">
         <Button
           variant="outline"
@@ -534,14 +608,14 @@ function NewFederationPage() {
         </Button>
         <div className="flex items-center gap-2">
           {step > 1 && (
-            <Button variant="ghost" onClick={() => setStep((s) => (s - 1) as Step)}>
+            <Button variant="ghost" onClick={handleBack}>
               Back
             </Button>
           )}
           {step < 5 && (
             <Button
-              onClick={() => setStep((s) => (s + 1) as Step)}
-              disabled={!canNextFromStep(step)}
+              onClick={handleNext}
+              aria-invalid={!canNextFromStep(step) ? true : undefined}
             >
               Next
             </Button>

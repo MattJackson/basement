@@ -20,7 +20,28 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+    // v1.10.0.1 — forward `className` (and the rest of common anchor
+    // props) so the tap-target tests below can assert the nav links
+    // carry the min-h-[44px] utility. Pre-fix the mock dropped every
+    // prop except children.
+    Link: ({
+      children,
+      className,
+      to,
+      activeProps,
+    }: {
+      children: React.ReactNode;
+      className?: string;
+      to?: string;
+      activeProps?: { className?: string };
+    }) => (
+      <a
+        href={typeof to === "string" ? to : undefined}
+        className={[className, activeProps?.className].filter(Boolean).join(" ")}
+      >
+        {children}
+      </a>
+    ),
     Outlet: () => null,
     useNavigate: vi.fn(() => vi.fn()),
     useSearch: vi.fn(() => ({})),
@@ -107,5 +128,31 @@ describe("UserShell", () => {
 
     const banner = screen.getByText(/^v\d+\.\d+\.\d+$/);
     expect(banner).toBeInTheDocument();
+  });
+
+  // v1.10.0.1 — nav links + logo carry the min-h-[44px] tap-target
+  // utility so mobile viewports satisfy the WCAG/iOS HIG 44×44
+  // threshold (smoke section [E] caught the pre-fix 20px / 40px sizes).
+  // Class-based assertion rather than computed style because jsdom
+  // does not implement Tailwind's runtime stylesheet.
+  it("nav links carry the 44px min-height tap-target utility", async () => {
+    const { UserShell } = await import("@/shared/layout/UserShell");
+    render(<UserShell><div data-testid="child">Content</div></UserShell>, { wrapper: Wrapper });
+
+    const primaryNav = screen.getByRole("navigation", { name: "Primary" });
+    const links = primaryNav.querySelectorAll("a");
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of Array.from(links)) {
+      expect(link.className).toMatch(/min-h-\[44px\]/);
+    }
+  });
+
+  it("logo anchor carries the 44px min-height + min-width tap-target utilities", async () => {
+    const { UserShell } = await import("@/shared/layout/UserShell");
+    render(<UserShell><div data-testid="child">Content</div></UserShell>, { wrapper: Wrapper });
+
+    const logo = screen.getByLabelText("Basement — home");
+    expect(logo.className).toMatch(/min-h-\[44px\]/);
+    expect(logo.className).toMatch(/min-w-\[44px\]/);
   });
 });
