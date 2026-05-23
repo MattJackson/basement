@@ -2980,66 +2980,72 @@ section("[16] version label under Logo (Fix 7)");
     // [v1.10e] Garage backends gate properly — "Not supported"
     //          rendering on the three sections instead of crashing.
     // ============================================================
-    section("[v1.10e] Garage 'Not supported' rendering on compliance sections (v1.10.0a/c/d)");
-    await check("[v1.10e] if any user region is Garage, its bucket renders unsupported notices on the three sections", async () => {
+    section("[v1.10e] driver-unsupported 'Not supported' rendering on compliance sections (v1.10.0a/c/d)");
+    await check("[v1.10e] unsupported drivers (e.g. Garage) render the unsupported notices on all three sections", async () => {
       const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
       if (!regionsResp.ok()) {
-        skipLine("v1.10e garage gating", `regions → ${regionsResp.status()}`);
+        skipLine("v1.10e driver-unsupported gating", `regions → ${regionsResp.status()}`);
         return;
       }
       const regions = await regionsResp.json();
       if (!Array.isArray(regions) || regions.length === 0) {
-        skipLine("v1.10e garage gating", "no user regions configured");
+        skipLine("v1.10e driver-unsupported gating", "no user regions configured");
         return;
       }
-      // Find a Garage-backed region — driver field is on the region row.
-      const garage = regions.find((r: any) =>
-        typeof r.driver === "string" && /^garage/i.test(r.driver),
-      );
-      if (!garage) {
-        skipLine("v1.10e garage gating", "no Garage-backed user region — gating exercised by v1.10b/c/d shape checks on the configured driver(s)");
+      // Probe each region for an unsupported-versioning bucket. The
+      // /versioning endpoint's {supported:false} is the wire signal
+      // for "driver doesn't support this axis" — more reliable than
+      // sniffing the region's driver label since drivers may rename.
+      let foundRegionId: string | null = null;
+      let foundBucketId: string | null = null;
+      for (const r of regions) {
+        const rid = r.id as string;
+        const bResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${rid}/buckets`);
+        if (!bResp.ok()) continue;
+        const bBody = await bResp.json();
+        const buckets = Array.isArray(bBody) ? bBody : bBody?.buckets;
+        if (!Array.isArray(buckets) || buckets.length === 0) continue;
+        const bid = buckets[0].id as string;
+        const vResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${rid}/buckets/${bid}/versioning`);
+        if (!vResp.ok()) continue;
+        const v = await vResp.json();
+        if (v.supported === false) {
+          foundRegionId = rid;
+          foundBucketId = bid;
+          break;
+        }
+      }
+      if (!foundRegionId || !foundBucketId) {
+        skipLine("v1.10e driver-unsupported gating", "no user-region bucket on an unsupported-versioning driver — gating exercised by v1.10b/c/d shape checks on the configured driver(s)");
         return;
       }
-      const regionId = garage.id as string;
-      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
-      if (!bucketsResp.ok()) {
-        skipLine("v1.10e garage gating", `buckets → ${bucketsResp.status()}`);
-        return;
-      }
-      const bucketsBody = await bucketsResp.json();
-      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
-      if (!Array.isArray(buckets) || buckets.length === 0) {
-        skipLine("v1.10e garage gating", "Garage region has no buckets");
-        return;
-      }
-      const bid = buckets[0].id as string;
 
-      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+      await page!.goto(`${BASE_URL}/files/${foundRegionId}/b/${foundBucketId}`, { waitUntil: "networkidle" });
       await page!.waitForSelector('[data-testid="versioning-section"]', { timeout: 10_000 });
 
-      // Garage doesn't support versioning today — versioning section
-      // must render the unsupported notice. Object Lock follows the
-      // same axis (and additionally short-circuits when versioning
-      // isn't enabled). Encryption shows unsupported when neither
-      // SSE-S3 nor SSE-KMS axes are supported.
+      // Unsupported driver: versioning section must render the
+      // unsupported notice. Object Lock follows the same axis (and
+      // additionally short-circuits when versioning isn't enabled).
+      // Encryption shows unsupported when neither SSE-S3 nor SSE-KMS
+      // axes are supported.
       const versioningUnsup = await page!.locator('[data-testid="versioning-unsupported"]').count();
       if (versioningUnsup === 0) {
-        throw new Error("Garage bucket: versioning section did not render 'unsupported' notice");
+        throw new Error("unsupported driver: versioning section did not render 'unsupported' notice");
       }
       // Object Lock can land on EITHER unsupported (most likely on
       // Garage) OR needs-versioning when versioning isn't enabled.
       const lockUnsup = await page!.locator('[data-testid="object-lock-unsupported"]').count();
       const lockNeedsVer = await page!.locator('[data-testid="object-lock-needs-versioning"]').count();
       if (lockUnsup === 0 && lockNeedsVer === 0) {
-        throw new Error("Garage bucket: Object Lock section did not render either 'unsupported' or 'needs-versioning' notice");
+        throw new Error("unsupported driver: Object Lock section did not render either 'unsupported' or 'needs-versioning' notice");
       }
       // Encryption: unsupported is the expected branch on Garage.
       const encUnsup = await page!.locator('[data-testid="encryption-unsupported"]').count();
       if (encUnsup === 0) {
-        throw new Error("Garage bucket: Encryption section did not render 'unsupported' notice");
+        throw new Error("unsupported driver: Encryption section did not render 'unsupported' notice");
       }
 
-      await shot(page!, "v1.10e-garage-not-supported");
+      await shot(page!, "v1.10e-driver-not-supported");
     });
 
     // ============================================================

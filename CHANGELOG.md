@@ -4,6 +4,142 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.10.0 — 2026-05-22
+
+Compliance + integrity milestone — versioning + Object Lock + SSE.
+v1.10 closes the v1.x arc with the ransomware shield + compliance
+posture that complements v1.6 federation: federation replicates data
+across backends; versioning + object-lock + server-side encryption
+make those replicas resilient, recoverable, and private. Five primary
+cycles (`v1.10.0a` → `v1.10.0e`) plus a smoke-gate-caught
+`v1.10.0d.1` AppShell hydration-race hotfix (same shape as
+v1.7.0a.3/a.4). Bucket versioning landed first (driver interface +
+AWS S3 + MinIO full + Garage stubs + UI card +
+`ObjectVersionsPanel`); Object Lock layered on versioning per the S3
+spec (Governance + Compliance modes + per-version legal hold);
+default server-side encryption shipped last (SSE-S3 + SSE-KMS with
+per-axis capability bits gating the algorithm radio). AWS S3 + MinIO
+full across all three; Garage v1 / v2 advertise unsupported (upstream
+content-addressed block store conflicts with versioned overwrites)
+and the UI renders graceful "Not supported by this backend driver"
+notices instead of fighting the gap. 72/72 smoke checks pass against
+the live deploy that this milestone promotes. **v1.x is feature-
+complete with this release; v2.0 = basement IS a backend (S3
+gateway) is the next major.** ADR-0006 (v2.0 gateway design) is the
+next senior artifact. Full write-up in
+[docs/release-notes/v1.10.0.md](docs/release-notes/v1.10.0.md).
+
+**v1.x roadmap complete; v2.0 chain begins next.** The v1.x line ran
+v1.0 → v1.10 in one extended operator session-and-change. Recap of
+every minor tag in the v1.x line:
+
+- **v1.0** — Multi-backend admin + RBAC + scoped creds (ADR-0001)
+- **v1.1** — Region tier replaces phantom Connections at user persona (ADR-0002)
+- **v1.2** — Sudo-style admin elevation (ADR-0003)
+- **v1.3** — Multi-user polish (OIDC group mapping + invites + per-cluster admin UI)
+- **v1.4** — Scale + perf (virtualized browser + paginated key perms + growth analytics + scrub UI)
+- **v1.5** — Backup story (scheduled backups + GFS retention + restore wizard)
+- **v1.6** — Federation + multi-backend replication (ADR-0005)
+- **v1.7** — Service accounts + webhooks + event-driven federation
+- **v1.8** — MCP server + Mobile PWA + service-account config UX + rebrand / relicense
+- **v1.9** — WebDAV gateway + pluggable gateway architecture
+- **v1.10** — Compliance + integrity (versioning + Object Lock + SSE)
+
+## v1.10.0e — 2026-05-22
+
+Milestone gate cycle for v1.10.0. Smoke 72/72 green against the live
+v1.10.0d.1 deploy that v1.10.0 promotes; full v1.10 smoke check
+suite (`[v1.10a]` bucket detail compliance sections + `[v1.10b]`
+versioning API shape + `[v1.10c]` object-lock API shape + `[v1.10d]`
+encryption API shape + `[v1.10e]` driver-unsupported branch
+rendering); screenshot pass to `/tmp/v1.10.0-screenshots/` capturing
+the three sections in their unsupported branch (live deploy has
+Garage-only user regions). Release notes
+([`docs/release-notes/v1.10.0.md`](docs/release-notes/v1.10.0.md))
+with the end-of-v1.x summary table; README updated with v1.10
+feature bullets + competitive matrix gains (parity with MinIO
+Console on the security / integrity axis); CHANGELOG v1.10.0 entry
+with v1.x line recap.
+
+## v1.10.0d.1 — 2026-05-22
+
+Smoke gate v1.10 + AppShell admin-redirect hydration hotfix. Smoke
+surface adds five new v1.10 checks. AppShell hotfix: the v1.9.0e.2
+tight-coupling redirect fired on the first render of `/admin/*`
+before AuthModeHydrator could push the cookie-derived mode into the
+provider — every full-page navigation to `/admin/*` bounced to
+`/files` even on freshly-elevated sessions. Same shape as the
+v1.7.0a.3/a.4 AdminEntryElevationGuard hotfix: (1) defer redirect
+while `useUser()` is loading; (2) belt-and-braces — read `user.mode`
+directly off `/auth/me` payload and short-circuit when admin /
+elevated. Two new tests pin both branches.
+
+## v1.10.0d — 2026-05-22
+
+Bucket default server-side encryption — SSE-S3 + SSE-KMS. Driver
+gains four new methods (`BucketEncryptionSupport` returning
+per-axis SSE-S3 + SSE-KMS bits, `GetBucketEncryption` +
+`PutBucketEncryption` + `DeleteBucketEncryption`); AWS S3 full (both
+axes), MinIO full (SSE-S3 + SSE-KMS where the MinIO server is
+wired with a KMS backend — the driver surfaces the live state
+honestly), Garage stubs returning `ErrUnsupported`. User-tier API
+under `/api/v1/user/regions/{rid}/buckets/{bid}/encryption` (GET
+folds the per-axis capability bits + algorithm + key ID into one
+response so the FE branches off one fetch). New
+`EncryptionSection` card on the bucket detail page handles four
+branches internally (unsupported / SSE-S3-only / both-axes / enabled
+with separate Disable button); capability-honest gating —
+no driver-name checks anywhere in the FE.
+
+## v1.10.0c — 2026-05-22
+
+Object Lock — bucket configuration + per-version retention + per-
+version legal hold. Driver gains seven new methods
+(`ObjectLockSupport` + `GetObjectLockConfig` + `PutObjectLockConfig`
++ `GetObjectRetention` + `PutObjectRetention` + `GetObjectLegalHold`
++ `PutObjectLegalHold`); AWS S3 + MinIO full, Garage stubs. User-
+tier API under `/object-lock` + per-version `/retention` +
+`/legal-hold`. New `ObjectLockSection` card layered on versioning
+per the S3 spec — three branches surfaced internally (unsupported /
+needs-versioning / full editor). Once Object Lock is enabled, the
+disable affordance disappears (S3 one-way contract). Per-version
+lock UX in `ObjectVersionsPanel`: lock status pills (Compliance /
+Governance until YYYY-MM-DD or Legal hold), Set retention modal
+with reduce-detection (compliance-reduce blocked; governance-reduce
+surfaces bypass-governance toggle), Set / Release hold toggle,
+Delete affordance gated on lock state.
+
+## v1.10.0b — 2026-05-22
+
+Bucket versioning UI — `VersioningSection` card on the bucket detail
+page + `ObjectVersionsPanel` per-object version history + "Show all
+versions" toggle on the bucket browser. Three branches mirror
+`LifecycleSection`'s posture: supported=false → "Not supported by
+this backend driver" notice; supported + disabled → select offers
+Enabled only (S3 contract: once enabled, can't flip back to "never
+enabled"); supported + enabled-or-suspended → Enabled + Suspended
+options. ObjectVersionsPanel mounts inline below the file list when
+the operator clicks "Versions" on any file row — lists every version
+with version-ID, size, modified timestamp, current badge,
+delete-marker chip, Download + Delete affordances.
+
+## v1.10.0a — 2026-05-22
+
+Bucket versioning — driver interface + AWS S3 + MinIO impl +
+user-tier API. First cycle of the v1.10 compliance + integrity
+track. Driver gains seven members (`VersioningSupport` capability
+gate, `GetVersioningStatus` + `EnableVersioning` +
+`SuspendVersioning` bucket-level toggle, `ListObjectVersions` +
+`GetObjectVersion` + `DeleteObjectVersion` per-object history).
+AWS S3 + MinIO ship full via aws-sdk-go-v2; Garage v1 + v2 stubs
+return `ErrUnsupported` from every method
+(`VersioningSupport()=false`) — upstream Garage doesn't implement
+bucket versioning in its S3 surface, content-addressed block store
+semantics conflict with versioned overwrites. User-tier endpoints
+under `/api/v1/user/regions/{rid}/buckets/{bid}/versioning` + per-
+version `/versions[/{vid}]`. Wire envelope folds the capability flag
+into the GET payload so the FE branches off one fetch.
+
 ## v1.9.0 — 2026-05-22
 
 WebDAV gateway + pluggable gateway architecture milestone. v1.9
