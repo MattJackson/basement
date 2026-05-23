@@ -83,6 +83,9 @@ func writeRegistryForError(w http.ResponseWriter, err error) {
 	// for builder failures. Also handle bare store-Get errors which
 	// say "connection not found: {id}" without the Registry prefix.
 	switch {
+	case errors.Is(err, errMissingClusterID):
+		writeErrorSimple(w, http.StatusBadRequest, "CLUSTER_ID_REQUIRED",
+			"cluster id is required for this endpoint")
 	case strings.Contains(msg, "connection not found"):
 		writeErrorSimple(w, http.StatusNotFound, "CLUSTER_NOT_FOUND", "Connection not found")
 	case strings.Contains(msg, "getting connection") && strings.Contains(msg, "not found"):
