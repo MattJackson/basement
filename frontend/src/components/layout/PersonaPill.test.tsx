@@ -30,13 +30,19 @@ vi.mock("@/shared/auth/elevation", () => ({
   useElevationPrompt: () => vi.fn(() => Promise.resolve()),
 }));
 
-// v1.9.0e.1: PersonaPill now consults the URL to distinguish
-// admin-mode-on-admin-page from admin-mode-on-user-page. Tests in this
-// file pin the warning-ramp + drop-privileges behaviour, which is URL-
-// independent — default the pathname to /admin/* so the visual variant
-// is the historical "solid" one and the existing assertions hold.
+// v1.9.0e.2: PersonaPill.handleDrop now calls useNavigate to send the
+// operator to /files after dropping privileges (tight mode/view
+// coupling — drop = go user). Mock the router so the test harness
+// doesn't need a real route tree, and expose the spy via a module-
+// level handle so the new "drop → /files" assertion can read it.
+//
+// v1.9.0e.1's useLocation hook on PersonaPill was stripped this cycle
+// — the mode-vs-view distinction is now expressed by routing (USER
+// can't reach /admin/* at all; admin on /files/* is fine) rather than
+// by the pill's visual variant, so we only need to mock useNavigate.
+const navigateSpy = vi.fn((_opts: { to: string }) => Promise.resolve());
 vi.mock("@tanstack/react-router", () => ({
-  useLocation: () => ({ pathname: "/admin/clusters" }),
+  useNavigate: () => navigateSpy,
 }));
 
 function newClient() {
@@ -105,6 +111,7 @@ describe("PersonaPill drop privileges (v1.7.0a.2)", () => {
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(null, { status: 200 }),
     );
+    navigateSpy.mockClear();
   });
 
   afterEach(() => {
@@ -201,6 +208,51 @@ describe("PersonaPill drop privileges (v1.7.0a.2)", () => {
     expect(screen.getByTestId("persona-pill").getAttribute("data-mode")).toBe(
       "admin",
     );
+    // No navigation on failure — operator stays put with their stale
+    // ADMIN session so they can see why the drop didn't take.
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+
+  // v1.9.0e.2 — tight mode/view coupling. Dropping privileges from the
+  // × button always sends the operator to /files; the drop bug the
+  // operator reported was dropping privileges on /admin/clusters and
+  // then the (since-deleted) AdminEntryElevationGuard firing the
+  // elevation prompt against the same page they just dropped from.
+  // Mode change now drives navigation: drop = go user = /files.
+  it("navigates to /files after a successful drop", async () => {
+    const client = newClient();
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+    render(
+      <HarnessWithClient
+        client={client}
+        initial={{ mode: "admin", expiresAt }}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId("persona-drop"));
+
+    await waitFor(() => {
+      expect(navigateSpy).toHaveBeenCalledWith({ to: "/files" });
+    });
+  });
+
+  it("does NOT navigate when the backend rejects the drop", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    const client = newClient();
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+    render(
+      <HarnessWithClient
+        client={client}
+        initial={{ mode: "admin", expiresAt }}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId("persona-drop"));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+    expect(navigateSpy).not.toHaveBeenCalled();
   });
 });
 

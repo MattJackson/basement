@@ -9,36 +9,30 @@
 //                    one-click extend ("Stay admin") that just calls
 //                    /auth/elevate again with the same target_mode.
 //
-// v1.9.0e.1 amendment — mode vs. view disambiguation:
-//   The pill historically only reflected *mode*, but matthew (operator)
-//   reported it's hard to tell when you're in an admin view vs a user
-//   view if your mode is admin both times. Now the pill also reflects
-//   which URL tree you're on:
-//     mode=admin + URL=/admin/*  → solid amber "ADMIN" pill (the page
-//                                  matches your mode — you're using
-//                                  your admin authority).
-//     mode=admin + URL=/files/*  → outlined amber "ADMIN · user view"
-//                                  pill (you have admin authority but
-//                                  are browsing the user shell). The
-//                                  countdown still ticks because the
-//                                  TTL doesn't care about URL.
-//     mode=user                  → neutral USER pill (unchanged).
+// v1.9.0e.2 — tight mode/view coupling reverts the v1.9.0e.1 mode-vs-
+// view experiment. The pill is the source of truth for MODE only; the
+// URL surface no longer factors into the visual variant. With the
+// AppShell redirect blocking USER on /admin/* and admin allowed to
+// dip into /files/*, the operator's "what mode am I in" question is
+// answered by the pill alone, independent of URL.
 //
 // Countdown re-renders once per second. At expiry the AuthModeProvider's
-// auto-downgrade kicks in independently — and AuthModeHydrator surfaces
-// a drop-in-place banner at /admin/* rather than yanking the user.
+// auto-downgrade kicks in independently — and AppShell's redirect
+// effect navigates the operator to /files when the falling-edge fires
+// while they're on /admin/*.
 //
 // "Drop privileges" hits POST /api/v1/auth/logout-elevation, then
 // pushes mode=user into the provider so the pill flips instantly
 // without waiting for a /auth/me refetch. v1.7.0a.2: also invalidate
 // the cached ["auth","me"] query so AuthModeHydrator's next sync
 // reads the freshly-rotated cookie (mode=user) and doesn't snap the
-// pill back to ADMIN from a stale React Query cache.
+// pill back to ADMIN from a stale React Query cache. v1.9.0e.2:
+// also navigate to /files — under the tight coupling, drop = go user.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 import { useElevationPrompt } from "@/shared/auth/elevation";
 
@@ -80,7 +74,7 @@ export function PersonaPill() {
   const setAuthMode = useSetAuthMode();
   const promptForElevation = useElevationPrompt();
   const queryClient = useQueryClient();
-  const location = useLocation();
+  const navigate = useNavigate();
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
   // warnedRef tracks the latest expiresAt for which we've fired the
@@ -123,13 +117,6 @@ export function PersonaPill() {
   const showCountdown = expiresAt > 0 && elevated;
   const inAmberWindow = showCountdown && remainingMs > 0 && remainingMs <= WARN_AMBER_MS;
   const inRedWindow = showCountdown && remainingMs > 0 && remainingMs <= WARN_RED_MS;
-  // v1.9.0e.1: distinguish admin-mode-on-admin-page from admin-mode-on-
-  // user-page. /admin/* matches the operator's authority; /files/* (or
-  // any non-admin URL) means they're browsing the user shell while
-  // holding admin powers — visually muted + label called out so they
-  // don't confuse "admin time ticking" with "I'm on an admin page".
-  const onAdminPage = location.pathname.startsWith("/admin");
-  const adminOnUserView = elevated && !onAdminPage;
 
   // <30s warning + flash + extend toast. Fires once per elevation
   // window. The toast carries an inline action that triggers a
@@ -182,6 +169,14 @@ export function PersonaPill() {
       //    detects current.mode !== user.mode and snaps the pill
       //    back to ADMIN within one tick.
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      // 3. v1.9.0e.2: drop = go user. Mode change drives navigation
+      //    under the tight coupling, so the operator always ends up
+      //    on /files after dropping privileges (even if they were
+      //    mid-flow on /admin/clusters). Replaces the v1.7.0a-era
+      //    behaviour where the URL stayed put and the AdminUserMode
+      //    banner sat over the page asking the operator to elevate
+      //    they just dropped from.
+      void navigate({ to: "/files" });
       toast.success("Privileges dropped");
     } catch {
       toast.error("Failed to drop privileges — network error");
@@ -197,36 +192,17 @@ export function PersonaPill() {
           className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
           data-testid="persona-pill"
           data-mode="user"
-          data-view="user"
         >
           USER
         </span>
       );
     }
-    // admin (incl. legacy "elevated" alias). Two visual variants:
-    //   - on /admin/*  → solid amber (mode matches view)
-    //   - elsewhere    → outlined / muted amber + "· user view" suffix
-    //                    so the operator knows the URL doesn't match
-    //                    their mode. The warning ramps still apply on
-    //                    both variants — TTL is URL-agnostic.
-    const solidClasses = inRedWindow
+    // admin (incl. legacy "elevated" alias)
+    const classes = inRedWindow
       ? "bg-red-300 text-red-950 dark:bg-red-500/40 dark:text-red-50 animate-pulse"
       : inAmberWindow
         ? "bg-amber-300 text-amber-950 dark:bg-amber-500/30 dark:text-amber-100"
         : "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200";
-    // Outlined variant: transparent fill, amber border + text. The red/
-    // amber warning windows still escalate the colour so the operator
-    // doesn't lose the expiry signal on the user shell.
-    const outlinedClasses = inRedWindow
-      ? "border border-red-400 text-red-700 dark:border-red-400/60 dark:text-red-200 animate-pulse"
-      : inAmberWindow
-        ? "border border-amber-400 text-amber-800 dark:border-amber-400/60 dark:text-amber-200"
-        : "border border-amber-300 text-amber-700 dark:border-amber-400/40 dark:text-amber-300";
-    const classes = adminOnUserView ? outlinedClasses : solidClasses;
-    const label = adminOnUserView ? "ADMIN · user view" : "ADMIN";
-    const titleText = adminOnUserView
-      ? "You have admin authority but are browsing the user shell. Visit /admin to use admin pages."
-      : undefined;
     return (
       <span
         className={
@@ -236,14 +212,12 @@ export function PersonaPill() {
         }
         data-testid="persona-pill"
         data-mode="admin"
-        data-view={adminOnUserView ? "user" : "admin"}
         data-warn={inRedWindow ? "red" : inAmberWindow ? "amber" : "none"}
-        title={titleText}
       >
-        {label}
+        ADMIN
       </span>
     );
-  }, [mode, flashing, inAmberWindow, inRedWindow, adminOnUserView]);
+  }, [mode, flashing, inAmberWindow, inRedWindow]);
 
   return (
     <div className="flex items-center gap-1.5">

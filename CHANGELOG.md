@@ -26,6 +26,30 @@ server) and document the recommended NAS + BACKUP-wizard pattern
 plus the Samba + s3fs-fuse community sidecar workaround. Full
 write-up in [docs/release-notes/v1.9.0.md](docs/release-notes/v1.9.0.md).
 
+## v1.9.0e.2 — 2026-05-22
+
+Tight mode/view coupling. Operator UX reset that kills the "ADMIN
+mode on user pages or vice versa" confusion the v1.7.0a-era guards
+papered over. Mode now drives navigation: dropping privileges always
+sends the operator to `/files`, elevating always sends them to
+`/admin/clusters`, and URL-bar navigation to `/admin/*` in USER mode
+silently redirects to `/files` instead of firing an elevation prompt.
+Deletes `AdminEntryElevationGuard` (the side-effect-only
+elevation-on-entry hook that conflicted with the × drop button) and
+`AdminUserModeBanner` (impossible state under the new coupling).
+Reverts the v1.9.0e.1 PersonaPill mode-vs-view distinction — the
+pill is now MODE-only again, because under tight coupling USER can't
+reach `/admin/*` at all and admin on `/files/*` is the only mismatch
+state, expressed by routing rather than by the pill's visual variant.
+Keeps the v1.9.0e.1 elevation success cache-invalidate fix so the
+hydrator picks up the rotated cookie immediately. PersonaPill's ×
+drop button + UserMenu's "Switch to user view" both call
+`/auth/logout-elevation` then navigate to `/files`; UserMenu's
+"Switch to admin view" still elevates then navigates to
+`/admin/clusters`. Logo href tracks mode in both shells so the
+header brand mark always points at the operator's "home" for the
+mode they're in.
+
 ## v1.9.0e.1 — 2026-05-22
 
 Elevation success cache-invalidate + PersonaPill mode-vs-view. Two
