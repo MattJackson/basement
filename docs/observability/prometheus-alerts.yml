@@ -1,0 +1,115 @@
+# Prometheus alert rules for basement-server (v1.11.0f).
+#
+# Drop this file into your Prometheus rule_files config. Tune the
+# thresholds (especially the lag thresholds and webhook-failure rate)
+# to your environment — these are reasonable starting points for a
+# small-team self-hosted deployment.
+#
+# Apply:
+#   1. Save as /etc/prometheus/rules/basement.yml (or whichever path
+#      your prometheus.yml's `rule_files:` glob picks up).
+#   2. Reload Prometheus: `curl -X POST http://prometheus:9090/-/reload`
+#      (requires --web.enable-lifecycle) or restart the service.
+#   3. Verify under Prometheus -> Alerts that all rules are loaded.
+groups:
+  - name: basement-availability
+    interval: 30s
+    rules:
+      - alert: BasementDown
+        # build_info goes absent when no basement scrape has succeeded
+        # in the last 5min — either the process is dead or the network
+        # path to /metrics is broken.
+        expr: absent(basement_build_info) == 1
+        for: 5m
+        labels:
+          severity: critical
+          component: basement
+        annotations:
+          summary: "basement-server scrape target is missing"
+          description: "basement_build_info has been absent for 5 minutes. The process is likely down or unreachable from Prometheus."
+          runbook: "1. Check process status; 2. Curl /metrics directly from a network-adjacent host; 3. Inspect basement server logs for crashes."
+
+  - name: basement-auth
+    interval: 30s
+    rules:
+      - alert: BasementHighAuthFailureRate
+        # Sustained > 1 failed login per second over 5 minutes is a
+        # strong signal of a credential-stuffing or brute-force burst.
+        # Tighten or loosen via the threshold below.
+        expr: sum(rate(basement_auth_attempts_total{result="failure"}[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: basement-auth
+        annotations:
+          summary: "elevated authentication failure rate"
+          description: "basement is rejecting more than 1 login per second over the last 5 minutes (current rate: {{ $value | humanize }}/s). Possible credential-stuffing or brute-force attempt."
+          runbook: "1. Check audit log for source IPs; 2. Consider IP block at ingress; 3. Verify OIDC provider health if OIDC is enabled."
+
+  - name: basement-federation
+    interval: 30s
+    rules:
+      - alert: BasementFederationLagHigh
+        # Per-replica lag in seconds. The default policy ships
+        # LagAlertSec=300 (5min); we alert at 10min to leave headroom
+        # for normal write spikes. If you've raised LagAlertSec, raise
+        # this threshold proportionally.
+        expr: basement_federation_lag_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+          component: basement-federation
+        annotations:
+          summary: "federation replica lag above threshold"
+          description: "federation {{ $labels.federation_id }} replica {{ $labels.replica }} is {{ $value | humanizeDuration }} behind the primary."
+          runbook: "1. Check basement /admin/federations for the federation's health; 2. Verify replica backend reachability; 3. Inspect logs for federation:replicate errors."
+
+  - name: basement-backups
+    interval: 30s
+    rules:
+      - alert: BasementBackupFailed
+        # Last backup result was failure. on() pairs the failure
+        # counter with the success-timestamp gauge so we only alert
+        # when there's been a recorded failure since the last success.
+        expr: rate(basement_backup_runs_total{result="failure"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          component: basement-backups
+        annotations:
+          summary: "a basement backup run failed in the last 15 minutes"
+          description: "Basement recorded {{ $value | humanize }} failed backup runs per second over the last 15 minutes."
+          runbook: "1. Check /user/backups for the offending schedule; 2. Verify source + destination region credentials; 3. Tail server logs for backup:run errors."
+
+      - alert: BasementBackupOverdue
+        # Optional companion: alerts if no successful backup landed
+        # in the last 26h. Adjust to the longest interval you expect.
+        expr: (time() - max by (backup_id) (basement_backup_last_success_timestamp_seconds)) > 26 * 3600
+        for: 15m
+        labels:
+          severity: warning
+          component: basement-backups
+        annotations:
+          summary: "backup {{ $labels.backup_id }} hasn't succeeded in 26 hours"
+          description: "No successful run for backup {{ $labels.backup_id }} in the last {{ $value | humanizeDuration }}."
+          runbook: "Inspect the schedule, verify it's enabled, and check recent run history."
+
+  - name: basement-webhooks
+    interval: 30s
+    rules:
+      - alert: BasementWebhookFailureRate
+        # When > 50% of webhook deliveries fail over a 10-minute
+        # window, alert. The clamp_min on the denominator avoids
+        # divide-by-zero during low-volume windows.
+        expr: |
+          sum(rate(basement_webhook_deliveries_total{result="failure"}[10m]))
+          / clamp_min(sum(rate(basement_webhook_deliveries_total[10m])), 0.001)
+          > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: basement-webhooks
+        annotations:
+          summary: "webhook delivery failure rate above 50% (10m)"
+          description: "More than half of webhook delivery attempts failed in the last 10 minutes. Subscribers are at risk of auto-disable."
+          runbook: "1. Check /user/webhooks for delivery history; 2. Verify subscriber endpoints are reachable; 3. Tail server logs for webhook engine errors."

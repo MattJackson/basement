@@ -17,8 +17,15 @@ type Config struct {
 	DataDir        string        // BASEMENT_DATA_DIR, default "/var/lib/basement"
 	PublicURL      string        // BASEMENT_PUBLIC_URL, optional
 	LogLevel       string        // BASEMENT_LOG_LEVEL, default "info"
+	LogFormat      string        // BASEMENT_LOG_FORMAT, "json" (default) or "text"
 	SessionTTL     time.Duration // BASEMENT_SESSION_TTL, default 24h
 	AuditRetention time.Duration // BASEMENT_AUDIT_RETENTION_DAYS (days), default 90 days
+	// MetricsToken is the optional bearer token gating the /metrics
+	// Prometheus endpoint. Empty (default) leaves /metrics
+	// unauthenticated — the standard Prometheus convention is to front
+	// it with a network allowlist. Set this when shared ingress makes
+	// the network gate impractical.
+	MetricsToken   string // BASEMENT_METRICS_TOKEN, optional
 
 	Driver  DriverConfig
 	Admin   AdminConfig
@@ -93,6 +100,7 @@ func Load() (*Config, error) {
 		Listen:         ":8080",
 		DataDir:        "/var/lib/basement",
 		LogLevel:       "info",
+		LogFormat:      "json",
 		SessionTTL:     24 * time.Hour,
 		AuditRetention: 90 * 24 * time.Hour,
 		OIDC: OIDCConfig{
@@ -105,6 +113,8 @@ func Load() (*Config, error) {
 	cfg.DataDir = envOr("BASEMENT_DATA_DIR", cfg.DataDir)
 	cfg.PublicURL = envOr("BASEMENT_PUBLIC_URL", "")
 	cfg.LogLevel = envOr("BASEMENT_LOG_LEVEL", cfg.LogLevel)
+	cfg.LogFormat = envOr("BASEMENT_LOG_FORMAT", cfg.LogFormat)
+	cfg.MetricsToken = envOr("BASEMENT_METRICS_TOKEN", "")
 
 	// Parse SessionTTL (optional, default 24h)
 	sessionTTLEnv := os.Getenv("BASEMENT_SESSION_TTL")
@@ -266,6 +276,12 @@ func Load() (*Config, error) {
 	validLogLevels := map[string]bool{"debug": true, "info": true, "warn": true, "error": true}
 	if !validLogLevels[cfg.LogLevel] {
 		errs = append(errs, fmt.Errorf("BASEMENT_LOG_LEVEL=%q: must be one of debug|info|warn|error", cfg.LogLevel))
+	}
+
+	// Validate log format (optional, must be json|text)
+	validLogFormats := map[string]bool{"json": true, "text": true}
+	if !validLogFormats[cfg.LogFormat] {
+		errs = append(errs, fmt.Errorf("BASEMENT_LOG_FORMAT=%q: must be one of json|text", cfg.LogFormat))
 	}
 
 	if len(errs) > 0 {

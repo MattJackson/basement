@@ -90,6 +90,13 @@ type Server struct {
 	policy     policy.Enforcer
 	audit      audit.Logger
 	metrics    metrics.Recorder
+	// v1.11.0f: Prometheus collector + optional bearer token gate
+	// for /metrics. Nil collector means the endpoint returns 503
+	// METRICS_NOT_WIRED. Token is enforced (constant-time compare)
+	// only when non-empty — when empty, /metrics is open per the
+	// Prometheus convention of "operator fronts with allowlist".
+	promCollector *metrics.Collector
+	promToken     string
 	router     chi.Router
 	httpServer *http.Server
 	logger     *slog.Logger
@@ -253,6 +260,18 @@ func (s *Server) SetMetricsRecorder(r metrics.Recorder) {
 	s.metrics = r
 }
 
+// SetPromCollector wires the v1.11.0f Prometheus collector and the
+// token gate read from BASEMENT_METRICS_TOKEN. When nil, /metrics
+// returns 503 METRICS_NOT_WIRED. main.go always wires a non-nil
+// collector; tests that don't care leave it unset.
+//
+// MUST be called before Start — the middleware that records HTTP
+// counters is installed at routes() time.
+func (s *Server) SetPromCollector(c *metrics.Collector, token string) {
+	s.promCollector = c
+	s.promToken = token
+}
+
 // authMiddleware returns the auth middleware to install on protected
 // route groups. Production wires the v1.7.0b bearer path here by
 // passing the wired service-account store as the BearerVerifier;
@@ -304,6 +323,12 @@ func (s *Server) routes() {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Recoverer)
 	r.Use(s.logHandler)
+	// v1.11.0f: Prometheus HTTP counters + latency histogram. Installed
+	// at the root so /metrics, /api/v1/*, /webdav/* all get observed.
+	// The wrapper checks s.promCollector at request time so callers can
+	// SetPromCollector after New() (the chi router is built once in
+	// New() and middleware chains aren't re-runnable).
+	r.Use(s.promMiddlewareDeferred)
 
 	r.Route("/api/v1", func(apiR chi.Router) {
 		apiR.Use(middleware.AllowContentType("application/json"))
@@ -657,7 +682,61 @@ func (s *Server) routes() {
 	r.Handle("/webdav", s.webdavRouter())
 	r.Handle("/webdav/*", s.webdavRouter())
 
+	// v1.11.0f: Prometheus exporter. No auth by convention (operators
+	// front this with a network allowlist) unless promToken is set, in
+	// which case the handler enforces Bearer auth. Returns 503 when the
+	// collector isn't wired so misconfigurations surface clearly.
+	r.Handle("/metrics", s.metricsHandler())
+
 	r.Handle("/*", web.Handler())
+}
+
+// metricsHandler returns the Prometheus /metrics handler if the
+// collector was wired, otherwise a 503 stub.
+func (s *Server) metricsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.promCollector == nil {
+			writeErrorSimple(w, http.StatusServiceUnavailable, "METRICS_NOT_WIRED",
+				"Prometheus exporter is not configured on this deployment.")
+			return
+		}
+		s.promCollector.Handler(s.promToken).ServeHTTP(w, r)
+	})
+}
+
+// promRouteFor resolves the chi route template (e.g. /api/v1/buckets/{id})
+// from a request — gives the Prometheus HTTP counter labels a bounded
+// cardinality (one row per declared route) rather than one row per
+// concrete URL path.
+//
+// Falls back to the raw path when chi hasn't matched yet (root-level
+// requests where chi's RouteContext is empty).
+func promRouteFor(r *http.Request) string {
+	rctx := chi.RouteContext(r.Context())
+	if rctx == nil {
+		return r.URL.Path
+	}
+	if p := rctx.RoutePattern(); p != "" {
+		return p
+	}
+	return r.URL.Path
+}
+
+// promMiddlewareDeferred is a thin middleware that checks
+// s.promCollector at request time and delegates to the collector's
+// own middleware. When the collector hasn't been wired (tests), it
+// passes through cleanly. Defining this as a method (rather than
+// computing the middleware up front in routes()) means callers can
+// SetPromCollector at any point after New() — the chi router is
+// stamped once in New() and we can't re-run the .Use chain.
+func (s *Server) promMiddlewareDeferred(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.promCollector == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.promCollector.PromMiddleware(promRouteFor)(next).ServeHTTP(w, r)
+	})
 }
 
 // webdavRouter returns the wired WebDAV handler if SetWebDAVHandler
