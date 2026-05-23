@@ -29,6 +29,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ElevationModal } from "@/components/auth/ElevationModal";
 import type { AuthMode } from "@/shared/auth/mode";
 
@@ -115,6 +116,7 @@ export function ElevationProvider({ children }: { children: ReactNode }) {
   // practice the modal blocks the UI so concurrent prompts shouldn't
   // arise — but the ref prevents a state race if they do.
   const queueRef = useRef<PendingPrompt | null>(null);
+  const queryClient = useQueryClient();
 
   const promptForElevation = useCallback(
     (targetMode: Exclude<AuthMode, "user">, reason?: string) =>
@@ -150,7 +152,15 @@ export function ElevationProvider({ children }: { children: ReactNode }) {
     queueRef.current = null;
     setPending(null);
     entry?.resolve();
-  }, []);
+    // v1.9.0e.1: invalidate /auth/me (and any mode-derived queries) so
+    // the AuthModeHydrator picks up the fresh server mode immediately.
+    // Without this, the previously-cached /auth/me payload still says
+    // mode=user and AdminEntryElevationGuard fires the modal AGAIN on
+    // the very next render — same shape as the v1.7.0a.2 drop-
+    // privileges cache-staleness bug, just on the rising edge.
+    queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    queryClient.invalidateQueries({ queryKey: ["user"] });
+  }, [queryClient]);
 
   const handleCancel = useCallback(() => {
     const entry = queueRef.current;

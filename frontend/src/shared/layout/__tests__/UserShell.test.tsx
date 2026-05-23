@@ -25,6 +25,14 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
     useNavigate: vi.fn(() => vi.fn()),
     useSearch: vi.fn(() => ({})),
     useRouter: vi.fn(() => ({ isServer: false })),
+    // v1.9.0e.1: PersonaPill (mounted inside UserShell) now consults
+    // useLocation to distinguish admin-mode-on-admin-page from admin-
+    // mode-on-user-page. UserShell renders on /files/* by definition,
+    // so return a /files path so the rendered pill takes the user-view
+    // branch when in admin mode (irrelevant here — auth provider is
+    // absent so it defaults to USER — but the hook still needs to
+    // return a value to avoid throwing).
+    useLocation: vi.fn(() => ({ pathname: "/files" })),
   };
 });
 

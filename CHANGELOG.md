@@ -26,6 +26,30 @@ server) and document the recommended NAS + BACKUP-wizard pattern
 plus the Samba + s3fs-fuse community sidecar workaround. Full
 write-up in [docs/release-notes/v1.9.0.md](docs/release-notes/v1.9.0.md).
 
+## v1.9.0e.1 — 2026-05-22
+
+Elevation success cache-invalidate + PersonaPill mode-vs-view. Two
+operator-reported bugs in the elevation flow. **Bug 1:** clicking
+"Switch to admin" in UserMenu → entering password → success → the
+guard at `/admin/clusters` immediately re-prompted because the cached
+`/auth/me` payload still said `mode: "user"` and
+`AdminEntryElevationGuard` reads `user.mode` directly off the cached
+payload to decide whether to fire. Fix in
+`shared/auth/elevation.tsx` — `handleSuccess` now invalidates the
+`["auth", "me"]` (and `["user"]`) queries so `AuthModeHydrator` picks
+up the freshly-rotated cookie mode immediately. Same shape as the
+v1.7.0a.2 drop-privileges cache-staleness bug, just on the rising
+edge. **Bug 2:** `PersonaPill` showed an identical "ADMIN" pill
+regardless of which URL the operator was on, so admin-mode-on-`/files`
+looked the same as admin-mode-on-`/admin/*` — confusing because the
+URL didn't match the chrome. Fix in `components/layout/PersonaPill.tsx`
+— pill now consults `useLocation()` and renders a solid amber pill
+on `/admin/*` ("ADMIN") versus an outlined / muted amber pill on
+`/files/*` ("ADMIN · user view") with a tooltip explaining the state.
+USER mode pill is unchanged. Three new test files pin both fixes:
+`elevation-invalidate.test.tsx`, `PersonaPill-view.test.tsx`, and
+`AdminEntryElevationGuard-no-double-prompt.test.tsx`.
+
 ## v1.9.0d — 2026-05-22
 
 Generalised Gateways UI + plugin doc. The WebDAV-hardcoded card on
