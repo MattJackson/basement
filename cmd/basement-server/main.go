@@ -30,6 +30,7 @@ import (
 	"github.com/mattjackson/basement/internal/gateway/webdav"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
+	"github.com/mattjackson/basement/internal/version"
 	"github.com/mattjackson/basement/internal/webhook"
 )
 
@@ -54,7 +55,20 @@ func main() {
 		level = slog.LevelInfo
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	// v1.11.0f: select slog handler format from BASEMENT_LOG_FORMAT.
+	// JSON is the production default — every log line is one parseable
+	// record (filebeat / loki / stackdriver all consume it directly).
+	// Text mode is a developer convenience that produces human-friendly
+	// timestamp+level+msg+kv lines.
+	handlerOpts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	switch cfg.LogFormat {
+	case "text":
+		handler = slog.NewTextHandler(os.Stdout, handlerOpts)
+	default:
+		handler = slog.NewJSONHandler(os.Stdout, handlerOpts)
+	}
+	logger := slog.New(handler)
 	slog.SetDefault(logger)
 
 	// Warn loud if the data dir isn't writable — saves will fail.
@@ -293,8 +307,18 @@ func main() {
 	// crashing process never loses a recorded action. Tests that
 	// instantiate api.New() don't get this wiring — they fall
 	// through to the no-op default installed by New().
-	auditLogger := audit.NewFileLogger(cfg.DataDir)
+	//
+	// v1.11.0f: wrap the file logger in metrics.AuditCollector so
+	// every event also drives the Prometheus counters
+	// (auth_attempts_total, audit_events_total, federation_replicate,
+	// backup_runs, webhook_deliveries). The collector forwards every
+	// Log call to the wrapped logger so the on-disk log is unchanged.
+	promCollector := metrics.NewCollector()
+	promCollector.SetBuildInfo(version.Version, version.Commit)
+	fileAuditLogger := audit.NewFileLogger(cfg.DataDir)
+	auditLogger := metrics.NewAuditCollector(fileAuditLogger, promCollector)
 	srv.SetAuditLogger(auditLogger)
+	srv.SetPromCollector(promCollector, cfg.MetricsToken)
 
 	// v1.0.0d: per-bucket bytes+objects snapshots, persisted hourly
 	// to {dataDir}/metrics/YYYY-MM-DD.jsonl. Powers the time-series
@@ -458,6 +482,13 @@ func main() {
 		MaxJitter: 90 * time.Second,
 	})
 
+	// v1.11.0f: 30s gauge refresher. Walks the federation store +
+	// service-account store to populate the Prometheus gauges that
+	// aren't naturally event-driven (federation lag, SA count). Kept
+	// out of the request hot path; one tick per 30s is rounding-error
+	// load for a store of dozens of federations.
+	go runPromGaugeRefresher(ctxSignal, promCollector, st.Federated(), st.ServiceAccounts())
+
 	if err := srv.Start(ctxSignal); err != nil {
 		slog.Error("http server error", "error", err)
 		os.Exit(1)
@@ -479,4 +510,73 @@ func (b webdavOrgCapsBridge) IsEnabled() bool {
 		return true
 	}
 	return b.caps.Get().Gateways.WebDAV.Enabled
+}
+
+// runPromGaugeRefresher ticks every 30s and refreshes the Prometheus
+// gauges that aren't naturally event-driven: per-replica federation
+// lag, service-account count. Returns on ctx.Done().
+//
+// Bucket + object gauges are populated lazily by the per-bucket
+// snapshot scheduler (internal/metrics/scheduler.go) — those touch
+// every connection/bucket already and updating Prometheus there would
+// double the per-tick fan-out cost. Keeping them as a v1.11.x follow-up
+// once the snapshot scheduler grows a "this tick observed these
+// numbers" hook.
+func runPromGaugeRefresher(ctx context.Context, c *metrics.Collector, fedStore federation.FederatedBuckets, saStore serviceAccountsLister) {
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	// Fire once immediately so a fresh boot has gauges before the first
+	// tick; otherwise the first 30s of /metrics shows no federation lag.
+	refreshPromGauges(c, fedStore, saStore)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			refreshPromGauges(c, fedStore, saStore)
+		}
+	}
+}
+
+// refreshPromGauges walks the federation store + SA store and updates
+// every gauge that derives from them. Best-effort: store errors log
+// and continue so a transient JSON-load issue doesn't poison metrics.
+func refreshPromGauges(c *metrics.Collector, fedStore federation.FederatedBuckets, saStore serviceAccountsLister) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if fedStore != nil {
+		fbs, err := fedStore.All(ctx)
+		if err != nil {
+			slog.Warn("prom gauge refresh: federation list failed", "error", err)
+		} else {
+			now := time.Now().UTC()
+			for _, fb := range fbs {
+				for _, rep := range fb.Replicas {
+					var lag float64
+					if !rep.LastSync.IsZero() {
+						lag = now.Sub(rep.LastSync).Seconds()
+					}
+					replicaKey := rep.RegionID + ":" + rep.Bucket
+					c.SetFederationLag(fb.ID, replicaKey, lag)
+				}
+			}
+		}
+	}
+
+	if saStore != nil {
+		count, err := saStore.CountAll(ctx)
+		if err != nil {
+			slog.Warn("prom gauge refresh: service-account count failed", "error", err)
+		} else {
+			c.SetServiceAccountsTotal(count)
+		}
+	}
+}
+
+// serviceAccountsLister is the narrow interface refreshPromGauges
+// needs. The real service-account store satisfies it via the
+// CountAll method added in v1.11.0f; tests can substitute a fake.
+type serviceAccountsLister interface {
+	CountAll(ctx context.Context) (int, error)
 }

@@ -92,6 +92,10 @@ type ServiceAccounts interface {
 	Rotate(ctx context.Context, id string) (ServiceAccount, string, error)
 	VerifySecret(ctx context.Context, akid string, candidateSecret string) (bool, error)
 	TouchLastUsed(ctx context.Context, id string) error
+	// CountAll returns the total service-account count across every
+	// owner. Used by the v1.11.0f Prometheus gauge refresher; cheap
+	// (linear scan over the in-memory map under an RLock).
+	CountAll(ctx context.Context) (int, error)
 }
 
 // fileStore implements ServiceAccounts on top of a JSON file. Keyed
@@ -433,6 +437,15 @@ func (fs *fileStore) ListForUser(_ context.Context, userID string) ([]ServiceAcc
 		}
 	}
 	return out, nil
+}
+
+// CountAll returns the total row count across every owner — used by
+// the v1.11.0f Prometheus gauge refresher to populate
+// basement_service_accounts_total.
+func (fs *fileStore) CountAll(_ context.Context) (int, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	return len(fs.rows), nil
 }
 
 // Rotate replaces the row's secret + bcrypt hash. AccessKeyID is

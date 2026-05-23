@@ -4,6 +4,60 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0f — 2026-05-23
+
+Observability cycle: basement now exposes a fixed-set Prometheus
+exporter, a drop-in Grafana dashboard, a starter alert ruleset, and
+runs all server logging through `log/slog` with configurable JSON or
+text output.
+
+- **`/metrics` endpoint** publishes 14 metric families covering HTTP
+  request rate + latency histogram, auth attempts, audit volume,
+  federation replicate + per-replica lag, backup runs + last-success
+  timestamp, webhook delivery outcomes, active sessions, service
+  accounts, buckets, objects, and build info. Defaults to
+  unauthenticated (standard Prometheus convention); a bearer-token
+  gate activates when `BASEMENT_METRICS_TOKEN` is set.
+- **Audit -> Prometheus bridge** wraps the existing `audit.Logger` so
+  every event flowing through the audit pipeline (`auth:login`,
+  `federation:replicate_*`, `backup:run_*`, `webhook:fired_*`) drives
+  the corresponding Prometheus counter automatically — no call-site
+  instrumentation required. The on-disk audit log is unchanged.
+- **`docs/observability/`** ships `grafana-dashboard.json` (ten-panel
+  drop-in dashboard), `prometheus-alerts.yml` (six rules:
+  BasementDown, BasementHighAuthFailureRate, BasementFederationLagHigh,
+  BasementBackupFailed, BasementBackupOverdue, BasementWebhookFailureRate),
+  and a README with scrape config + import steps + metric reference.
+- **`BASEMENT_LOG_FORMAT`** switches the slog handler between `json`
+  (default; one parseable object per line, ready for log aggregators)
+  and `text` (key=value for local dev). Invalid values rejected at
+  boot.
+- **`basement_build_info`** stamped from `version.Version` +
+  `version.Commit` at boot, giving operators a stable "is basement
+  alive" signal and the basis for the `BasementDown` alert.
+
+Tests: new unit tests cover (a) every metric family surfaces on
+`/metrics`, (b) bearer-token gate accepts/rejects correctly, (c) the
+HTTP middleware records counter + histogram samples, (d) backup
+success runs update the last-success gauge, (e) the audit collector
+fans out auth/webhook/federation/backup events to their specialty
+counters, (f) `/metrics` returns 503 when the collector isn't wired,
+(g) bad-cred login bumps `auth_attempts_total{result="failure"}`
+through the wired audit collector, (h) `BASEMENT_LOG_FORMAT` parses
+and validates, (i) JSON slog output is parseable and text slog
+output isn't accidentally JSON-shaped.
+
+Touched: `internal/metrics/prometheus.go` (new),
+`internal/metrics/audit_collector.go` (new),
+`internal/metrics/prometheus_test.go` (new),
+`internal/api/server.go`, `internal/api/prometheus_endpoint_test.go`
+(new), `internal/config/config.go`, `internal/config/config_test.go`,
+`internal/serviceaccount/store.go`, `cmd/basement-server/main.go`,
+`cmd/basement-server/main_test.go` (new),
+`docs/observability/README.md` (new),
+`docs/observability/grafana-dashboard.json` (new),
+`docs/observability/prometheus-alerts.yml` (new), `CHANGELOG.md`.
+
 ## v1.11.0d — 2026-05-22
 
 Trust + credibility docs cycle. Self-hosters evaluating basement

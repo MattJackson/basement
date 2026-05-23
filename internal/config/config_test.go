@@ -252,6 +252,86 @@ func TestLoad_InvalidLogLevel(t *testing.T) {
 	}
 }
 
+// TestLoad_LogFormatDefaultsToJSON: the v1.11.0f default is JSON
+// output suitable for log aggregation in production. Operators flip
+// to text only for local dev.
+func TestLoad_LogFormatDefaultsToJSON(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if cfg.LogFormat != "json" {
+		t.Errorf("LogFormat default = %q, want \"json\"", cfg.LogFormat)
+	}
+}
+
+// TestLoad_LogFormatAcceptsText covers the text override that
+// developers use locally.
+func TestLoad_LogFormatAcceptsText(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_LOG_FORMAT", "text")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if cfg.LogFormat != "text" {
+		t.Errorf("LogFormat = %q, want \"text\"", cfg.LogFormat)
+	}
+}
+
+// TestLoad_InvalidLogFormat rejects bogus values up front so misconfig
+// surfaces at boot rather than producing an unparseable log stream.
+func TestLoad_InvalidLogFormat(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_LOG_FORMAT", "yaml")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "BASEMENT_LOG_FORMAT") {
+		t.Errorf("error missing BASEMENT_LOG_FORMAT: %v", err)
+	}
+}
+
+// TestLoad_MetricsTokenReadFromEnv covers the optional bearer-token
+// gate for the /metrics endpoint.
+func TestLoad_MetricsTokenReadFromEnv(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
+	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_METRICS_TOKEN", "scrape-s3cr3t")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if cfg.MetricsToken != "scrape-s3cr3t" {
+		t.Errorf("MetricsToken = %q, want %q", cfg.MetricsToken, "scrape-s3cr3t")
+	}
+}
+
 func TestLoad_CustomSessionTTL(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "garage")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
