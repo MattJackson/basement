@@ -55,6 +55,7 @@ export function UserMenu() {
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
+  const uiAdmin = user?.uiAdmin ?? false;
   const initial = (user?.username ?? "?").charAt(0).toUpperCase();
 
   const handleLogout = async () => {
@@ -143,25 +144,20 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         {/* Persona switcher — admin ⇄ user. The role gate at `/` */}
         {/* routes UIAdmins to /admin and others to /files; this lets */}
-        {/* an admin manually visit the user view + back. Both links */}
-        {/* render for now (pre-RBAC, everyone is admin); when RBAC */}
-        {/* lands, hide the admin link for non-UIAdmins. */}
+        {/* an admin manually visit the user view + back. */}
         {/* v1.3.0a.3: admin entry triggers elevation BEFORE navigating */}
         {/* so the first action under /admin doesn't 403; user entry */}
         {/* stays a plain link (no elevation needed for /files). */}
         <DropdownMenuGroup>
-          <DropdownMenuItem
-            onClick={handleSwitchToAdmin}
-            data-testid="switch-to-admin"
-          >
-            Switch to admin view
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={handleSwitchToUser}
-            data-testid="switch-to-user"
-          >
-            Switch to user view
-          </DropdownMenuItem>
+          {role === "user" ? (
+            <DropdownMenuItem onClick={handleSwitchToAdmin} data-testid="switch-to-admin">
+              Switch to admin view
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={handleSwitchToUser} data-testid="switch-to-user">
+              Switch to user view
+            </DropdownMenuItem>
+          )}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
@@ -180,9 +176,11 @@ export function UserMenu() {
           <DropdownMenuLinkItem href="/admin/audit">
             Audit log
           </DropdownMenuLinkItem>
-          <DropdownMenuLinkItem href="/admin/system">
-            System settings
-          </DropdownMenuLinkItem>
+          {uiAdmin && (
+            <DropdownMenuLinkItem href="/admin/system">
+              System settings
+            </DropdownMenuLinkItem>
+          )}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         {/* v1.13.0a (ADR-0008): Theme submenu — System / Light / Dark.
