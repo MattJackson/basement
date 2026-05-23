@@ -167,7 +167,7 @@ function mockRegistry(opts: {
 }
 
 describe("GatewaysCard (v1.9.0d)", () => {
-  it("renders one row per registered gateway in registry order", () => {
+  it("renders implemented gateways first, then stubs alphabetically (v1.11.0.19)", () => {
     mockRegistry({ data: defaultRoster() });
     render(
       <GatewaysCard
@@ -184,6 +184,17 @@ describe("GatewaysCard (v1.9.0d)", () => {
         screen.getByTestId(`gateways-${name}-section`),
       ).toBeInTheDocument();
     }
+
+    // v1.11.0.19: webdav (implemented) sorts first; stubs follow in
+    // alpha order. Pin the order by reading the rendered sections in
+    // DOM order and comparing names.
+    const sections = screen.getAllByTestId(/^gateways-[a-z0-9]+-section$/);
+    const names = sections.map((el) =>
+      (el.getAttribute("data-testid") ?? "")
+        .replace(/^gateways-/, "")
+        .replace(/-section$/, ""),
+    );
+    expect(names).toEqual(["webdav", "ftp", "nfs", "s3", "smb"]);
   });
 
   it("WebDAV row shows enable toggle + capability chips", () => {

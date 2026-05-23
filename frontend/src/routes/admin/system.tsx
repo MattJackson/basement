@@ -605,7 +605,18 @@ export function GatewaysCard({
             the basement server log; the registry wires up at boot.
           </div>
         ) : (
-          (registry.data ?? []).map((g, idx) => (
+          // v1.11.0.19: surface implemented gateways first so the operator
+          // sees the live row (WebDAV today) before scrolling past four
+          // "coming soon" stubs. Each group stays alphabetical so the
+          // order is still deterministic as new gateways land. Backend
+          // Registry.All() stays alpha — this is a presentation tweak.
+          [...(registry.data ?? [])]
+            .sort((a, b) => {
+              if (a.implemented !== b.implemented)
+                return a.implemented ? -1 : 1;
+              return a.name.localeCompare(b.name);
+            })
+            .map((g, idx) => (
             <div key={g.name}>
               {idx > 0 && <hr className="my-4 border-input" />}
               <GatewayRow
