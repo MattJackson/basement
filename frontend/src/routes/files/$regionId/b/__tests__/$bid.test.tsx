@@ -44,6 +44,11 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
     useUserRegionObjectsInfinite: vi.fn(),
     useUserRegionPresignGet: vi.fn(),
     useFederationByTarget: vi.fn(),
+    // v1.10.0b — versioning hooks. Default mocks land in beforeEach.
+    useBucketVersioning: vi.fn(),
+    usePutBucketVersioning: vi.fn(),
+    useObjectVersions: vi.fn(),
+    useDeleteObjectVersion: vi.fn(),
   };
 });
 
@@ -54,7 +59,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { Route } from "@/routes/files/$regionId/b/$bid";
 import {
+  useBucketVersioning,
+  useDeleteObjectVersion,
   useFederationByTarget,
+  useObjectVersions,
+  usePutBucketVersioning,
   useUserRegionBuckets,
   useUserRegionObjectsInfinite,
   useUserRegionPresignGet,
@@ -125,6 +134,33 @@ beforeEach(() => {
     data: null,
     isLoading: false,
     error: null,
+  } as any);
+
+  // v1.10.0b: default versioning hooks land in the "supported but
+  // never enabled" state — the toggle + per-row Versions button don't
+  // surface, the section renders the disabled-but-supported branch.
+  // Tests that exercise versioning behavior override these per case.
+  vi.mocked(useBucketVersioning).mockReturnValue({
+    data: { status: "disabled", supported: true },
+    isLoading: false,
+    error: null,
+  } as any);
+  vi.mocked(usePutBucketVersioning).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+  } as any);
+  vi.mocked(useObjectVersions).mockReturnValue({
+    data: { versions: [] },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  } as any);
+  vi.mocked(useDeleteObjectVersion).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+    isError: false,
+    variables: undefined,
   } as any);
 });
 
@@ -457,5 +493,298 @@ describe("/files/$regionId/b/$bid — federation badge (v1.6.0e)", () => {
         params: { id: "fed-abc" },
       }),
     );
+  });
+});
+
+// v1.10.0b: versioning UI. Three surfaces wire into the bucket
+// browser:
+//   1. The VersioningSection card at the bottom of the page —
+//      enable/suspend toggle + Save (mutation hook).
+//   2. The "Show all versions" toolbar — only shows when versioning
+//      is active (enabled or suspended) on a driver that supports it.
+//   3. The per-row "Versions" button — gated by the same condition;
+//      opens the ObjectVersionsPanel for that key.
+describe("/files/$regionId/b/$bid — versioning UI (v1.10.0b)", () => {
+  it("renders the versioning section card on every bucket page", () => {
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({ objects: [{ key: "a.txt", size: 10 }] }) as any,
+    );
+
+    renderBucket();
+    expect(screen.getByTestId("versioning-section")).toBeInTheDocument();
+  });
+
+  it("hides the Show-all-versions toggle when versioning is unsupported by the driver", () => {
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "disabled", supported: false },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({ objects: [{ key: "a.txt", size: 10 }] }) as any,
+    );
+
+    renderBucket();
+    expect(screen.queryByTestId("show-all-versions-toolbar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("versioning-unsupported")).toBeInTheDocument();
+    // The per-row Versions button must NOT render when the driver
+    // doesn't support versioning — would open an empty panel.
+    expect(screen.queryByTestId("file-versions-a.txt")).not.toBeInTheDocument();
+  });
+
+  it("hides the Show-all-versions toggle when versioning is supported but never enabled", () => {
+    // Default beforeEach mock — supported but status="disabled".
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({ objects: [{ key: "a.txt", size: 10 }] }) as any,
+    );
+
+    renderBucket();
+    expect(screen.queryByTestId("show-all-versions-toolbar")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("file-versions-a.txt")).not.toBeInTheDocument();
+  });
+
+  it("shows the Show-all-versions toggle and per-row Versions buttons when versioning is enabled", () => {
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "enabled", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [
+          { key: "a.txt", size: 10 },
+          { key: "b.txt", size: 20 },
+        ],
+      }) as any,
+    );
+
+    renderBucket();
+    expect(screen.getByTestId("show-all-versions-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("file-versions-a.txt")).toBeInTheDocument();
+    expect(screen.getByTestId("file-versions-b.txt")).toBeInTheDocument();
+  });
+
+  it("shows the Show-all-versions toggle when versioning is suspended (historical versions still queryable)", () => {
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "suspended", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({ objects: [{ key: "a.txt", size: 10 }] }) as any,
+    );
+
+    renderBucket();
+    expect(screen.getByTestId("show-all-versions-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("file-versions-a.txt")).toBeInTheDocument();
+  });
+
+  it("clicking a row's Versions button opens the versions panel for that key", async () => {
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "enabled", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [{ key: "a.txt", size: 10 }],
+      }) as any,
+    );
+    vi.mocked(useObjectVersions).mockReturnValue({
+      data: {
+        versions: [
+          {
+            versionId: "v3id",
+            key: "a.txt",
+            size: 30,
+            lastModified: "2026-05-22T14:32:00Z",
+            isLatest: true,
+            isDeleteMarker: false,
+          },
+          {
+            versionId: "v2id",
+            key: "a.txt",
+            size: 20,
+            lastModified: "2026-05-18T09:14:00Z",
+            isLatest: false,
+            isDeleteMarker: false,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    renderBucket();
+    await userEvent.click(screen.getByTestId("file-versions-a.txt"));
+
+    expect(screen.getByTestId("object-versions-panel")).toBeInTheDocument();
+    // Both version rows render with the per-version testid.
+    expect(screen.getByTestId("object-version-row-v3id")).toBeInTheDocument();
+    expect(screen.getByTestId("object-version-row-v2id")).toBeInTheDocument();
+    // The current version row carries the "current" affordance via
+    // the data-is-latest attribute (and its rendered Badge).
+    expect(
+      screen.getByTestId("object-version-row-v3id").getAttribute("data-is-latest"),
+    ).toBe("true");
+  });
+
+  it("renders delete markers with the distinct delete-marker badge", async () => {
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "enabled", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [{ key: "gone.txt", size: 10 }],
+      }) as any,
+    );
+    vi.mocked(useObjectVersions).mockReturnValue({
+      data: {
+        versions: [
+          {
+            versionId: "dm1",
+            key: "gone.txt",
+            size: 0,
+            lastModified: "2026-05-22T14:32:00Z",
+            isLatest: true,
+            isDeleteMarker: true,
+          },
+          {
+            versionId: "v1id",
+            key: "gone.txt",
+            size: 20,
+            lastModified: "2026-05-18T09:14:00Z",
+            isLatest: false,
+            isDeleteMarker: false,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    renderBucket();
+    await userEvent.click(screen.getByTestId("file-versions-gone.txt"));
+
+    // Delete-marker badge appears on the tombstone row only.
+    const dmRow = screen.getByTestId("object-version-row-dm1");
+    expect(dmRow.getAttribute("data-is-delete-marker")).toBe("true");
+    expect(
+      screen.getAllByTestId("object-version-delete-marker-badge").length,
+    ).toBe(1);
+    // Real version row carries no delete-marker badge.
+    const realRow = screen.getByTestId("object-version-row-v1id");
+    expect(realRow.getAttribute("data-is-delete-marker")).toBe("false");
+    // Real versions render a Download anchor; delete markers don't.
+    expect(screen.getByTestId("object-version-download-v1id")).toBeInTheDocument();
+    expect(screen.queryByTestId("object-version-download-dm1")).not.toBeInTheDocument();
+  });
+
+  it("delete-version button opens a confirmation modal and fires the mutation on confirm", async () => {
+    const deleteMutate = vi.fn();
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "enabled", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useDeleteObjectVersion).mockReturnValue({
+      mutate: deleteMutate,
+      isPending: false,
+      isError: false,
+      variables: undefined,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({
+        objects: [{ key: "a.txt", size: 10 }],
+      }) as any,
+    );
+    vi.mocked(useObjectVersions).mockReturnValue({
+      data: {
+        versions: [
+          {
+            versionId: "v2id",
+            key: "a.txt",
+            size: 20,
+            isLatest: false,
+            isDeleteMarker: false,
+          },
+        ],
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any);
+
+    renderBucket();
+    await userEvent.click(screen.getByTestId("file-versions-a.txt"));
+    await userEvent.click(screen.getByTestId("object-version-delete-v2id"));
+    // Confirmation dialog mounts.
+    await userEvent.click(screen.getByTestId("object-version-delete-confirm"));
+
+    expect(deleteMutate).toHaveBeenCalledTimes(1);
+    expect(deleteMutate).toHaveBeenCalledWith(
+      { key: "a.txt", versionId: "v2id" },
+      expect.any(Object),
+    );
+  });
+
+  it("VersioningSection Save button stays disabled until the operator changes the select", async () => {
+    const putMutate = vi.fn();
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "enabled", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(usePutBucketVersioning).mockReturnValue({
+      mutate: putMutate,
+      isPending: false,
+      isError: false,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({ objects: [{ key: "a.txt", size: 10 }] }) as any,
+    );
+
+    renderBucket();
+    const saveBtn = screen.getByTestId("versioning-save");
+    expect(saveBtn).toBeDisabled();
+
+    // Switch from Enabled to Suspended and assert Save is now active.
+    const select = screen.getByTestId("versioning-status-select") as HTMLSelectElement;
+    await userEvent.selectOptions(select, "suspended");
+    expect(saveBtn).not.toBeDisabled();
+
+    await userEvent.click(saveBtn);
+    expect(putMutate).toHaveBeenCalledTimes(1);
+    expect(putMutate).toHaveBeenCalledWith(
+      { status: "suspended" },
+      expect.any(Object),
+    );
+  });
+
+  it("toggling Show-all-versions flips highlight state on per-row Versions buttons", async () => {
+    vi.mocked(useBucketVersioning).mockReturnValue({
+      data: { status: "enabled", supported: true },
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
+      makeInfiniteResult({ objects: [{ key: "a.txt", size: 10 }] }) as any,
+    );
+
+    renderBucket();
+    const versionsBtn = screen.getByTestId("file-versions-a.txt");
+    // Ghost variant by default; toggling Show-all-versions swaps it
+    // to outline. Use the className contains assertion since shadcn
+    // Buttons compose their variant into the class list.
+    const defaultClass = versionsBtn.className;
+
+    const toggle = screen.getByTestId("show-all-versions-toggle");
+    await userEvent.click(toggle);
+
+    expect(versionsBtn.className).not.toBe(defaultClass);
   });
 });
