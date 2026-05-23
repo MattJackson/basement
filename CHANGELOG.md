@@ -4,6 +4,96 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0 — 2026-05-23
+
+Milestone release closing the v1.11 launch-readiness arc. See
+[`docs/release-notes/v1.11.0.md`](docs/release-notes/v1.11.0.md) for
+the full write-up.
+
+Summary of what shipped across the v1.11.0a -> v1.11.0f + v1.11.0.1
+sub-cycles:
+
+- **First-run onboarding wizard** (`v1.11.0a`) — five-step
+  Welcome -> Cluster -> OIDC -> Team -> Done wizard at
+  `/admin/first-run`, Skip on every step, dismiss latch on the
+  welcome card; AppShell auto-routes admin entries when
+  `needsOnboarding && !completed`; upgrade-safe (existing deploys
+  auto-promote to `completed=true`).
+- **Production deployment guide** (`v1.11.0b`) — new
+  `docs/deployment/` directory with README + docker + reverse-proxy
+  + tls + hardening + backup-basement + upgrade docs covering the
+  full path from `docker run` to production posture.
+- **5-minute install** (`v1.11.0c`) — auto-bootstrap of
+  JWT secret + admin password on first boot;
+  `INITIAL ADMIN PASSWORD` printed to stdout; persisted to
+  `{DATA_DIR}/.jwt-secret` + `{DATA_DIR}/.initial-admin-password`
+  (0600); new `scripts/install.sh` curl-pipe-bash one-liner.
+  Zero behavioural change for operators with explicit env.
+- **Trust + credibility docs** (`v1.11.0d`) — `SECURITY.md`,
+  `CONTRIBUTING.md`, `DCO.md`, `.github/ISSUE_TEMPLATE/`,
+  `PULL_REQUEST_TEMPLATE.md`, plus a CycloneDX SBOM GitHub Actions
+  workflow published per release tag.
+- **Screenshots gallery + README polish** (`v1.11.0e`) — 15-shot
+  Playwright-driven capture under `docs/screenshots/v1.10/` plus
+  a 2x4 README embed; README compressed from a 60-bullet feature
+  wall into a 13-row table; new Quickstart code-block matching
+  v1.11.0c auto-bootstrap.
+- **Observability — Prometheus exporter + Grafana + alerts +
+  slog** (`v1.11.0f`) — `/metrics` endpoint with 14 metric
+  families; `docs/observability/` with Grafana dashboard +
+  alert rules; `BASEMENT_LOG_FORMAT=json|text` slog handler.
+- **Garage v2 admin-tier connection hotfix** (`v1.11.0.1`) —
+  caught by real-Garage-v2 testing during the v1.11 cycle.
+
+No breaking changes; no driver interface changes; no data
+migrations. New env vars: `BASEMENT_METRICS_TOKEN`,
+`BASEMENT_LOG_FORMAT`, `BASEMENT_ADMIN_PASSWORD` (all optional).
+
+## v1.11.0e — 2026-05-23
+
+Screenshots gallery + README polish. Closes the v1.11
+launch-readiness gap on the README front so visitors landing on
+the repo see what they're getting before they install.
+
+- **Capture script** (`scripts/capture-v1.10-screenshots.ts`) —
+  Playwright-driven walk against a live deploy using the same
+  fetch-based auth pattern as `scripts/comprehensive-smoke.ts`.
+  Discovers a real region + bucket + cluster + federation +
+  backup for the route walks; mints one clean ephemeral
+  service-account for the SA list + MCP section shot. Shots
+  7 / 8 / 9 / 10 fall back to a Playwright-rendered static-HTML
+  mock when the live target (Garage-only) doesn't support the
+  underlying primitive; mocked shots end in `-mocked.png` and
+  embed an explicit disclaimer naming the production component.
+- **Output** (`docs/screenshots/v1.10/`, 15 PNGs) — clusters
+  list, bucket browser (desktop + mobile), three compliance
+  sections (Versioning / Object Lock / Encryption), object
+  versions panel, federation detail + wizard, backup detail,
+  service accounts list, MCP config dialog, Gateways card,
+  policy matrix, audit log.
+- **Gallery index** (`docs/screenshots/README.md`) — per-shot
+  table with file name + description + source (live / mock);
+  documents the `-mocked.png` convention; re-capture command +
+  env var overrides.
+- **README polish** — "Why basement" trimmed to a 5-sentence
+  pitch; new Quickstart code-block matching v1.11.0c auto-
+  bootstrap; new Screenshots section embedding 8 of the 15 PNGs
+  with one-line context; Features compressed from a 60-bullet
+  wall into a 13-row table with per-release-notes links; new
+  "What's next" section naming v1.11 launch-readiness +
+  v2.0 S3 gateway + v2.x sketch; CONTRIBUTING / SECURITY links.
+- **Tests** (`internal/docslint/screenshots_test.go`) —
+  TestScreenshotsIndex (README headings + capture script +
+  v1.10/ refs + `-mocked.png` explanation), TestV110GalleryFiles
+  (each of the 15 expected shots exists, accepts live or mocked
+  variant), TestReadmeReferencesGallery (README image embeds +
+  index link can't silently rot).
+
+Touched: `scripts/capture-v1.10-screenshots.ts` (new),
+`docs/screenshots/v1.10/` (15 PNGs new), `docs/screenshots/README.md`
+(new), `README.md`, `internal/docslint/screenshots_test.go` (new),
+`CHANGELOG.md`.
+
 ## v1.11.0f — 2026-05-23
 
 Observability cycle: basement now exposes a fixed-set Prometheus
