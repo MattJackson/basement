@@ -266,17 +266,28 @@ async function countRealResources(page: Page): Promise<Counts> {
   };
 }
 
-// Filter the SA list down to user-real entries — the field that the
-// baseline cares about. Smoke leftovers (name starting with "smoke-")
-// from prior runs are counted separately so they don't trigger the
-// drift alarm. Cleanup will reap them at end-of-run.
-async function countRealSAs(page: Page): Promise<number> {
-  const r = await page.request.get(`${BASE_URL}/api/v1/admin/service-accounts`);
-  if (!r.ok()) return -1;
-  const body = await r.json().catch(() => null);
-  const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : null;
-  if (!arr) return -1;
-  return arr.filter((sa: any) => !(sa.name ?? "").startsWith("smoke-")).length;
+// Count only NON-smoke entries — operator's real resources, the
+// thing the safety check actually cares about. Smoke leftovers
+// (whether from this run or a prior one) are excluded so they don't
+// trigger the drift alarm.
+async function countOperatorReal(page: Page): Promise<Counts> {
+  async function countNonSmoke(url: string, nameField: string): Promise<number> {
+    const r = await page.request.get(`${BASE_URL}${url}`);
+    if (!r.ok()) return -1;
+    const body = await r.json().catch(() => null);
+    const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : null;
+    if (!arr) return -1;
+    return arr.filter(
+      (it: any) => !((it[nameField] ?? "") as string).startsWith("smoke-") && !it.revokedAt,
+    ).length;
+  }
+  return {
+    regions: await countNonSmoke("/api/v1/user/regions", "alias"),
+    serviceAccounts: await countNonSmoke("/api/v1/admin/service-accounts", "name"),
+    webhooks: await countNonSmoke("/api/v1/user/webhooks", "name"),
+    backups: await countNonSmoke("/api/v1/user/backups", "name"),
+    federations: await countNonSmoke("/api/v1/user/federated-buckets", "name"),
+  };
 }
 
 function countsEqual(a: Counts, b: Counts): boolean {
@@ -357,50 +368,290 @@ async function main(): Promise<number> {
       if (body.mode !== "admin") throw new Error(`expected mode=admin, got ${body.mode}`);
     });
 
-    // Reap leftover smoke-* SAs from prior runs that stalled before
-    // cleanup. Best-effort — failures here are just logged. We DON'T
-    // reap leftover webhooks/backups/federations the same way because
-    // (a) those endpoints don't currently leak, and (b) the operator
-    // may have legitimate test resources named that way; SAs are
-    // safe because the `smoke-` prefix is exclusive to this script.
-    await check("opportunistically reap stale smoke-* SAs from prior runs", async () => {
-      const r = await desktop!.request.get(`${BASE_URL}/api/v1/admin/service-accounts`);
-      if (!r.ok()) {
-        warnLine(`could not list SAs to reap: ${r.status()}`);
-        return;
-      }
-      const body = await r.json().catch(() => null);
-      const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : [];
-      const stale = arr.filter((sa: any) => (sa.name ?? "").startsWith("smoke-") && !sa.revokedAt);
-      if (stale.length === 0) {
-        info("  no stale smoke SAs to reap");
-        return;
-      }
-      info(`  reaping ${stale.length} stale smoke SA(s) from prior runs`);
-      for (const sa of stale) {
-        const d = await desktop!.request.delete(`${BASE_URL}/api/v1/admin/service-accounts/${sa.id}`);
-        if (!d.ok()) {
-          warnLine(`  failed to reap ${sa.name} (${sa.id}): ${d.status()}`);
+    // Reap leftover smoke-* resources from prior runs that stalled
+    // before cleanup. Best-effort — failures here are just logged.
+    // We only reap entries whose name STARTS with `smoke-` since the
+    // operator's real resources don't use that prefix. This keeps the
+    // baseline meaningful (smoke leftovers don't inflate the "real"
+    // count and trigger drift alarms at end-of-run).
+    await check("opportunistically reap stale smoke-* leftovers from prior runs", async () => {
+      const targets: { kind: string; listUrl: string; delUrl: (id: string) => string }[] = [
+        { kind: "sa", listUrl: "/api/v1/admin/service-accounts", delUrl: (id) => `/api/v1/admin/service-accounts/${id}` },
+        { kind: "webhook", listUrl: "/api/v1/user/webhooks", delUrl: (id) => `/api/v1/user/webhooks/${id}` },
+        { kind: "backup", listUrl: "/api/v1/user/backups", delUrl: (id) => `/api/v1/user/backups/${id}` },
+        { kind: "federation", listUrl: "/api/v1/user/federated-buckets", delUrl: (id) => `/api/v1/user/federated-buckets/${id}` },
+      ];
+      let reaped = 0;
+      for (const t of targets) {
+        const r = await desktop!.request.get(`${BASE_URL}${t.listUrl}`);
+        if (!r.ok()) continue;
+        const body = await r.json().catch(() => null);
+        const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : [];
+        const stale = arr.filter(
+          (it: any) => (it.name ?? "").startsWith("smoke-") && !it.revokedAt,
+        );
+        for (const it of stale) {
+          const d = await desktop!.request.delete(`${BASE_URL}${t.delUrl(it.id)}`);
+          if (d.ok()) {
+            reaped++;
+          } else {
+            warnLine(`  failed to reap ${t.kind} ${it.name} (${it.id}): ${d.status()}`);
+          }
         }
       }
+      if (reaped > 0) info(`  reaped ${reaped} stale smoke leftover(s)`);
+      else info("  no stale smoke leftovers to reap");
     });
 
     // Baseline counts BEFORE any mutation. End-of-run compares
-    // against this; mismatch = real data was touched. We use the
-    // filtered SA count to ignore smoke-* leftovers from prior runs,
-    // since cleanup at end-of-run will reap them.
-    await check("record baseline counts of real resources", async () => {
-      baseline = await countRealResources(desktop!);
-      baseline.serviceAccounts = await countRealSAs(desktop!);
+    // against this; mismatch = real data was touched. We count only
+    // operator-real resources (non-smoke, non-revoked) so leftovers
+    // from this or any prior run don't trigger drift alarms.
+    await check("record baseline counts of operator-real resources", async () => {
+      baseline = await countOperatorReal(desktop!);
       info(`  baseline: regions=${baseline.regions} sa=${baseline.serviceAccounts} webhooks=${baseline.webhooks} backups=${baseline.backups} federations=${baseline.federations}`);
     });
 
-    // Subsequent sections wired in follow-up commits.
-    info("[scaffolding only — section bodies wired in subsequent commits]");
+    // Discover a real region + bucket so route walks below have
+    // concrete params. These are READ-ONLY — no mutations.
+    let realRegionId = "";
+    let realBucketId = "";
+    let realClusterId = "";
+    await check("discover a real region + bucket + cluster for route walks (READ-ONLY)", async () => {
+      const rResp = await desktop!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (rResp.ok()) {
+        const arr = await rResp.json();
+        if (Array.isArray(arr) && arr.length > 0) realRegionId = arr[0].id;
+      }
+      if (realRegionId) {
+        const bResp = await desktop!.request.get(`${BASE_URL}/api/v1/user/regions/${realRegionId}/buckets`);
+        if (bResp.ok()) {
+          const body = await bResp.json();
+          const buckets = Array.isArray(body) ? body : body?.buckets ?? [];
+          if (buckets.length > 0) realBucketId = buckets[0].id;
+        }
+      }
+      const cResp = await desktop!.request.get(`${BASE_URL}/api/v1/admin/clusters`);
+      if (cResp.ok()) {
+        const arr = await cResp.json();
+        if (Array.isArray(arr) && arr.length > 0) realClusterId = arr[0].id;
+      }
+      info(`  region=${realRegionId || "<none>"} bucket=${realBucketId || "<none>"} cluster=${realClusterId || "<none>"}`);
+    });
+
+    // ============================================================
+    // A. Route enumeration — visit every URL pattern from frontend/src/routes/
+    // ============================================================
+    section("[A] route enumeration — every route walked desktop + console-error gate");
+
+    // routes[].requiresAdmin gates whether we re-elevate first.
+    // routes[].mobile=false skips the mobile re-run (e.g. wizards
+    // that don't have a mobile layout yet).
+    type RouteSpec = {
+      path: string;
+      key: string;
+      requiresAdmin?: boolean;
+      mobile?: boolean;
+      requiresRegion?: boolean;
+      requiresBucket?: boolean;
+      requiresCluster?: boolean;
+      // an optional minimal assertion that must hold on the rendered page
+      assertText?: string;
+    };
+
+    const routes: RouteSpec[] = [
+      // Public / unauthenticated surfaces
+      { path: "/admin/login", key: "admin-login", assertText: "Sign in" },
+      { path: "/share/notarealtokenforsmoke", key: "share-bogus-token", assertText: "not found" },
+
+      // User shell
+      { path: "/", key: "root", assertText: "My Regions" },
+      { path: "/files", key: "files-home", assertText: "My Regions" },
+      { path: "/files/keys", key: "files-keys", assertText: "My Keys" },
+      { path: "/files/keys/new", key: "files-keys-new", assertText: "Add a key" },
+      { path: "/files/regions/new", key: "files-regions-new-redirect", assertText: "Add a key" },
+      { path: "/files/shares", key: "files-shares", assertText: "Shares" },
+      { path: "/files/syncs", key: "files-syncs", assertText: "Cross-cluster" },
+      { path: "/files/syncs/new", key: "files-syncs-new" },
+      { path: "/files/backups", key: "files-backups", assertText: "Backups" },
+      { path: "/files/backups/new", key: "files-backups-new", assertText: "New backup" },
+      { path: "/files/federated-buckets", key: "files-federated", assertText: "Federations" },
+      { path: "/files/federated-buckets/new", key: "files-federated-new" },
+      { path: "/files/webhooks", key: "files-webhooks", assertText: "Webhook" },
+      { path: "/files/webhooks/new", key: "files-webhooks-new" },
+
+      // User shell w/ params (only if we have a real region / bucket)
+      { path: "/files/{regionId}", key: "files-region", requiresRegion: true },
+      { path: "/files/{regionId}/b/{bid}", key: "files-region-bucket", requiresRegion: true, requiresBucket: true },
+
+      // Admin
+      { path: "/admin", key: "admin-root", requiresAdmin: true },
+      { path: "/admin/system", key: "admin-system", requiresAdmin: true },
+      { path: "/admin/users", key: "admin-users", requiresAdmin: true, assertText: "User Management" },
+      { path: "/admin/users/new", key: "admin-users-new", requiresAdmin: true },
+      { path: "/admin/clusters", key: "admin-clusters", requiresAdmin: true, assertText: "Clusters" },
+      { path: "/admin/clusters/new", key: "admin-clusters-new", requiresAdmin: true },
+      { path: "/admin/buckets", key: "admin-buckets", requiresAdmin: true },
+      { path: "/admin/keys", key: "admin-keys", requiresAdmin: true, assertText: "Access keys" },
+      { path: "/admin/audit", key: "admin-audit", requiresAdmin: true, assertText: "Audit log" },
+      { path: "/admin/policies", key: "admin-policies", requiresAdmin: true },
+      { path: "/admin/service-accounts", key: "admin-sa", requiresAdmin: true },
+      { path: "/admin/service-accounts/new", key: "admin-sa-new", requiresAdmin: true },
+      { path: "/admin/migrate", key: "admin-migrate", requiresAdmin: true },
+
+      // Admin w/ cluster param
+      { path: "/admin/clusters/{cid}", key: "admin-cluster-detail", requiresAdmin: true, requiresCluster: true },
+      { path: "/admin/clusters/{cid}/edit", key: "admin-cluster-edit", requiresAdmin: true, requiresCluster: true },
+      { path: "/admin/clusters/{cid}/layout", key: "admin-cluster-layout", requiresAdmin: true, requiresCluster: true },
+      { path: "/admin/clusters/{cid}/scrub", key: "admin-cluster-scrub", requiresAdmin: true, requiresCluster: true },
+    ];
+
+    function expandPath(p: string): string | null {
+      let out = p;
+      if (out.includes("{regionId}")) {
+        if (!realRegionId) return null;
+        out = out.replace("{regionId}", realRegionId);
+      }
+      if (out.includes("{bid}")) {
+        if (!realBucketId) return null;
+        out = out.replace("{bid}", realBucketId);
+      }
+      if (out.includes("{cid}")) {
+        if (!realClusterId) return null;
+        out = out.replace("{cid}", realClusterId);
+      }
+      return out;
+    }
+
+    let routeWalkErrors = 0;
+    for (const spec of routes) {
+      const url = expandPath(spec.path);
+      if (url === null) {
+        skipLine(`[A] visit ${spec.path}`, "required param not discoverable");
+        continue;
+      }
+      await check(`[A] visit ${spec.path} (desktop)`, async () => {
+        // Snapshot the error counts BEFORE navigation so we attribute
+        // any new console/page errors to this specific route.
+        const errBefore = consoleErrors.length + pageErrors.length;
+        const resp = await desktop!.goto(`${BASE_URL}${url}`, { waitUntil: "networkidle", timeout: 20_000 });
+        if (resp && resp.status() >= 500) {
+          throw new Error(`HTTP ${resp.status()} from server on ${url}`);
+        }
+        // Wait for an h1 OR a "not found"-ish render to settle (the
+        // share/bogus-token path has no h1; that's fine).
+        await desktop!.waitForSelector('h1, body', { timeout: 10_000 }).catch(() => {});
+        // Optional text gate. Wait up to 5s for the text to settle —
+        // route components hydrate asynchronously, so a snap-shot
+        // check immediately after networkidle can race the React
+        // first paint.
+        if (spec.assertText) {
+          const has = await desktop!
+            .waitForFunction(
+              (t: string) => (document.body.innerText || "").toLowerCase().includes(t.toLowerCase()),
+              spec.assertText,
+              { timeout: 5_000 },
+            )
+            .then(() => true)
+            .catch(() => false);
+          if (!has) {
+            const actualH1 = await desktop!
+              .locator("h1")
+              .first()
+              .textContent()
+              .catch(() => "<none>");
+            reportBug(
+              "route-walk",
+              `${spec.path} did not surface expected text "${spec.assertText}" (h1=${actualH1?.slice(0, 60) ?? "<none>"})`,
+            );
+          }
+        }
+        await shotDesktop(desktop!, `A-${spec.key}`);
+        const errAfter = consoleErrors.length + pageErrors.length;
+        if (errAfter > errBefore) {
+          routeWalkErrors += errAfter - errBefore;
+          reportBug("console-error", `${spec.path} produced ${errAfter - errBefore} new console/page error(s)`);
+        }
+      });
+    }
+    if (routeWalkErrors > 0) {
+      warnLine(`route walk produced ${routeWalkErrors} cumulative console/page error(s)`);
+    }
+
+    // ============================================================
+    // E. Mobile viewport re-run of read-only routes
+    // ============================================================
+    section("[E] mobile viewport (375x667) re-run of read-only routes");
+
+    // Mobile context needs its own elevation so admin endpoints work.
+    await check("[E] elevate mobile context to admin", async () => {
+      await elevateToAdmin(mobile!);
+    });
+
+    for (const spec of routes) {
+      if (spec.mobile === false) continue;
+      const url = expandPath(spec.path);
+      if (url === null) continue;
+      await check(`[E] visit ${spec.path} (mobile)`, async () => {
+        const resp = await mobile!.goto(`${BASE_URL}${url}`, { waitUntil: "networkidle", timeout: 20_000 });
+        if (resp && resp.status() >= 500) {
+          throw new Error(`HTTP ${resp.status()} from server on ${url}`);
+        }
+        await mobile!.waitForSelector('h1, body', { timeout: 10_000 }).catch(() => {});
+        await shotMobile(mobile!, `E-${spec.key}`);
+      });
+    }
+
+    // Quick mobile-specific assertions: nav scroll + touch targets.
+    await check("[E] mobile /files: primary nav scrollable horizontally", async () => {
+      await mobile!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
+      const navOverflow = await mobile!.evaluate(() => {
+        const nav = document.querySelector('nav[aria-label="Primary"]');
+        if (!nav) return null;
+        const cs = window.getComputedStyle(nav);
+        return { overflow: cs.overflowX, scrollWidth: nav.scrollWidth, clientWidth: nav.clientWidth };
+      });
+      if (!navOverflow) {
+        reportBug("mobile-nav", "Primary nav element not found on mobile /files");
+        return;
+      }
+      // We expect either overflow-x auto/scroll, OR the content to fit
+      // within the viewport (no horizontal overflow needed).
+      const ok = ["auto", "scroll"].includes(navOverflow.overflow) || navOverflow.scrollWidth <= navOverflow.clientWidth;
+      if (!ok) {
+        reportBug("mobile-nav", `Primary nav overflows but isn't scrollable: ${JSON.stringify(navOverflow)}`);
+      }
+    });
+
+    await check("[E] mobile /files: touch targets >= 44px tall (heuristic)", async () => {
+      await mobile!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
+      const small = await mobile!.evaluate(() => {
+        const interactive = Array.from(document.querySelectorAll('button, a[href], [role="button"]'));
+        const bad: { tag: string; text: string; h: number }[] = [];
+        for (const el of interactive) {
+          const r = el.getBoundingClientRect();
+          // Skip zero-sized (off-screen / hidden) elements
+          if (r.width === 0 && r.height === 0) continue;
+          // Skip elements inside the version-pill area (intentionally small)
+          if (el.closest('[data-testid="version-pill"]')) continue;
+          if (r.height < 44) {
+            const text = (el.textContent ?? "").trim().slice(0, 30);
+            bad.push({ tag: el.tagName.toLowerCase(), text, h: Math.round(r.height) });
+          }
+        }
+        return bad.slice(0, 5);
+      });
+      if (small.length > 0) {
+        reportBug("mobile-touch-targets", `Found ${small.length}+ interactive elements <44px tall on /files: ${JSON.stringify(small)}`);
+      }
+    });
 
   } finally {
     // ============================================================
-    // CLEANUP — runs even if checks above threw
+    // CLEANUP — runs even if checks above threw. Two passes:
+    //   1. Tracked-ephemeral reap (resources THIS run created)
+    //   2. Broad smoke-* sweep (resources from any run, including
+    //      ones whose tracking we lost mid-flight)
     // ============================================================
     section("[cleanup] reaping ephemeral resources");
     if (desktop && ephemerals.length > 0) {
@@ -429,19 +680,49 @@ async function main(): Promise<number> {
         }
       }
     } else {
-      info("  no ephemeral resources to reap");
+      info("  no tracked ephemerals to reap");
     }
 
-    // Real-resource count sanity check.
+    // Broad sweep — catches anything from this or prior runs that we
+    // lost track of. Safe because every smoke-created resource uses
+    // the `smoke-` prefix and the operator's real resources never do.
+    if (desktop) {
+      info("  broad sweep of smoke-* leftovers across all endpoints");
+      const sweep: { kind: string; listUrl: string; nameField: string; delUrl: (id: string) => string }[] = [
+        { kind: "sa", listUrl: "/api/v1/admin/service-accounts", nameField: "name", delUrl: (id) => `/api/v1/admin/service-accounts/${id}` },
+        { kind: "webhook", listUrl: "/api/v1/user/webhooks", nameField: "name", delUrl: (id) => `/api/v1/user/webhooks/${id}` },
+        { kind: "backup", listUrl: "/api/v1/user/backups", nameField: "name", delUrl: (id) => `/api/v1/user/backups/${id}` },
+        { kind: "federation", listUrl: "/api/v1/user/federated-buckets", nameField: "name", delUrl: (id) => `/api/v1/user/federated-buckets/${id}` },
+      ];
+      for (const t of sweep) {
+        const r = await desktop.request.get(`${BASE_URL}${t.listUrl}`);
+        if (!r.ok()) continue;
+        const body = await r.json().catch(() => null);
+        const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : [];
+        const targets = arr.filter(
+          (it: any) => ((it[t.nameField] ?? "") as string).startsWith("smoke-") && !it.revokedAt,
+        );
+        for (const it of targets) {
+          const d = await desktop.request.delete(`${BASE_URL}${t.delUrl(it.id)}`);
+          if (!d.ok()) {
+            warnLine(`  sweep failed for ${t.kind} ${it[t.nameField]} (${it.id}): ${d.status()}`);
+          } else {
+            info(`  swept ${t.kind} ${it[t.nameField]}`);
+          }
+        }
+      }
+    }
+
+    // Real-resource count sanity check. Counts operator-real
+    // resources only (excludes smoke-* leftovers).
     if (desktop && baseline) {
-      const after = await countRealResources(desktop);
-      after.serviceAccounts = await countRealSAs(desktop);
+      const after = await countOperatorReal(desktop);
       info(`  after:    regions=${after.regions} sa=${after.serviceAccounts} webhooks=${after.webhooks} backups=${after.backups} federations=${after.federations}`);
       if (!countsEqual(baseline, after)) {
-        failLine("real-resource count sanity", `baseline ${JSON.stringify(baseline)} != after ${JSON.stringify(after)}`);
-        reportBug("safety", `Real-resource count drift detected — operator data may have been mutated`);
+        failLine("operator-real count sanity", `baseline ${JSON.stringify(baseline)} != after ${JSON.stringify(after)}`);
+        reportBug("safety", `Operator-real count drift detected — real data may have been mutated`);
       } else {
-        passLine("real-resource count sanity (baseline == after)", 0);
+        passLine("operator-real count sanity (baseline == after)", 0);
       }
     }
 
