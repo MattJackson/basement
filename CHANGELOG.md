@@ -62,6 +62,69 @@ product-code changes. `go test -race ./...` green, `pnpm build`
 green. See `docs/release-notes/v1.11.0.md` for the broader v1.11.x
 narrative.
 
+## v1.11.0.11 — 2026-05-23
+
+README rewrite — value-first, badges, no comparison framing. See
+git log for the full diff; CHANGELOG entry added retroactively in
+v1.11.0.10 docs sweep.
+
+## v1.11.0.10 — 2026-05-23
+
+Documentation 100% up-to-date sweep. Docs-only cycle; no product
+code touched.
+
+- **Three new top-level docs**:
+  - `docs/architecture.md` — component walkthrough (process model,
+    package layout, request lifecycle, auth tiers, persistence,
+    driver registry, federation engine, metrics + logging, gateway
+    architecture, v2.0 outlook).
+  - `docs/testing.md` — five-layer pyramid (Go + Vitest unit,
+    docslint, feature-coverage smoke, comprehensive UI smoke,
+    postdeploy UI smoke) + CI gates + per-change-type test guidance.
+  - `docs/feature-matrix.md` — honest capability × driver table
+    sourced from each driver's `Capabilities()` impl; calls out the
+    Garage versioning / object-lock / SSE Unsupported branch and
+    the open BUG01/03/04/05/06 driver-parity gaps.
+- **`docs/configuration.md` rewrite** — removed the stale "Only
+  `garage` supported in v1.0" claim; added the AWS S3 driver block;
+  documented `BASEMENT_LOG_FORMAT`, `BASEMENT_METRICS_TOKEN`,
+  `BASEMENT_ADMIN_PASSWORD`, `BASEMENT_OIDC_ELEVATION_PROMPT`;
+  reframed the driver story around the v1.x-correct pattern (no
+  `BASEMENT_DRIVER` required; add clusters via `/admin/clusters`);
+  added the auto-bootstrap (v1.11.0c) walkthrough.
+- **Integration stub honesty pass** — SMB / NFS / FTP stubs claimed
+  v1.10 / v1.11 implementation slots that never landed; rewritten
+  to reflect the v2.x line (SMB + NFS in v2.3, FTP in the v2.x
+  long-tail) and to cross-link ADR-0006 for the v2 sketch. S3
+  stub now cross-links ADR-0006 explicitly.
+- **`SECURITY.md` env-var fix** — referenced
+  `BASEMENT_ADMIN_INITIAL_PASSWORD` (does not exist); replaced with
+  the actual surface (`BASEMENT_ADMIN_PASSWORD_HASH` /
+  `BASEMENT_ADMIN_PASSWORD` + the v1.11.0c auto-bootstrap path) and
+  cross-linked `deployment/docker.md`.
+- **`docs/feature-smoke-bugs.md`** — added "Status as of v1.11.0.10"
+  table; BUG02 marked FIXED in v1.11.0.5, BUG01/03/04/05/06 remain
+  OPEN (v1.11.0.6 through v1.11.0.9 cycles did not land).
+- **Forward-link chain across release notes** — added "Next release"
+  pointers to v1.4.0 → v1.5.0 → v1.6.0 → v1.7.0 → v1.8.0
+  (v1.0/v1.1/v1.2/v1.3/v1.9/v1.10 already had them). v1.11.0
+  marked as current `v1.x` tip with a forward-link to ADR-0006
+  (the v2.0 design proposal).
+- **`docs/screenshots/SHOTLIST.md`** — added historical-document
+  banner pointing at the current Playwright capture flow.
+- **URL consistency** — normalized `MattJackson` →
+  `mattjackson` in README + `docs/deployment/docker.md` so the
+  install.sh URL matches the lowercase Go module path
+  (`github.com/mattjackson/basement`).
+
+Touched: `CHANGELOG.md`, `SECURITY.md`,
+`docs/architecture.md` (new), `docs/testing.md` (new),
+`docs/feature-matrix.md` (new), `docs/configuration.md`,
+`docs/feature-smoke-bugs.md`, `docs/screenshots/SHOTLIST.md`,
+`docs/integrations/{smb,nfs,ftp,s3}.md`,
+`docs/release-notes/{v1.4,v1.5,v1.6,v1.7,v1.8,v1.11}.0.md`,
+`docs/deployment/docker.md`.
+
 ## v1.11.0.5 — 2026-05-23
 
 Feature-coverage smoke + Garage v2 driver bugfix.

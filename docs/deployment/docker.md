@@ -50,13 +50,13 @@ detection, image pull, compose-file generation, log tailing, and a
 final banner that prints the auto-generated password:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/mattjackson/basement/main/scripts/install.sh | bash
 ```
 
 For review-before-run:
 
 ```bash
-curl -sSLo install.sh https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh
+curl -sSLo install.sh https://raw.githubusercontent.com/mattjackson/basement/main/scripts/install.sh
 less install.sh
 bash install.sh
 ```

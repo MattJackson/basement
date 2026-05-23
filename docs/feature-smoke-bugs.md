@@ -6,6 +6,23 @@ Target: `https://basement.pq.io`
 
 Totals: pass=46, skip=2, fail=0, bugs=6
 
+## Status as of v1.11.0.10 (docs sweep)
+
+| Bug   | Area                  | Status                                                                                |
+|-------|-----------------------|---------------------------------------------------------------------------------------|
+| BUG01 | bucket-rename         | **OPEN** — Garage v2 alias-diff path not implemented; punted to a follow-up cycle.    |
+| BUG02 | key-grant-flags-lost  | **FIXED** in v1.11.0.5 (`internal/drivers/garage/keys.go` decode fix).                |
+| BUG03 | driver-info endpoint  | **OPEN** — per-cluster `/driver-info` handler not wired; punted to a follow-up cycle. |
+| BUG04 | multipart-abort key   | **OPEN** — abort route missing `{key}` segment; punted to a follow-up cycle.          |
+| BUG05 | snapshots 500         | **OPEN** — UserRegion-backed backups need degraded-OK handling; follow-up.            |
+| BUG06 | WebDAV PROPFIND edge  | **OPEN** — Caddyfile in `deploy/` needs WebDAV verbs whitelist; deployment config.    |
+
+Five of six bugs are still open after v1.11.0.10; the docs sweep
+did not touch product code. They are tracked here so a future cycle
+can address them in priority order.
+
+
+
 ## Per-feature pass/fail summary
 
 | Feature | Pass | Fail | Skip |

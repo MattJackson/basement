@@ -1,10 +1,10 @@
 # basement
 
-[![Release](https://img.shields.io/github/v/release/MattJackson/basement)](https://github.com/MattJackson/basement/releases)
+[![Release](https://img.shields.io/github/v/release/mattjackson/basement)](https://github.com/mattjackson/basement/releases)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/MattJackson/basement)](https://github.com/MattJackson/basement/blob/main/go.mod)
-[![Container](https://img.shields.io/badge/ghcr.io-basement-2496ED?logo=docker&logoColor=white)](https://github.com/MattJackson/basement/pkgs/container/basement)
-[![SBOM](https://github.com/MattJackson/basement/actions/workflows/sbom.yml/badge.svg)](https://github.com/MattJackson/basement/actions/workflows/sbom.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/mattjackson/basement)](https://github.com/mattjackson/basement/blob/main/go.mod)
+[![Container](https://img.shields.io/badge/ghcr.io-basement-2496ED?logo=docker&logoColor=white)](https://github.com/mattjackson/basement/pkgs/container/basement)
+[![SBOM](https://github.com/mattjackson/basement/actions/workflows/sbom.yml/badge.svg)](https://github.com/mattjackson/basement/actions/workflows/sbom.yml)
 
 > One pane of glass for self-hosted S3-compatible object storage.
 > Manage many backends from one UI. Mount as a network drive.
@@ -46,7 +46,7 @@ No env vars, no bcrypt CLI, no JWT secret to generate up front — basement auto
 Prefer a guided one-liner that drops a `docker-compose.yml` alongside the container and prints the password for you?
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/mattjackson/basement/main/scripts/install.sh | bash
 ```
 
 (Review-before-run recommended: `curl -sSLo install.sh https://.../install.sh && less install.sh && bash install.sh`.)
@@ -130,6 +130,9 @@ Verified against project READMEs, source code searches, and latest release notes
 
 ## Documentation
 
+- [Architecture](docs/architecture.md) — process model, package layout, request lifecycle, auth tiers, persistence, federation, metrics
+- [Feature matrix](docs/feature-matrix.md) — capability × driver table, sourced from each driver's `Capabilities()` impl
+- [Testing](docs/testing.md) — five-layer pyramid (unit, docslint, feature smoke, comprehensive smoke, postdeploy smoke) + CI gates
 - [Deployment](docs/deployment/) — Docker, reverse proxy, TLS, hardening, backups, upgrades
 - [Observability](docs/observability/) — Prometheus alerts, Grafana dashboard, slog config
 - [Integrations](docs/integrations/) — WebDAV, Time Machine, SMB / NFS / FTP / S3 gateways

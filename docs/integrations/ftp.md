@@ -1,8 +1,11 @@
 # FTP / SFTP gateway
 
 > **Status:** stub. Registered in v1.9.0c so the `/admin/gateways`
-> roster lists every protocol on the v1.10+ roadmap; the
-> implementation is not built yet.
+> roster surfaces it from day one; the implementation is **not
+> built and not on the v1.x roadmap**. FTP / SFTP sits in the
+> long-tail v2.x line (see [ADR-0006](../adr/0006-v2-s3-gateway.md)
+> for the v2.x sketch — SMB/NFS land in v2.3, FTP follows when
+> demand surfaces).
 
 ## What it is
 
@@ -20,10 +23,11 @@ protocols. A working basement FTP gateway would let:
 ## Why it's a stub
 
 FTP has decent pure-Go libraries (`jlaffaye/ftp` for the client,
-`goftp/server` for the server). The v1.9.0c scope is the gateway
-abstraction itself, not a new protocol; FTP slots into v1.11 once
-the more pressing protocols (SMB for Time Machine, NFS for Linux)
-ship.
+`goftp/server` for the server). The v1.9.0c scope was the gateway
+abstraction itself, not a new protocol; FTP / SFTP got registered
+as a stub so the operator UI surfaces every planned gateway from
+day one. The full implementation ships in the v2.x line, after
+the higher-demand SMB + NFS pair (v2.3).
 
 SFTP via `golang.org/x/crypto/ssh` is the more interesting target.
 We'd lump it under this gateway with a "preferred" badge for the
@@ -41,8 +45,8 @@ answer in 2026.
 
 ## Implementation tracking
 
-The native FTP / SFTP gateway is planned for v1.11. When it ships,
-this doc will be replaced by the full integration guide (mount flags,
-auth modes, SFTP vs FTPS recommendation, troubleshooting). The
-gateway interface it'll implement is documented in
-[adding-a-gateway.md](adding-a-gateway.md).
+The native FTP / SFTP gateway is in the v2.x long-tail. When it
+ships, this doc will be replaced by the full integration guide
+(mount flags, auth modes, SFTP vs FTPS recommendation,
+troubleshooting). The gateway interface it'll implement is
+documented in [adding-a-gateway.md](adding-a-gateway.md).

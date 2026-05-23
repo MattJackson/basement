@@ -1,8 +1,10 @@
 # SMB / CIFS gateway
 
 > **Status:** stub. Registered in v1.9.0c so the `/admin/gateways`
-> roster lists every protocol on the v1.10+ roadmap; the
-> implementation is not built yet.
+> roster surfaces it from day one; the implementation is **not
+> built and not on the v1.x roadmap**. SMB ships as part of the v2.3
+> "SMB + NFS gateways alongside WebDAV" line (see
+> [ADR-0006](../adr/0006-v2-s3-gateway.md) for the v2.x sketch).
 
 ## What it is
 
@@ -39,8 +41,8 @@ sidecar bridges SMB → S3 → basement.
 
 ## Implementation tracking
 
-The native SMB gateway is on the v1.10+ roadmap. When it ships, this
-doc will be replaced by the full integration guide (per-client mount
-instructions, auth mapping, known limitations, troubleshooting). The
-gateway interface it'll implement is documented in
-[adding-a-gateway.md](adding-a-gateway.md).
+The native SMB gateway is in the v2.x line (planned for v2.3
+alongside NFS). When it ships, this doc will be replaced by the
+full integration guide (per-client mount instructions, auth mapping,
+known limitations, troubleshooting). The gateway interface it'll
+implement is documented in [adding-a-gateway.md](adding-a-gateway.md).

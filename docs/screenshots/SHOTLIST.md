@@ -1,4 +1,12 @@
-# Screenshot Shot List — basement v0.5.0
+# Screenshot Shot List — basement v0.5.0 (historical)
+
+> **Historical document.** This was the original operator-driven
+> shot list from the v0.5.0 era, before the automated capture flow
+> existed. It is kept for context — the current capture pipeline is
+> `scripts/capture-v1.10-screenshots.ts` (Playwright-driven, repeatable
+> across deploys), and the current gallery + per-shot index lives at
+> [`README.md`](./README.md). For new captures, start with the index
+> + the capture script, not this file.
 
 Structured guide for capturing PNG/WebP images used in README, blog posts, and launch materials. **You do NOT capture these yourself** — operator with access to live deploy at `https://basement.pq.io` runs through this list in one sitting.
 
