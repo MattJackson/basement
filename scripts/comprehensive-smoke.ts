@@ -230,12 +230,11 @@ async function elevateToAdmin(page: Page): Promise<void> {
 }
 
 async function dropToUser(page: Page): Promise<void> {
-  const resp = await page.request.post(`${BASE_URL}/api/v1/auth/elevate`, {
-    headers: { "Content-Type": "application/json" },
-    data: { target_mode: "user" },
-  });
+  // The drop path is /auth/logout-elevation (not /auth/elevate with
+  // target_mode=user — that's rejected by INVALID_TARGET_MODE).
+  const resp = await page.request.post(`${BASE_URL}/api/v1/auth/logout-elevation`);
   if (!resp.ok()) {
-    throw new Error(`POST /api/v1/auth/elevate(user) → ${resp.status()}`);
+    throw new Error(`POST /api/v1/auth/logout-elevation → ${resp.status()}`);
   }
 }
 
@@ -524,11 +523,20 @@ async function main(): Promise<number> {
     }
 
     let routeWalkErrors = 0;
+    let lastElevateAt = Date.now();
     for (const spec of routes) {
       const url = expandPath(spec.path);
       if (url === null) {
         skipLine(`[A] visit ${spec.path}`, "required param not discoverable");
         continue;
+      }
+      // Re-elevate every 60s when entering admin paths. ADMIN-mode
+      // cookies are valid for 15 min by default, so this is paranoid,
+      // but on a flaky CI host a long walk can edge close enough that
+      // an intermediate /auth/me call lapses the cookie.
+      if (spec.requiresAdmin && Date.now() - lastElevateAt > 60_000) {
+        await elevateToAdmin(desktop!).catch(() => {});
+        lastElevateAt = Date.now();
       }
       await check(`[A] visit ${spec.path} (desktop)`, async () => {
         // Snapshot the error counts BEFORE navigation so we attribute
@@ -560,9 +568,10 @@ async function main(): Promise<number> {
               .first()
               .textContent()
               .catch(() => "<none>");
+            const finalUrl = desktop!.url();
             reportBug(
               "route-walk",
-              `${spec.path} did not surface expected text "${spec.assertText}" (h1=${actualH1?.slice(0, 60) ?? "<none>"})`,
+              `${spec.path} did not surface expected text "${spec.assertText}" (final url=${finalUrl}, h1=${actualH1?.slice(0, 60) ?? "<none>"})`,
             );
           }
         }
@@ -623,6 +632,343 @@ async function main(): Promise<number> {
       }
     });
 
+    // ============================================================
+    // C+D. Form validation + dialog/modal walks (ephemeral CRUD)
+    // ============================================================
+    section("[C+D] form validation + ephemeral CRUD via API (most reliable)");
+
+    // Strategy: form-walks via the UI are flaky against a live deploy
+    // (toast timing, dialog z-index, focus management). The most
+    // reliable way to exercise CREATE→VERIFY→DELETE for each resource
+    // type is the API directly, with a parallel UI screenshot of the
+    // form rendered. This keeps the destructive coverage deterministic
+    // and surfaces UI bugs via screenshots without UI form races.
+
+    // ---------- Service Account ----------
+    await check("[C] ephemeral SA: create via API, screenshot detail, delete", async () => {
+      const name = ephName("sa");
+      const r = await desktop!.request.post(`${BASE_URL}/api/v1/admin/service-accounts`, {
+        headers: { "Content-Type": "application/json" },
+        data: { name, capabilities: [{ id: "bucket:view", scope: "bucket:*:*" }] },
+      });
+      if (!r.ok()) throw new Error(`POST /admin/service-accounts → ${r.status()} ${await r.text()}`);
+      // Response shape: { serviceAccount: {id, ...}, secret: "..." }
+      // The secret is shown once; we don't need to use it for the
+      // smoke since cleanup goes through the admin DELETE endpoint.
+      const body = await r.json();
+      const saId = (body.serviceAccount?.id ?? body.id) as string;
+      if (!saId) throw new Error(`SA create response missing id: ${JSON.stringify(body).slice(0, 200)}`);
+      trackEphemeral("sa", saId, name);
+
+      // Navigate the UI to /admin/service-accounts to confirm it lists.
+      await desktop!.goto(`${BASE_URL}/admin/service-accounts`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-sa-list-with-ephemeral");
+
+      // Detail page render — if the page exists.
+      await desktop!.goto(`${BASE_URL}/admin/service-accounts/${saId}`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-sa-detail");
+    });
+
+    // ---------- Webhook ----------
+    await check("[C] ephemeral webhook: create via API, screenshot list + detail, delete", async () => {
+      const name = ephName("webhook");
+      const r = await desktop!.request.post(`${BASE_URL}/api/v1/user/webhooks`, {
+        headers: { "Content-Type": "application/json" },
+        data: {
+          name,
+          targetUrl: "https://example.invalid/smoke-webhook",
+          events: ["object.created"],
+          enabled: true,
+        },
+      });
+      if (!r.ok()) throw new Error(`POST /user/webhooks → ${r.status()} ${await r.text()}`);
+      const created = await r.json();
+      trackEphemeral("webhook", created.id as string, name);
+
+      await desktop!.goto(`${BASE_URL}/files/webhooks`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-webhook-list-with-ephemeral");
+
+      await desktop!.goto(`${BASE_URL}/files/webhooks/${created.id}`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-webhook-detail");
+    });
+
+    // ---------- Backup ----------
+    await check("[C] ephemeral backup: create via API (manual+disabled+mirror), screenshot, delete", async () => {
+      if (!realRegionId || !realBucketId) {
+        warnLine("no region/bucket — skipping backup CRUD");
+        return;
+      }
+      const name = ephName("backup");
+      const r = await desktop!.request.post(`${BASE_URL}/api/v1/user/backups`, {
+        headers: { "Content-Type": "application/json" },
+        data: {
+          name,
+          srcRegionId: realRegionId,
+          srcBucket: realBucketId,
+          dstRegionId: realRegionId,
+          dstBucket: realBucketId,
+          schedule: "manual",
+          disabled: true, // critical: NEVER runs against operator's real bucket
+          mode: "mirror",
+        },
+      });
+      if (!r.ok()) throw new Error(`POST /user/backups → ${r.status()} ${await r.text()}`);
+      const created = await r.json();
+      const backupId = created.id as string;
+      trackEphemeral("backup", backupId, name);
+
+      await desktop!.goto(`${BASE_URL}/files/backups`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-backup-list-with-ephemeral");
+
+      await desktop!.goto(`${BASE_URL}/files/backups/${backupId}`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-backup-detail");
+
+      // Restore wizard route renders the mirror-mode notice (not a wizard).
+      await desktop!.goto(`${BASE_URL}/files/backups/${backupId}/restore`, { waitUntil: "networkidle" });
+      await shotDesktop(desktop!, "C-backup-restore");
+    });
+
+    // ---------- Form validation walks via the UI ----------
+    // For each new-resource form: load → submit blank → assert validation
+    // fires → screenshot. We do NOT then submit valid data — the create
+    // path is exercised via API above. This keeps the destructive
+    // coverage scope tight and validates the validation gate itself.
+    const validationForms = [
+      {
+        path: "/files/keys/new",
+        key: "keys-new",
+        submitText: /Add key|Save key|Add a key/i,
+        validationCue: /required|invalid|cannot be|please/i,
+      },
+      {
+        path: "/files/webhooks/new",
+        key: "webhooks-new",
+        submitText: /Create webhook|Save|Submit/i,
+        validationCue: /required|invalid|cannot be|please|at least/i,
+      },
+      {
+        path: "/files/federated-buckets/new",
+        key: "fed-new",
+        submitText: /Create|Continue|Next/i,
+        validationCue: /required|invalid|cannot be|please|at least/i,
+      },
+      {
+        path: "/admin/clusters/new",
+        key: "clusters-new",
+        submitText: /Add cluster|Connect|Create|Save/i,
+        validationCue: /required|invalid|cannot be|please/i,
+      },
+      {
+        path: "/admin/users/new",
+        key: "users-new",
+        submitText: /Create|Invite|Save/i,
+        validationCue: /required|invalid|cannot be|please/i,
+      },
+    ];
+
+    for (const f of validationForms) {
+      await check(`[C] ${f.path}: blank submit fires validation`, async () => {
+        await desktop!.goto(`${BASE_URL}${f.path}`, { waitUntil: "networkidle" });
+        await desktop!.waitForSelector("form, h1", { timeout: 10_000 }).catch(() => {});
+
+        // Find a plausible submit button. If we can't find one we
+        // warn-and-pass — many forms have a wizard "Next" button as
+        // their primary action.
+        const btn = desktop!
+          .locator("button[type=submit], button")
+          .filter({ hasText: f.submitText })
+          .first();
+        const btnCount = await btn.count();
+        if (btnCount === 0) {
+          warnLine(`  ${f.path}: no submit button matching ${f.submitText}, skipping blank-submit`);
+          return;
+        }
+        await btn.click({ timeout: 5_000 }).catch(() => {});
+
+        // Wait briefly for validation messages to render. We accept
+        // EITHER an HTML5 :invalid input, a [role=alert] node, or
+        // body text matching one of the cue patterns.
+        const hadValidation = await desktop!
+          .waitForFunction(
+            (cue: string) => {
+              const cueRe = new RegExp(cue, "i");
+              const hasInvalidInput = document.querySelectorAll("input:invalid, textarea:invalid").length > 0;
+              const hasAlert = document.querySelectorAll('[role="alert"], [aria-invalid="true"]').length > 0;
+              const hasCue = cueRe.test(document.body.innerText || "");
+              return hasInvalidInput || hasAlert || hasCue;
+            },
+            f.validationCue.source,
+            { timeout: 4_000 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        if (!hadValidation) {
+          reportBug("form-validation", `${f.path}: blank submit did NOT fire any validation gate`);
+        }
+        await shotDesktop(desktop!, `C-validation-${f.key}`);
+      });
+    }
+
+    // ---------- Modal walks ----------
+    // /admin/keys "+ New" dialog (no submit — just open + cancel)
+    await check("[D] /admin/keys '+ New' dialog opens and cancels cleanly", async () => {
+      await desktop!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
+      const newBtn = desktop!.locator('button:has-text("New")').first();
+      if ((await newBtn.count()) === 0) {
+        warnLine("  /admin/keys: '+ New' button not found");
+        return;
+      }
+      await newBtn.click({ timeout: 5_000 });
+      const dialog = desktop!.locator('[role="dialog"], dialog').first();
+      await dialog.waitFor({ state: "visible", timeout: 5_000 });
+      await shotDesktop(desktop!, "D-admin-keys-new-dialog");
+      // Cancel without submit.
+      const cancel = desktop!.locator('button:has-text("Cancel"), button:has-text("Close")').first();
+      if ((await cancel.count()) > 0) {
+        await cancel.click({ timeout: 5_000 });
+      } else {
+        await desktop!.keyboard.press("Escape");
+      }
+      // Dialog should disappear.
+      await desktop!
+        .waitForFunction(() => document.querySelectorAll('[role="dialog"]:not([aria-hidden="true"])').length === 0, null, { timeout: 5_000 })
+        .catch(() => reportBug("modal", "/admin/keys '+ New' dialog did not dismiss after Cancel/Escape"));
+    });
+
+    // Elevation modal — drop to user, then navigate to /admin/* and verify
+    // the elevation modal renders (we don't actually submit; just confirm
+    // the modal appears and screenshot it).
+    await check("[D] elevation modal renders when dropped to USER mode hitting /admin", async () => {
+      await dropToUser(desktop!);
+      await desktop!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
+      // The middleware either pops a password modal OR redirects to /files.
+      // Accept either, but screenshot whichever rendered.
+      const elevModal = desktop!.locator('input[type="password"], [role="dialog"]').first();
+      const visible = await elevModal.isVisible({ timeout: 5_000 }).catch(() => false);
+      const url = desktop!.url();
+      if (!visible && !/files/.test(url)) {
+        reportBug("elevation", `/admin/clusters in USER mode neither popped elevation modal nor redirected to /files (url=${url})`);
+      }
+      await shotDesktop(desktop!, "D-elevation-modal-or-redirect");
+      // Re-elevate so subsequent checks continue working.
+      await elevateToAdmin(desktop!);
+    });
+
+    // ============================================================
+    // F. Auth-state coverage — drop-to-user nav, elevate-back nav
+    // ============================================================
+    section("[F] auth-state navigation (USER ↔ ADMIN per ADR-0003 + v1.9.0e.2)");
+
+    await check("[F] drop-to-user from /admin lands on /files (v1.9.0e.2)", async () => {
+      await elevateToAdmin(desktop!);
+      await desktop!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
+      await dropToUser(desktop!);
+      // Reload — the AuthModeProvider needs the new cookie to re-evaluate.
+      // Per v1.9.0e.2 tight coupling: drop = /files.
+      await desktop!.goto(`${BASE_URL}/`, { waitUntil: "networkidle" });
+      await desktop!.waitForURL(/\/files(\?|$)/, { timeout: 10_000 });
+      await shotDesktop(desktop!, "F-after-drop-to-user");
+    });
+
+    await check("[F] elevate-from-user lands on /admin (v1.9.0e.2 tight coupling)", async () => {
+      // Force a clean state — navigate to about:blank so the SPA
+      // route guards don't fire off the previous cookie value.
+      await desktop!.goto("about:blank");
+      await elevateToAdmin(desktop!);
+      // Per v1.9.0e.2: elevation should land the operator on /admin.
+      // The smoke can't replicate the in-page elevation click, but it
+      // can confirm /api/v1/auth/me now says admin, and that hitting
+      // /admin no longer pops the elevation modal.
+      const meResp = await desktop!.request.get(`${BASE_URL}/api/v1/auth/me`);
+      const me = await meResp.json();
+      if (me.mode !== "admin") throw new Error(`expected mode=admin after elevate, got ${me.mode}`);
+      await desktop!.goto(`${BASE_URL}/admin/clusters`, { waitUntil: "networkidle" });
+      // Wait a beat for the AuthModeProvider to settle on the fresh
+      // cookie before checking URL — the goto can fire before the
+      // mode-cookie reads complete and the guard can briefly bounce.
+      await desktop!.waitForURL(/\/admin\/clusters/, { timeout: 5_000 }).catch(() => {});
+      const url = desktop!.url();
+      if (!/\/admin\/clusters/.test(url)) {
+        throw new Error(`expected /admin/clusters after re-elevate, got ${url}`);
+      }
+      await shotDesktop(desktop!, "F-after-elevate-back");
+    });
+
+    // ============================================================
+    // G. WebDAV functional probe (gateway architecture, v1.9.0)
+    // ============================================================
+    section("[G] WebDAV gateway probe (v1.9.0)");
+
+    await check("[G] OPTIONS /webdav/ returns DAV headers", async () => {
+      const r = await desktop!.request.fetch(`${BASE_URL}/webdav/`, { method: "OPTIONS" });
+      // Allow either 200 or 401 (some configs require basic auth on
+      // OPTIONS). We only care that the response speaks DAV.
+      if (r.status() >= 500) throw new Error(`OPTIONS /webdav/ → ${r.status()}`);
+      const dav = r.headers()["dav"];
+      if (!dav) {
+        reportBug("webdav", `OPTIONS /webdav/ returned no DAV header (status=${r.status()})`);
+        return;
+      }
+      // Standard DAV class indicators are 1, 2, 3.
+      if (!/[123]/.test(dav)) {
+        reportBug("webdav", `OPTIONS /webdav/ DAV header malformed: ${dav}`);
+      }
+    });
+
+    await check("[G] PROPFIND /webdav/ — best-effort", async () => {
+      // Caddy edge may strip nonstandard verbs; this is informational.
+      const r = await desktop!.request.fetch(`${BASE_URL}/webdav/`, {
+        method: "PROPFIND",
+        headers: { Depth: "0" },
+      });
+      // 207 multi-status = healthy. 401 = needs basic auth (also ok —
+      // the verb made it through the edge). 405/501 = the edge is
+      // blocking PROPFIND, which we document but don't fail.
+      const s = r.status();
+      if (s === 207 || s === 401) {
+        info(`  PROPFIND ok (status=${s})`);
+      } else if (s === 405 || s === 501) {
+        warnLine(`  PROPFIND blocked by edge (status=${s}) — non-fatal`);
+      } else if (s >= 500) {
+        reportBug("webdav", `PROPFIND /webdav/ → ${s} (server error)`);
+      }
+    });
+
+    // ============================================================
+    // H. PWA probe (manifest + service worker)
+    // ============================================================
+    section("[H] PWA assets");
+
+    await check("[H] GET /manifest.webmanifest returns valid manifest", async () => {
+      const r = await desktop!.request.get(`${BASE_URL}/manifest.webmanifest`);
+      if (!r.ok()) throw new Error(`GET /manifest.webmanifest → ${r.status()}`);
+      const body = await r.json().catch(() => null);
+      if (!body || typeof body !== "object") throw new Error("manifest did not parse as JSON");
+      for (const required of ["name", "short_name", "start_url", "display", "icons"]) {
+        if (!(required in body)) {
+          reportBug("pwa", `manifest missing required field: ${required}`);
+        }
+      }
+    });
+
+    await check("[H] GET /sw.js — present (status 200) or warn", async () => {
+      const r = await desktop!.request.get(`${BASE_URL}/sw.js`);
+      if (r.status() === 200) {
+        // Sanity: ensure it's at least script-shaped.
+        const body = await r.text();
+        if (body.length < 50) {
+          reportBug("pwa", `/sw.js is suspiciously short: ${body.length} bytes`);
+        }
+      } else if (r.status() === 404) {
+        // Some PWA configs serve the SW from a different path.
+        warnLine("  /sw.js returned 404 — PWA may be disabled or SW at different path");
+      } else {
+        reportBug("pwa", `/sw.js returned unexpected status ${r.status()}`);
+      }
+    });
+
+    // Touch-target heuristic (also belongs to [E] mobile section).
+    section("[E] mobile touch-target audit");
     await check("[E] mobile /files: touch targets >= 44px tall (heuristic)", async () => {
       await mobile!.goto(`${BASE_URL}/files`, { waitUntil: "networkidle" });
       const small = await mobile!.evaluate(() => {
