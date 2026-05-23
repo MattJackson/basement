@@ -273,30 +273,76 @@ func TestCreateBucketError(t *testing.T) {
 	}
 }
 
+// TestUpdateBucket verifies the combined-update path: quotas via
+// POST /v2/UpdateBucket, aliases via Add/Remove diff, and a final GET
+// re-fetch that returns the canonical post-update bucket info.
+// v1.11.0.6: BUG01 fix — aliases were silently dropped before this.
 func TestUpdateBucket(t *testing.T) {
+	var (
+		quotaPostHit  bool
+		addAliasHit   string
+		removeAliasHit string
+		getCount      int
+	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/UpdateBucket" || r.Method != "POST" {
-			t.Errorf("expected POST /v2/UpdateBucket, got %s %s", r.Method, r.URL.Path)
-		}
+		switch {
+		case r.URL.Path == "/v2/UpdateBucket" && r.Method == "POST":
+			quotaPostHit = true
+			var req updateBucketRequestBody
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("failed to decode UpdateBucket request: %v", err)
+			}
+			if req.Quotas == nil || req.Quotas.MaxSize == nil || *req.Quotas.MaxSize != 2000000 {
+				t.Errorf("UpdateBucket body quotas = %+v, want MaxSize=2000000", req.Quotas)
+			}
+			// Echo back something — driver ignores this on combined
+			// updates and trusts the final GET.
+			_ = json.NewEncoder(w).Encode(getBucketInfoResponse{ID: "updated-bucket-789"})
 
-		var req updateBucketRequestBody
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			t.Fatalf("failed to decode request: %v", err)
-		}
+		case r.URL.Path == "/v2/AddBucketAlias" && r.Method == "POST":
+			var body bucketAliasEnum
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode AddBucketAlias request: %v", err)
+			}
+			if body.BucketID != "updated-bucket-789" {
+				t.Errorf("AddBucketAlias bucketId = %q, want updated-bucket-789", body.BucketID)
+			}
+			addAliasHit = body.GlobalAlias
+			_, _ = w.Write([]byte("{}"))
 
-		response := getBucketInfoResponse{
-			ID:              "updated-bucket-789",
-			Created:         time.Now(),
-			GlobalAliases:   []string{"new-name"},
-			WebsiteAccess:   true,
-			Objects:         10,
-			Bytes:           5000,
-			Quotas:          &apiBucketQuotas{MaxSize: int64Ptr(2000000), MaxObjects: nil},
-		}
+		case r.URL.Path == "/v2/RemoveBucketAlias" && r.Method == "POST":
+			var body bucketAliasEnum
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("failed to decode RemoveBucketAlias request: %v", err)
+			}
+			if body.BucketID != "updated-bucket-789" {
+				t.Errorf("RemoveBucketAlias bucketId = %q, want updated-bucket-789", body.BucketID)
+			}
+			removeAliasHit = body.GlobalAlias
+			_, _ = w.Write([]byte("{}"))
 
-w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
-}))
+		case r.URL.Path == "/v2/GetBucketInfo" && r.Method == "GET":
+			getCount++
+			// First GET (pre-diff) returns the OLD alias so the
+			// driver computes a rename. Second GET (final re-fetch)
+			// returns the NEW alias.
+			aliases := []string{"old-name"}
+			if getCount == 2 {
+				aliases = []string{"new-name"}
+			}
+			_ = json.NewEncoder(w).Encode(getBucketInfoResponse{
+				ID:            "updated-bucket-789",
+				Created:       time.Now(),
+				GlobalAliases: aliases,
+				Objects:       10,
+				Bytes:         5000,
+				Quotas:        &apiBucketQuotas{MaxSize: int64Ptr(2000000)},
+			})
+
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
 	defer server.Close()
 
 	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
@@ -312,13 +358,114 @@ w.Header().Set("Content-Type", "application/json")
 		t.Fatalf("UpdateBucket failed: %v", err)
 	}
 
+	if !quotaPostHit {
+		t.Error("expected POST /v2/UpdateBucket to be called for quotas")
+	}
+	if addAliasHit != "new-name" {
+		t.Errorf("AddBucketAlias = %q, want new-name", addAliasHit)
+	}
+	if removeAliasHit != "old-name" {
+		t.Errorf("RemoveBucketAlias = %q, want old-name", removeAliasHit)
+	}
 	if bucket.ID != "updated-bucket-789" {
 		t.Errorf("expected ID 'updated-bucket-789', got '%s'", bucket.ID)
 	}
-
 	if len(bucket.Aliases) != 1 || bucket.Aliases[0] != "new-name" {
 		t.Errorf("expected aliases ['new-name'], got %v", bucket.Aliases)
 	}
+}
+
+// TestUpdateBucket_QuotasOnly verifies that an update with only quotas
+// (Aliases == nil) doesn't touch the alias endpoints — the previous
+// behaviour for callers that never set Aliases.
+func TestUpdateBucket_QuotasOnly(t *testing.T) {
+	var addAliasCalls, removeAliasCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v2/UpdateBucket" && r.Method == "POST":
+			_ = json.NewEncoder(w).Encode(getBucketInfoResponse{ID: "b-q"})
+		case r.URL.Path == "/v2/AddBucketAlias":
+			addAliasCalls++
+		case r.URL.Path == "/v2/RemoveBucketAlias":
+			removeAliasCalls++
+		case r.URL.Path == "/v2/GetBucketInfo" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(getBucketInfoResponse{
+				ID:            "b-q",
+				GlobalAliases: []string{"keep-me"},
+				Quotas:        &apiBucketQuotas{MaxSize: int64Ptr(123)},
+			})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+	_, err := d.UpdateBucket(context.Background(), "b-q", driverpkg.BucketUpdate{
+		Quotas: &driverpkg.Quotas{MaxSize: int64Ptr(123)},
+	})
+	if err != nil {
+		t.Fatalf("UpdateBucket: %v", err)
+	}
+	if addAliasCalls != 0 || removeAliasCalls != 0 {
+		t.Errorf("quotas-only update touched alias endpoints (add=%d remove=%d)",
+			addAliasCalls, removeAliasCalls)
+	}
+}
+
+// TestDiffAliases covers the add-then-remove ordering invariant and
+// the no-op case. The diff helper is the load-bearing piece of the
+// BUG01 fix; a regression here would silently mis-apply rename calls.
+func TestDiffAliases(t *testing.T) {
+	cases := []struct {
+		name              string
+		current, desired  []string
+		wantAdd, wantRemove []string
+	}{
+		{
+			name:    "rename",
+			current: []string{"old"}, desired: []string{"new"},
+			wantAdd: []string{"new"}, wantRemove: []string{"old"},
+		},
+		{
+			name:    "noop",
+			current: []string{"a", "b"}, desired: []string{"b", "a"},
+			wantAdd: nil, wantRemove: nil,
+		},
+		{
+			name:    "add-only",
+			current: []string{"a"}, desired: []string{"a", "b"},
+			wantAdd: []string{"b"}, wantRemove: nil,
+		},
+		{
+			name:    "remove-only",
+			current: []string{"a", "b"}, desired: []string{"a"},
+			wantAdd: nil, wantRemove: []string{"b"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, r := diffAliases(tc.current, tc.desired)
+			if !stringSliceEqual(a, tc.wantAdd) {
+				t.Errorf("toAdd = %v, want %v", a, tc.wantAdd)
+			}
+			if !stringSliceEqual(r, tc.wantRemove) {
+				t.Errorf("toRemove = %v, want %v", r, tc.wantRemove)
+			}
+		})
+	}
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestUpdateBucketNotFound(t *testing.T) {

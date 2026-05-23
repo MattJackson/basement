@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/backup"
+	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/store"
 )
 
@@ -427,6 +428,100 @@ func TestCreateBackup_NegativeRetentionRejected(t *testing.T) {
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestSnapshotsList_UserRegionDestination_FallsBackToRegionDriver
+// covers the v1.11.0.6 BUG05 fix: when a snapshot-mode backup's
+// destination is a UserRegion (no admin Connection registered at the
+// region's endpoint), the handler used to return 500 with the raw
+// "region has no admin bridge (endpoint %q)" string from
+// resolveBackupConn. The fix falls back to building a region-scoped
+// driver from the UserRegion's stored S3 key and listing snapshots
+// via that driver — which works because snapshot enumeration is pure
+// S3 ListObjects, not an admin op.
+//
+// Test strategy: wire UserRegions, register a region under the
+// caller's userID, point a snapshot backup's DstRegionID at the
+// region, then assert the handler returns 200 + the canonical wire
+// shape (empty array, since no snapshot prefixes exist yet on the
+// in-memory mock driver).
+func TestSnapshotsList_UserRegionDestination_FallsBackToRegionDriver(t *testing.T) {
+	dataDir := t.TempDir()
+	cfg := newTestConfig()
+	cfg.DataDir = dataDir
+	st, err := store.Open(dataDir, 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WireUserRegions(cfg.JWT.Secret); err != nil {
+		t.Fatalf("WireUserRegions: %v", err)
+	}
+
+	mock := &testMockDriver{}
+	mock.listObjectsFunc = func(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
+		// No snapshot prefixes yet — handler should return [].
+		return driver.ObjectPage{}, nil
+	}
+
+	conns := &testMockConnectionStore{}
+	reg := driver.NewRegistry(conns)
+	reg.SetUserRegionsStore(st.UserRegions())
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
+		return mock, nil
+	})
+
+	srv := New(cfg, st, conns, nil, reg)
+	bs, _ := backup.NewFileStore(dataDir)
+	sched := backup.NewScheduler(bs, backup.RunnerFunc(func(_ context.Context, _ backup.Backup) backup.BackupResult {
+		return backup.BackupResult{Success: true}
+	}), nil)
+	srv.SetBackups(bs, sched)
+	t.Cleanup(func() {
+		sched.Stop()
+		os.RemoveAll(dataDir)
+	})
+
+	// Create a UserRegion under matthew. The store hands us back the
+	// canonical record with its assigned ID — that ID is what the
+	// backup's DstRegionID will reference. SecretKeyEnc carries the
+	// PLAINTEXT secret on the Create input; the store encrypts it
+	// immediately and never holds plaintext beyond the call.
+	ur := st.UserRegions()
+	region, err := ur.Create(context.Background(), store.UserRegion{
+		UserID:       "matthew",
+		Alias:        "dst",
+		Endpoint:     "https://s3.example.com",
+		AccessKeyID:  "AK",
+		SecretKeyEnc: []byte("SK"),
+	})
+	if err != nil {
+		t.Fatalf("UserRegions.Create: %v", err)
+	}
+
+	created, err := bs.Create(context.Background(), backup.Backup{
+		OwnerUserID: "matthew",
+		Name:        "user-region-backup",
+		Schedule:    backup.ScheduleManual,
+		Mode:        backup.BackupModeSnapshot,
+		DstRegionID: region.ID,
+		DstBucket:   "dst-bucket",
+		Retention:   backup.DefaultRetention(),
+	})
+	if err != nil {
+		t.Fatalf("backup.Create: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/backups/"+created.ID+"/snapshots", nil)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (region driver fallback), got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if body != "[]\n" && body != "[]" {
+		t.Fatalf("expected empty array (no prefixes), got %q", body)
 	}
 }
 

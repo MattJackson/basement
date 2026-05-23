@@ -6,20 +6,20 @@ Target: `https://basement.pq.io`
 
 Totals: pass=46, skip=2, fail=0, bugs=6
 
-## Status as of v1.11.0.10 (docs sweep)
+## Status as of v1.11.0.6 (driver/handler sweep)
 
 | Bug   | Area                  | Status                                                                                |
 |-------|-----------------------|---------------------------------------------------------------------------------------|
-| BUG01 | bucket-rename         | **OPEN** — Garage v2 alias-diff path not implemented; punted to a follow-up cycle.    |
+| BUG01 | bucket-rename         | **FIXED** in v1.11.0.6 (Garage v2 + v1 alias-diff via Add/RemoveBucketAlias).         |
 | BUG02 | key-grant-flags-lost  | **FIXED** in v1.11.0.5 (`internal/drivers/garage/keys.go` decode fix).                |
-| BUG03 | driver-info endpoint  | **OPEN** — per-cluster `/driver-info` handler not wired; punted to a follow-up cycle. |
-| BUG04 | multipart-abort key   | **OPEN** — abort route missing `{key}` segment; punted to a follow-up cycle.          |
-| BUG05 | snapshots 500         | **OPEN** — UserRegion-backed backups need degraded-OK handling; follow-up.            |
+| BUG03 | driver-info endpoint  | **FIXED** in v1.11.0.6 (`driverInfoHandler` wired under `adminG`, per-cluster Caps).  |
+| BUG04 | multipart-abort key   | **FIXED** in v1.11.0.6 (abort handler accepts `?key=` query param; FE + smoke).       |
+| BUG05 | snapshots 500         | **FIXED** in v1.11.0.6 (`snapshotListingDriver` falls back to UserRegion S3 key).     |
 | BUG06 | WebDAV PROPFIND edge  | **OPEN** — Caddyfile in `deploy/` needs WebDAV verbs whitelist; deployment config.    |
 
-Five of six bugs are still open after v1.11.0.10; the docs sweep
-did not touch product code. They are tracked here so a future cycle
-can address them in priority order.
+All driver/handler-side bugs from the v1.11.0.5 smoke run are closed.
+BUG06 is the only remaining item, and it lives in operator-owned
+infra (Caddyfile) rather than basement code, so it tracks separately.
 
 
 
@@ -56,13 +56,13 @@ can address them in priority order.
 
 ### A. Cluster + driver basics (3 bugs)
 
-#### BUG01 — bucket-rename: PATCH `/admin/clusters/{cid}/buckets/{bid}` with `{aliases:[...]}` silently no-ops
+#### BUG01 — bucket-rename: PATCH `/admin/clusters/{cid}/buckets/{bid}` with `{aliases:[...]}` silently no-ops **[FIXED — v1.11.0.6]**
 
 PATCH returns 200 with the **old** aliases array unchanged. The Garage v2 `UpdateBucket` driver impl (`internal/drivers/garage/buckets.go:59`) reads only `update.Quotas` from the `driver.BucketUpdate` body — `update.Aliases` is ignored entirely. Garage v2's alias model is separate from `UpdateBucket`: aliases are added/removed via `AddBucketAlias` / `RemoveBucketAlias` endpoints. The handler in `internal/api/admin_buckets.go:updateBucketHandler` happily passes the `aliases` field through and returns success, then re-fetches and returns the unchanged bucket.
 
 Repro: `PATCH /api/v1/admin/clusters/{garage-v2-cid}/buckets/{bid}` with body `{"aliases":["new-name"]}` → 200, body still shows the old alias.
 
-Fix scope: medium — `garage.driver.UpdateBucket` needs an alias-diff step (compute add/remove from current aliases vs. requested) and to call `AddBucketAlias` / `RemoveBucketAlias` per delta. Same fix needed for `garage_v1` driver. Punted to a follow-up cycle.
+Fix (v1.11.0.6): `garage.driver.UpdateBucket` now diffs the requested aliases against `GetBucketInfo.globalAliases` and fans out per-delta `AddBucketAlias` / `RemoveBucketAlias` calls (adds-before-removes so a rename never zeroes the alias set mid-flight). `garage_v1` driver got the parity fix using the dedicated `/v1/bucket/alias/global` PUT/DELETE endpoints. Both drivers re-fetch via `GetBucketInfo` after the diff so the response carries the canonical post-update state.
 
 #### BUG02 — key-grant-flags-lost: Garage v2 driver decoded per-bucket permissions wrong, dropping every grant to all-false **[FIXED INLINE — v1.11.0.5]**
 
@@ -74,17 +74,17 @@ Fix: switch the field to `[]keyInfoBucketResponse` and read `b.Permissions.Read/
 
 The `BUG02` line still appears in the live smoke output because the deploy is at v1.11.0.3; the fix lands with v1.11.0.5.
 
-#### BUG03 — driver-info-endpoint: GET `/api/v1/admin/clusters/{cid}/driver-info` returns 404
+#### BUG03 — driver-info-endpoint: GET `/api/v1/admin/clusters/{cid}/driver-info` returns 404 **[FIXED — v1.11.0.6]**
 
 The cycle brief assumed a per-cluster driver-capabilities endpoint exists. Inventory of `internal/api/server.go` routes shows only the global `/api/v1/capabilities` (which queries `s.drv`, the default driver), not a `{cid}`-scoped variant. A per-cluster endpoint matters once a deploy holds multiple cluster connections with different drivers (e.g. one Garage v2 + one S3 + one MinIO).
 
 Repro: `GET /api/v1/admin/clusters/{any-cid}/driver-info` → 404.
 
-Fix scope: small — wire a new handler that calls `s.reg.For(ctx, cid)` and returns the same `driver.Caps` shape per-cluster. Punted to a follow-up cycle.
+Fix (v1.11.0.6): added `driverInfoHandler` in `admin_clusters.go` and wired the route under `adminG.Get("/admin/clusters/{cid}/driver-info", s.driverInfoHandler)`. Uses the v1.11.0.2 `driverForRouteCluster` dispatch pattern + reads the `Driver` name off the `Connection` record so the wire response includes both the configured driver (e.g. `garage` vs `garage-v1`) and the live `Caps` from that cluster's driver instance.
 
 ### C. Bucket object operations (1 bug)
 
-#### BUG04 — multipart-abort handler routes empty Key to S3, gets rejected
+#### BUG04 — multipart-abort handler routes empty Key to S3, gets rejected **[FIXED — v1.11.0.6]**
 
 `internal/api/user_regions.go:userAbortRegionMultipartHandler` constructs `driver.MultipartUpload{UploadID: uploadID, Bucket: bid}` and passes that to `drv.AbortMultipart`. The Garage v2 driver (`internal/drivers/garage/s3.go:305`) calls `s3.AbortMultipartUploadInput{Bucket, Key, UploadId}` — but `upload.Key` is empty because the route `DELETE /multipart/{uploadId}` has no `{key}` path segment. AWS S3 SDK rejects the request before it leaves the wire.
 
@@ -96,17 +96,17 @@ DELETE /api/v1/user/regions/{rid}/buckets/{bid}/multipart/{uploadId} → 400 INV
 
 Side-effect: the multipart upload stays in-flight on the backend, which then blocks bucket-delete with `BucketNotEmpty`.
 
-Fix scope: small-medium — route needs the object key as either an additional path segment, a query param, or a body field. The handler then forwards into the driver call with both. Punted to a follow-up cycle.
+Fix (v1.11.0.6): the abort handler now accepts the object key as a `?key=<urlencoded>` query param (preferred — keeps DELETE bodyless) or a `{"key":"..."}` JSON body (forward-compat). Missing key returns 400 `INVALID_REQUEST` with a clear `object key required (pass as ?key=<encoded> query param)` message instead of relying on the SDK's downstream error string. FE callers (`useUserRegionMultipartAbort`, `UploadDialog`) and the smoke harness updated to pass the key.
 
 ### D. Backups (1 bug)
 
-#### BUG05 — list-snapshots returns 500 on a freshly-created snapshot-mode backup
+#### BUG05 — list-snapshots returns 500 on a freshly-created snapshot-mode backup **[FIXED — v1.11.0.6]**
 
 `GET /api/v1/user/backups/{id}/snapshots` returns 500 when the backup is snapshot-mode but has never run. `userListBackupSnapshotsHandler` (`internal/api/user_backups.go:454`) calls `resolveBackupConn` which returns `region has no admin bridge` for UserRegion-backed destinations (since UserRegions don't carry the admin token). The 500 should be either a 200 with `[]` or a 503 with a clear "destination region has no admin bridge" message — never a bare 500.
 
 Repro: create a snapshot-mode backup pointing at a UserRegion destination, then `GET /user/backups/{id}/snapshots` → 500 `SNAPSHOT_LIST_FAILED: region has no admin bridge (endpoint "...")`.
 
-Fix scope: small — degrade the no-admin-bridge case to 200 with `{snapshots: [], note: "destination region lacks admin bridge; snapshots not enumerable"}`. Punted to a follow-up cycle.
+Fix (v1.11.0.6): better than the proposed degradation — the snapshot lister now actually works against UserRegion destinations. Added `snapshotListingDriver` helper that tries the admin-bridge path first (unchanged behaviour for admin Connection destinations) and falls back to building a region-scoped driver from the UserRegion's stored S3 credentials when no admin bridge exists. Snapshot enumeration is pure S3 `ListObjects` against the destination bucket's snapshot-prefix tree — exactly what the UserRegion's own key was authorized to write, so the same key can read it back. No more 500; the endpoint returns the real snapshot list (or `[]` when no snapshots have been written yet) regardless of destination tier.
 
 ### L. WebDAV gateway (1 bug)
 

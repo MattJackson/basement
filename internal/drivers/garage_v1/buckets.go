@@ -130,42 +130,108 @@ func (d *driver) CreateBucket(ctx context.Context, spec driverpkg.BucketSpec) (d
 	return bucketFromInfo(resp), nil
 }
 
-// UpdateBucket updates a bucket's quotas and/or website settings.
-// Endpoint: PUT /v1/bucket?id={id} (garage-admin-v1.yml:755-828).
+// UpdateBucket updates a bucket's quotas and/or aliases.
 //
-// Body shape: garage-admin-v1.yml:786-814. Both websiteAccess and quotas
-// are optional; only the quotas branch is wired here since BucketUpdate
-// doesn't model website settings.
+// Quotas go via PUT /v1/bucket?id={id} (garage-admin-v1.yml:755-828);
+// alias management goes through the dedicated PUT/DELETE
+// /v1/bucket/alias/global endpoints (garage-admin-v1.yml:950-1017),
+// since the PUT /bucket body does NOT carry globalAliases.
 //
-// OPEN: the v1 PUT /bucket endpoint does NOT modify globalAliases — alias
-// management goes through the dedicated /bucket/alias/global PUT/DELETE
-// endpoints (garage-admin-v1.yml:950-1017). This implementation therefore
-// IGNORES update.Aliases. A future change should call PutBucketGlobalAlias
-// / DeleteBucketGlobalAlias to reconcile the alias set against the current
-// bucket info. For now we leave Aliases unhandled and only honor Quotas.
+// When the caller passes `update.Aliases`, we diff against the bucket's
+// current `globalAliases` (read via GetBucket) and fan out one PUT per
+// net-new alias and one DELETE per dropped alias. Adds come before
+// removes so a single-alias rename (drop "old", add "new") never
+// momentarily leaves the bucket with zero aliases.
 //
 // Spec note (garage-admin-v1.yml:769-771): "In `quotas`: new values of
 // `maxSize` and `maxObjects` must both be specified, or set to `null` to
 // remove the quotas." We follow this — if Quotas is non-nil we always send
 // both fields (using JSON null for ones the caller left as nil).
+//
+// BUG01 (v1.11.0.5 smoke): prior to v1.11.0.6 the v1 driver silently
+// dropped `update.Aliases`, matching the v2 bug. Fixed here for parity
+// per `feedback_driver_parity`.
 func (d *driver) UpdateBucket(ctx context.Context, id string, update driverpkg.BucketUpdate) (driverpkg.Bucket, error) {
-	body := updateBucketRequestV1{}
-
+	// Step 1: send quota changes (if any). Same body shape as before.
 	if update.Quotas != nil {
-		body.Quotas = &updateBucketQuotasV1{
-			MaxSize:    update.Quotas.MaxSize,
-			MaxObjects: update.Quotas.MaxObjects,
+		body := updateBucketRequestV1{
+			Quotas: &updateBucketQuotasV1{
+				MaxSize:    update.Quotas.MaxSize,
+				MaxObjects: update.Quotas.MaxObjects,
+			},
+		}
+		path := fmt.Sprintf("/v1/bucket?id=%s", url.QueryEscape(id))
+		var resp bucketInfoV1
+		if err := d.client.do(ctx, "PUT", path, body, &resp); err != nil {
+			return driverpkg.Bucket{}, err
 		}
 	}
 
-	path := fmt.Sprintf("/v1/bucket?id=%s", url.QueryEscape(id))
+	// Step 2: reconcile aliases via the dedicated /bucket/alias/global
+	// endpoints. Compute the diff against current state — the v1 API
+	// has no replace-all primitive, only per-alias PUT / DELETE.
+	if update.Aliases != nil {
+		desired := *update.Aliases
 
-	var resp bucketInfoV1
-	if err := d.client.do(ctx, "PUT", path, body, &resp); err != nil {
-		return driverpkg.Bucket{}, err
+		var current bucketInfoV1
+		getPath := fmt.Sprintf("/v1/bucket?id=%s", url.QueryEscape(id))
+		if err := d.client.do(ctx, "GET", getPath, nil, &current); err != nil {
+			return driverpkg.Bucket{}, err
+		}
+
+		toAdd, toRemove := diffAliasesV1(current.GlobalAliases, desired)
+
+		for _, a := range toAdd {
+			p := fmt.Sprintf("/v1/bucket/alias/global?id=%s&alias=%s",
+				url.QueryEscape(id), url.QueryEscape(a))
+			if err := d.client.do(ctx, "PUT", p, nil, nil); err != nil {
+				return driverpkg.Bucket{}, err
+			}
+		}
+		for _, a := range toRemove {
+			p := fmt.Sprintf("/v1/bucket/alias/global?id=%s&alias=%s",
+				url.QueryEscape(id), url.QueryEscape(a))
+			if err := d.client.do(ctx, "DELETE", p, nil, nil); err != nil {
+				return driverpkg.Bucket{}, err
+			}
+		}
 	}
 
-	return bucketFromInfo(resp), nil
+	// Step 3: re-fetch + return the canonical post-update bucket.
+	var final bucketInfoV1
+	finalPath := fmt.Sprintf("/v1/bucket?id=%s", url.QueryEscape(id))
+	if err := d.client.do(ctx, "GET", finalPath, nil, &final); err != nil {
+		return driverpkg.Bucket{}, err
+	}
+	return bucketFromInfo(final), nil
+}
+
+// diffAliasesV1 returns (toAdd, toRemove) for the alias reconciliation
+// loop. Order-insensitive; preserves the desired-list order for adds
+// and current-list order for removes so reconciliation is deterministic
+// across retries. Duplicated from the v2 driver intentionally — keeping
+// the helper local sidesteps a cross-package dep that the driver
+// interface doesn't otherwise need.
+func diffAliasesV1(current, desired []string) (toAdd, toRemove []string) {
+	currentSet := make(map[string]struct{}, len(current))
+	for _, a := range current {
+		currentSet[a] = struct{}{}
+	}
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, a := range desired {
+		desiredSet[a] = struct{}{}
+	}
+	for _, a := range desired {
+		if _, ok := currentSet[a]; !ok {
+			toAdd = append(toAdd, a)
+		}
+	}
+	for _, a := range current {
+		if _, ok := desiredSet[a]; !ok {
+			toRemove = append(toRemove, a)
+		}
+	}
+	return toAdd, toRemove
 }
 
 // DeleteBucket deletes a bucket. The bucket must be empty.

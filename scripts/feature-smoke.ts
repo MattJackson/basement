@@ -780,10 +780,11 @@ async function main(): Promise<number> {
         skipLine("C.1 multipart", "no region or bucket");
         return;
       }
+      const objectKey = "feat-smoke/multipart-test.bin";
       const r = await api(
         "POST",
         `/api/v1/user/regions/${urRegionId}/buckets/${aBucketId}/multipart/init`,
-        { key: "feat-smoke/multipart-test.bin", contentType: "application/octet-stream" },
+        { key: objectKey, contentType: "application/octet-stream" },
       );
       if (r.status !== 200) {
         reportBug(
@@ -798,10 +799,12 @@ async function main(): Promise<number> {
         reportBug("multipart-init", `init response missing uploadId; got: ${JSON.stringify(r.body).slice(0, 200)}`);
         return;
       }
-      // Abort
+      // Abort — v1.11.0.6: the handler now requires the object key
+      // (S3 AbortMultipartUpload needs it); pass as ?key= query param
+      // per the BUG04 fix.
       const a = await api(
         "DELETE",
-        `/api/v1/user/regions/${urRegionId}/buckets/${aBucketId}/multipart/${encodeURIComponent(uploadId)}`,
+        `/api/v1/user/regions/${urRegionId}/buckets/${aBucketId}/multipart/${encodeURIComponent(uploadId)}?key=${encodeURIComponent(objectKey)}`,
       );
       if (a.status !== 204 && a.status !== 200) {
         reportBug(

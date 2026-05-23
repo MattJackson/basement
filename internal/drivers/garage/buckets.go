@@ -54,26 +54,112 @@ func (d *driver) CreateBucket(ctx context.Context, spec driverpkg.BucketSpec) (d
 	return bucketFromInfo(resp), nil
 }
 
-// UpdateBucket updates a bucket's quotas and/or website settings.
-// Endpoint: POST /v2/UpdateBucket (garage-admin-v2.json:1594-1641).
+// UpdateBucket updates a bucket's quotas and/or aliases.
+//
+// Quotas + website settings are POSTed to /v2/UpdateBucket
+// (garage-admin-v2.json:1594-1641).
+//
+// Alias changes are NOT part of UpdateBucket on Garage v2 — the v2 API
+// models alias mutations as separate AddBucketAlias / RemoveBucketAlias
+// calls keyed by the {bucketId, globalAlias} pair
+// (garage-admin-v2.json:95-127 + 1401-1430, BucketAliasEnum schema at
+// 1948-1985). When the caller passes `update.Aliases`, we diff against
+// the bucket's current `globalAliases` (read via GetBucketInfo) and
+// fan out one Add per net-new alias and one Remove per dropped alias.
+//
+// Diff order: Adds before Removes so a rename (drop "old", add "new")
+// never momentarily leaves the bucket without any alias — Garage rejects
+// the last RemoveBucketAlias against a bucket whose alias set would
+// become empty with `400 cannot remove last alias`.
+//
+// BUG01 (v1.11.0.5 smoke): prior to v1.11.0.6 this method silently
+// dropped `update.Aliases`, so PATCH /admin/clusters/{cid}/buckets/{bid}
+// with `{"aliases":[...]}` returned 200 + the old alias array unchanged.
 func (d *driver) UpdateBucket(ctx context.Context, id string, update driverpkg.BucketUpdate) (driverpkg.Bucket, error) {
-	body := updateBucketRequestBody{}
-
+	// Step 1: send quota changes (if any) via UpdateBucket. We always
+	// hit this path when the caller provided quotas so callers get
+	// the same wire shape as before, even when aliases is also set.
 	if update.Quotas != nil {
-		body.Quotas = &apiBucketQuotas{
-			MaxSize:    update.Quotas.MaxSize,
-			MaxObjects: update.Quotas.MaxObjects,
+		body := updateBucketRequestBody{
+			Quotas: &apiBucketQuotas{
+				MaxSize:    update.Quotas.MaxSize,
+				MaxObjects: update.Quotas.MaxObjects,
+			},
+		}
+		path := fmt.Sprintf("/v2/UpdateBucket?id=%s", url.QueryEscape(id))
+		var resp getBucketInfoResponse
+		if err := d.client.do(ctx, "POST", path, body, &resp); err != nil {
+			return driverpkg.Bucket{}, err
 		}
 	}
 
-	path := fmt.Sprintf("/v2/UpdateBucket?id=%s", url.QueryEscape(id))
+	// Step 2: reconcile aliases (if requested). Compute the diff
+	// against current state — Garage v2 has no replace-all endpoint,
+	// only per-alias Add / Remove.
+	if update.Aliases != nil {
+		desired := *update.Aliases
 
-	var resp getBucketInfoResponse
-	if err := d.client.do(ctx, "POST", path, body, &resp); err != nil {
-		return driverpkg.Bucket{}, err
+		var current getBucketInfoResponse
+		getPath := fmt.Sprintf("/v2/GetBucketInfo?id=%s", url.QueryEscape(id))
+		if err := d.client.do(ctx, "GET", getPath, nil, &current); err != nil {
+			return driverpkg.Bucket{}, err
+		}
+
+		toAdd, toRemove := diffAliases(current.GlobalAliases, desired)
+
+		// Adds first (see method-level comment) so a single-alias
+		// rename never tries to remove the only remaining alias.
+		for _, a := range toAdd {
+			body := bucketAliasEnum{BucketID: id, GlobalAlias: a}
+			if err := d.client.do(ctx, "POST", "/v2/AddBucketAlias", body, nil); err != nil {
+				return driverpkg.Bucket{}, err
+			}
+		}
+		for _, a := range toRemove {
+			body := bucketAliasEnum{BucketID: id, GlobalAlias: a}
+			if err := d.client.do(ctx, "POST", "/v2/RemoveBucketAlias", body, nil); err != nil {
+				return driverpkg.Bucket{}, err
+			}
+		}
 	}
 
-	return bucketFromInfo(resp), nil
+	// Step 3: re-fetch + return the canonical post-update bucket. A
+	// single GetBucketInfo here (instead of trusting the last write's
+	// echo) keeps the response correct even when both quotas + aliases
+	// changed in this call.
+	var final getBucketInfoResponse
+	finalPath := fmt.Sprintf("/v2/GetBucketInfo?id=%s", url.QueryEscape(id))
+	if err := d.client.do(ctx, "GET", finalPath, nil, &final); err != nil {
+		return driverpkg.Bucket{}, err
+	}
+	return bucketFromInfo(final), nil
+}
+
+// diffAliases returns (toAdd, toRemove) — aliases in desired that are
+// not in current, and aliases in current that are not in desired.
+// Order-insensitive; preserves the desired-list order for adds and the
+// current-list order for removes so reconciliation is deterministic
+// across retries.
+func diffAliases(current, desired []string) (toAdd, toRemove []string) {
+	currentSet := make(map[string]struct{}, len(current))
+	for _, a := range current {
+		currentSet[a] = struct{}{}
+	}
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, a := range desired {
+		desiredSet[a] = struct{}{}
+	}
+	for _, a := range desired {
+		if _, ok := currentSet[a]; !ok {
+			toAdd = append(toAdd, a)
+		}
+	}
+	for _, a := range current {
+		if _, ok := desiredSet[a]; !ok {
+			toRemove = append(toRemove, a)
+		}
+	}
+	return toAdd, toRemove
 }
 
 // DeleteBucket deletes a bucket. The bucket must be empty.
@@ -189,6 +275,15 @@ type createBucketLocalAlias struct {
 type updateBucketRequestBody struct {
 	Quotas      *apiBucketQuotas `json:"quotas,omitempty"`
 	WebsiteAccess *updateBucketWebsiteAccess `json:"websiteAccess,omitempty"`
+}
+
+// bucketAliasEnum mirrors the global-alias variant of BucketAliasEnum
+// (garage-admin-v2.json:1948-1985). The local-alias variant requires an
+// accessKeyId and is unused by the driver today — basement's alias model
+// is global-only, matching the BucketUpdate.Aliases contract.
+type bucketAliasEnum struct {
+	BucketID    string `json:"bucketId"`
+	GlobalAlias string `json:"globalAlias"`
 }
 
 // apiBucketQuotas mirrors ApiBucketQuotas (garage-admin-v2.json:1748-1765).
