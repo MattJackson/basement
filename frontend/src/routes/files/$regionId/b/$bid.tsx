@@ -331,7 +331,7 @@ function UserRegionBucketObjects() {
     <div className="space-y-6">
       <PageHeader
         title={bucketAlias}
-        description={`Objects in ${bucketAlias}`}
+        description={prefix ? prefix.replace(/\/$/, "") : undefined}
         badge={federation ? <FederationBadge federation={federation} /> : null}
         actions={
           <div className="flex items-center gap-2 w-full sm:w-auto">
