@@ -10,11 +10,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { client } from "@/shared/api/client";
 import { useUser } from "@/shared/auth/useUser";
 import { useVersion } from "@/shared/api/queries";
 import { useElevationPrompt } from "@/shared/auth/elevation";
-import { useAuthMode } from "@/shared/auth/mode";
+import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -38,6 +39,7 @@ export function UserMenu() {
   // already-elevated users skip the prompt and go straight to /admin.
   const promptForElevation = useElevationPrompt();
   const { mode } = useAuthMode();
+  const setAuthMode = useSetAuthMode();
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
@@ -70,6 +72,33 @@ export function UserMenu() {
       // ELEVATION_CANCELLED — user dismissed the modal. Stay where we
       // are; the UserMenu remains open visually only briefly because
       // Radix closes on item click anyway.
+    }
+  };
+
+  // v1.9.0e.2: "Switch to user view" drops privileges before navigating
+  // under the tight coupling. Mirror of handleDrop in PersonaPill —
+  // POST /auth/logout-elevation, snap local mode to USER, invalidate
+  // the cached /auth/me, then navigate. USER-mode clicks just navigate
+  // (no privileges to drop).
+  const handleSwitchToUser = async () => {
+    if (mode === "user") {
+      await navigate({ to: "/files" });
+      return;
+    }
+    try {
+      const res = await fetch("/api/v1/auth/logout-elevation", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        toast.error(`Failed to drop privileges (HTTP ${res.status})`);
+        return;
+      }
+      setAuthMode({ mode: "user", expiresAt: 0 });
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      await navigate({ to: "/files" });
+    } catch {
+      toast.error("Failed to drop privileges — network error");
     }
   };
 
@@ -109,9 +138,12 @@ export function UserMenu() {
           >
             Switch to admin view
           </DropdownMenuItem>
-          <DropdownMenuLinkItem href="/files">
+          <DropdownMenuItem
+            onClick={handleSwitchToUser}
+            data-testid="switch-to-user"
+          >
             Switch to user view
-          </DropdownMenuLinkItem>
+          </DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>

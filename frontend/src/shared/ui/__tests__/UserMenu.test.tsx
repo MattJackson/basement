@@ -148,3 +148,120 @@ describe("UserMenu — Switch to admin elevation", () => {
     expect(navigateMock).not.toHaveBeenCalled();
   });
 });
+
+describe("UserMenu — Switch to admin (v1.9.0e.2 routing)", () => {
+  // v1.9.0e.2 pins the post-elevation landing target. Under the new
+  // tight mode/view coupling, elevating always navigates to /admin
+  // (specifically /admin/clusters as the admin landing route). Already-
+  // elevated clicks short-circuit straight to the same target.
+  beforeEach(() => {
+    navigateMock.mockReset();
+    vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          mode: "admin",
+          mode_expires_at: Math.floor(Date.now() / 1000) + 900,
+          mode_ttl_seconds: 900,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("navigates to /admin/clusters after successful elevation (USER mode)", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    fireEvent.click(await screen.findByTestId("switch-to-admin"));
+
+    const password = await screen.findByTestId("elevation-password");
+    fireEvent.change(password, { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByRole("button", { name: /^submit$/i }));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
+    });
+  });
+});
+
+describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
+  // Tight coupling: "Switch to user view" drops privileges AND
+  // navigates. USER-mode clicks just navigate (no privileges to
+  // drop). On a successful drop the local mode flips to USER and the
+  // /auth/me cache invalidates so the next hydrate sees the rotated
+  // cookie.
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    navigateMock.mockReset();
+    fetchSpy = vi.spyOn(window, "fetch").mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it("USER mode: navigates to /files without calling logout-elevation", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    fireEvent.click(await screen.findByTestId("switch-to-user"));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("ADMIN mode: POSTs logout-elevation, then navigates to /files", async () => {
+    render(<UserMenu />, {
+      wrapper: ({ children }) => (
+        <Wrapper
+          initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }}
+        >
+          {children}
+        </Wrapper>
+      ),
+    });
+
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    fireEvent.click(await screen.findByTestId("switch-to-user"));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "/api/v1/auth/logout-elevation",
+        expect.objectContaining({ method: "POST", credentials: "include" }),
+      );
+    });
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
+    });
+  });
+
+  it("ADMIN mode + backend rejects drop: does NOT navigate", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    render(<UserMenu />, {
+      wrapper: ({ children }) => (
+        <Wrapper
+          initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }}
+        >
+          {children}
+        </Wrapper>
+      ),
+    });
+
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    fireEvent.click(await screen.findByTestId("switch-to-user"));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalled();
+    });
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+});

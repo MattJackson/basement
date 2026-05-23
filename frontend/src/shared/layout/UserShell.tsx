@@ -5,6 +5,7 @@ import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
+import { useAuthMode } from "@/shared/auth/mode";
 
 interface UserShellProps {
   children?: ReactNode;
@@ -15,12 +16,18 @@ const NAV_LINK =
 const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function UserShell({ children }: UserShellProps): ReactNode {
+  // v1.9.0e.2: logo target tracks mode. An ADMIN dipping into the user
+  // view (allowed under the tight coupling) clicks the logo and lands
+  // back on /admin, mirroring AppShell. USER mode stays on /files.
+  const { mode } = useAuthMode();
+  const logoHref = mode === "user" ? "/files" : "/admin";
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
           <div className="flex items-center gap-3 sm:gap-6 min-w-0 flex-1">
-            <Logo href="/files" />
+            <Logo href={logoHref} />
             {/* v1.8.0e: nav scrolls horizontally on mobile (no
                 hamburger). 7 top-level user routes wouldn't fit a
                 380px viewport even at small font sizes, and a

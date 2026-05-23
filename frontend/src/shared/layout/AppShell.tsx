@@ -1,14 +1,14 @@
 import type { ReactNode } from "react";
-import { Outlet, Link } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { Outlet, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
 import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner";
-import { AdminUserModeBanner } from "@/components/auth/AdminUserModeBanner";
-import { AdminEntryElevationGuard } from "@/components/auth/AdminEntryElevationGuard";
 import { useUser } from "@/shared/auth/useUser";
+import { useAuthMode } from "@/shared/auth/mode";
 
 interface AppShellProps {
   children?: ReactNode;
@@ -21,19 +21,48 @@ const NAV_LINK_ACTIVE = "text-foreground font-medium";
 export function AppShell({ children }: AppShellProps): ReactNode {
   const { data: user } = useUser();
   const isUIAdmin = user?.uiAdmin === true;
+  const { mode } = useAuthMode();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // v1.9.0e.2 — tight mode/view coupling. USER mode visiting /admin/*
+  // gets a silent redirect to /files; no elevation prompt, no banner.
+  // The operator must opt in to admin via the UserMenu (which elevates
+  // up front and navigates to /admin/clusters on success).
+  //
+  // ADMIN mode visiting /files/* is allowed (admin can dip into the
+  // user view), so the redirect only fires on the user→admin URL
+  // mismatch.
+  //
+  // Also covers the falling-edge case: an admin session expiring
+  // while on /admin/* drops the operator to /files, replacing the old
+  // ElevationExpiredBanner re-elevate flow with a navigation that
+  // matches the new mental model (drop = go user, elevate = go admin).
+  const onAdmin = location.pathname.startsWith("/admin");
+  useEffect(() => {
+    if (!onAdmin) return;
+    // /admin/login is the pre-auth page and renders bare (outside
+    // AppShell), but defensively skip it so a deep-link to it can't
+    // bounce.
+    if (location.pathname === "/admin/login") return;
+    if (mode === "user") {
+      void navigate({ to: "/files", replace: true });
+    }
+  }, [onAdmin, location.pathname, mode, navigate]);
+
+  // Logo target tracks mode under the tight coupling: USER → /files,
+  // ADMIN → /admin. Without this the admin in /files clicks the logo
+  // and lands on /admin (good) but the user shell's logo always points
+  // at /files (good). Both shells delegate to <Logo href=...> and read
+  // the same auth mode source of truth.
+  const logoHref = mode === "user" ? "/files" : "/admin";
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* ADR-0003 v1.7.0a.1: auto-elevate on /admin/* entry. Side-effect */}
-      {/* only — opens the elevation modal when the operator lands on an */}
-      {/* admin route in USER mode (typically via URL-bar nav). Cancel */}
-      {/* navigates to /files; success leaves the page in place with the */}
-      {/* freshly-elevated mode. */}
-      <AdminEntryElevationGuard />
       <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
           <div className="flex items-center gap-6">
-            <Logo />
+            <Logo href={logoHref} />
             <nav className="flex items-center gap-5" aria-label="Primary">
               {/* 'Buckets' previously pointed at '/' which the role */}
               {/* gate redirects to '/admin/clusters' for UIAdmins — */}
@@ -94,19 +123,12 @@ export function AppShell({ children }: AppShellProps): ReactNode {
 
       <NewVersionBanner />
 
-      {/* ADR-0003 v1.3.0a.4 amendment: when an admin session expires */}
-      {/* in place we surface a banner instead of auto-redirecting, so */}
-      {/* the operator can finish reading / saving / re-elevate without */}
-      {/* losing context. The banner self-gates on /admin/* + mode==user */}
-      {/* so it's a no-op on /files routes. */}
+      {/* v1.9.0e.2: the ExpiredBanner still renders so an admin */}
+      {/* session ending in /files/* (or anywhere the AppShell mounts) */}
+      {/* surfaces the "re-elevate" affordance. On /admin/* the */}
+      {/* redirect effect above fires first and the operator lands on */}
+      {/* /files before the banner has a chance to matter. */}
       <ElevationExpiredBanner />
-
-      {/* ADR-0003 v1.7.0a.1 amendment: persistent fallback when the */}
-      {/* operator is on /admin/* but in USER mode. Belt-and-braces with */}
-      {/* the AdminEntryElevationGuard above — if the auto-prompt was */}
-      {/* dismissed or skipped, this banner keeps the elevate affordance */}
-      {/* one click away. Hidden whenever mode === admin. */}
-      <AdminUserModeBanner />
 
       <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children ?? <Outlet />}
