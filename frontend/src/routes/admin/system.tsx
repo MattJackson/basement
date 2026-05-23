@@ -126,14 +126,16 @@ function OrgCapabilitiesPage() {
     return null;
   }
 
+  // v1.11.0.23: these MUST spread `data` first — without the spread, setData
+  // overwrites the entire OrgCapabilities object with only the one field,
+  // wiping signupMode / allowUserBackends / oidcOnly / gateways / etc. The
+  // earlier @ts-ignore was papering over that error instead of fixing it.
   function setEnabledDrivers(newEnabled: string[]) {
-    // @ts-ignore - type compatibility issue with optional fields
-    setData({ enabledDrivers: newEnabled });
+    setData({ ...data, enabledDrivers: newEnabled });
   }
 
   function setUserBackendDrivers(newUserDrivers: string[]) {
-    // @ts-ignore - type compatibility issue with optional fields
-    setData({ userBackendDrivers: newUserDrivers });
+    setData({ ...data, userBackendDrivers: newUserDrivers });
   }
 
   const AVAILABLE_DRIVERS = ["garage", "garage-v1", "aws-s3", "minio"];
