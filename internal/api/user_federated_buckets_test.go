@@ -769,6 +769,105 @@ func TestFindFederationByTarget_OwnershipScoped(t *testing.T) {
 	}
 }
 
+// TestHealthRank_PendingBetweenInSyncAndLagging pins the v1.11.0.9
+// healthRank ordering: HealthPending is worse than in-sync (so a
+// pending replica drags the summary off the green path) but better
+// than lagging (so a one-pending + one-lagging federation surfaces
+// the lagging — the more actionable signal).
+//
+// Operator-facing impact: a fresh federation whose only replica is
+// pending verification renders as computedHealth="pending" in the
+// /api/v1/user/federated-buckets list — yellow signal, not green.
+func TestHealthRank_PendingBetweenInSyncAndLagging(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want int // sign of healthRank(a) - healthRank(b): -1 a<b, 0 a==b, 1 a>b
+	}{
+		{federation.HealthInSync, federation.HealthPending, -1},
+		{federation.HealthPending, federation.HealthLagging, -1},
+		{federation.HealthLagging, federation.HealthStale, -1},
+		{federation.HealthStale, federation.HealthBroken, -1},
+		{federation.HealthPending, federation.HealthInSync, 1},
+		{federation.HealthBroken, federation.HealthPending, 1},
+		{federation.HealthInSync, federation.HealthInSync, 0},
+	}
+	for _, c := range cases {
+		got := sign(healthRank(c.a) - healthRank(c.b))
+		if got != c.want {
+			t.Errorf("healthRank(%q) vs healthRank(%q): got sign=%d, want %d (ranks %d, %d)",
+				c.a, c.b, got, c.want, healthRank(c.a), healthRank(c.b))
+		}
+	}
+}
+
+func sign(n int) int {
+	switch {
+	case n < 0:
+		return -1
+	case n > 0:
+		return 1
+	}
+	return 0
+}
+
+// TestToFederatedBucketResponse_PendingSurfacedInSummary verifies the
+// v1.11.0.9 health-summary wiring end-to-end: a federation with a
+// single pending replica gets computedHealth="pending" in the
+// response, and a federation with a pending + a lagging replica
+// surfaces the worse "lagging" signal.
+func TestToFederatedBucketResponse_PendingSurfacedInSummary(t *testing.T) {
+	now := time.Now().UTC()
+	cases := []struct {
+		name     string
+		replicas []federation.ReplicaTarget
+		want     string
+	}{
+		{
+			name: "single pending replica → summary=pending",
+			replicas: []federation.ReplicaTarget{
+				{RegionID: "r1", Bucket: "b1", Health: federation.HealthPending},
+			},
+			want: federation.HealthPending,
+		},
+		{
+			name: "pending + in-sync → summary=pending (worse wins)",
+			replicas: []federation.ReplicaTarget{
+				{RegionID: "r1", Bucket: "b1", Health: federation.HealthInSync, LastSync: now.Add(-time.Minute)},
+				{RegionID: "r2", Bucket: "b2", Health: federation.HealthPending},
+			},
+			want: federation.HealthPending,
+		},
+		{
+			name: "pending + lagging → summary=lagging (lagging is worse)",
+			replicas: []federation.ReplicaTarget{
+				{RegionID: "r1", Bucket: "b1", Health: federation.HealthPending},
+				{RegionID: "r2", Bucket: "b2", Health: federation.HealthLagging, LastSync: now.Add(-time.Hour)},
+			},
+			want: federation.HealthLagging,
+		},
+		{
+			name: "pending + broken → summary=broken",
+			replicas: []federation.ReplicaTarget{
+				{RegionID: "r1", Bucket: "b1", Health: federation.HealthPending},
+				{RegionID: "r2", Bucket: "b2", Health: federation.HealthBroken},
+			},
+			want: federation.HealthBroken,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fb := federation.FederatedBucket{
+				Replicas: c.replicas,
+				Policy:   federation.DefaultPolicy(),
+			}
+			got := toFederatedBucketResponse(fb)
+			if got.ComputedHealth != c.want {
+				t.Fatalf("ComputedHealth=%q, want %q", got.ComputedHealth, c.want)
+			}
+		})
+	}
+}
+
 // TestFindFederationByTarget_MissingParams: omitting regionId or
 // bucket returns 400 INVALID_REQUEST.
 func TestFindFederationByTarget_MissingParams(t *testing.T) {

@@ -236,6 +236,77 @@ Touched: `go.mod`, `go.sum`, `Makefile` (new), `CONTRIBUTING.md`,
 `internal/drivers/garage_v1/integration_test.go` (new),
 `internal/federation/integration_test.go` (new).
 
+## v1.11.0.9 — 2026-05-23
+
+Federation engine replicate-timeout fix. v1.11.0.4 fixed the LastSync
+diff-filter bug but uncovered a second issue: the per-federation
+goroutine had NO timeout on `replicateBatch` / `PutObjectStream`. When
+the primary held substantial objects (multi-MB files, many objects),
+the boot tick blocked indefinitely inside the per-replica worker
+pool's `wg.Wait`. Every subsequent ticker.C send was lost because
+the `for-select` in `runFederation` never returned to consume them —
+the federation appeared dead from the operator's side: `updatedAt`
+frozen at boot-tick time, manual `/resync` calls a no-op, the engine
+appeared alive (other federations ticked) but THIS federation stuck.
+
+Landed after v1.11.0.10 / .11 / .12 in wall-clock order; the
+v1.11.0.10 docs sweep noted "v1.11.0.6 through v1.11.0.9 cycles did
+not land" — this entry corrects that for v1.11.0.9.
+
+Fix:
+
+- **Per-object timeout (`ObjectReplicateTimeout = 60s`)**. Each
+  per-object replicate gets `context.WithTimeout(ctx,
+  ObjectReplicateTimeout)`. Long enough for ~100 MB at a modest WAN
+  link, short enough that a pathological single-object hang can't
+  permanently strand a federation. Cancelled objects record a failure
+  and the next tick re-attempts.
+- **Per-tick deadline (`TickDeadline = MaxBatchPerTick * 10s = 1000s`)**.
+  The whole tick (compute diff + replicate batch + record health)
+  is wrapped in a deadline-bounded ctx. When the deadline fires the
+  in-flight per-object ctxs see Done(), workers exit, replicateBatch
+  returns the partial counters, the for-select unblocks, and the
+  next scheduled tick fires on schedule.
+- **Engine-level cancellation context**. `Start` creates an engine
+  ctx that `Stop` cancels FIRST (before closing quit channels) so
+  in-flight PutObjectStream / DeleteObject calls on well-behaved
+  drivers exit promptly during shutdown rather than blocking on
+  their per-object 60s timeout.
+- **Stop grace period (`StopGracePeriod = 10s`)**. `Stop` no longer
+  hangs indefinitely waiting for `loops.Wait` + `inflight.Wait`.
+  Caps the drain at 10 seconds per phase; logs at Warn with the
+  count of abandoned work when a wedged driver ignores ctx and the
+  grace expires. The leaked goroutines exit naturally when their
+  upstream connection times out — or when the process exits.
+- **`healthRank` now includes `HealthPending`**. Pending sorts
+  between in-sync and lagging in the federation summary so a fresh-
+  but-unverified replica surfaces as yellow ("pending") in the
+  computedHealth column rather than silently inheriting "in-sync".
+  Per the operator's v1.11.0.4 cycle note.
+
+Tests pinned:
+
+- `TestFederationEngine_ReplicateTimesOut` — wedged PutObjectStream
+  cancellation by per-object timeout; replica health flips off pending
+  to lagging.
+- `TestFederationEngine_TickContinuesAfterStuckBatch` — boot-tick
+  wedge resolves; second scheduled tick fires (proves the for-select
+  unblocks after replicateBatch returns).
+- `TestFederationEngine_StopDoesNotHangOnBlockedReplicate` — ctx-
+  ignoring driver leaks but `Stop()` returns within the grace bound.
+- `TestEngine_StopCancelsInflight` — well-behaved driver exits on
+  ctx-cancellation propagated from `Stop`; replaces the old
+  `TestEngine_StopWaitsForInflight` which pinned the now-incorrect
+  "Stop blocks until in-flight finishes" contract.
+- `TestHealthRank_PendingBetweenInSyncAndLagging` +
+  `TestToFederatedBucketResponse_PendingSurfacedInSummary` — pin the
+  pending-yellow-signal rank ordering at the API layer.
+
+Touched: `internal/federation/engine.go`,
+`internal/federation/engine_test.go`,
+`internal/api/user_federated_buckets.go`,
+`internal/api/user_federated_buckets_test.go`, `CHANGELOG.md`.
+
 ## v1.11.0.5 — 2026-05-23
 
 Feature-coverage smoke + Garage v2 driver bugfix.

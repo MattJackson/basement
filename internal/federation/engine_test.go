@@ -558,10 +558,19 @@ func TestEngine_TriggerNowImmediate(t *testing.T) {
 	})
 }
 
-// TestEngine_StopWaitsForInflight: Stop blocks until in-flight
-// replicates finish. We stall a put via a gate channel and assert Stop
-// doesn't return before the goroutine releases.
-func TestEngine_StopWaitsForInflight(t *testing.T) {
+// TestEngine_StopCancelsInflight: v1.11.0.9 changes Stop's contract
+// from "block until in-flight replicates finish" to "cancel in-flight
+// + wait up to StopGracePeriod for clean drain". A well-behaved driver
+// that honours ctx (slowDriver does — selects on gate vs ctx.Done())
+// returns promptly once Stop cancels the engine ctx, and Stop returns
+// before the gate is closed.
+//
+// Pre-v1.11.0.9 this test asserted the opposite — Stop hung until the
+// test closed the gate. That contract caused the production bug the
+// cycle is fixing: a wedged backend stalled engine shutdown
+// indefinitely. The new contract trades "guaranteed-completed PUTs at
+// shutdown" for "guaranteed-bounded shutdown latency".
+func TestEngine_StopCancelsInflight(t *testing.T) {
 	e, st, res, _ := newTestEngine(t)
 	ctx := context.Background()
 
@@ -594,25 +603,29 @@ func TestEngine_StopWaitsForInflight(t *testing.T) {
 	})
 
 	stopped := make(chan struct{})
+	stopStart := time.Now()
 	go func() {
 		e.Stop()
 		close(stopped)
 	}()
 
-	// Stop should NOT return while the put is blocked.
-	select {
-	case <-stopped:
-		t.Fatalf("Stop returned before in-flight put released")
-	case <-time.After(150 * time.Millisecond):
-	}
-
-	// Release the gate; Stop should now return promptly.
-	close(replica.gate)
+	// Stop should return promptly because engine ctx cancellation
+	// propagates to the slowDriver's select-on-ctx.Done arm. Without
+	// the v1.11.0.9 fix the gate is never closed and Stop blocks
+	// forever (the test would hit its t.Fail timeout).
 	select {
 	case <-stopped:
 	case <-time.After(2 * time.Second):
-		t.Fatalf("Stop did not return after in-flight put released")
+		t.Fatalf("Stop did not return after ctx-cancellation reached the slow PUT — well-behaved driver should exit on ctx.Done")
 	}
+
+	if elapsed := time.Since(stopStart); elapsed > 1500*time.Millisecond {
+		t.Fatalf("Stop took %v, expected ctx-cancellation to short-circuit the wait", elapsed)
+	}
+
+	// Release the gate — defensive cleanup in case the goroutine is
+	// somehow still parked.
+	close(replica.gate)
 }
 
 // slowDriver is a fakeDriver that blocks PutObjectStream on a gate
@@ -1707,6 +1720,309 @@ func TestEngine_PollingStillRunsAlongside(t *testing.T) {
 	waitFor(t, 3*time.Second, func() bool {
 		return replica.has("r-bucket", "polled-later.txt")
 	})
+}
+
+// wedgedDriver mimics a backend whose PutObjectStream blocks until
+// ctx is cancelled. Unlike slowDriver this one's wedge is the DEFAULT
+// path — every PUT enters the wedge; tests use it to assert
+// per-object-timeout cancellation without an explicit gate close.
+//
+// putStarted is incremented every time a PUT enters the wedge so
+// tests can assert "second tick fired = second wedge entered".
+// putCancelled is incremented every time a wedged PUT exits via
+// ctx cancellation so tests can correlate timeout events.
+type wedgedDriver struct {
+	*fakeDriver
+	putStarted   atomic.Int64
+	putCancelled atomic.Int64
+}
+
+func newWedgedDriver(id string) *wedgedDriver {
+	return &wedgedDriver{fakeDriver: newFakeDriver(id)}
+}
+
+// PutObjectStream blocks until ctx is cancelled. Returns ctx.Err() —
+// the engine's replicateBatch records it as a per-object failure and
+// the per-tick deadline expiry is propagated to the next tick.
+func (w *wedgedDriver) PutObjectStream(ctx context.Context, _ string, _ string, _ io.Reader, _ string, _ int64) error {
+	w.putStarted.Add(1)
+	<-ctx.Done()
+	w.putCancelled.Add(1)
+	return ctx.Err()
+}
+
+// TestFederationEngine_ReplicateTimesOut: when a replica's
+// PutObjectStream wedges forever, the engine's per-object timeout
+// cancels the wedged call and tickFederation returns within the tick
+// deadline (rather than hanging until process exit).
+//
+// Asserts:
+//   - tickFederation returns within a bounded wall-clock window.
+//   - The wedged-replica's health record flips to lagging/broken
+//     (never stuck at HealthPending).
+//
+// Without the v1.11.0.9 fix this test hangs until the Go test runner
+// kills it — the for-select in runFederation can't return to consume
+// the next ticker because replicateBatch's wg.Wait is blocked on the
+// wedged goroutine.
+func TestFederationEngine_ReplicateTimesOut(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	// Tight per-object timeout so the test finishes in well under
+	// a second. The wedge inside PutObjectStream will see ctx.Done()
+	// after this duration.
+	e.SetObjectReplicateTimeout(100 * time.Millisecond)
+	// Generous tick deadline so the timeout-vs-deadline race resolves
+	// in favour of the per-object timeout firing first.
+	e.SetTickDeadline(2 * time.Second)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	wedged := newWedgedDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", wedged)
+
+	primary.seed("p-bucket", "wedge.txt", []byte("wedge body"), time.Now().UTC())
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Drive the tick directly so we can measure its wall-clock
+	// duration. Without the timeout this call blocks forever.
+	done := make(chan struct{})
+	start := time.Now()
+	go func() {
+		e.tickFederation(ctx, fb.ID)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("tickFederation did not return within 3s — wedged PutObjectStream was not cancelled by per-object timeout")
+	}
+
+	elapsed := time.Since(start)
+	if elapsed > 2500*time.Millisecond {
+		t.Fatalf("tickFederation took %v, expected to return within the per-object timeout window", elapsed)
+	}
+	if wedged.putStarted.Load() < 1 {
+		t.Fatalf("wedged PUT was never entered — test invariant broken")
+	}
+	if wedged.putCancelled.Load() < 1 {
+		t.Fatalf("wedged PUT was never cancelled — per-object timeout did not fire")
+	}
+
+	// Health should have flipped away from pending/in-sync. The single
+	// failure increments the per-replica failure count; with the
+	// recordFailure path firing, health is now Lagging (single failure)
+	// — not Broken (requires 3 consecutive).
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	r := got.Replicas[0]
+	if r.Health == HealthInSync {
+		t.Fatalf("replica health should NOT be in-sync after wedged replicate, got %q", r.Health)
+	}
+	if r.Health == HealthPending {
+		t.Fatalf("replica health should NOT remain pending after wedged replicate, got %q", r.Health)
+	}
+	if r.Health != HealthLagging {
+		t.Fatalf("expected health=lagging after first wedge failure, got %q", r.Health)
+	}
+}
+
+// TestFederationEngine_TickContinuesAfterStuckBatch: when the boot
+// tick wedges on a slow replicate, the per-tick deadline expires and
+// the per-federation goroutine returns to the for-select to consume
+// the NEXT scheduled ticker.C send. Without v1.11.0.9 the second tick
+// never fires — the loop is stuck inside the first tick forever.
+//
+// Asserts:
+//   - At least two distinct ticks fire within the test window.
+//   - The second tick lands AFTER the first (timing assertion proves
+//     the for-select unblocked).
+func TestFederationEngine_TickContinuesAfterStuckBatch(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	// Per-object timeout: 80ms — small enough that the first tick's
+	// wedge resolves quickly. The tick deadline is wider so the
+	// deadline-fires-first path is rare.
+	e.SetObjectReplicateTimeout(80 * time.Millisecond)
+	e.SetTickDeadline(500 * time.Millisecond)
+	// 40ms tick interval so the second scheduled tick lands shortly
+	// after the first wedge resolves.
+	e.SetTickInterval(40 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	wedged := newWedgedDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", wedged)
+
+	// One source object — the boot tick will try to replicate it and
+	// wedge on PutObjectStream. The per-object timeout cancels the
+	// PUT; the loop returns to the for-select and the next ticker.C
+	// fires a SECOND tick that tries again (and wedges again).
+	primary.seed("p-bucket", "stuck.txt", []byte("stuck body"), time.Now().UTC())
+
+	_, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	// Wait for the boot tick's wedge to be entered AT LEAST ONCE.
+	waitFor(t, 2*time.Second, func() bool {
+		return wedged.putStarted.Load() >= 1
+	})
+
+	firstStartCount := wedged.putStarted.Load()
+	if firstStartCount < 1 {
+		t.Fatalf("expected at least 1 wedged PUT on first tick, got %d", firstStartCount)
+	}
+
+	// Now wait for the SECOND tick to fire — visible as a second
+	// PUT entering the wedge. Without the v1.11.0.9 fix this never
+	// happens — the for-select is stuck inside the first tick's
+	// wg.Wait forever. With the fix, the per-object timeout fires
+	// (~80ms), replicateBatch returns, the for-select unblocks, and
+	// the next scheduled ticker.C triggers tickFederation again.
+	waitFor(t, 3*time.Second, func() bool {
+		return wedged.putStarted.Load() > firstStartCount
+	})
+
+	secondStartCount := wedged.putStarted.Load()
+	if secondStartCount <= firstStartCount {
+		t.Fatalf("second tick never fired — for-select did not return after first wedge resolved (firstStartCount=%d, currentStartCount=%d)",
+			firstStartCount, secondStartCount)
+	}
+}
+
+// TestFederationEngine_StopDoesNotHangOnBlockedReplicate: even when a
+// replicate is wedged inside a driver that ignores ctx cancellation,
+// Stop() returns within the configured grace period — log + abandon
+// rather than hang the process indefinitely.
+//
+// Without v1.11.0.9 Stop calls inflight.Wait() unconditionally and
+// hangs forever when any goroutine is wedged.
+func TestFederationEngine_StopDoesNotHangOnBlockedReplicate(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	// Short grace so the test finishes fast. Production keeps 10s.
+	e.SetStopGracePeriod(300 * time.Millisecond)
+	// Per-object timeout WIDE so the wedge isn't unblocked by the
+	// per-object cancel — this test is specifically about Stop's
+	// grace-period bound, not the per-object timeout's.
+	e.SetObjectReplicateTimeout(1 * time.Hour)
+	e.SetTickDeadline(1 * time.Hour)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	stuck := &ctxIgnoringDriver{
+		fakeDriver: newFakeDriver("replica"),
+		putStarted: make(chan struct{}, 1),
+		release:    make(chan struct{}),
+	}
+	res.set("region-primary", primary)
+	res.set("region-replica", stuck)
+	// The wedged goroutine truly leaks for the duration of the test
+	// process — that's the production semantics this test pins. We
+	// intentionally do NOT release stuck.release: doing so would let
+	// the goroutine complete after Stop and race the t.TempDir
+	// cleanup writing to a directory that the test framework is
+	// already removing. The leak is bounded by the Go test binary's
+	// lifetime (single test process invocation).
+
+	primary.seed("p-bucket", "stuck.txt", []byte("stuck"), time.Now().UTC())
+
+	_, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+
+	// Wait for the wedge to begin — once we're past this point,
+	// Stop has a goroutine to abandon.
+	select {
+	case <-stuck.putStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("ctx-ignoring PUT never entered — test invariant broken")
+	}
+
+	stopped := make(chan struct{})
+	stopStart := time.Now()
+	go func() {
+		e.Stop()
+		close(stopped)
+	}()
+
+	// Stop should return WITHIN the grace period (plus a small slack
+	// for the inflight-drain phase which is bounded by another
+	// grace tick). Total cap = 2 * grace = 600ms; we allow 1.5s.
+	select {
+	case <-stopped:
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatalf("Stop did not return within the grace period — production wedge would hang the process")
+	}
+
+	elapsed := time.Since(stopStart)
+	if elapsed > 1500*time.Millisecond {
+		t.Fatalf("Stop took %v, expected to return within grace period bound", elapsed)
+	}
+}
+
+// ctxIgnoringDriver is a fakeDriver whose PutObjectStream blocks on a
+// release channel and IGNORES ctx cancellation. Used by the
+// Stop-grace-period test: the per-object timeout can't unblock this
+// goroutine, so Stop must rely on its own grace-period bound to
+// return.
+//
+// putStarted is a buffered channel sent-to once when the first PUT
+// enters; tests can read from it to gate test assertions on "the
+// goroutine is actually wedged now".
+//
+// release is closed by the test at the end so the leaked goroutine
+// can return without panicking the race detector.
+type ctxIgnoringDriver struct {
+	*fakeDriver
+	putStarted chan struct{}
+	release    chan struct{}
+}
+
+func (d *ctxIgnoringDriver) PutObjectStream(_ context.Context, _ string, _ string, _ io.Reader, _ string, _ int64) error {
+	select {
+	case d.putStarted <- struct{}{}:
+	default:
+	}
+	// Intentionally ignore ctx — wait only on the explicit release.
+	// In the StopDoesNotHangOnBlockedReplicate test release is never
+	// closed: the goroutine is meant to leak until the test process
+	// exits, mirroring the production semantics of a driver that
+	// ignores ctx + Stop's grace-period abandonment.
+	<-d.release
+	return nil
 }
 
 // TestEngine_AuditOnReplicateFailure: a failing PUT still emits a
