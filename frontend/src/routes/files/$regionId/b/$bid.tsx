@@ -29,6 +29,7 @@ import type { FederatedBucket } from "@/shared/api/queries";
 import { UploadDialog } from "@/components/upload/UploadDialog";
 import { VersioningSection } from "@/shared/ui/VersioningSection";
 import { ObjectVersionsPanel } from "@/shared/ui/ObjectVersionsPanel";
+import { ObjectLockSection } from "@/shared/ui/ObjectLockSection";
 
 // Object browser for buckets reached via a UserRegion (ADR-0002, v1.1.0c).
 // Every backend call goes through /api/v1/user/regions/{regionId}/buckets/
@@ -494,6 +495,17 @@ function UserRegionBucketObjects() {
           handles the "Not supported by this driver" branch internally
           so we can mount it unconditionally. */}
       <VersioningSection regionId={regionId} bucket={bid} />
+
+      {/* v1.10.0c — Object Lock settings card. Layered on top of
+          versioning per the S3 spec; the card surfaces three distinct
+          branches internally (unsupported / needs-versioning / full
+          editor) so we mount it unconditionally and pass the
+          versioning state down for the gating decision. */}
+      <ObjectLockSection
+        regionId={regionId}
+        bucket={bid}
+        versioningState={versioningState}
+      />
 
       {presignMutation.isError && (
         <ErrorBanner message="Failed to generate download link. Try again." />
