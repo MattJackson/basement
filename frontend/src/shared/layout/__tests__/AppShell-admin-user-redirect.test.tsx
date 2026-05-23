@@ -57,6 +57,11 @@ vi.mock("@/shared/api/queries", () => ({
     isLoading: false,
     error: null,
   }),
+  // v1.11.0a — AppShell now consults the onboarding state to decide
+  // whether to auto-route to /admin/first-run. Default to "no
+  // onboarding needed" so the existing redirect tests don't fight a
+  // second navigation.
+  useOnboardingState: () => ({ data: { needsOnboarding: false, completed: true } }),
 }));
 
 // Elevation prompt is touched indirectly via UserMenu; mock to a no-op

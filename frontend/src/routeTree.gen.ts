@@ -27,6 +27,7 @@ import { Route as AdminServiceAccountsRouteImport } from "./routes/admin/service
 import { Route as AdminPoliciesRouteImport } from "./routes/admin/policies"
 import { Route as AdminMigrateRouteImport } from "./routes/admin/migrate"
 import { Route as AdminLoginRouteImport } from "./routes/admin/login"
+import { Route as AdminFirstRunRouteImport } from "./routes/admin/first-run"
 import { Route as AdminAuditRouteImport } from "./routes/admin/audit"
 import { Route as FilesWebhooksIndexRouteImport } from "./routes/files/webhooks/index"
 import { Route as FilesSyncsIndexRouteImport } from "./routes/files/syncs/index"
@@ -153,6 +154,11 @@ const AdminMigrateRoute = AdminMigrateRouteImport.update({
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: "/admin/login",
   path: "/admin/login",
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminFirstRunRoute = AdminFirstRunRouteImport.update({
+  id: "/admin/first-run",
+  path: "/admin/first-run",
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminAuditRoute = AdminAuditRouteImport.update({
@@ -351,6 +357,7 @@ const AdminClustersCidBucketsIdLifecycleRuleIdEditRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/admin/audit": typeof AdminAuditRoute
+  "/admin/first-run": typeof AdminFirstRunRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/policies": typeof AdminPoliciesRoute
@@ -408,6 +415,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/admin/audit": typeof AdminAuditRoute
+  "/admin/first-run": typeof AdminFirstRunRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/policies": typeof AdminPoliciesRoute
@@ -457,6 +465,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/admin/audit": typeof AdminAuditRoute
+  "/admin/first-run": typeof AdminFirstRunRoute
   "/admin/login": typeof AdminLoginRoute
   "/admin/migrate": typeof AdminMigrateRoute
   "/admin/policies": typeof AdminPoliciesRoute
@@ -516,6 +525,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/admin/audit"
+    | "/admin/first-run"
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/policies"
@@ -573,6 +583,7 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/admin/audit"
+    | "/admin/first-run"
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/policies"
@@ -621,6 +632,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/admin/audit"
+    | "/admin/first-run"
     | "/admin/login"
     | "/admin/migrate"
     | "/admin/policies"
@@ -679,6 +691,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminAuditRoute: typeof AdminAuditRoute
+  AdminFirstRunRoute: typeof AdminFirstRunRoute
   AdminLoginRoute: typeof AdminLoginRoute
   AdminMigrateRoute: typeof AdminMigrateRoute
   AdminPoliciesRoute: typeof AdminPoliciesRoute
@@ -835,6 +848,13 @@ declare module "@tanstack/react-router" {
       path: "/admin/login"
       fullPath: "/admin/login"
       preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    "/admin/first-run": {
+      id: "/admin/first-run"
+      path: "/admin/first-run"
+      fullPath: "/admin/first-run"
+      preLoaderRoute: typeof AdminFirstRunRouteImport
       parentRoute: typeof rootRouteImport
     }
     "/admin/audit": {
@@ -1256,6 +1276,7 @@ const AdminClustersCidBucketsIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminAuditRoute: AdminAuditRoute,
+  AdminFirstRunRoute: AdminFirstRunRoute,
   AdminLoginRoute: AdminLoginRoute,
   AdminMigrateRoute: AdminMigrateRoute,
   AdminPoliciesRoute: AdminPoliciesRoute,

@@ -9,6 +9,7 @@ import { PersonaPill } from "@/components/layout/PersonaPill";
 import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner";
 import { useUser } from "@/shared/auth/useUser";
 import { useAuthMode } from "@/shared/auth/mode";
+import { useOnboardingState } from "@/shared/api/queries";
 
 interface AppShellProps {
   children?: ReactNode;
@@ -66,6 +67,42 @@ export function AppShell({ children }: AppShellProps): ReactNode {
       void navigate({ to: "/files", replace: true });
     }
   }, [onAdmin, location.pathname, mode, navigate, userLoading, user?.mode]);
+
+  // v1.11.0a — first-run onboarding redirect. Auto-route to
+  // /admin/first-run when the deploy is empty (0 clusters + 0
+  // non-admin users) AND the operator hasn't dismissed the wizard
+  // yet. We ONLY query for the state when the operator is in admin
+  // mode on an /admin/* route — non-admin users get a 403 from the
+  // state endpoint, and the query staying disabled avoids noise in
+  // their browser console.
+  //
+  // We deliberately skip the redirect when the operator is ALREADY on
+  // /admin/first-run (otherwise the route reload would loop) AND skip
+  // every other deep-linked admin page (e.g. cluster detail) once the
+  // wizard has been dismissed. The dismiss flag is the latch that
+  // prevents auto-show; manual /admin/first-run navigation is always
+  // allowed and the route renders fine even after dismiss.
+  const isAdminUser = user?.uiAdmin === true;
+  const inAdminMode = user?.mode === "admin" || user?.mode === "elevated" || mode !== "user";
+  const onFirstRun = location.pathname === "/admin/first-run";
+  const onAdminLogin = location.pathname === "/admin/login";
+  const onboardingQueryEnabled =
+    isAdminUser && inAdminMode && onAdmin && !onAdminLogin && !userLoading;
+  const { data: onboardingState } = useOnboardingState({ enabled: onboardingQueryEnabled });
+
+  useEffect(() => {
+    if (!onboardingQueryEnabled) return;
+    if (onFirstRun) return;
+    if (!onboardingState) return;
+    if (onboardingState.completed) return;
+    if (!onboardingState.needsOnboarding) return;
+    void navigate({ to: "/admin/first-run", replace: true });
+  }, [
+    onboardingQueryEnabled,
+    onFirstRun,
+    onboardingState,
+    navigate,
+  ]);
 
   // Logo target tracks mode under the tight coupling: USER → /files,
   // ADMIN → /admin. Without this the admin in /files clicks the logo
