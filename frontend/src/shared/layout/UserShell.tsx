@@ -11,8 +11,15 @@ interface UserShellProps {
   children?: ReactNode;
 }
 
+// v1.10.0.1 — added `min-h-[44px] inline-flex items-center` to satisfy
+// the WCAG/iOS HIG 44×44 tap-target threshold on mobile. Pre-fix the
+// nav links rendered at the text line-height (~20px) which the smoke
+// audit (section [E]) flagged as below the threshold. The inline-flex
+// + items-center keeps the visual size identical on desktop (where the
+// link text is what the eye registers) while padding the tap area to
+// the full 44px box on touch devices.
 const NAV_LINK =
-  "text-sm text-muted-foreground hover:text-foreground transition-colors";
+  "text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center min-h-[44px]";
 const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function UserShell({ children }: UserShellProps): ReactNode {

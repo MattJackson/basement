@@ -108,21 +108,59 @@ describe("AddKeyPage (/files/keys/new)", () => {
     expect(screen.getByRole("button", { name: /Add key/ })).toBeInTheDocument();
   });
 
-  it("disables submit until required fields are filled", async () => {
+  // v1.10.0.1 — pre-fix the submit button was disabled on blank inputs,
+  // which left an operator clicking Submit on an empty form with no
+  // feedback at all (the smoke audit caught it). The new behaviour is:
+  // submit is enabled, click fires per-field validation, inline
+  // role=alert errors render next to each blank required input, and
+  // the user stays on the page.
+  it("surfaces inline validation errors on blank submit", async () => {
     renderWithProviders(<AddKeyPage />);
 
     const submit = screen.getByRole("button", { name: /Add key/ });
-    expect(submit).toBeDisabled();
-
-    await userEvent.type(screen.getByLabelText(/Key alias/), "home");
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "https://s3.example.com",
-    );
-    await userEvent.type(screen.getByLabelText(/Access Key ID/), "GK_TEST");
-    await userEvent.type(screen.getByLabelText(/Secret Access Key/), "sssh");
-
     expect(submit).toBeEnabled();
+
+    await userEvent.click(submit);
+
+    // Required-field alerts surface for every blank input.
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.length).toBeGreaterThanOrEqual(4);
+
+    // Mutation never fires + we don't navigate away.
+    expect(mutateAsyncMock).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+
+    // aria-invalid flips on each offending input.
+    expect(screen.getByLabelText(/Key alias/)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(screen.getByLabelText(/S3 endpoint URL/)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(screen.getByLabelText(/Access Key ID/)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    expect(screen.getByLabelText(/Secret Access Key/)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+  });
+
+  it("clears the field-level error once the operator starts typing", async () => {
+    renderWithProviders(<AddKeyPage />);
+    await userEvent.click(screen.getByRole("button", { name: /Add key/ }));
+
+    expect(screen.getByLabelText(/Key alias/)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
+    await userEvent.type(screen.getByLabelText(/Key alias/), "home");
+    expect(screen.getByLabelText(/Key alias/)).not.toHaveAttribute(
+      "aria-invalid",
+    );
   });
 
   it("submits the trimmed payload and navigates back to /files on success", async () => {

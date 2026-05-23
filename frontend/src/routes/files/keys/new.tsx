@@ -97,6 +97,20 @@ function AddKeyPage() {
   const [region, setRegion] = useState("us-east-1");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [regionTouched, setRegionTouched] = useState(false);
+  // v1.10.0.1 — surfaced field-level validation. Pre-fix the submit
+  // button was simply `disabled` when any required field was blank, so
+  // an operator clicking Submit on a pristine form got no feedback at
+  // all (smoke flagged this as "blank submit silently does nothing").
+  // Now we let the submit attempt fire, record which required fields
+  // are still empty, render inline `role="alert"` messages + flip
+  // `aria-invalid` on the offending inputs, and keep the user on the
+  // page until they fix things.
+  const [fieldErrors, setFieldErrors] = useState<{
+    alias?: string;
+    endpoint?: string;
+    accessKeyId?: string;
+    secretKey?: string;
+  }>({});
   const [showCommonEndpoints, setShowCommonEndpoints] = useState(false);
   // v1.3.0c: per-region S3 addressing toggle. Default off (path-style)
   // — the safe choice for every backend (Garage, IP-addressed MinIO,
@@ -157,8 +171,23 @@ function AddKeyPage() {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!alias.trim() || !endpoint.trim() || !accessKeyId.trim() || !secretKey) {
-      setErrorMessage("All required fields must be filled in.");
+    // v1.10.0.1 — collect per-field errors first so we can render
+    // inline cues next to each offending input. Anything blank gets a
+    // "Required" message; the submit short-circuits if anything is
+    // blank.
+    const nextFieldErrors: {
+      alias?: string;
+      endpoint?: string;
+      accessKeyId?: string;
+      secretKey?: string;
+    } = {};
+    if (!alias.trim()) nextFieldErrors.alias = "Required";
+    if (!endpoint.trim()) nextFieldErrors.endpoint = "Required";
+    if (!accessKeyId.trim()) nextFieldErrors.accessKeyId = "Required";
+    if (!secretKey) nextFieldErrors.secretKey = "Required";
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setErrorMessage("Please fill in the required fields.");
       return;
     }
 
@@ -181,8 +210,11 @@ function AddKeyPage() {
     }
   };
 
-  const canSubmit =
-    !!alias.trim() && !!endpoint.trim() && !!accessKeyId.trim() && !!secretKey && !submitting;
+  // v1.10.0.1 — the button is no longer disabled-on-blank; we want
+  // the operator to be able to click Submit and see inline validation
+  // fire, not stare at a greyed-out button with no explanation. The
+  // only disabled state now is during an in-flight mutation.
+  const canSubmit = !submitting;
 
   return (
     <div className="space-y-6">
@@ -285,11 +317,27 @@ function AddKeyPage() {
             id="alias"
             type="text"
             value={alias}
-            onChange={(e) => setAlias(e.target.value)}
+            onChange={(e) => {
+              setAlias(e.target.value);
+              if (fieldErrors.alias && e.target.value.trim()) {
+                setFieldErrors((prev) => ({ ...prev, alias: undefined }));
+              }
+            }}
             placeholder="home"
             autoComplete="off"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            aria-invalid={fieldErrors.alias ? true : undefined}
+            aria-describedby={fieldErrors.alias ? "alias-error" : undefined}
+            className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${fieldErrors.alias ? "border-red-500" : ""}`}
           />
+          {fieldErrors.alias && (
+            <p
+              id="alias-error"
+              role="alert"
+              className="text-xs text-red-600 dark:text-red-400"
+            >
+              {fieldErrors.alias}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             A short label so you can tell this key apart from any others on your keychain
             (e.g. &quot;Work S3&quot;, &quot;Personal S3&quot;).
@@ -304,11 +352,27 @@ function AddKeyPage() {
             id="endpoint"
             type="url"
             value={endpoint}
-            onChange={(e) => handleEndpointChange(e.target.value)}
+            onChange={(e) => {
+              handleEndpointChange(e.target.value);
+              if (fieldErrors.endpoint && e.target.value.trim()) {
+                setFieldErrors((prev) => ({ ...prev, endpoint: undefined }));
+              }
+            }}
             placeholder="https://s3.example.com"
             autoComplete="off"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            aria-invalid={fieldErrors.endpoint ? true : undefined}
+            aria-describedby={fieldErrors.endpoint ? "endpoint-error" : undefined}
+            className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${fieldErrors.endpoint ? "border-red-500" : ""}`}
           />
+          {fieldErrors.endpoint && (
+            <p
+              id="endpoint-error"
+              role="alert"
+              className="text-xs text-red-600 dark:text-red-400"
+            >
+              {fieldErrors.endpoint}
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             Paste an endpoint with &quot;amazonaws.com&quot;, &quot;garage&quot;, or &quot;minio&quot; in the
             URL and we&apos;ll suggest a region label.
@@ -324,12 +388,28 @@ function AddKeyPage() {
               id="accessKeyId"
               type="text"
               value={accessKeyId}
-              onChange={(e) => setAccessKeyId(e.target.value)}
+              onChange={(e) => {
+                setAccessKeyId(e.target.value);
+                if (fieldErrors.accessKeyId && e.target.value.trim()) {
+                  setFieldErrors((prev) => ({ ...prev, accessKeyId: undefined }));
+                }
+              }}
               placeholder="GK..."
               autoComplete="off"
               spellCheck={false}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              aria-invalid={fieldErrors.accessKeyId ? true : undefined}
+              aria-describedby={fieldErrors.accessKeyId ? "accessKeyId-error" : undefined}
+              className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${fieldErrors.accessKeyId ? "border-red-500" : ""}`}
             />
+            {fieldErrors.accessKeyId && (
+              <p
+                id="accessKeyId-error"
+                role="alert"
+                className="text-xs text-red-600 dark:text-red-400"
+              >
+                {fieldErrors.accessKeyId}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -340,12 +420,28 @@ function AddKeyPage() {
               id="secretKey"
               type="password"
               value={secretKey}
-              onChange={(e) => setSecretKey(e.target.value)}
+              onChange={(e) => {
+                setSecretKey(e.target.value);
+                if (fieldErrors.secretKey && e.target.value) {
+                  setFieldErrors((prev) => ({ ...prev, secretKey: undefined }));
+                }
+              }}
               placeholder={"••••••••"}
               autoComplete="new-password"
               spellCheck={false}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+              aria-invalid={fieldErrors.secretKey ? true : undefined}
+              aria-describedby={fieldErrors.secretKey ? "secretKey-error" : undefined}
+              className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${fieldErrors.secretKey ? "border-red-500" : ""}`}
             />
+            {fieldErrors.secretKey && (
+              <p
+                id="secretKey-error"
+                role="alert"
+                className="text-xs text-red-600 dark:text-red-400"
+              >
+                {fieldErrors.secretKey}
+              </p>
+            )}
           </div>
         </div>
 
@@ -414,6 +510,7 @@ function AddKeyPage() {
         {errorMessage && (
           <div
             data-testid="add-key-error"
+            role="alert"
             className="rounded-md border border-red-500/50 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-300"
           >
             {errorMessage}

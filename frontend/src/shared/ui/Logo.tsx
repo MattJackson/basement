@@ -23,9 +23,15 @@ interface LogoProps {
  */
 export function Logo({ href = "/", iconOnly = false, className = "" }: LogoProps) {
   return (
+    // v1.10.0.1 — added `min-h-[44px] min-w-[44px]` so the lockup
+    // hits the WCAG/iOS HIG 44×44 tap-target threshold on mobile.
+    // The mark is 40px (h-10 w-10) which the smoke audit flagged as
+    // 4px short; the min-* utilities expand the anchor's hit area
+    // without resizing the SVG itself, so desktop visuals are
+    // unchanged.
     <a
       href={href}
-      className={`flex items-center gap-2.5 font-medium hover:opacity-80 transition-opacity ${className}`}
+      className={`flex items-center gap-2.5 font-medium hover:opacity-80 transition-opacity min-h-[44px] min-w-[44px] ${className}`}
       aria-label="Basement — home"
       data-testid="logo"
     >

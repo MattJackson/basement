@@ -97,21 +97,34 @@ beforeEach(() => {
 });
 
 describe("NewFederationPage (/files/federated-buckets/new)", () => {
-  it("renders Step 1 (Primary) on mount and gates Next until both fields are filled", async () => {
+  // v1.10.0.1 — pre-fix the Next button was disabled on incomplete
+  // steps; an operator clicking Next on Step 1 with blank dropdowns
+  // got no feedback at all (smoke caught it). The new behaviour:
+  // Next stays enabled, click surfaces an inline `role=alert` error
+  // describing the missing field, the wizard refuses to advance.
+  it("renders Step 1 (Primary) on mount and surfaces inline error when Next is clicked blank", async () => {
     renderWizard();
 
     expect(screen.getByText(/Step 1 of 5/)).toBeInTheDocument();
     const nextBtn = screen.getByRole("button", { name: "Next" });
-    expect(nextBtn).toBeDisabled();
+    expect(nextBtn).toBeEnabled();
+
+    await userEvent.click(nextBtn);
+    expect(screen.getByTestId("step-error")).toHaveTextContent(/primary region/i);
+    // Still on Step 1.
+    expect(screen.getByText(/Step 1 of 5/)).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText(/Region \*/), "r-home");
-    expect(nextBtn).toBeDisabled();
+    await userEvent.click(nextBtn);
+    expect(screen.getByTestId("step-error")).toHaveTextContent(/primary bucket/i);
+    expect(screen.getByText(/Step 1 of 5/)).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByLabelText(/Bucket \*/), "photos");
-    expect(nextBtn).toBeEnabled();
+    await userEvent.click(nextBtn);
+    expect(screen.getByText(/Step 2 of 5/)).toBeInTheDocument();
   });
 
-  it("advances through Step 2 (Replicas) and gates Next while the row is empty", async () => {
+  it("advances through Step 2 (Replicas) and shows an error when the row is empty", async () => {
     renderWizard();
 
     // Step 1
@@ -121,8 +134,10 @@ describe("NewFederationPage (/files/federated-buckets/new)", () => {
 
     expect(screen.getByText(/Step 2 of 5/)).toBeInTheDocument();
     const nextBtn = screen.getByRole("button", { name: "Next" });
-    // Replica row starts empty -> Next gated.
-    expect(nextBtn).toBeDisabled();
+    // Replica row starts empty -> clicking Next surfaces an inline error.
+    await userEvent.click(nextBtn);
+    expect(screen.getByTestId("step-error")).toHaveTextContent(/region and a bucket/i);
+    expect(screen.getByText(/Step 2 of 5/)).toBeInTheDocument();
 
     await userEvent.selectOptions(
       screen.getByLabelText("Region", { selector: "#replica-region-0" }),
@@ -132,10 +147,11 @@ describe("NewFederationPage (/files/federated-buckets/new)", () => {
       screen.getByLabelText("Bucket", { selector: "#replica-bucket-0" }),
       "docs",
     );
-    expect(nextBtn).toBeEnabled();
+    await userEvent.click(nextBtn);
+    expect(screen.getByText(/Step 3 of 5/)).toBeInTheDocument();
   });
 
-  it("flags a duplicate (region, bucket) pair between primary + replica and disables Next", async () => {
+  it("flags a duplicate (region, bucket) pair between primary + replica and blocks Next", async () => {
     renderWizard();
 
     // Primary: r-home / photos
@@ -162,7 +178,10 @@ describe("NewFederationPage (/files/federated-buckets/new)", () => {
     bucketSelect.dispatchEvent(new Event("change", { bubbles: true }));
 
     expect(screen.getByTestId("duplicate-replica-warning")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    // Clicking Next surfaces the duplicate error and refuses to advance.
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByTestId("step-error")).toHaveTextContent(/duplicated/i);
+    expect(screen.getByText(/Step 2 of 5/)).toBeInTheDocument();
   });
 
   it("submits the canonical create body on Step 5 and navigates to the detail page", async () => {
