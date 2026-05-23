@@ -567,6 +567,14 @@ func (s *Server) routes() {
 			uiAdminG.Get("/admin/oidc-group-mappings", s.listOIDCGroupMappingsHandler)
 			uiAdminG.Put("/admin/oidc-group-mappings", s.updateOIDCGroupMappingsHandler)
 
+			// v1.13.0b: Skin management endpoints (upload, activate, delete, policy).
+			uiAdminG.Get("/admin/skins", s.listAdminSkinsHandler)
+			uiAdminG.Post("/admin/skins/upload", s.uploadSkinHandler)
+			uiAdminG.Put("/admin/skins/{id}/activate", s.activateSkinHandler)
+			uiAdminG.Delete("/admin/skins/{id}", s.deleteSkinHandler)
+			uiAdminG.Get("/admin/skins/{id}/policy", s.getSkinPolicyHandler)
+			uiAdminG.Put("/admin/skins/{id}/policy", s.updateSkinPolicyHandler)
+
 			// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). UIAdmin
 			// middleware is belt-and-braces; the actual enforcement
 			// is the per-handler bucket:view / bucket:edit_alias gate.
