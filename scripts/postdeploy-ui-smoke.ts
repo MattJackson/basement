@@ -1273,10 +1273,14 @@ async function main(): Promise<number> {
       }
 
       const hasCards = await page!.locator('[data-testid="region-key-card"]').count();
-      const hasEmptyState = await page!.locator('text=No region keys yet').count();
+      // v1.2.0d empty-state heading is "No keys yet" — the legacy
+      // "No region keys yet" copy was retired with the page rename
+      // ("My Region Keys" -> "My Keys"). Matching the canonical
+      // current text closes the v1.11.0.18 smoke false-positive.
+      const hasEmptyState = await page!.locator('text="No keys yet"').count();
 
       if (hasCards === 0 && hasEmptyState === 0) {
-        throw new Error("/files/keys rendered neither region-key cards nor empty state");
+        throw new Error("/files/keys rendered neither region-key cards nor 'No keys yet' empty state");
       }
 
       if (hasCards > 0) {
