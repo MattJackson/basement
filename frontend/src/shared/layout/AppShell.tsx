@@ -19,7 +19,7 @@ const NAV_LINK =
 const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function AppShell({ children }: AppShellProps): ReactNode {
-  const { data: user } = useUser();
+  const { data: user, isLoading: userLoading } = useUser();
   const isUIAdmin = user?.uiAdmin === true;
   const { mode } = useAuthMode();
   const location = useLocation();
@@ -38,6 +38,15 @@ export function AppShell({ children }: AppShellProps): ReactNode {
   // while on /admin/* drops the operator to /files, replacing the old
   // ElevationExpiredBanner re-elevate flow with a navigation that
   // matches the new mental model (drop = go user, elevate = go admin).
+  //
+  // v1.10.0e: hydration-race hardening (same shape as v1.7.0a.3/a.4).
+  // The redirect now (1) waits for /auth/me to resolve before firing,
+  // and (2) reads mode directly off the user payload as a fallback —
+  // AuthModeHydrator's setMode runs in a SUBSEQUENT render so within
+  // the first render where user data arrives, the provider's mode is
+  // still the conservative USER default. Without these guards, every
+  // full-page navigation to /admin/* would bounce to /files even when
+  // the cookie reports admin.
   const onAdmin = location.pathname.startsWith("/admin");
   useEffect(() => {
     if (!onAdmin) return;
@@ -45,10 +54,18 @@ export function AppShell({ children }: AppShellProps): ReactNode {
     // AppShell), but defensively skip it so a deep-link to it can't
     // bounce.
     if (location.pathname === "/admin/login") return;
+    // Defer while /auth/me is still loading — without this the redirect
+    // fires on the first render before the cookie-derived mode lands
+    // in the provider.
+    if (userLoading) return;
+    // Belt-and-braces: if the server payload says admin/elevated, the
+    // hydrator hasn't run setMode yet for this render but the cookie
+    // is already authoritative — don't bounce.
+    if (user?.mode === "admin" || user?.mode === "elevated") return;
     if (mode === "user") {
       void navigate({ to: "/files", replace: true });
     }
-  }, [onAdmin, location.pathname, mode, navigate]);
+  }, [onAdmin, location.pathname, mode, navigate, userLoading, user?.mode]);
 
   // Logo target tracks mode under the tight coupling: USER → /files,
   // ADMIN → /admin. Without this the admin in /files clicks the logo

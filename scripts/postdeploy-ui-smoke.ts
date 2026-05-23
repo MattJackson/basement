@@ -2786,6 +2786,263 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.10a] Bucket detail renders the three compliance sections
+    //          (Versioning + Object Lock + Encryption)
+    // ============================================================
+    section("[v1.10a] bucket detail compliance sections (v1.10.0b/c/d)");
+    await check("[v1.10a] /files/{rid}/b/{bid} renders Versioning + Object Lock + Encryption sections", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.10a compliance sections", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.10a compliance sections", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.10a compliance sections", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.10a compliance sections", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+
+      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('h1', { timeout: 10_000 });
+
+      // All three v1.10 sections mount unconditionally — they each
+      // handle their own "not supported by this driver" branch
+      // internally, so the testid wrapper is always present.
+      await page!.waitForSelector('[data-testid="versioning-section"]', { timeout: 10_000 });
+      await page!.waitForSelector('[data-testid="object-lock-section"]', { timeout: 10_000 });
+      await page!.waitForSelector('[data-testid="encryption-section"]', { timeout: 10_000 });
+
+      // Section headers render (Versioning + Object Lock + Server-Side
+      // Encryption) — these are the operator-facing labels that the
+      // smoke caught regressions on in prior cycles (missing headers
+      // on render is the kind of bug API-level checks miss).
+      const versioningHeader = await page!.locator('[data-testid="versioning-section"] h2', { hasText: "Versioning" }).count();
+      if (versioningHeader === 0) {
+        throw new Error("Versioning section missing h2 'Versioning' header");
+      }
+      const lockHeader = await page!.locator('[data-testid="object-lock-section"] h2', { hasText: "Object Lock" }).count();
+      if (lockHeader === 0) {
+        throw new Error("Object Lock section missing h2 'Object Lock' header");
+      }
+      const encHeader = await page!.locator('[data-testid="encryption-section"] h2', { hasText: /Server-Side Encryption/i }).count();
+      if (encHeader === 0) {
+        throw new Error("Encryption section missing h2 'Server-Side Encryption' header");
+      }
+
+      await shot(page!, "v1.10a-bucket-compliance-sections");
+    });
+
+    // ============================================================
+    // [v1.10b] Versioning API endpoint shape (capability + status)
+    // ============================================================
+    section("[v1.10b] versioning API endpoint shape (v1.10.0a)");
+    await check("[v1.10b] GET /api/v1/user/regions/{rid}/buckets/{bid}/versioning returns {supported, status}", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.10b versioning API", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.10b versioning API", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.10b versioning API", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.10b versioning API", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets/${bid}/versioning`);
+      if (!resp.ok()) {
+        throw new Error(`GET versioning → ${resp.status()}: ${await resp.text()}`);
+      }
+      const body = await resp.json();
+      if (typeof body.supported !== "boolean") {
+        throw new Error(`expected supported:boolean, got ${typeof body.supported}`);
+      }
+      if (typeof body.status !== "string") {
+        throw new Error(`expected status:string, got ${typeof body.status}`);
+      }
+      // Status is one of disabled | enabled | suspended (S3 contract).
+      if (!["disabled", "enabled", "suspended"].includes(body.status)) {
+        throw new Error(`unexpected status: '${body.status}'`);
+      }
+    });
+
+    // ============================================================
+    // [v1.10c] Object Lock API endpoint shape (supported + enabled)
+    // ============================================================
+    section("[v1.10c] object-lock API endpoint shape (v1.10.0c)");
+    await check("[v1.10c] GET /api/v1/user/regions/{rid}/buckets/{bid}/object-lock returns {supported, enabled}", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.10c object-lock API", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.10c object-lock API", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.10c object-lock API", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.10c object-lock API", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets/${bid}/object-lock`);
+      if (!resp.ok()) {
+        throw new Error(`GET object-lock → ${resp.status()}: ${await resp.text()}`);
+      }
+      const body = await resp.json();
+      if (typeof body.supported !== "boolean") {
+        throw new Error(`expected supported:boolean, got ${typeof body.supported}`);
+      }
+      if (typeof body.enabled !== "boolean") {
+        throw new Error(`expected enabled:boolean, got ${typeof body.enabled}`);
+      }
+    });
+
+    // ============================================================
+    // [v1.10d] Encryption API endpoint shape (supportedS3 + supportedKms + enabled)
+    // ============================================================
+    section("[v1.10d] encryption API endpoint shape (v1.10.0d)");
+    await check("[v1.10d] GET /api/v1/user/regions/{rid}/buckets/{bid}/encryption returns {supportedS3, supportedKms, enabled}", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.10d encryption API", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.10d encryption API", "no user regions configured");
+        return;
+      }
+      const regionId = regions[0].id as string;
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.10d encryption API", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.10d encryption API", "region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets/${bid}/encryption`);
+      if (!resp.ok()) {
+        throw new Error(`GET encryption → ${resp.status()}: ${await resp.text()}`);
+      }
+      const body = await resp.json();
+      if (typeof body.supportedS3 !== "boolean") {
+        throw new Error(`expected supportedS3:boolean, got ${typeof body.supportedS3}`);
+      }
+      if (typeof body.supportedKms !== "boolean") {
+        throw new Error(`expected supportedKms:boolean, got ${typeof body.supportedKms}`);
+      }
+      if (typeof body.enabled !== "boolean") {
+        throw new Error(`expected enabled:boolean, got ${typeof body.enabled}`);
+      }
+    });
+
+    // ============================================================
+    // [v1.10e] Garage backends gate properly — "Not supported"
+    //          rendering on the three sections instead of crashing.
+    // ============================================================
+    section("[v1.10e] Garage 'Not supported' rendering on compliance sections (v1.10.0a/c/d)");
+    await check("[v1.10e] if any user region is Garage, its bucket renders unsupported notices on the three sections", async () => {
+      const regionsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions`);
+      if (!regionsResp.ok()) {
+        skipLine("v1.10e garage gating", `regions → ${regionsResp.status()}`);
+        return;
+      }
+      const regions = await regionsResp.json();
+      if (!Array.isArray(regions) || regions.length === 0) {
+        skipLine("v1.10e garage gating", "no user regions configured");
+        return;
+      }
+      // Find a Garage-backed region — driver field is on the region row.
+      const garage = regions.find((r: any) =>
+        typeof r.driver === "string" && /^garage/i.test(r.driver),
+      );
+      if (!garage) {
+        skipLine("v1.10e garage gating", "no Garage-backed user region — gating exercised by v1.10b/c/d shape checks on the configured driver(s)");
+        return;
+      }
+      const regionId = garage.id as string;
+      const bucketsResp = await page!.request.get(`${BASE_URL}/api/v1/user/regions/${regionId}/buckets`);
+      if (!bucketsResp.ok()) {
+        skipLine("v1.10e garage gating", `buckets → ${bucketsResp.status()}`);
+        return;
+      }
+      const bucketsBody = await bucketsResp.json();
+      const buckets = Array.isArray(bucketsBody) ? bucketsBody : bucketsBody?.buckets;
+      if (!Array.isArray(buckets) || buckets.length === 0) {
+        skipLine("v1.10e garage gating", "Garage region has no buckets");
+        return;
+      }
+      const bid = buckets[0].id as string;
+
+      await page!.goto(`${BASE_URL}/files/${regionId}/b/${bid}`, { waitUntil: "networkidle" });
+      await page!.waitForSelector('[data-testid="versioning-section"]', { timeout: 10_000 });
+
+      // Garage doesn't support versioning today — versioning section
+      // must render the unsupported notice. Object Lock follows the
+      // same axis (and additionally short-circuits when versioning
+      // isn't enabled). Encryption shows unsupported when neither
+      // SSE-S3 nor SSE-KMS axes are supported.
+      const versioningUnsup = await page!.locator('[data-testid="versioning-unsupported"]').count();
+      if (versioningUnsup === 0) {
+        throw new Error("Garage bucket: versioning section did not render 'unsupported' notice");
+      }
+      // Object Lock can land on EITHER unsupported (most likely on
+      // Garage) OR needs-versioning when versioning isn't enabled.
+      const lockUnsup = await page!.locator('[data-testid="object-lock-unsupported"]').count();
+      const lockNeedsVer = await page!.locator('[data-testid="object-lock-needs-versioning"]').count();
+      if (lockUnsup === 0 && lockNeedsVer === 0) {
+        throw new Error("Garage bucket: Object Lock section did not render either 'unsupported' or 'needs-versioning' notice");
+      }
+      // Encryption: unsupported is the expected branch on Garage.
+      const encUnsup = await page!.locator('[data-testid="encryption-unsupported"]').count();
+      if (encUnsup === 0) {
+        throw new Error("Garage bucket: Encryption section did not render 'unsupported' notice");
+      }
+
+      await shot(page!, "v1.10e-garage-not-supported");
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
     section("[NN] console + pageerror gate (v0.8.0c)");
