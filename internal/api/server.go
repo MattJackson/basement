@@ -19,6 +19,7 @@ import (
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 	"github.com/mattjackson/basement/internal/federation"
+	"github.com/mattjackson/basement/internal/gateway"
 	"github.com/mattjackson/basement/internal/metrics"
 	"github.com/mattjackson/basement/internal/store"
 	"github.com/mattjackson/basement/internal/sync"
@@ -80,6 +81,11 @@ type Server struct {
 	// *webdav.Handler before Start(); tests that don't care about the
 	// gateway leave the field unset.
 	webdav      http.Handler
+	// v1.9.0c gateway registry. The /admin/gateways endpoint reads
+	// from this to render every registered gateway (real + stub).
+	// Nil in tests that don't care about the multi-gateway surface;
+	// the handler returns 503 GATEWAYS_NOT_WIRED in that case.
+	gateways    *gateway.Registry
 	oidc        oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
@@ -220,10 +226,19 @@ func (s *Server) SetWebhooks(store webhook.Store, engine webhookEmitter) {
 // under /webdav/ on the root chi router. Passing nil disables the
 // route and any request to /webdav/* returns 503 WEBDAV_NOT_WIRED so
 // a Finder probe surfaces an actionable error rather than a silent
-// 404. Production main.go always supplies a non-nil *webdav.Handler;
+// 404. Production main.go always supplies a non-nil http.Handler;
 // tests that don't exercise WebDAV leave this unset.
 func (s *Server) SetWebDAVHandler(h http.Handler) {
 	s.webdav = h
+}
+
+// SetGatewayRegistry wires the v1.9.0c gateway registry. Read by the
+// /admin/gateways endpoint to enumerate the protocol surface;
+// production main.go always supplies a populated registry, tests
+// that don't care leave it unset and the handler returns 503
+// GATEWAYS_NOT_WIRED.
+func (s *Server) SetGatewayRegistry(r *gateway.Registry) {
+	s.gateways = r
 }
 
 // SetMetricsRecorder wires the metrics-snapshot recorder into the
@@ -397,6 +412,11 @@ func (s *Server) routes() {
 			// Org capabilities management
 			uiAdminG.Get("/admin/system", s.getOrgCapabilitiesHandler)
 			uiAdminG.Patch("/admin/system", s.updateOrgCapabilitiesHandler)
+
+			// v1.9.0c GATEWAYS: per-protocol gateway roster (real +
+			// stub) for the generalized /admin/gateways UI. Read-only;
+			// per-protocol toggles still go through PATCH /admin/system.
+			uiAdminG.Get("/admin/gateways", s.listGatewaysHandler)
 
 			// User management (global, UI Admin only)
 			uiAdminG.Get("/admin/users", s.listAllUsersHandler)
