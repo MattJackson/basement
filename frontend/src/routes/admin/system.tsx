@@ -589,7 +589,7 @@ export function GatewaysCard({
           when implementations are contributed.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-4">
         {registry.isLoading ? (
           <p
             className="text-sm text-muted-foreground"
@@ -611,16 +611,21 @@ export function GatewaysCard({
           // "coming soon" stubs. Each group stays alphabetical so the
           // order is still deterministic as new gateways land. Backend
           // Registry.All() stays alpha — this is a presentation tweak.
+          //
+          // v1.11.0.21: hero/stub split — implemented rows render as the
+          // hero (full chrome, prominent mount URL), stubs render in a
+          // muted single-line treatment so the operator's eye lands on
+          // the live row first. No <hr/> between rows: the visual weight
+          // contrast carries the grouping on its own.
           [...(registry.data ?? [])]
             .sort((a, b) => {
               if (a.implemented !== b.implemented)
                 return a.implemented ? -1 : 1;
               return a.name.localeCompare(b.name);
             })
-            .map((g, idx) => (
-            <div key={g.name}>
-              {idx > 0 && <hr className="my-4 border-input" />}
+            .map((g) => (
               <GatewayRow
+                key={g.name}
                 gateway={g}
                 config={
                   gateways.protocols?.[g.name] ??
@@ -635,24 +640,40 @@ export function GatewaysCard({
                 onSave={() => handleSave(g.name)}
                 saving={savingName === g.name}
               />
-            </div>
-          ))
+            ))
         )}
       </CardContent>
     </Card>
   );
 }
 
-// GatewayRow renders one gateway in the registry-driven card. The
-// shape is uniform across protocols — capability chips, status block,
-// optional mount URL, optional connect hints, optional enable toggle
-// — so adding a new gateway in v1.10+ requires no UI changes.
+// GatewayRow renders one gateway in the registry-driven card. There
+// are two visual treatments driven by Implemented(): the hero (full
+// chrome — mount URL, copy button, connect hints, enable toggle, save)
+// and the muted stub (single-line description + chips, no affordances).
 //
-// Implementation status drives two affordances:
-//   - The badge color (Implemented = primary; not = muted "coming soon")
-//   - Whether the enable toggle renders at all (hidden for stubs; the
-//     spec is explicit that stubs show "—" in place of a toggle)
-function GatewayRow({
+// v1.11.0.21 split the row into two sub-components so each shape can
+// be tuned independently — the implemented row carries the operator's
+// attention, the stubs sit quietly until they grow real implementations.
+function GatewayRow(props: {
+  gateway: GatewayInfo;
+  config: GatewayConfig;
+  onChange: (next: GatewayConfig) => void;
+  onSave: () => Promise<void>;
+  saving: boolean;
+}) {
+  if (props.gateway.implemented) {
+    return <ImplementedGatewayRow {...props} />;
+  }
+  return <StubGatewayRow gateway={props.gateway} />;
+}
+
+// ImplementedGatewayRow is the hero treatment — the operator's
+// landing pad for the live gateway. Heading, status pill, mount URL
+// with prominent copy, per-platform connect hints, and the save
+// button live here. Renders inside a bordered panel so it visually
+// stands apart from the muted stub rows below.
+function ImplementedGatewayRow({
   gateway,
   config,
   onChange,
@@ -665,7 +686,6 @@ function GatewayRow({
   onSave: () => Promise<void>;
   saving: boolean;
 }) {
-  const implemented = gateway.implemented;
   const mountURL = mountURLFor(gateway, config);
   const [copied, setCopied] = useState(false);
 
@@ -685,80 +705,70 @@ function GatewayRow({
 
   return (
     <section
-      className="space-y-3"
+      className="rounded-lg border border-input bg-muted/20 p-4 space-y-4"
       data-testid={`gateways-${gateway.name}-section`}
       aria-labelledby={`gateways-${gateway.name}-heading`}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h3
-              id={`gateways-${gateway.name}-heading`}
-              className="text-base font-medium"
-            >
-              {gateway.displayName}
-            </h3>
-            <ImplementationBadge implemented={implemented} />
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {gateway.description}
-          </p>
-        </div>
-        {implemented ? (
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              data-testid={`gateways-${gateway.name}-enabled`}
-              checked={config.enabled ?? true}
-              onChange={(e) => onChange({ enabled: e.target.checked })}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            Enabled
-          </label>
-        ) : (
-          <span
-            className="text-sm text-muted-foreground"
-            data-testid={`gateways-${gateway.name}-no-toggle`}
-            aria-label="Enable toggle hidden for unimplemented gateway"
+      {/* Header: title + status pill on one line; toggle stacks below */}
+      {/* on phones so the row collapses cleanly. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3
+            id={`gateways-${gateway.name}-heading`}
+            className="text-base font-semibold"
           >
-            &mdash;
-          </span>
-        )}
+            {gateway.displayName}
+          </h3>
+          <ImplementationBadge implemented={true} />
+          <StatusPill
+            gatewayName={gateway.name}
+            status={gateway.status}
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            data-testid={`gateways-${gateway.name}-enabled`}
+            checked={config.enabled ?? true}
+            onChange={(e) => onChange({ enabled: e.target.checked })}
+            className="h-4 w-4 rounded border-gray-300"
+          />
+          Enabled
+        </label>
       </div>
 
-      <CapabilityChips
-        gatewayName={gateway.name}
-        capabilities={gateway.capabilities}
-      />
+      {gateway.status.lastError && (
+        <p
+          className="text-xs text-destructive"
+          data-testid={`gateways-${gateway.name}-last-error`}
+        >
+          Last error: {gateway.status.lastError}
+        </p>
+      )}
 
-      <StatusBlock
-        gatewayName={gateway.name}
-        implemented={implemented}
-        status={gateway.status}
-        listenAddress={gateway.listenAddress}
-      />
-
-      {implemented && mountURL && (
-        <div className="space-y-1">
+      {mountURL && (
+        <div className="space-y-1.5">
           <label
             className="text-sm font-medium"
             htmlFor={`gateway-${gateway.name}-mount-url`}
           >
             Mount URL
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               id={`gateway-${gateway.name}-mount-url`}
               data-testid={`gateways-${gateway.name}-mount-url`}
               readOnly
               value={mountURL}
               className="font-mono text-xs"
+              onFocus={(e) => e.currentTarget.select()}
             />
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               onClick={handleCopy}
               data-testid={`gateways-${gateway.name}-copy`}
+              className="sm:w-24"
             >
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -766,13 +776,16 @@ function GatewayRow({
         </div>
       )}
 
-      {implemented && (
-        <div className="space-y-1">
+      <ConnectHints gatewayName={gateway.name} />
+
+      <details className="text-xs text-muted-foreground">
+        <summary className="cursor-pointer">Advanced</summary>
+        <div className="mt-2 space-y-1.5">
           <label
-            className="text-sm font-medium"
+            className="text-xs font-medium text-foreground"
             htmlFor={`gateway-${gateway.name}-base-url`}
           >
-            Base URL override (optional)
+            Base URL override
           </label>
           <Input
             id={`gateway-${gateway.name}-base-url`}
@@ -780,37 +793,148 @@ function GatewayRow({
             placeholder={defaultMountURL(gateway.name)}
             value={config.baseUrl ?? ""}
             onChange={(e) => onChange({ baseUrl: e.target.value })}
+            className="font-mono text-xs"
           />
-          <p className="text-xs text-muted-foreground">
-            Use when basement sits behind a reverse proxy that exposes
-            this gateway on a different host. Leave blank to use the
-            current origin.
+          <p>
+            Set this when basement is behind a reverse proxy on a
+            different host. Leave blank to use the current origin.
           </p>
         </div>
-      )}
+      </details>
 
-      {implemented && <ConnectHints gatewayName={gateway.name} />}
+      <CapabilityChips
+        gatewayName={gateway.name}
+        capabilities={gateway.capabilities}
+        muted={false}
+      />
 
       {/* v1.11.0.20: docs link only renders for implemented gateways. */}
-      {/* Per feedback_dont_announce_v2 the stub rows should not link to */}
-      {/* tracking docs that implicitly commit to a delivery window — */}
-      {/* the coming-soon badge + capability chips carry the message. */}
-      {implemented && (
-        <DocsLink gatewayName={gateway.name} implemented={implemented} />
-      )}
-
-      {implemented && (
-        <div className="flex justify-end">
-          <Button
-            onClick={onSave}
-            disabled={saving}
-            data-testid={`gateways-${gateway.name}-save`}
-          >
-            {saving ? "Saving…" : `Save ${gateway.displayName} settings`}
-          </Button>
-        </div>
-      )}
+      {/* Per feedback_dont_announce_v2 stub rows do not link to docs */}
+      {/* that implicitly commit to a delivery window. */}
+      <div className="flex flex-col-reverse items-stretch justify-between gap-2 sm:flex-row sm:items-center">
+        <DocsLink gatewayName={gateway.name} implemented={true} />
+        <Button
+          onClick={onSave}
+          disabled={saving}
+          data-testid={`gateways-${gateway.name}-save`}
+        >
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
     </section>
+  );
+}
+
+// StubGatewayRow renders the muted "coming soon" treatment — single
+// row with display name, badge, capability chips inline, no
+// affordances. The lower opacity + condensed layout signals that
+// these are placeholder protocols without screaming "not done yet"
+// at every visit.
+function StubGatewayRow({ gateway }: { gateway: GatewayInfo }) {
+  return (
+    <section
+      className="flex flex-col gap-2 rounded-lg border border-dashed border-input/60 p-3 opacity-70 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+      data-testid={`gateways-${gateway.name}-section`}
+      aria-labelledby={`gateways-${gateway.name}-heading`}
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <h3
+            id={`gateways-${gateway.name}-heading`}
+            className="text-sm font-medium"
+          >
+            {gateway.displayName}
+          </h3>
+          <ImplementationBadge implemented={false} />
+        </div>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          {gateway.description}
+        </p>
+        <div className="mt-1.5">
+          <CapabilityChips
+            gatewayName={gateway.name}
+            capabilities={gateway.capabilities}
+            muted={true}
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-3 self-start sm:self-center">
+        {/* Stubs still surface the canonical "no toggle" placeholder */}
+        {/* — the spec relies on the em-dash to mark unimplemented */}
+        {/* affordance positions, and the test pins the testid. */}
+        <span
+          className="hidden text-sm text-muted-foreground sm:inline"
+          data-testid={`gateways-${gateway.name}-no-toggle`}
+          aria-label="Enable toggle hidden for unimplemented gateway"
+        >
+          &mdash;
+        </span>
+        <span
+          className="text-xs text-muted-foreground italic"
+          data-testid={`gateways-${gateway.name}-status`}
+        >
+          not implemented yet
+        </span>
+      </div>
+    </section>
+  );
+}
+
+// StatusPill is v1.11.0.21's simplification of the v1.9.0d
+// StatusBlock. The old block listed running flag + active connections
+// + last activity + total requests + listen address in one prose
+// run-on; the operator's takeaway is binary: is the gateway up, and
+// when did something last touch it. The pill carries those two
+// signals; the rest moves into a tooltip-style title attribute for
+// power users who hover over it.
+function StatusPill({
+  gatewayName,
+  status,
+}: {
+  gatewayName: string;
+  status: GatewayStatus;
+}) {
+  const lastActivity = status.lastActivity
+    ? humanRelative(status.lastActivity)
+    : null;
+
+  if (!status.running) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive"
+        data-testid={`gateways-${gatewayName}-status`}
+        title="Gateway is not currently accepting connections"
+      >
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-destructive" />
+        Stopped
+      </span>
+    );
+  }
+
+  const titleParts: string[] = ["Running"];
+  if (status.activeConnections !== undefined) {
+    titleParts.push(
+      `${status.activeConnections} active connection${status.activeConnections === 1 ? "" : "s"}`,
+    );
+  }
+  if (status.totalRequests !== undefined) {
+    titleParts.push(`${status.totalRequests} total requests`);
+  }
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+      data-testid={`gateways-${gatewayName}-status`}
+      title={titleParts.join(" · ")}
+    >
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-500" />
+      Active
+      {lastActivity && (
+        <span className="font-normal text-muted-foreground">
+          &middot; {lastActivity}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -844,12 +968,19 @@ function ImplementationBadge({ implemented }: { implemented: boolean }) {
 // write / delete / move / lock / per-auth methods). Each chip is
 // rendered only when the capability is set, so a protocol with no
 // auth methods gets no auth chips — keeps the row honest.
+//
+// v1.11.0.21 added the `muted` prop so stub rows can render the chips
+// at lower visual weight (no border, no monospace) while implemented
+// rows keep the bordered + monospace treatment that pairs well with
+// the rest of the hero panel.
 function CapabilityChips({
   gatewayName,
   capabilities,
+  muted = false,
 }: {
   gatewayName: string;
   capabilities: GatewayCapabilities;
+  muted?: boolean;
 }) {
   const chips: string[] = [];
   if (capabilities.read) chips.push("read");
@@ -863,9 +994,32 @@ function CapabilityChips({
 
   if (chips.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
-        Capabilities: <span className="italic">unspecified</span>
+      <p
+        className="text-xs text-muted-foreground italic"
+        data-testid={`gateways-${gatewayName}-capabilities`}
+      >
+        capabilities unspecified
       </p>
+    );
+  }
+
+  if (muted) {
+    return (
+      <div
+        className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground"
+        data-testid={`gateways-${gatewayName}-capabilities`}
+      >
+        {chips.map((c, i) => (
+          <span key={c}>
+            {c}
+            {i < chips.length - 1 && (
+              <span aria-hidden="true" className="mx-1 opacity-60">
+                &middot;
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
     );
   }
 
@@ -874,7 +1028,6 @@ function CapabilityChips({
       className="flex flex-wrap items-center gap-1.5 text-xs"
       data-testid={`gateways-${gatewayName}-capabilities`}
     >
-      <span className="text-muted-foreground">Capabilities:</span>
       {chips.map((c) => (
         <span
           key={c}
@@ -887,114 +1040,45 @@ function CapabilityChips({
   );
 }
 
-// StatusBlock surfaces the runtime stats /admin/gateways returns.
-// Stub gateways short-circuit to "not implemented yet"; live ones
-// render running + connection + activity + counters with em-dashes
-// for absent values so the operator sees "—" rather than "0" for
-// counters the gateway doesn't track.
-function StatusBlock({
-  gatewayName,
-  implemented,
-  status,
-  listenAddress,
-}: {
-  gatewayName: string;
-  implemented: boolean;
-  status: GatewayStatus;
-  listenAddress?: string;
-}) {
-  if (!implemented) {
-    return (
-      <p
-        className="text-xs text-muted-foreground"
-        data-testid={`gateways-${gatewayName}-status`}
-      >
-        Status: <span className="italic">not implemented yet</span>
-      </p>
-    );
-  }
-
-  const runningLabel = status.running ? "running" : "stopped";
-  const activeConnections = status.activeConnections;
-  const totalRequests = status.totalRequests;
-  const lastActivity = status.lastActivity
-    ? humanRelative(status.lastActivity)
-    : "—";
-
-  return (
-    <div
-      className="text-xs text-muted-foreground"
-      data-testid={`gateways-${gatewayName}-status`}
-    >
-      <p>
-        Status: <span className="font-mono">{runningLabel}</span>,{" "}
-        {activeConnections !== undefined
-          ? `${activeConnections} active connection${
-              activeConnections === 1 ? "" : "s"
-            }`
-          : "active connections —"}
-        , last activity:{" "}
-        <span className="font-mono">{lastActivity}</span>
-        {totalRequests !== undefined && (
-          <>
-            , total requests: <span className="font-mono">{totalRequests}</span>
-          </>
-        )}
-        {listenAddress && (
-          <>
-            , listen: <span className="font-mono">{listenAddress}</span>
-          </>
-        )}
-      </p>
-      {status.lastError && (
-        <p className="mt-1 text-destructive" data-testid={`gateways-${gatewayName}-last-error`}>
-          Last error: {status.lastError}
-        </p>
-      )}
-    </div>
-  );
-}
-
 // ConnectHints renders the collapsed per-platform mount instructions.
 // Today only WebDAV has bespoke per-platform copy; other implemented
 // gateways will gain their own clauses here as they land. Stubs
 // don't get connect hints &mdash; the coming-soon badge + capability
 // chips carry the message and no docs link is rendered (v1.11.0.20).
+//
+// v1.11.0.21 tightened each platform clause to a single imperative
+// sentence — the goal is "what do I tap" not "what is this protocol".
 function ConnectHints({ gatewayName }: { gatewayName: string }) {
   if (gatewayName === "webdav") {
     return (
-      <details className="rounded-md border border-input bg-muted/30 p-3">
-        <summary className="cursor-pointer text-sm font-medium">
+      <details className="text-sm">
+        <summary className="cursor-pointer font-medium">
           Connect from your platform
         </summary>
-        <ul className="mt-3 space-y-2 text-sm">
+        <ul className="mt-3 space-y-1.5 text-sm">
           <li>
-            <strong>macOS Finder:</strong> press &#8984;K, paste the mount
-            URL, then enter your basement username and password.
+            <strong>macOS:</strong> Finder &rsaquo; &#8984;K &rsaquo;
+            paste mount URL.
           </li>
           <li>
-            <strong>Windows Explorer:</strong> This PC &rarr; Map network
-            drive, paste the URL into the Folder field, and authenticate
-            with basement credentials.
+            <strong>Windows:</strong> Explorer &rsaquo; Map network drive
+            &rsaquo; paste mount URL.
           </li>
           <li>
-            <strong>Linux (Nautilus):</strong> Connect to Server, paste
-            the URL with the <code>davs://</code> scheme (e.g.{" "}
-            <code>davs://basement.example/webdav</code>).
+            <strong>Linux:</strong> Nautilus &rsaquo; Connect to Server
+            &rsaquo; replace <code>https://</code> with <code>davs://</code>.
           </li>
           <li>
-            <strong>iOS Files:</strong> Browse tab &rarr; &hellip; menu
-            &rarr; Connect to Server, paste the URL, choose Registered
-            User, enter credentials.
+            <strong>iOS:</strong> Files &rsaquo; Browse &rsaquo; &hellip;
+            &rsaquo; Connect to Server.
           </li>
         </ul>
-        <p className="mt-3 text-xs text-muted-foreground">
-          For automation, use a service account from{" "}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Sign in with basement credentials, or a{" "}
           <Link to="/admin/service-accounts" className="underline">
-            /admin/service-accounts
+            service-account key
           </Link>{" "}
-          &mdash; the <code>BMNT&hellip;</code> key goes in the username
-          field, the shown-once secret in the password field.
+          (<code>BMNT&hellip;</code>) for automation.
         </p>
       </details>
     );
@@ -1008,6 +1092,10 @@ function ConnectHints({ gatewayName }: { gatewayName: string }) {
 // across the project — see feedback_dont_announce_v2). The
 // `implemented` prop is retained for callsite clarity even though
 // the unimplemented branch is now unreachable.
+//
+// v1.11.0.21 shortened the label from "<NAME> integration guide ->"
+// to "Docs ->" — the row's own title already carries the protocol
+// name, so repeating it in the link is chrome we can drop.
 function DocsLink({
   gatewayName,
   implemented: _implemented,
@@ -1016,19 +1104,16 @@ function DocsLink({
   implemented: boolean;
 }) {
   const href = `/docs/integrations/${gatewayName}.md`;
-  const label = `${gatewayName.toUpperCase()} integration guide`;
   return (
-    <p className="text-xs">
-      <a
-        href={href}
-        className="font-medium text-primary underline-offset-4 hover:underline"
-        target="_blank"
-        rel="noreferrer"
-        data-testid={`gateways-${gatewayName}-docs`}
-      >
-        {label} &rarr;
-      </a>
-    </p>
+    <a
+      href={href}
+      className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+      target="_blank"
+      rel="noreferrer"
+      data-testid={`gateways-${gatewayName}-docs`}
+    >
+      Docs &rarr;
+    </a>
   );
 }
 
