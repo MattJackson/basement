@@ -581,11 +581,12 @@ export function GatewaysCard({
       <CardHeader>
         <CardTitle>Gateways</CardTitle>
         <CardDescription>
-          Native-protocol mounts that let desktop and mobile clients talk
-          to basement without the web UI. WebDAV ships built-in; SMB / NFS
-          / FTP / S3 are registered as stubs in v1.9.0c and light up as
-          their implementations land &mdash; see the per-protocol docs
-          below for the implementation tracking.
+          Mount your buckets as a network drive on Mac, Windows, Linux,
+          iOS, and Android. WebDAV is available today and works with any
+          client that speaks the protocol &mdash; Finder&apos;s Connect to
+          Server, Windows Explorer&apos;s Map Network Drive, or your file
+          manager of choice. Additional protocols are placeholders for
+          when implementations are contributed.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
