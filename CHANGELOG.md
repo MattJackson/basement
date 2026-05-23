@@ -125,6 +125,71 @@ Touched: `CHANGELOG.md`, `SECURITY.md`,
 `docs/release-notes/{v1.4,v1.5,v1.6,v1.7,v1.8,v1.11}.0.md`,
 `docs/deployment/docker.md`.
 
+## v1.11.0.8 — 2026-05-23
+
+Real Garage v1 + v2 in CI — integration test infrastructure.
+
+Pure test addition; no product code changes. The driver bug class
+that surfaced repeatedly across v1.11.0.1 / v1.11.0.2 / v1.11.0.5
+BUG02 and the federation no-op replication bug v1.11.0.4 all share
+the same root cause: the unit suite uses fakes that honour the
+documented interface but don't reproduce real-Garage wire semantics
+(grant-permission wire shape, second-precision object mtimes, the
+admin-only ADR-0001 connection shape). Every one of those bugs
+would have been caught BEFORE deploy by an integration suite that
+talks to actual Garage containers.
+
+- **New `internal/drivers/garagetest` package** — testcontainers-go
+  bootstrap helper. `Bootstrap(t, V1|V2)` spins up a single-node
+  Garage cluster, mounts an in-memory `garage.toml`, waits for the
+  admin API, stages + applies a single-node layout, returns a
+  `*Cluster` with `AdminURL`/`AdminToken`/`S3Endpoint` ready to wire
+  into a driver. Talks to the cluster's admin API directly (raw HTTP)
+  for bootstrap — the driver under test never participates in its
+  own setup. Auto-skips on hosts without Docker so a local
+  `go test -tags=integration ./...` on a no-Docker laptop produces
+  a clean "skipped" rather than a noisy error.
+- **`internal/drivers/garage/driver_integration_test.go`** —
+  replaces the env-var skeleton with four real tests covering the
+  v1.11.0.x bug classes against `dxflrs/garage:v2.0.0`:
+  admin-only driver builds + ListBuckets (v1.11.0.1), bucket ID
+  round-trip vs cluster's view (v1.11.0.2),
+  AllowBucketKey+GetKey grant readback (v1.11.0.5 BUG02), and a
+  Health+ListNodes smoke.
+- **`internal/drivers/garage_v1/integration_test.go`** — parallel
+  suite against `dxflrs/garage:v1.0.1` honouring the driver-parity
+  doctrine. Every regression test the v2 driver carries also pins
+  the v1 driver's behaviour, so a future refactor can't quietly
+  recreate the v2 BUG02 mistake in the v1 code path.
+- **`internal/federation/integration_test.go`** — end-to-end engine
+  test against TWO Garage v2 clusters. Boots the engine, sleeps
+  past the boot tick so LastSync gets set, uploads an object to
+  the primary, then asserts the replica receives it within 15s.
+  Direct repro for v1.11.0.4 — the bug only surfaced because real
+  Garage returns whole-second mtimes while the fakeDriver records
+  nanoseconds.
+- **`.github/workflows/integration.yml`** — three CI jobs (Garage
+  v2 driver, Garage v1 driver, federation engine) gated to paths
+  that could plausibly break a real-Garage interaction. Concurrency
+  group cancels stale runs per branch.
+- **`Makefile`** — new `make integration` runs all three suites
+  locally. Docker required.
+- **`CONTRIBUTING.md`** — "Integration tests" section documents
+  the build tag, the local-run command, and the CI workflow.
+
+Tests stay behind `//go:build integration`, so `go test -race ./...`
+(the CONTRIBUTING.md "ready to merge" gate) is unchanged and still
+Docker-free. The new `testcontainers-go` dependency is only pulled
+into the build under `-tags=integration`. `pnpm build` clean;
+`go test -race ./...` green across all packages.
+
+Touched: `go.mod`, `go.sum`, `Makefile` (new), `CONTRIBUTING.md`,
+`CHANGELOG.md`, `.github/workflows/integration.yml` (new),
+`internal/drivers/garagetest/garagetest.go` (new),
+`internal/drivers/garage/driver_integration_test.go` (rewritten),
+`internal/drivers/garage_v1/integration_test.go` (new),
+`internal/federation/integration_test.go` (new).
+
 ## v1.11.0.5 — 2026-05-23
 
 Feature-coverage smoke + Garage v2 driver bugfix.

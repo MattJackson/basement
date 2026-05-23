@@ -118,29 +118,52 @@ exhaustive:
    pre-commit and CI run on every push. Add new tests under
    `_test.go` (Go) or `__tests__/` (vitest).
 
-2. **Integration smoke** — `bash scripts/feature-smoke.sh`. Runs
+2. **Integration tests (real Garage containers)** — `make integration`
+   runs the driver + federation suites against real Garage v1
+   (`dxflrs/garage:v1.0.1`) and v2 (`dxflrs/garage:v2.0.0`)
+   containers spun up via
+   [`testcontainers-go`](https://github.com/testcontainers/testcontainers-go).
+   The suites are gated behind the `integration` Go build tag so
+   `go test ./...` stays Docker-free. They are the regression net
+   for the v1.11.0.1 / v1.11.0.2 / v1.11.0.4 / v1.11.0.5 BUG02 bug
+   classes — each was a real-Garage interaction the unit suite
+   couldn't have caught. CI runs the same suites via
+   `.github/workflows/integration.yml` on every PR + every push to
+   `main` that touches driver or federation code paths.
+
+   ```bash
+   make integration                                                   # all (Garage v1, v2, federation)
+   go test -tags=integration -race -v ./internal/drivers/garage/...    # Garage v2 driver
+   go test -tags=integration -race -v ./internal/drivers/garage_v1/... # Garage v1 driver
+   go test -tags=integration -race -v ./internal/federation/...        # federation E2E (2x v2)
+   ```
+
+   Requires a Docker daemon (or Docker-compatible runtime like
+   colima, Rancher Desktop, Podman with docker.sock).
+
+3. **Feature smoke** — `bash scripts/feature-smoke.sh`. Runs
    the per-feature functional smoke against the 10x Garage v2 test
    backend (10.1.7.11:38xx). Hard safety gate: every destructive op
    asserts the target cluster label starts with `garage-v2-test-`.
 
-3. **UI smoke** — `pnpm -C frontend smoke` (curated, ~70 checks) and
+4. **UI smoke** — `pnpm -C frontend smoke` (curated, ~70 checks) and
    `pnpm -C frontend smoke:full` (comprehensive walk, every route +
    axe-core a11y pass). Both target the live deploy
    (`basement.pq.io`) using the matthew/password credentials.
 
-4. **Fuzz** — `go test -fuzz=FuzzMatchFilter -fuzztime=30s
+5. **Fuzz** — `go test -fuzz=FuzzMatchFilter -fuzztime=30s
    ./internal/audit/...` (cycle v1.11.0.12 starter). Pure-function
    fuzzers live alongside the code they exercise as `*_fuzz_test.go`.
    When you add a fuzz target, add it to the `Makefile` fuzz-*
    targets so it's discoverable.
 
-5. **Quality gates** — `make quality` runs lint + vet + test +
+6. **Quality gates** — `make quality` runs lint + vet + test +
    gosec + govulncheck locally. CI runs the same gates per
    `.github/workflows/quality.yml`. Tightening from warn-mode to
    block-mode is per-gate and tracked in
    `docs/security-audit-baseline.md`.
 
-6. **Pre-commit hooks** — install once with `pre-commit install`.
+7. **Pre-commit hooks** — install once with `pre-commit install`.
    Hooks run gitleaks + whitespace fixers + gofmt on every commit,
    and `go test -race ./...` on every push (slow, push-stage only).
 
