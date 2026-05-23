@@ -56,6 +56,16 @@ type testMockDriver struct {
 	scrubSupportFunc func() driver.ScrubCapability
 	scrubStateFunc   func(ctx context.Context) (driver.ScrubState, error)
 	startScrubFunc   func(ctx context.Context) error
+
+	// v1.10.0a versioning hooks. nil-default reports unsupported
+	// (matches Garage v1/v2 posture).
+	versioningSupportFunc   func() bool
+	getVersioningStatusFunc func(ctx context.Context, bucket string) (driver.VersioningStatus, error)
+	enableVersioningFunc    func(ctx context.Context, bucket string) error
+	suspendVersioningFunc   func(ctx context.Context, bucket string) error
+	listObjectVersionsFunc  func(ctx context.Context, bucket, prefix, versionIDMarker string, limit int) ([]driver.ObjectVersion, string, error)
+	getObjectVersionFunc    func(ctx context.Context, bucket, key, versionID string) (driver.StreamResult, error)
+	deleteObjectVersionFunc func(ctx context.Context, bucket, key, versionID string) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -280,6 +290,60 @@ func (m *testMockDriver) ScrubState(ctx context.Context) (driver.ScrubState, err
 func (m *testMockDriver) StartScrub(ctx context.Context) error {
 	if m.startScrubFunc != nil {
 		return m.startScrubFunc(ctx)
+	}
+	return driver.ErrUnsupported
+}
+
+// v1.10.0a versioning hooks — overridable funcs so the versioning
+// handler tests can plug in custom behaviour without a second mock.
+// Defaults: VersioningSupport=false (matches Garage v1/v2 posture)
+// and methods return ErrUnsupported so a handler that runs against
+// an unconfigured mock surfaces the 501 NOT_SUPPORTED branch.
+func (m *testMockDriver) VersioningSupport() bool {
+	if m.versioningSupportFunc != nil {
+		return m.versioningSupportFunc()
+	}
+	return false
+}
+
+func (m *testMockDriver) GetVersioningStatus(ctx context.Context, bucket string) (driver.VersioningStatus, error) {
+	if m.getVersioningStatusFunc != nil {
+		return m.getVersioningStatusFunc(ctx, bucket)
+	}
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) EnableVersioning(ctx context.Context, bucket string) error {
+	if m.enableVersioningFunc != nil {
+		return m.enableVersioningFunc(ctx, bucket)
+	}
+	return driver.ErrUnsupported
+}
+
+func (m *testMockDriver) SuspendVersioning(ctx context.Context, bucket string) error {
+	if m.suspendVersioningFunc != nil {
+		return m.suspendVersioningFunc(ctx, bucket)
+	}
+	return driver.ErrUnsupported
+}
+
+func (m *testMockDriver) ListObjectVersions(ctx context.Context, bucket, prefix, versionIDMarker string, limit int) ([]driver.ObjectVersion, string, error) {
+	if m.listObjectVersionsFunc != nil {
+		return m.listObjectVersionsFunc(ctx, bucket, prefix, versionIDMarker, limit)
+	}
+	return nil, "", driver.ErrUnsupported
+}
+
+func (m *testMockDriver) GetObjectVersion(ctx context.Context, bucket, key, versionID string) (driver.StreamResult, error) {
+	if m.getObjectVersionFunc != nil {
+		return m.getObjectVersionFunc(ctx, bucket, key, versionID)
+	}
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error {
+	if m.deleteObjectVersionFunc != nil {
+		return m.deleteObjectVersionFunc(ctx, bucket, key, versionID)
 	}
 	return driver.ErrUnsupported
 }

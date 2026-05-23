@@ -273,6 +273,45 @@ type ScrubCapability struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// VersioningStatus reports the current versioning state of a bucket
+// (v1.10.0a). The "disabled" state is distinct from "suspended":
+// disabled means versioning has never been turned on (the S3
+// GetBucketVersioning response has no Status field), while suspended
+// means versioning was previously enabled and then turned off (Status
+// is explicitly "Suspended" — existing versions remain queryable but
+// no new versions are created for subsequent writes).
+type VersioningStatus string
+
+const (
+	// VersioningEnabled indicates the bucket actively versions objects.
+	VersioningEnabled VersioningStatus = "enabled"
+	// VersioningSuspended indicates the bucket retains existing
+	// versions but no longer creates new ones.
+	VersioningSuspended VersioningStatus = "suspended"
+	// VersioningDisabled indicates the bucket has never had versioning
+	// turned on.
+	VersioningDisabled VersioningStatus = "disabled"
+)
+
+// ObjectVersion represents one historical version of an object in a
+// versioned bucket (v1.10.0a). Returned by ListObjectVersions and
+// surfaced to the UI's version-history view.
+//
+// IsDeleteMarker is true for "tombstone" rows S3 inserts when an
+// object is DELETEd in a versioned bucket — the row records the
+// delete event but carries no payload. The UI renders these
+// distinctly from real versions so an operator can spot "this version
+// was deleted on T" vs "this version was overwritten on T".
+type ObjectVersion struct {
+	VersionID      string    `json:"versionId"`
+	Key            string    `json:"key"`
+	Size           int64     `json:"size"`
+	ETag           string    `json:"etag,omitempty"`
+	LastModified   time.Time `json:"lastModified,omitempty"`
+	IsLatest       bool      `json:"isLatest"`
+	IsDeleteMarker bool      `json:"isDeleteMarker,omitempty"`
+}
+
 // ScrubState carries the live state of a block-scrub operation.
 // Running flips to true the moment a scrub kicks off and back to
 // false once Garage flushes the completion record; the UI polls
@@ -383,4 +422,41 @@ type Driver interface {
 	ScrubSupport() ScrubCapability
 	ScrubState(ctx context.Context) (ScrubState, error)
 	StartScrub(ctx context.Context) error
+
+	// Bucket versioning (v1.10.0a). VersioningSupport is the UI's
+	// gate — drivers that don't advertise versioning (Garage v1 / v2
+	// today) hide the toggle entirely and the methods below return
+	// ErrUnsupported. AWS S3 + MinIO implement the full set.
+	//
+	// GetVersioningStatus reports the current state per
+	// VersioningStatus (enabled / suspended / disabled). Toggling
+	// from any state to Enabled flips to enabled; from enabled to
+	// suspended preserves existing versions but stops creating new
+	// ones. There is no S3-side "un-suspend back to never-enabled" —
+	// disabled is observable only on buckets that were never enabled
+	// in the first place.
+	//
+	// ListObjectVersions surfaces all versions (current +
+	// noncurrent) AND delete markers, ordered by key then by version
+	// (newest first within each key). versionIDMarker is the
+	// continuation token returned in the previous page's
+	// nextVersionIDMarker; pass empty for the first call. The second
+	// return value is nextVersionIDMarker — empty when the result is
+	// not truncated.
+	//
+	// GetObjectVersion streams a specific version of a key (the same
+	// shape as StreamObject but pinned to versionID). Required for
+	// the UI's "restore this version" preview + download flows.
+	//
+	// DeleteObjectVersion permanently deletes a single version row,
+	// including delete markers. This is distinct from a regular
+	// DeleteObject on a versioned bucket — that inserts a delete
+	// marker; this removes a specific historical version forever.
+	VersioningSupport() bool
+	GetVersioningStatus(ctx context.Context, bucket string) (VersioningStatus, error)
+	EnableVersioning(ctx context.Context, bucket string) error
+	SuspendVersioning(ctx context.Context, bucket string) error
+	ListObjectVersions(ctx context.Context, bucket, prefix, versionIDMarker string, limit int) ([]ObjectVersion, string, error)
+	GetObjectVersion(ctx context.Context, bucket, key, versionID string) (StreamResult, error)
+	DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error
 }

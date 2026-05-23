@@ -590,6 +590,21 @@ func (s *Server) routes() {
 			userG.Post("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}/complete", s.userCompleteRegionMultipartHandler)
 			userG.Delete("/user/regions/{regionId}/buckets/{bid}/multipart/{uploadId}", s.userAbortRegionMultipartHandler)
 			userG.Delete("/user/regions/{regionId}/buckets/{bid}/objects/{key}", s.userDeleteRegionObjectHandler)
+
+			// v1.10.0a VERSIONING — bucket-level toggle + per-object
+			// version history. Capability-gated (the driver's
+			// VersioningSupport() returns 501 NOT_SUPPORTED on
+			// Garage variants today). Audit events:
+			//   bucket:versioning_get        — read
+			//   bucket:versioning_enabled    — flip to Enabled
+			//   bucket:versioning_suspended  — flip to Suspended
+			//   object:version_list/get      — read-with-trail
+			//   object:version_delete        — destructive (always audited)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/versioning", s.userGetBucketVersioningHandler)
+			userG.Put("/user/regions/{regionId}/buckets/{bid}/versioning", s.userPutBucketVersioningHandler)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/versions", s.userListObjectVersionsHandler)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/versions/{versionId}", s.userGetObjectVersionHandler)
+			userG.Delete("/user/regions/{regionId}/buckets/{bid}/o/{key}/versions/{versionId}", s.userDeleteObjectVersionHandler)
 		})
 	})
 

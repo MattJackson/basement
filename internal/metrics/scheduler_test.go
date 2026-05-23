@@ -151,6 +151,27 @@ func (d *schedulerStubDriver) ScrubState(_ context.Context) (driver.ScrubState, 
 }
 func (d *schedulerStubDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
 
+// v1.10.0a versioning — stubs report unsupported.
+func (d *schedulerStubDriver) VersioningSupport() bool { return false }
+func (d *schedulerStubDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
+
 // TestRunOneCycle_HappyPath drives one cycle across two clusters
 // with two buckets each and asserts four snapshots were recorded.
 func TestRunOneCycle_HappyPath(t *testing.T) {

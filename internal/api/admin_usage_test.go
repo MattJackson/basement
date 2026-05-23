@@ -157,6 +157,28 @@ func (d *usageSizedDriver) ScrubState(_ context.Context) (driver.ScrubState, err
 }
 func (d *usageSizedDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
 
+// v1.10.0a versioning — usage stub doesn't exercise versioning;
+// default unsupported.
+func (d *usageSizedDriver) VersioningSupport() bool { return false }
+func (d *usageSizedDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (d *usageSizedDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (d *usageSizedDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (d *usageSizedDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
+
 const usageSizedDriverName = "stub-usage-sized"
 
 var usageSizedRegisterOnce sync.Once

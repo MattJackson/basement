@@ -143,3 +143,89 @@ func (m *fanoutDriver) ScrubState(_ context.Context) (driver.ScrubState, error) 
 	return driver.ScrubState{}, driver.ErrUnsupported
 }
 func (m *fanoutDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
+
+// v1.10.0a versioning shims — default behaviour: report unsupported.
+// Tests that exercise the versioning handlers
+// (user_bucket_versioning_test.go) use the regionMockDriver +
+// testMockDriver pair which have overridable hooks; these shims only
+// exist to keep the rest of the package compiling.
+
+func (m *layoutDriver) VersioningSupport() bool { return false }
+func (m *layoutDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (m *layoutDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *layoutDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *layoutDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (m *layoutDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (m *layoutDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
+
+func (m *stubDriver) VersioningSupport() bool { return false }
+func (m *stubDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (m *stubDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *stubDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *stubDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (m *stubDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (m *stubDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
+
+func (m *mockDriver) VersioningSupport() bool { return false }
+func (m *mockDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (m *mockDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *mockDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *mockDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (m *mockDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (m *mockDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
+
+func (m *fanoutDriver) VersioningSupport() bool { return false }
+func (m *fanoutDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (m *fanoutDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *fanoutDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (m *fanoutDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (m *fanoutDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (m *fanoutDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
