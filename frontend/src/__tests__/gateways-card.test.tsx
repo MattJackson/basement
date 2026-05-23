@@ -252,6 +252,36 @@ describe("GatewaysCard (v1.9.0d)", () => {
     }
   });
 
+  it("stub rows omit the tracking docs link and version-commit copy (v1.11.0.20)", () => {
+    // Per feedback_dont_announce_v2 the stub rows no longer link to
+    // a docs/integrations/<name>.md tracking page (those docs were
+    // also scrubbed of "planned for v2.x" copy in the same cycle).
+    // The coming-soon badge + capability chips carry the message
+    // for unimplemented protocols.
+    mockRegistry({ data: defaultRoster() });
+    render(
+      <GatewaysCard
+        gateways={{ webdav: { enabled: true }, protocols: { webdav: { enabled: true } } }}
+        onChange={() => {}}
+        onSave={async () => {}}
+      />,
+    );
+
+    for (const name of ["ftp", "nfs", "s3", "smb"]) {
+      // No docs link rendered for stubs.
+      expect(screen.queryByTestId(`gateways-${name}-docs`)).toBeNull();
+
+      const section = screen.getByTestId(`gateways-${name}-section`);
+      // No "Implementation planned" / "planned for v" / "implementation tracking" copy.
+      expect(section.textContent ?? "").not.toMatch(/Implementation planned/i);
+      expect(section.textContent ?? "").not.toMatch(/planned for v/i);
+      expect(section.textContent ?? "").not.toMatch(/implementation tracking/i);
+    }
+
+    // WebDAV (implemented) still surfaces its integration-guide link.
+    expect(screen.getByTestId("gateways-webdav-docs")).toBeInTheDocument();
+  });
+
   it("toggling WebDAV off writes BOTH the legacy webdav field and the protocols map", () => {
     mockRegistry({ data: defaultRoster() });
     const onChange = vi.fn();

@@ -791,7 +791,13 @@ function GatewayRow({
 
       {implemented && <ConnectHints gatewayName={gateway.name} />}
 
-      <DocsLink gatewayName={gateway.name} implemented={implemented} />
+      {/* v1.11.0.20: docs link only renders for implemented gateways. */}
+      {/* Per feedback_dont_announce_v2 the stub rows should not link to */}
+      {/* tracking docs that implicitly commit to a delivery window — */}
+      {/* the coming-soon badge + capability chips carry the message. */}
+      {implemented && (
+        <DocsLink gatewayName={gateway.name} implemented={implemented} />
+      )}
 
       {implemented && (
         <div className="flex justify-end">
@@ -952,8 +958,8 @@ function StatusBlock({
 // ConnectHints renders the collapsed per-platform mount instructions.
 // Today only WebDAV has bespoke per-platform copy; other implemented
 // gateways will gain their own clauses here as they land. Stubs
-// don't get connect hints (the DocsLink card carries the pointer
-// to the implementation tracking instead).
+// don't get connect hints &mdash; the coming-soon badge + capability
+// chips carry the message and no docs link is rendered (v1.11.0.20).
 function ConnectHints({ gatewayName }: { gatewayName: string }) {
   if (gatewayName === "webdav") {
     return (
@@ -996,21 +1002,21 @@ function ConnectHints({ gatewayName }: { gatewayName: string }) {
   return null;
 }
 
-// DocsLink renders the per-protocol docs pointer. Live gateways link
-// at their full integration guide; stubs link at the implementation-
-// tracking placeholder doc so the operator has a single jump-off
-// point for "when's this going to ship".
+// DocsLink renders the per-protocol docs pointer. Only invoked for
+// implemented gateways (per v1.11.0.20: stubs no longer link to a
+// tracking doc, since version-committing copy is being scrubbed
+// across the project — see feedback_dont_announce_v2). The
+// `implemented` prop is retained for callsite clarity even though
+// the unimplemented branch is now unreachable.
 function DocsLink({
   gatewayName,
-  implemented,
+  implemented: _implemented,
 }: {
   gatewayName: string;
   implemented: boolean;
 }) {
   const href = `/docs/integrations/${gatewayName}.md`;
-  const label = implemented
-    ? `${gatewayName.toUpperCase()} integration guide`
-    : `${gatewayName.toUpperCase()} implementation tracking`;
+  const label = `${gatewayName.toUpperCase()} integration guide`;
   return (
     <p className="text-xs">
       <a
