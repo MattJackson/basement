@@ -2520,3 +2520,208 @@ export function useDeleteObjectVersion(
     },
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// v1.10.0c — Object Lock (governance + compliance + legal hold)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Object Lock layers on top of v1.10.0a/b versioning per the S3 spec.
+// The FE gates the bucket settings card on BOTH (a) the driver's
+// objectLock capability flag AND (b) versioning being enabled — the
+// VersioningSection's "Required for Object Lock" note hints at this
+// in the v1.10.0b card; the Object Lock card surfaces it explicitly.
+//
+// Per-version retention + legal-hold hooks always require a versionId
+// in the URL — the per-object Object Lock surface always pins to a
+// specific version row. The bucket browser surfaces these from the
+// per-version rows in ObjectVersionsPanel.
+
+export type ObjectLockMode = "GOVERNANCE" | "COMPLIANCE";
+
+export interface ObjectLockRetention {
+  mode: ObjectLockMode;
+  retainUntilDate: string; // RFC3339 timestamp
+}
+
+export interface ObjectLockConfigResponse {
+  enabled: boolean;
+  defaultRetention?: ObjectLockRetention | null;
+  supported: boolean;
+}
+
+export interface ObjectLockConfigRequest {
+  enabled: boolean;
+  defaultRetention?: ObjectLockRetention | null;
+}
+
+export function useObjectLockConfig(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useQuery<ObjectLockConfigResponse>({
+    queryKey: ["user", "regions", regionId, "buckets", bucket, "object-lock"],
+    queryFn: async () => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/object-lock`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/object-lock`, res.status, body);
+      }
+      return body as ObjectLockConfigResponse;
+    },
+    enabled: !!regionId && !!bucket,
+    staleTime: 30_000,
+    retry: 1,
+  });
+}
+
+export function usePutObjectLockConfig(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<ObjectLockConfigResponse, Error, ObjectLockConfigRequest>({
+    mutationFn: async (req) => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/object-lock`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/object-lock/put`, res.status, body);
+      }
+      return body as ObjectLockConfigResponse;
+    },
+  });
+}
+
+// Per-version retention reads / writes. versionId is REQUIRED — the
+// per-object Object Lock surface always pins to a specific version
+// row. retention can be null in the response (no retention set on
+// this version).
+export interface ObjectRetentionResponse {
+  retention?: ObjectLockRetention | null;
+}
+
+export function useObjectRetention(
+  regionId: string | null,
+  bucket: string | null,
+  key: string | null,
+  versionId: string | null,
+  enabled: boolean = true,
+) {
+  return useQuery<ObjectRetentionResponse>({
+    queryKey: ["user", "regions", regionId, "buckets", bucket, "object-retention", key, versionId],
+    queryFn: async () => {
+      if (!regionId || !bucket || !key || !versionId) {
+        throw new Error("Region id, bucket, key, versionId required");
+      }
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/retention?versionId=${encodeURIComponent(versionId)}`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/retention`, res.status, body);
+      }
+      return body as ObjectRetentionResponse;
+    },
+    enabled: enabled && !!regionId && !!bucket && !!key && !!versionId,
+    staleTime: 10_000,
+    retry: 1,
+  });
+}
+
+export function usePutObjectRetention(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<
+    ObjectRetentionResponse,
+    Error,
+    {
+      key: string;
+      versionId: string;
+      retention: ObjectLockRetention;
+      bypassGovernance?: boolean;
+    }
+  >({
+    mutationFn: async ({ key, versionId, retention, bypassGovernance }) => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const params = new URLSearchParams({ versionId });
+      if (bypassGovernance) params.set("bypassGovernance", "true");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/retention?${params.toString()}`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(retention),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/retention/put`, res.status, body);
+      }
+      return body as ObjectRetentionResponse;
+    },
+  });
+}
+
+export interface ObjectLegalHoldResponse {
+  on: boolean;
+}
+
+export function useObjectLegalHold(
+  regionId: string | null,
+  bucket: string | null,
+  key: string | null,
+  versionId: string | null,
+  enabled: boolean = true,
+) {
+  return useQuery<ObjectLegalHoldResponse>({
+    queryKey: ["user", "regions", regionId, "buckets", bucket, "object-legal-hold", key, versionId],
+    queryFn: async () => {
+      if (!regionId || !bucket || !key || !versionId) {
+        throw new Error("Region id, bucket, key, versionId required");
+      }
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/legal-hold?versionId=${encodeURIComponent(versionId)}`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/legal-hold`, res.status, body);
+      }
+      return body as ObjectLegalHoldResponse;
+    },
+    enabled: enabled && !!regionId && !!bucket && !!key && !!versionId,
+    staleTime: 10_000,
+    retry: 1,
+  });
+}
+
+export function usePutObjectLegalHold(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<
+    ObjectLegalHoldResponse,
+    Error,
+    { key: string; versionId: string; on: boolean }
+  >({
+    mutationFn: async ({ key, versionId, on }) => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/legal-hold?versionId=${encodeURIComponent(versionId)}`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/legal-hold/put`, res.status, body);
+      }
+      return body as ObjectLegalHoldResponse;
+    },
+  });
+}
