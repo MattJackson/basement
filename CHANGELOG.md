@@ -4,6 +4,33 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0b — 2026-05-22
+
+Production deployment guide cycle (docs-only).
+
+- **New `docs/deployment/` directory** with an index README + six
+  topic sub-docs: `docker.md` (annotated Compose + bcrypt + JWT
+  rotation), `reverse-proxy.md` (Caddy / Nginx / Traefik examples
+  including the Caddy `method`-allowlist workaround for WebDAV
+  PROPFIND / MKCOL / MOVE / COPY passthrough flagged in v1.9.0e),
+  `tls.md` (auto-ACME / behind Cloudflare / proxy-terminated
+  topologies + the Cloudflare WebDAV-verb-stripping note +
+  `cloudflared` tunnel workaround), `hardening.md` (network bind,
+  cookie posture, secrets management, data-dir perms, audit-log
+  retention, container-user / capability / read-only-rootfs
+  posture + production checklist), `backup-basement.md` (data-dir
+  vs object-data distinction, ZFS-snapshot / stop-and-copy /
+  live-rsync trade-off, JWT-secret-must-be-backed-up-with-data
+  warning, restore drill), `upgrade.md` (tag-pull + restart,
+  Watchtower wiring + opt-out reasoning, v1.x forward+backward
+  compat contract, v2.0 major-version-upgrade caveat).
+- **README Quickstart rewritten** as a five-line `docker run`
+  one-shot with `htpasswd -bnBC 12` for the admin bcrypt hash and
+  `openssl rand -base64 32` for the JWT secret; pointer to the new
+  deployment dir for production posture.
+
+No code changes; `pnpm build` + `go test -race ./...` green.
+
 ## v1.10.0.2 — 2026-05-22
 
 Continuation of the v1.10.0.1 "bug tested to death" pass — same shapes
