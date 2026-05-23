@@ -55,3 +55,35 @@ func (m *mockDriver) ScrubState(_ context.Context) (ScrubState, error) {
 func (m *mockDriver) StartScrub(_ context.Context) error {
 	return ErrUnsupported
 }
+
+// v1.10.0a versioning shims — mock advertises no versioning support
+// (matches Garage v1 / v2 posture). Drivers that care override these
+// per-test; for registry-level tests the unsupported defaults keep
+// the interface satisfied without dragging real S3 versioning shape
+// into the registry test suite.
+
+func (m *mockDriver) VersioningSupport() bool { return false }
+
+func (m *mockDriver) GetVersioningStatus(_ context.Context, _ string) (VersioningStatus, error) {
+	return VersioningDisabled, ErrUnsupported
+}
+
+func (m *mockDriver) EnableVersioning(_ context.Context, _ string) error {
+	return ErrUnsupported
+}
+
+func (m *mockDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return ErrUnsupported
+}
+
+func (m *mockDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]ObjectVersion, string, error) {
+	return nil, "", ErrUnsupported
+}
+
+func (m *mockDriver) GetObjectVersion(_ context.Context, _, _, _ string) (StreamResult, error) {
+	return StreamResult{}, ErrUnsupported
+}
+
+func (m *mockDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return ErrUnsupported
+}

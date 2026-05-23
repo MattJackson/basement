@@ -209,6 +209,28 @@ func (d *restoreDriver) ScrubState(_ context.Context) (driver.ScrubState, error)
 }
 func (d *restoreDriver) StartScrub(_ context.Context) error { return driver.ErrUnsupported }
 
+// v1.10.0a versioning — restore driver doesn't exercise versioning;
+// default unsupported.
+func (d *restoreDriver) VersioningSupport() bool { return false }
+func (d *restoreDriver) GetVersioningStatus(_ context.Context, _ string) (driver.VersioningStatus, error) {
+	return driver.VersioningDisabled, driver.ErrUnsupported
+}
+func (d *restoreDriver) EnableVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (d *restoreDriver) SuspendVersioning(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+func (d *restoreDriver) ListObjectVersions(_ context.Context, _, _, _ string, _ int) ([]driver.ObjectVersion, string, error) {
+	return nil, "", driver.ErrUnsupported
+}
+func (d *restoreDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driver.StreamResult, error) {
+	return driver.StreamResult{}, driver.ErrUnsupported
+}
+func (d *restoreDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
+	return driver.ErrUnsupported
+}
+
 // restoreDriverCounter monotonically increments so each test gets
 // unique driver-factory names. driver.Register panics on duplicate
 // registration; isolation per test means the registry inside a test
