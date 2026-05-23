@@ -186,6 +186,59 @@ Touched: `docs/adr/0007-per-cluster-envelope-encryption.md` (new),
 `frontend/src/shared/ui/LockBadge.tsx` (new),
 `frontend/src/routes/admin/clusters/$cid/index.tsx`, `CHANGELOG.md`.
 
+## v1.11.0.21 — 2026-05-23
+
+Gateways card general UX polish on `/admin/system`. The card had been
+accumulating cruft across three prior cycles (sort order in `.19`,
+stub-row copy in `.20`, intro rewrite in `.22`); this pass tunes the
+whole card for visual coherence and lets the live row carry the
+operator's attention.
+
+- **Hero/stub visual split** — implemented gateways render inside a
+  bordered, slightly-tinted panel (`border-input bg-muted/20 p-4`)
+  with a heading + status pill + capability chips + a prominent mount
+  URL with copy. Stubs render in a dashed-border, lower-opacity row
+  with the protocol name + coming-soon badge + a single-line
+  dot-separated capability list. The contrast carries the grouping
+  on its own — the inter-row `<hr/>` separators are gone.
+- **Status pill replaces StatusBlock prose** — the old block read
+  *"Status: running, 0 active connections, last activity: —, total
+  requests: 42, listen: …"* in one prose run-on. Replaced with a
+  pill: green dot + **Active** + last-activity (or red dot +
+  **Stopped** when not running). Power-user details (connection
+  count, total requests) move into the pill's `title` attribute.
+- **Capability chips reworked for stubs** — implemented row keeps
+  the bordered monospace chip; stubs render the same list as a
+  dot-separated inline run that takes less visual weight (`text-[11px]
+  text-muted-foreground`). The redundant **"Capabilities:"** prefix
+  is dropped on both — the row context already speaks for itself.
+- **Connect hints tightened** — each platform clause is now a single
+  imperative ("macOS: Finder ⌘K, paste mount URL.") instead of a
+  full sentence. The `<details>` chrome is unstyled (no panel) so it
+  sits flush with the rest of the row.
+- **Base URL override demoted** — moved from a top-level labelled
+  Input + paragraph hint into a collapsed `<details>` labelled
+  "Advanced". Reverse-proxy setups are a power-user concern; default
+  flow doesn't need it taking permanent vertical space.
+- **Save button text shortened** — "Save WebDAV settings" → "Save".
+  The row's heading already names the protocol.
+- **Docs link shortened** — "WEBDAV integration guide →" → "Docs →".
+  Same reasoning.
+- **Mobile-first header** — title cluster + Enable toggle stack
+  vertically on `<sm` viewports, side-by-side on `≥sm`. Mount-URL +
+  Copy stack the same way. Save row stays footer-bottom on mobile.
+- **Mount-URL input** — `onFocus={e => e.currentTarget.select()}` so
+  clicking the read-only field hands the operator a ready-to-copy
+  selection even when the clipboard API isn't available.
+- **Test extension** — `gateways-card.test.tsx` gains four
+  `v1.11.0.21 polish` assertions pinning the status pill copy
+  (Active / Stopped), the simplified Save label, and the stub
+  "not implemented yet" placeholder so a future cycle can't regress
+  the polish silently.
+
+Files touched: `frontend/src/routes/admin/system.tsx`,
+`frontend/src/__tests__/gateways-card.test.tsx`, `CHANGELOG.md`.
+
 ## v1.11.0.17 — 2026-05-23
 
 Mobile UI audit + inline fixes for the obvious phone-viewport bugs.

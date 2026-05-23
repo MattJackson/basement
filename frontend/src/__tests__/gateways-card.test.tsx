@@ -344,4 +344,81 @@ describe("GatewaysCard (v1.9.0d)", () => {
     expect(banner).toHaveTextContent(/Gateway registry unavailable/i);
     expect(banner).toHaveTextContent(/GATEWAYS_NOT_WIRED/);
   });
+
+  // v1.11.0.21 polish — hero/stub visual split.
+  //
+  // The card now renders implemented rows as the hero (status pill,
+  // mount URL, connect hints, save) and stubs in a muted single-line
+  // treatment. These tests pin the contracts the polish depends on so
+  // a future cycle can't regress them without noticing:
+  //
+  //   - Implemented row carries a status pill that reads "Active" when
+  //     the gateway is running, "Stopped" when not.
+  //   - Stub row keeps the "not implemented yet" status copy so the
+  //     em-dash placeholder + status testid still anchor it.
+  //   - Save button label is "Save" (no protocol name) — the row's
+  //     heading already names the gateway.
+  //   - Stubs no longer carry the verbose StatusBlock prose run-on.
+  describe("v1.11.0.21 polish", () => {
+    it("WebDAV status pill reads Active when the gateway is running", () => {
+      mockRegistry({ data: defaultRoster() });
+      render(
+        <GatewaysCard
+          gateways={{ webdav: { enabled: true }, protocols: { webdav: { enabled: true } } }}
+          onChange={() => {}}
+          onSave={async () => {}}
+        />,
+      );
+      const pill = screen.getByTestId("gateways-webdav-status");
+      expect(pill).toHaveTextContent(/Active/i);
+      // Old StatusBlock prose ("running, X active connections, last
+      // activity ...") must not survive the cleanup.
+      expect(pill.textContent ?? "").not.toMatch(/active connections/i);
+      expect(pill.textContent ?? "").not.toMatch(/total requests/i);
+    });
+
+    it("WebDAV status pill reads Stopped when the gateway is not running", () => {
+      const roster = defaultRoster().map((g) =>
+        g.name === "webdav" ? { ...g, status: { running: false } } : g,
+      );
+      mockRegistry({ data: roster });
+      render(
+        <GatewaysCard
+          gateways={{ webdav: { enabled: false }, protocols: { webdav: { enabled: false } } }}
+          onChange={() => {}}
+          onSave={async () => {}}
+        />,
+      );
+      const pill = screen.getByTestId("gateways-webdav-status");
+      expect(pill).toHaveTextContent(/Stopped/i);
+    });
+
+    it("save button on the WebDAV row reads just 'Save'", () => {
+      mockRegistry({ data: defaultRoster() });
+      render(
+        <GatewaysCard
+          gateways={{ webdav: { enabled: true }, protocols: { webdav: { enabled: true } } }}
+          onChange={() => {}}
+          onSave={async () => {}}
+        />,
+      );
+      const save = screen.getByTestId("gateways-webdav-save");
+      expect(save).toHaveTextContent(/^Save$/);
+    });
+
+    it("stub rows keep the 'not implemented yet' status placeholder", () => {
+      mockRegistry({ data: defaultRoster() });
+      render(
+        <GatewaysCard
+          gateways={{ webdav: { enabled: true }, protocols: { webdav: { enabled: true } } }}
+          onChange={() => {}}
+          onSave={async () => {}}
+        />,
+      );
+      for (const name of ["ftp", "nfs", "s3", "smb"]) {
+        const status = screen.getByTestId(`gateways-${name}-status`);
+        expect(status).toHaveTextContent(/not implemented yet/i);
+      }
+    });
+  });
 });
