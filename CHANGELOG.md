@@ -4,6 +4,34 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.9.0d — 2026-05-22
+
+Generalised Gateways UI + plugin doc. The WebDAV-hardcoded card on
+`/admin/system` shipped in v1.9.0b is replaced by a registry-driven
+card that renders one row per Gateway returned from
+`GET /api/v1/admin/gateways`: capability chips (read / write / delete
+/ move / lock / basic-auth / bearer-auth / sigv4-auth), live status
+(running, active connections, last activity, total requests), mount
+URL with Copy button + per-platform connect hints for implemented
+gateways, "Coming soon" badge in place of an enable toggle for stubs.
+Auto-refresh on a 30s tick keeps the status counters honest. New
+`useGatewaysRegistry()` hook wraps the endpoint; the card writes
+both the legacy `webdav` field AND the new generic
+`protocols["webdav"]` entry so v1.9.0b operators who flipped the
+WebDAV kill switch keep their state through the upgrade. The
+`OrgCapabilities.Gateways` shape gains a generic
+`Protocols map[string]GatewayConfig` nest (Enabled + BaseURL +
+Options) so v1.10+ gateways can ship per-protocol settings without a
+new Go field per gateway; a legacy v1.9.0b file with only
+`gateways.webdav.{enabled,baseUrl}` auto-migrates into
+`Protocols["webdav"]` on read. New plugin doc
+`docs/integrations/adding-a-gateway.md` walks through the Gateway +
+Backend interfaces, the boot-time wiring in `main.go`, the per-
+protocol Enable toggle pattern, the testing recipe, and points at
+`internal/gateway/webdav/` as the reference implementation. Stub
+docs (`smb.md`, `nfs.md`, `ftp.md`, `s3.md`) ship as implementation-
+tracking placeholders the card's per-row docs links point to.
+
 ## v1.9.0c — 2026-05-22
 
 Gateway architecture cycle. The WebDAV gateway shipped in v1.9.0a/b

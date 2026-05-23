@@ -39,18 +39,55 @@ type OrgCapabilities struct {
 	Gateways GatewaySettings `json:"gateways"`
 }
 
-// GatewaySettings groups the per-protocol gateway toggles. Each nested
-// struct lives under Gateways.{Protocol} so the on-disk JSON reads
-// naturally: gateways.webdav.enabled, gateways.smb.* (future), etc.
+// GatewaySettings groups the per-protocol gateway toggles. v1.9.0b
+// introduced a hand-typed nest with a single WebDAV field; v1.9.0d
+// generalizes the nest into a name-keyed map (`Protocols`) so any
+// registered gateway can carry an Enabled + BaseURL + Options blob
+// without a new Go field per protocol. The hand-typed WebDAV field is
+// preserved for back-compat: a v1.9.0b on-disk file (and any operator
+// who hand-edited the legacy shape) auto-migrates into
+// `Protocols["webdav"]` on read.
 //
-// We model SMB explicitly as "not supported" rather than omitting it so
-// the UI can render a deliberate "not supported natively" panel + link
-// to docs/integrations/time-machine.md instead of an empty section.
+// Why preserve the legacy field instead of just renaming: operators
+// already toggled WebDAV in v1.9.0b; the upgrade path must read their
+// deliberate kill-switch state. See normalizeGateways() + the
+// per-field marshalling notes in OrgCapabilities.UnmarshalJSON.
+//
+// We model SMB explicitly as "not supported" via stub gateway
+// registration rather than carving a special-case field here; the UI
+// renders "coming soon" purely from the registry's Implemented() flag.
 type GatewaySettings struct {
+	// WebDAV is the legacy v1.9.0b hand-typed field. Reads carry the
+	// operator's deliberate kill-switch through the migration; writes
+	// are mirrored to Protocols["webdav"] so post-migration the map
+	// is the source of truth and the field stays around as a
+	// back-compat shadow.
 	WebDAV WebDAVSettings `json:"webdav"`
+
+	// Protocols is the v1.9.0d generic per-gateway config map. Key is
+	// the Gateway.Name() ("webdav", "smb", "nfs", "ftp", "s3").
+	// Missing key means "use defaults for this gateway"; on the
+	// /admin/gateways enable-toggle path that resolves to false for
+	// stubs (UI hides toggle) and true for webdav (defaults-on
+	// preserves the v1.9.0a behaviour).
+	Protocols map[string]GatewayConfig `json:"protocols,omitempty"`
 }
 
-// WebDAVSettings is the operator-facing config for the v1.9.0a gateway.
+// GatewayConfig is the per-protocol settings blob carried by
+// GatewaySettings.Protocols. v1.9.0d only consumes Enabled + BaseURL;
+// the Options map is reserved for v1.10+ gateways that need a few
+// per-protocol strings (e.g. SMB share name prefix, NFS export root)
+// without growing a typed Go field per gateway.
+type GatewayConfig struct {
+	Enabled bool              `json:"enabled"`
+	BaseURL string            `json:"baseUrl,omitempty"`
+	Options map[string]string `json:"options,omitempty"`
+}
+
+// WebDAVSettings is the legacy v1.9.0b operator-facing config. Kept
+// in the v1.9.0d shape for back-compat: reads migrate this into the
+// generic Protocols map; writes are mirrored back so a downgrade to
+// v1.9.0b would still see the toggle.
 //
 // Enabled defaults to true on a fresh install so the gateway works the
 // moment basement comes up — operators who want to lock it down flip
@@ -68,7 +105,41 @@ type WebDAVSettings struct {
 	BaseURL string `json:"baseUrl,omitempty"`
 }
 
-// DefaultOrgCapabilities returns the default org capabilities.
+// IsEnabled reports whether the named gateway is enabled in this
+// settings blob. Webdav defaults to true (matches v1.9.0a behaviour
+// for any file lacking the field); every other gateway defaults to
+// false (stub gateways can't actually be enabled regardless of caps,
+// but the FE consults this flag to decide which row shows a toggle).
+//
+// Lookup order: Protocols[name] wins when present; otherwise the
+// legacy WebDAV hand-typed field bridges in for name=="webdav"; else
+// the default-by-name fires.
+func (g GatewaySettings) IsEnabled(name string) bool {
+	if cfg, ok := g.Protocols[name]; ok {
+		return cfg.Enabled
+	}
+	if name == "webdav" {
+		return g.WebDAV.Enabled
+	}
+	return false
+}
+
+// BaseURL returns the operator-pinned base URL for the named gateway,
+// or "" when none is set. Same lookup precedence as IsEnabled.
+func (g GatewaySettings) BaseURL(name string) string {
+	if cfg, ok := g.Protocols[name]; ok && cfg.BaseURL != "" {
+		return cfg.BaseURL
+	}
+	if name == "webdav" {
+		return g.WebDAV.BaseURL
+	}
+	return ""
+}
+
+// DefaultOrgCapabilities returns the default org capabilities. Both
+// the legacy WebDAV field and the v1.9.0d Protocols map start with
+// webdav.enabled=true so a downgrade to v1.9.0b would read the same
+// kill-switch state the v1.9.0d caller wrote.
 func DefaultOrgCapabilities() OrgCapabilities {
 	return OrgCapabilities{
 		SignupMode:         "invite",
@@ -79,18 +150,25 @@ func DefaultOrgCapabilities() OrgCapabilities {
 		AdminSessionTTLSec: AdminSessionTTLDefaultSec,
 		Gateways: GatewaySettings{
 			WebDAV: WebDAVSettings{Enabled: true},
+			Protocols: map[string]GatewayConfig{
+				"webdav": {Enabled: true},
+			},
 		},
 	}
 }
 
-// normalizeGateways migrates a legacy on-disk file that predates
-// v1.9.0b — no Gateways nest, no WebDAV.Enabled field — into the
-// default-on shape. Without this a fresh upgrade would read
-// Enabled=false (the zero value) and silently disable the working
-// WebDAV gateway. The migration flag is the legacy marker we use: if
-// the on-disk JSON has no gateways key at all, MigratedFromLegacy
-// stays at its tag-default false → we treat the whole block as
-// missing and substitute defaults.
+// normalizeGateways migrates a legacy on-disk file into the v1.9.0d
+// generic Protocols map shape. Three legacy shapes can hit this:
+//
+//  1. No "gateways" key at all (pre-v1.9.0b): substitute the full
+//     defaults — webdav.enabled=true, no other protocols.
+//  2. "gateways": {"webdav": {...}} only (v1.9.0b): mirror the
+//     WebDAV field into Protocols["webdav"] so the registry-driven
+//     UI reads it. The legacy field stays populated so a downgrade
+//     still sees the toggle.
+//  3. "gateways": {"protocols": {...}} present (v1.9.0d): keep as-is
+//     and mirror Protocols["webdav"] back into the legacy WebDAV
+//     field for downgrade-safety.
 //
 // We do NOT mutate the on-disk file here — that happens lazily on the
 // next Update() call. Read paths get the live defaults, write paths
@@ -99,7 +177,31 @@ func DefaultOrgCapabilities() OrgCapabilities {
 func normalizeGateways(g GatewaySettings, hadField bool) GatewaySettings {
 	if !hadField {
 		// Legacy file, no gateways block at all: default on.
-		return GatewaySettings{WebDAV: WebDAVSettings{Enabled: true}}
+		return GatewaySettings{
+			WebDAV: WebDAVSettings{Enabled: true},
+			Protocols: map[string]GatewayConfig{
+				"webdav": {Enabled: true},
+			},
+		}
+	}
+	if g.Protocols == nil {
+		g.Protocols = make(map[string]GatewayConfig)
+	}
+	// Forward-migrate the legacy WebDAV field into the generic map
+	// when the map is silent on webdav. Without this branch a v1.9.0b
+	// file with webdav.enabled=false would read as enabled=true via
+	// the map default and clobber the operator's kill switch.
+	if _, ok := g.Protocols["webdav"]; !ok {
+		g.Protocols["webdav"] = GatewayConfig{
+			Enabled: g.WebDAV.Enabled,
+			BaseURL: g.WebDAV.BaseURL,
+		}
+	}
+	// Mirror the canonical map state back into the legacy WebDAV
+	// field so a downgrade to v1.9.0b would read the same value.
+	if cfg, ok := g.Protocols["webdav"]; ok {
+		g.WebDAV.Enabled = cfg.Enabled
+		g.WebDAV.BaseURL = cfg.BaseURL
 	}
 	return g
 }
@@ -165,6 +267,15 @@ func (s *OrgCapabilitiesStore) load() error {
 		return nil // use defaults
 	}
 
+	// Zero out the Gateways nest before unmarshal so absent fields
+	// don't merge in from the in-memory default. Without this, a
+	// v1.9.0b-shaped file (only "gateways.webdav") would inherit the
+	// default's Protocols["webdav"]={Enabled:true} entry and clobber
+	// the operator's explicit kill-switch via the syncGatewaySettings
+	// "map wins" rule. The migration logic below substitutes the
+	// right shape from whichever side carried the on-disk truth.
+	s.data.Gateways = GatewaySettings{}
+
 	if err := json.Unmarshal(data, &s.data); err != nil {
 		return err
 	}
@@ -224,12 +335,47 @@ func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
 // so an operator hand-editing the JSON (or a buggy FE) can't smuggle a
 // 0-second or week-long TTL into the live config — the floor + ceiling
 // are part of the contract, not advisory.
+//
+// v1.9.0d cross-mirrors the legacy WebDAV field and the generic
+// Protocols map so a v1.9.0b client (only writes webdav.*) and a
+// v1.9.0d client (writes protocols.*) both land on the same on-disk
+// shape. Without this, a v1.9.0b PATCH would erase the v1.9.0d map
+// state for webdav and any client picking up the file later via the
+// new path would see stale flags.
 func (s *OrgCapabilitiesStore) Update(capabilities OrgCapabilities) error {
 	capabilities.AdminSessionTTLSec = ClampAdminSessionTTL(capabilities.AdminSessionTTLSec)
+	capabilities.Gateways = syncGatewaySettings(capabilities.Gateways)
 
 	s.mu.Lock()
 	s.data = capabilities
 	s.mu.Unlock()
 
 	return s.Save()
+}
+
+// syncGatewaySettings mirrors the legacy WebDAV field into the
+// Protocols map (and vice versa) so both shapes always agree on the
+// canonical state for webdav. Called on every Update so a v1.9.0b-
+// shaped PATCH (legacy field only) and a v1.9.0d-shaped PATCH (map
+// only) both round-trip cleanly.
+//
+// Tie-break: when the Protocols["webdav"] entry and the legacy
+// WebDAV field disagree, the LEGACY field wins. Rationale: every
+// caller-mutation path the FE uses today touches the legacy field
+// (the v1.9.0b card mutates WebDAV; the v1.9.0d card writes a
+// Protocols["webdav"] entry built from the same shape AND mirrors
+// it back to the legacy field). A divergence means the caller used
+// the legacy mutation path — preferring the legacy value preserves
+// the kill-switch contract. v1.10+ gateways without a legacy field
+// are read-only through the map and aren't affected.
+func syncGatewaySettings(g GatewaySettings) GatewaySettings {
+	if g.Protocols == nil {
+		g.Protocols = make(map[string]GatewayConfig)
+	}
+	// Legacy WebDAV field is canonical for the webdav key on write.
+	g.Protocols["webdav"] = GatewayConfig{
+		Enabled: g.WebDAV.Enabled,
+		BaseURL: g.WebDAV.BaseURL,
+	}
+	return g
 }
