@@ -484,10 +484,7 @@ func main() {
 	// error — a duplicate or empty-name skin at boot is a programming
 	// error, not a runtime condition.
 	skinRegistry := skin.New()
-	if err := skinRegistry.Register(skin.BuiltInDefault()); err != nil {
-		slog.Error("failed to register basement-default skin", "error", err)
-		os.Exit(1)
-	}
+	skin.RegisterBuiltInSkins(skinRegistry) // registers default + 4 built-in skins
 	srv.SetSkinRegistry(skinRegistry)
 
 	// v1.7.0f FEDERATION.EVENT-DRIVEN: subscribe the federation engine

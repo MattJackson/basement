@@ -1,0 +1,100 @@
+/* basement-minimal: Ultra-clean, minimal UI */
+/* Stripped back to essentials - maximum whitespace and simplicity */
+
+@theme {
+  /* Light theme - soft neutrals with subtle differentiation */
+  --basement-primary: hsl(210 40% 35%);
+  --basement-bg: hsl(0 0% 100%);
+  --basement-fg: hsl(210 20% 20%);
+  --basement-muted: hsl(210 10% 96%);
+  --basement-accent: hsl(210 30% 85%);
+  --basement-destructive: hsl(0 40% 60%);
+  --basement-warning: hsl(45 50% 70%);
+  --basement-success: hsl(142 40% 55%);
+  --basement-info: hsl(200 30% 65%);
+
+  /* Minimal border tokens */
+  --color-border: hsl(210 20% 90%);
+  --color-input: hsl(210 10% 98%);
+}
+
+.dark {
+  --basement-primary: hsl(210 40% 75%);
+  --basement-bg: hsl(210 30% 8%);
+  --basement-fg: hsl(210 20% 90%);
+  --basement-muted: hsl(210 30% 15%);
+  --basement-accent: hsl(210 30% 20%);
+  --basement-destructive: hsl(0 40% 70%);
+  --basement-warning: hsl(45 50% 60%);
+  --basement-success: hsl(142 40% 60%);
+  --basement-info: hsl(200 30% 70%);
+
+  /* Minimal border tokens */
+  --color-border: hsl(210 30% 25%);
+  --color-input: hsl(210 30% 18%);
+}
+
+/* Ultra-thin borders - minimal visual weight */
+*, *::before, *::after {
+  border-width: 1px !important;
+}
+
+/* No shadows - flat design */
+.card, button, dialog, .modal {
+  box-shadow: none !important;
+}
+
+/* Generous whitespace - lots of breathing room */
+.card, .btn, input, textarea, select {
+  padding: 1.25rem 1.75rem !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-top: 2rem !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Subtle hover states - minimal feedback */
+button:hover {
+  filter: brightness(0.98) !important;
+}
+
+/* Minimal focus rings - thin and subtle */
+*:focus {
+  outline: 2px solid var(--basement-primary) !important;
+  outline-offset: 1px !important;
+}
+
+/* Clean typography - system fonts only */
+html, body {
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* No decorative elements - pure content focus */
+a::after {
+  content: none !important;
+}
+
+.badge, .pill {
+  border-radius: 9999px !important;
+  padding: 0.375rem 0.875rem !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.02em !important;
+}
+
+/* Minimal table styling */
+table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+}
+
+th {
+  font-weight: 500 !important;
+  text-transform: none !important;
+  letter-spacing: 0.02em !important;
+}
+
+td {
+  padding: 1rem 1.25rem !important;
+}

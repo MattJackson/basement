@@ -1,0 +1,216 @@
+/* basement-terminal: TTY/Terminal theme */
+/* FUN! Green-on-black monospace, terminal vibes from the good old days */
+
+@theme {
+  /* Classic terminal green on black */
+  --basement-primary: hsl(142 100% 50%); /* Terminal green */
+  --basement-bg: hsl(0 0% 0%); /* Pure black */
+  --basement-fg: hsl(142 100% 50%); /* Green text */
+  --basement-muted: hsl(142 30% 30%); /* Dim green */
+  --basement-accent: hsl(142 80% 70%); /* Bright green */
+  --basement-destructive: hsl(0 100% 50%); /* Red for errors */
+  --basement-warning: hsl(45 100% 50%); /* Yellow for warnings */
+  --basement-success: hsl(142 100% 40%); /* Green for success */
+  --basement-info: hsl(200 80% 60%); /* Cyan for info */
+
+  /* Terminal border colors */
+  --color-border: hsl(142 50% 30%);
+  --color-input: hsl(0 0% 10%);
+}
+
+.dark {
+  /* Same as light - terminal is always dark mode */
+  --basement-primary: hsl(142 100% 50%);
+  --basement-bg: hsl(0 0% 0%);
+  --basement-fg: hsl(142 100% 50%);
+  --basement-muted: hsl(142 30% 30%);
+  --basement-accent: hsl(142 80% 70%);
+  --basement-destructive: hsl(0 100% 50%);
+  --basement-warning: hsl(45 100% 50%);
+  --basement-success: hsl(142 100% 40%);
+  --basement-info: hsl(200 80% 60%);
+
+  --color-border: hsl(142 50% 30%);
+  --color-input: hsl(0 0% 10%);
+}
+
+/* Force monospace font everywhere - terminal style */
+html, body {
+  font-family: "SF Mono", "Monaco", "Inconsolata", "Fira Mono", 
+               "Droid Sans Mono", "Source Code Pro", monospace !important;
+  letter-spacing: -0.02em !important; /* Tight kerning like a real terminal */
+}
+
+/* Blinking cursor effect */
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Terminal window chrome with glowing border */
+.card, dialog, .modal, .window {
+  background: var(--basement-bg) !important;
+  border: 2px solid hsl(142 50% 30%) !important;
+  box-shadow: 0 0 20px rgba(0, 255, 0, 0.1) !important;
+}
+
+/* Window title bar - terminal prompt style */
+.card-header, dialog header, .window-header {
+  background: hsl(142 30% 20%) !important;
+  border-bottom: 2px solid hsl(142 50% 30%) !important;
+  color: var(--basement-accent) !important;
+  padding: 8px 16px !important;
+}
+
+.card-header::before {
+  content: "┌─ ";
+}
+
+.card-header::after {
+  content: " ─┐";
+}
+
+/* Buttons with terminal aesthetic */
+button, .btn {
+  background: transparent !important;
+  border: 2px solid var(--basement-primary) !important;
+  color: var(--basement-fg) !important;
+  font-family: inherit !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.1em !important;
+}
+
+button:hover {
+  background: var(--basement-primary) !important;
+  color: var(--basement-bg) !important;
+}
+
+button:active {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Input fields with blinking cursor */
+input, textarea {
+  background: var(--basement-bg) !important;
+  border: 2px solid hsl(142 50% 30%) !important;
+  color: var(--basement-fg) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--basement-muted) !important;
+}
+
+/* Terminal-style focus - bright green glow */
+*:focus {
+  outline: none !important;
+  box-shadow: 0 0 15px hsl(142 100% 50%) !important;
+}
+
+/* Links with angle brackets like URLs */
+a {
+  color: var(--basement-accent) !important;
+  text-decoration: none !important;
+}
+
+a::before {
+  content: "<";
+}
+
+a::after {
+  content: ">";
+}
+
+a:hover {
+  background: hsl(142 50% 30%) !important;
+}
+
+/* Tables with terminal borders */
+table {
+  border-collapse: collapse !important;
+}
+
+th, td {
+  border: 1px solid hsl(142 50% 30%) !important;
+  padding: 8px 12px !important;
+}
+
+th {
+  background: hsl(142 30% 20%) !important;
+  color: var(--basement-accent) !important;
+}
+
+/* Code blocks with syntax highlighting colors */
+code, pre {
+  font-family: inherit !important;
+  background: hsl(0 0% 10%) !important;
+  border: 2px solid hsl(142 50% 30%) !important;
+}
+
+/* Syntax highlighting colors */
+.syntax-keyword { color: hsl(280 70% 60%) !important; } /* Purple */
+.syntax-string { color: hsl(45 100% 50%) !important; } /* Yellow */
+.syntax-comment { color: var(--basement-muted) !important; font-style: italic !important; } /* Dim green */
+.syntax-function { color: hsl(200 80% 60%) !important; } /* Cyan */
+
+/* Scrollbars - minimal terminal style */
+::-webkit-scrollbar {
+  width: 12px !important;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--basement-bg) !important;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(142 50% 30%) !important;
+}
+
+/* Status bar with prompt style */
+.status-bar {
+  background: hsl(142 30% 20%) !important;
+  color: var(--basement-fg) !important;
+  border-top: 2px solid hsl(142 50% 30%) !important;
+}
+
+.status-bar::before {
+  content: "❯ ";
+}
+
+/* Progress bar with blocky segments */
+.progress {
+  background: hsl(0 0% 20%) !important;
+  border: 1px solid hsl(142 50% 30%) !important;
+}
+
+.progress-fill {
+  background: linear-gradient(to right, 
+    var(--basement-primary) 50%, 
+    transparent 50%
+  ) !important;
+  background-size: 20px 100% !important;
+}
+
+/* Dialogs with retro terminal aesthetic */
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.8) !important;
+}
+
+/* Tooltip with green glow */
+.tooltip {
+  background: var(--basement-bg) !important;
+  border: 2px solid var(--basement-primary) !important;
+  color: var(--basement-fg) !important;
+  box-shadow: 0 0 15px rgba(0, 255, 0, 0.3) !important;
+}
+
+/* Checkbox and radio with square boxes */
+input[type="checkbox"], input[type="radio"] {
+  border-radius: 0 !important; /* Square like old terminals */
+  width: 14px !important;
+  height: 14px !important;
+  accent-color: var(--basement-primary) !important;
+}
