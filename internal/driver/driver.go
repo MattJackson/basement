@@ -358,6 +358,47 @@ type ObjectLockConfig struct {
 	DefaultRetention *ObjectLockRetention `json:"defaultRetention,omitempty"`
 }
 
+// SSEAlgorithm names the two bucket-default server-side encryption
+// algorithms basement-ui exposes (v1.10.0d). SSE-C (customer-provided
+// keys per request) is intentionally out of scope — niche, complicates
+// the upload path, no Garage parity story.
+//
+// SSE-S3 (AES256) is "backend manages the key end-to-end" — operator
+// flips a switch, backend handles key lifecycle, encryption is
+// transparent. SSE-KMS (aws:kms) is "operator controls the key via an
+// external KMS" — backend can't decrypt without the KMS still
+// granting access; useful for regulators or bring-your-own-key
+// workflows.
+type SSEAlgorithm string
+
+const (
+	// SSEAlgorithmAES256 is the SSE-S3 wire name. Backend manages the
+	// data-encryption key; no KMS key ARN required.
+	SSEAlgorithmAES256 SSEAlgorithm = "AES256"
+	// SSEAlgorithmKMS is the SSE-KMS wire name. Operator supplies the
+	// KMS key ID/ARN; the backend's IAM role must have permission to
+	// use it.
+	SSEAlgorithmKMS SSEAlgorithm = "aws:kms"
+)
+
+// BucketEncryption captures the bucket-level default encryption
+// configuration (v1.10.0d). Enabled mirrors S3's
+// ServerSideEncryptionConfiguration presence — a bucket with no
+// configuration set comes back as {Enabled: false}. Algorithm names
+// the cipher; KMSKeyID is required when Algorithm is
+// SSEAlgorithmKMS and ignored otherwise.
+//
+// BucketKey is the SSE-KMS "S3 Bucket Key" optimization — when true,
+// S3 generates a short-lived bucket-scoped data key and signs it with
+// the KMS key once per ~5min instead of once per object. Cuts KMS
+// call costs by ~99% on write-heavy buckets. No effect under SSE-S3.
+type BucketEncryption struct {
+	Enabled   bool         `json:"enabled"`
+	Algorithm SSEAlgorithm `json:"algorithm,omitempty"`
+	KMSKeyID  string       `json:"kmsKeyId,omitempty"`
+	BucketKey bool         `json:"bucketKey,omitempty"`
+}
+
 // ScrubState carries the live state of a block-scrub operation.
 // Running flips to true the moment a scrub kicks off and back to
 // false once Garage flushes the completion record; the UI polls
@@ -548,4 +589,38 @@ type Driver interface {
 	PutObjectRetention(ctx context.Context, bucket, key, versionID string, retention ObjectLockRetention, bypassGovernance bool) error
 	GetObjectLegalHold(ctx context.Context, bucket, key, versionID string) (bool, error)
 	PutObjectLegalHold(ctx context.Context, bucket, key, versionID string, on bool) error
+
+	// Bucket default encryption (v1.10.0d). SSESupport returns the
+	// two capability bits independently — (s3, kms) — because a
+	// backend can support SSE-S3 (backend-managed keys) without also
+	// supporting SSE-KMS (operator-supplied keys via an external
+	// KMS). AWS S3 + MinIO advertise (true, true). Garage v1 / v2
+	// advertise (false, false) — upstream Garage has no admin-layer
+	// encryption surface as of this cycle.
+	//
+	// The FE uses the two flags to render the right control set:
+	// hide the card if both are false; show only the SSE-S3 toggle
+	// if KMS is false; surface the full radio + key-ID input when
+	// both are true.
+	//
+	// GetBucketEncryption returns the current configuration. On
+	// buckets that have never had encryption set, drivers normalize
+	// the backend's "not configured" sentinel to {Enabled: false}
+	// so the FE can render the off-state without an error banner.
+	//
+	// PutBucketEncryption writes the configuration. Drivers
+	// validate (a) algorithm matches the SSESupport flags and (b)
+	// SSEAlgorithmKMS requests carry a non-empty KMSKeyID. The API
+	// layer also gates capability at the wire boundary; the driver
+	// stays defensive in case a direct caller skips the gate.
+	//
+	// DeleteBucketEncryption removes the configuration entirely.
+	// Distinct from PutBucketEncryption({Enabled: false}) — the
+	// S3 wire shape is a DeleteBucketEncryption call, not a PUT
+	// with an empty config. Idempotent on buckets that have no
+	// configuration set.
+	SSESupport() (s3 bool, kms bool)
+	GetBucketEncryption(ctx context.Context, bucket string) (*BucketEncryption, error)
+	PutBucketEncryption(ctx context.Context, bucket string, enc BucketEncryption) error
+	DeleteBucketEncryption(ctx context.Context, bucket string) error
 }

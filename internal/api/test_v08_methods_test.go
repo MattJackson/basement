@@ -315,3 +315,53 @@ func (m *fanoutDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bo
 func (m *fanoutDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
 	return driver.ErrUnsupported
 }
+
+// v1.10.0d Bucket Encryption shims — default behaviour: report
+// unsupported. Same posture as the Object Lock shims above. Tests that
+// exercise the encryption handlers use the regionMockDriver +
+// testMockDriver pair which have overridable hooks; these shims only
+// exist to keep the rest of the package compiling.
+
+func (m *layoutDriver) SSESupport() (bool, bool) { return false, false }
+func (m *layoutDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *layoutDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (m *layoutDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+
+func (m *stubDriver) SSESupport() (bool, bool) { return false, false }
+func (m *stubDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *stubDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (m *stubDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+
+func (m *mockDriver) SSESupport() (bool, bool) { return false, false }
+func (m *mockDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *mockDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (m *mockDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+
+func (m *fanoutDriver) SSESupport() (bool, bool) { return false, false }
+func (m *fanoutDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *fanoutDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (m *fanoutDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}

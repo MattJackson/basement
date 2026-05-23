@@ -77,6 +77,14 @@ type testMockDriver struct {
 	putObjectRetentionFunc   func(ctx context.Context, bucket, key, versionID string, retention driver.ObjectLockRetention, bypassGovernance bool) error
 	getObjectLegalHoldFunc   func(ctx context.Context, bucket, key, versionID string) (bool, error)
 	putObjectLegalHoldFunc   func(ctx context.Context, bucket, key, versionID string, on bool) error
+
+	// v1.10.0d Bucket Encryption hooks. nil-default reports
+	// unsupported (matches Garage v1/v2 posture). Tests that
+	// exercise the encryption surface override these per case.
+	sseSupportFunc             func() (bool, bool)
+	getBucketEncryptionFunc    func(ctx context.Context, bucket string) (*driver.BucketEncryption, error)
+	putBucketEncryptionFunc    func(ctx context.Context, bucket string, enc driver.BucketEncryption) error
+	deleteBucketEncryptionFunc func(ctx context.Context, bucket string) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -407,6 +415,38 @@ func (m *testMockDriver) GetObjectLegalHold(ctx context.Context, bucket, key, ve
 func (m *testMockDriver) PutObjectLegalHold(ctx context.Context, bucket, key, versionID string, on bool) error {
 	if m.putObjectLegalHoldFunc != nil {
 		return m.putObjectLegalHoldFunc(ctx, bucket, key, versionID, on)
+	}
+	return driver.ErrUnsupported
+}
+
+// v1.10.0d Bucket Encryption hooks — overridable funcs so the
+// encryption handler tests can plug in custom behaviour. Defaults:
+// unsupported (matches Garage v1/v2 posture) and methods return
+// ErrUnsupported.
+func (m *testMockDriver) SSESupport() (bool, bool) {
+	if m.sseSupportFunc != nil {
+		return m.sseSupportFunc()
+	}
+	return false, false
+}
+
+func (m *testMockDriver) GetBucketEncryption(ctx context.Context, bucket string) (*driver.BucketEncryption, error) {
+	if m.getBucketEncryptionFunc != nil {
+		return m.getBucketEncryptionFunc(ctx, bucket)
+	}
+	return nil, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) PutBucketEncryption(ctx context.Context, bucket string, enc driver.BucketEncryption) error {
+	if m.putBucketEncryptionFunc != nil {
+		return m.putBucketEncryptionFunc(ctx, bucket, enc)
+	}
+	return driver.ErrUnsupported
+}
+
+func (m *testMockDriver) DeleteBucketEncryption(ctx context.Context, bucket string) error {
+	if m.deleteBucketEncryptionFunc != nil {
+		return m.deleteBucketEncryptionFunc(ctx, bucket)
 	}
 	return driver.ErrUnsupported
 }

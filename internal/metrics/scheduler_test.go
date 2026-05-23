@@ -193,6 +193,18 @@ func (d *schedulerStubDriver) PutObjectLegalHold(_ context.Context, _, _, _ stri
 	return driver.ErrUnsupported
 }
 
+// v1.10.0d Bucket Encryption — stubs report unsupported.
+func (d *schedulerStubDriver) SSESupport() (bool, bool) { return false, false }
+func (d *schedulerStubDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+
 // TestRunOneCycle_HappyPath drives one cycle across two clusters
 // with two buckets each and asserts four snapshots were recorded.
 func TestRunOneCycle_HappyPath(t *testing.T) {

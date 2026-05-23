@@ -118,3 +118,22 @@ func (m *mockDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool
 func (m *mockDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
 	return ErrUnsupported
 }
+
+// v1.10.0d Bucket Encryption shims — same pattern as the Object Lock
+// shims above. The driver-package registry tests don't exercise SSE
+// directly; these stubs satisfy the interface so the existing tests
+// keep compiling.
+
+func (m *mockDriver) SSESupport() (bool, bool) { return false, false }
+
+func (m *mockDriver) GetBucketEncryption(_ context.Context, _ string) (*BucketEncryption, error) {
+	return nil, ErrUnsupported
+}
+
+func (m *mockDriver) PutBucketEncryption(_ context.Context, _ string, _ BucketEncryption) error {
+	return ErrUnsupported
+}
+
+func (m *mockDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return ErrUnsupported
+}
