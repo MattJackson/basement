@@ -1,0 +1,54 @@
+name: SBOM
+
+# On every tag push, generate a CycloneDX-format Software Bill of
+# Materials for the source tree (Go modules + Node packages) using
+# syft, then attach it to the GitHub release as an artifact. See
+# SECURITY.md "SBOM" section for the operator-facing story.
+#
+# Runs alongside the release.yml Docker build — independent job,
+# independent failure surface. Failing this workflow does not block
+# the Docker image publish.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # required to attach assets to the GitHub release
+
+jobs:
+  generate-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate CycloneDX SBOM for the source tree
+        run: |
+          syft scan dir:. \
+            -o cyclonedx-json=basement-${{ github.ref_name }}-sbom.cdx.json \
+            -o spdx-json=basement-${{ github.ref_name }}-sbom.spdx.json
+
+      - name: Generate CycloneDX SBOM for the published Docker image
+        # Best-effort — the release.yml job pushes the image in parallel,
+        # so it may not be available the first time this job runs. We
+        # don't fail the workflow if the image scan errors; the source
+        # SBOMs above are the canonical artifacts.
+        continue-on-error: true
+        run: |
+          syft scan ghcr.io/${{ github.repository_owner }}/basement:${{ github.ref_name }} \
+            -o cyclonedx-json=basement-${{ github.ref_name }}-image-sbom.cdx.json \
+            || echo "image scan skipped (image may not be published yet)"
+
+      - name: Attach SBOMs to the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            basement-${{ github.ref_name }}-sbom.cdx.json
+            basement-${{ github.ref_name }}-sbom.spdx.json
+            basement-${{ github.ref_name }}-image-sbom.cdx.json
+          fail_on_unmatched_files: false

@@ -4,6 +4,83 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0d — 2026-05-22
+
+Trust + credibility docs cycle. Self-hosters evaluating basement
+care about disclosure policy, contribution terms, and supply-chain
+transparency before they will commit to a control plane that holds
+their KMS key IDs and S3 secrets. This cycle ships the
+GitHub-canonical files so a first-time visitor can answer "how do
+I report a vuln, how do I contribute, what is the supply-chain
+story" without reading source:
+
+- **`SECURITY.md`** at the repo root. GitHub auto-detects and
+  surfaces this in the Security tab. Documents the security contact
+  (`matthew@pq.io`), best-effort 48-hour initial-response SLA,
+  supported-versions policy (current minor + previous minor),
+  90-day responsible-disclosure window, and an accurate threat
+  model that names what basement actually trusts (`DATA_DIR`,
+  `JWT_SECRET`, admin password, OIDC discovery) versus what it
+  does not (backend HTTP responses, backend audit truth, backend
+  permissions as policy). Crypto claims are concrete and tied to
+  the implementing files: per-user S3 secrets + cluster admin
+  tokens are AES-256-GCM with key derived as `sha256(JWT_SECRET)`
+  (`internal/store/crypto.go`), local passwords are bcrypt cost-12
+  (`internal/auth/bcrypt.go`), service-account secrets are bcrypt
+  of the secret half (`internal/serviceaccount/store.go`). Also
+  notes what we explicitly do NOT obscure (KMS key IDs are
+  plaintext — they're public identifiers, not secrets) and what we
+  do NOT log (object contents, plaintext passwords, post-mint
+  bearer secrets).
+- **`CONTRIBUTING.md`** at the repo root. AGPL-3.0 contribution
+  license terms; commercial dual-licensing path retained by the
+  maintainer with DCO sign-off (rather than copyright assignment)
+  as the lightweight enabler; local dev loop
+  (`git clone` → `pnpm install` → `pnpm build` → `go test -race
+  ./...`); code style (`gofmt`, `golangci-lint`, `prettier`,
+  `eslint`); PR process (branch → tests + sign-off → review →
+  merge). Driver-contribution section is explicit about the
+  parity doctrine (advertise unsupported honestly, do not fake
+  capability flags).
+- **`.github/DCO.md`**. Standard Developer Certificate of Origin
+  v1.1 text with a project-specific addendum tying the sign-off
+  to the maintainer's commercial relicensing rights, so a
+  contributor knows up front what they're agreeing to. `git commit
+  -s` how-to + `git rebase --signoff main` for back-fill.
+- **`.github/ISSUE_TEMPLATE/`** with four GitHub Issue Forms
+  (`bug_report.yml`, `feature_request.yml`, `question.yml`,
+  `security.yml` — the last is a tiny redirect form whose only
+  purpose is to push reporters back to SECURITY.md before they
+  publish a vuln in the open) plus `config.yml` setting
+  `blank_issues_enabled: false` so every report lands in a
+  template. Bug + feature forms list all four drivers as
+  multi-select dropdowns so triage gets routed correctly.
+- **`.github/PULL_REQUEST_TEMPLATE.md`** with four required
+  sections (Summary, Test plan, Linked issues, DCO sign-off) and
+  reviewer-notes scratch space. Test-plan checklist nudges
+  contributors to actually run `go test -race ./...` + the FE
+  build before opening the PR.
+- **`.github/workflows/sbom.yml`**. On every tag push, generates
+  both CycloneDX-JSON and SPDX-JSON Software Bill of Materials
+  for the source tree using
+  [syft](https://github.com/anchore/syft), attaches them as
+  release artifacts via `softprops/action-gh-release`. Best-effort
+  scan of the published Docker image is included as a
+  `continue-on-error` step (the parallel `release.yml` may not
+  have published the image yet when the SBOM job runs). Independent
+  workflow + independent failure surface — a syft regression does
+  not block the Docker image publish.
+
+Tests: new `internal/docslint/` package with table-driven Go tests
+asserting every new file exists, contains the substantive content
+(SLA, threat model, AGPL terms, DCO clauses (a)-(d), all four
+drivers in the bug-report dropdown, CycloneDX + SPDX in the SBOM
+workflow), and cross-links the other files consistently. The test
+walks up from `os.Getwd()` to find `go.mod`, so it works whether
+you `go test ./internal/docslint/...` from the repo root or from
+elsewhere. No FE / Go source code changed; `go test -race ./...`
++ `pnpm build` green.
+
 ## v1.11.0.1 — 2026-05-22
 
 Garage v2 driver: admin-tier (admin-only) connections fixed.

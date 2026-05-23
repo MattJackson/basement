@@ -1,0 +1,45 @@
+name: Question
+description: How do I... / does basement support... / which version should I run.
+title: "[q] "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions are welcome. For faster turnaround, please confirm
+        you've checked the docs first.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      placeholder: |
+        How do I configure SSE-KMS with an external Vault instance for
+        the MinIO driver?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: |
+        What are you trying to accomplish? What have you already
+        tried? Which docs did you read?
+
+  - type: input
+    id: version
+    attributes:
+      label: basement version
+      placeholder: "v1.10.0.2"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I have checked README.md, docs/configuration.md, and the relevant docs/release-notes/ entry.
+          required: true
+        - label: This is not a security report (those go to matthew@pq.io).
+          required: true

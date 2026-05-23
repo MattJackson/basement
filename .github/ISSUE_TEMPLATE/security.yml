@@ -1,0 +1,30 @@
+name: Security vulnerability
+description: Please do not file security issues here. Use the contact channel below.
+title: "[security] DO NOT FILE — see SECURITY.md"
+labels:
+  - security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # Stop — do not file a public security issue.
+
+        Security vulnerabilities in basement should be reported
+        **privately** to `matthew@pq.io`.
+
+        See [SECURITY.md](../blob/main/SECURITY.md) for the full
+        disclosure policy, response SLA, threat model, and what to
+        include in your report.
+
+        If you proceed with this public form, the maintainer will
+        close the issue without disclosure and ask you to re-send
+        the report by email. This protects you and protects other
+        operators running affected versions.
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: I understand
+      options:
+        - label: I have read SECURITY.md and understand security reports go to matthew@pq.io, not this tracker.
+          required: true

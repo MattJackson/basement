@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in basement doesn't behave the way the docs / UI suggest it should.
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more context you
+        provide, the faster we can reproduce and fix it.
+
+        For **security vulnerabilities**, please **do not** file a
+        public issue — email `matthew@pq.io`. See
+        [SECURITY.md](../blob/main/SECURITY.md).
+
+  - type: input
+    id: version
+    attributes:
+      label: basement version
+      description: |
+        Tag or commit you're running. Visible in the footer of
+        `/admin/system` or via `docker image inspect ghcr.io/mattjackson/basement`.
+      placeholder: "v1.10.0.2 or commit 4714938"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker (ghcr.io/mattjackson/basement)
+        - Docker Compose (deploy/docker-compose.example.yml)
+        - Built from source
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: drivers
+    attributes:
+      label: Backend driver(s) involved
+      multiple: true
+      options:
+        - Garage v1
+        - Garage v2
+        - AWS S3
+        - MinIO / OpenMaxIO
+        - Not driver-specific
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what actually happened?
+      placeholder: |
+        1. Navigated to /admin/clusters/foo/keys
+        2. Clicked "New key"
+        3. Submitted the form blank
+        4. Expected: inline validation errors
+        5. Actual: page reloaded with no feedback
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs (basement, browser console, backend)
+      description: Paste relevant log lines. Redact secrets — JWT_SECRET, access keys, OIDC client secrets, etc.
+      render: shell
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        Browser + OS for UI issues. Backend cluster versions when relevant
+        (Garage version, MinIO version, AWS region).
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I have searched existing issues for duplicates.
+          required: true
+        - label: This is not a security vulnerability (those go to matthew@pq.io).
+          required: true
