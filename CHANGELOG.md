@@ -4,6 +4,47 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.5 — 2026-05-23
+
+Feature-coverage smoke + Garage v2 driver bugfix.
+
+- **New `scripts/feature-smoke.ts`** — per-feature functional smoke
+  against test backends only (10x Garage v2 on 10.1.7.11:38xx).
+  Exercises every product feature A-O (cluster + key + bucket basics,
+  UserRegions, presign, multipart, backups, webhooks, service
+  accounts, lifecycle, versioning/object-lock/SSE stub paths, WebDAV,
+  audit, onboarding). Hard safety gate: every destructive op asserts
+  the target cluster label starts with `garage-v2-test-`; operator's
+  `classe` cluster and `lsi`/`cheshire` regions are deny-listed and
+  baseline-snapshotted to catch any drift. Ephemeral resources use
+  the `feat-smoke-{ts}-{rand}-` prefix; cleanup runs in finally with
+  a broad-sweep pre-flight reaper for leftovers from prior runs.
+  Run via `bash scripts/feature-smoke.sh`. 46 checks, 0 failures
+  against the live deploy.
+- **Bugfix: Garage v2 driver dropped per-bucket key permissions on
+  every GetKey** — `getKeyInfoResponse.BucketsPermissions` was typed
+  as `bucketPermissionResp` (flat `read/write/owner`), but the
+  Garage v2 `GetKeyInfo` wire shape nests them under
+  `permissions: {read, write, owner}` (KeyInfoBucketResponse,
+  garage-admin-v2.json:3490-3527). `keyFromInfo` therefore returned
+  all-false flags on every grant readback after `AllowBucketKey`
+  succeeded — which silently routed every downstream call signed
+  with the affected key into 401 `USER_KEY_REJECTED` against the
+  backend. Caught by the new feature smoke. Fix: switch the field
+  to `[]keyInfoBucketResponse` and read `b.Permissions.Read/...`.
+- **Bug report at `docs/feature-smoke-bugs.md`** — every failure /
+  warning from the smoke run, tagged with a `BUG##` ID, per-feature
+  pass/fail counts, and a follow-up table for the bugs that aren't
+  trivial enough to fix inline this cycle (bucket-rename via PATCH,
+  `/admin/clusters/{cid}/driver-info` endpoint missing, multipart
+  abort handler not passing the object key, snapshots list 500 on
+  fresh snapshot-mode backup, WebDAV PROPFIND blocked by edge).
+
+Touched: `scripts/feature-smoke.ts` (new), `scripts/feature-smoke.sh`
+(new), `internal/drivers/garage/keys.go`,
+`internal/drivers/garage/keys_test.go`,
+`docs/feature-smoke-bugs.md` (new), `CHANGELOG.md`.
+
 ## v1.11.0.4 — 2026-05-23
 
 Federation engine no-op replication fix. Caught by hands-on Garage v2

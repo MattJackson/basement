@@ -110,16 +110,22 @@ func (d *driver) DeleteKey(ctx context.Context, id string) error {
 
 // keyFromInfo converts a GetKeyInfoResponse into a driver.Key.
 // GetKeyInfoResponse schema: garage-admin-v2.json:2875-2930.
+//
+// v1.11.0.5: Garage v2 nests per-bucket permissions under
+// `permissions: {read, write, owner}` (KeyInfoBucketResponse,
+// garage-admin-v2.json:3490-3527). The prior code read them as flat
+// fields off the bucket row, which silently produced an all-false
+// grant on every GetKey call after AllowBucketKey succeeded.
 func keyFromInfo(resp getKeyInfoResponse) driverpkg.Key {
 	buckets := make([]driverpkg.KeyBucketAccess, 0, len(resp.BucketsPermissions))
 	for _, b := range resp.BucketsPermissions {
 		buckets = append(buckets, driverpkg.KeyBucketAccess{
-			BucketID:      b.BucketID,
-			GlobalAliases: []string{},
-			LocalAliases:  []string{},
-			Read:          b.Read,
-			Write:         b.Write,
-			Owner:         b.Owner,
+			BucketID:      b.ID,
+			GlobalAliases: b.GlobalAliases,
+			LocalAliases:  b.LocalAliases,
+			Read:          b.Permissions.Read,
+			Write:         b.Permissions.Write,
+			Owner:         b.Permissions.Owner,
 		})
 	}
 
@@ -151,23 +157,21 @@ type listKeysResponseItem struct {
 }
 
 // getKeyInfoResponse mirrors GetKeyInfoResponse (garage-admin-v2.json:2875-2930).
+//
+// v1.11.0.5: BucketsPermissions now decodes into keyInfoBucketResponse
+// so the nested `permissions: {read, write, owner}` shape on the wire
+// is parsed correctly. The older bucketPermissionResp expected the
+// permission flags as flat fields on the row, which silently dropped
+// every grant to all-false in keyFromInfo.
 type getKeyInfoResponse struct {
-	ID                 string              `json:"accessKeyId"`
-	Name               string              `json:"name"`
-	SecretAccessKey    *string             `json:"secretAccessKey,omitempty"`
-	Created            time.Time           `json:"created,omitempty"`
-	Expiration         *time.Time          `json:"expiration,omitempty"`
-	Expired            bool                `json:"expired"`
-	Permissions        keyPerm             `json:"permissions"`
-	BucketsPermissions []bucketPermissionResp `json:"buckets"`
-}
-
-// bucketPermissionResp is used for tests and matches the buckets permissions structure.
-type bucketPermissionResp struct {
-	BucketID string `json:"id"`
-	Read     bool   `json:"read"`
-	Write    bool   `json:"write"`
-	Owner    bool   `json:"owner"`
+	ID                 string                  `json:"accessKeyId"`
+	Name               string                  `json:"name"`
+	SecretAccessKey    *string                 `json:"secretAccessKey,omitempty"`
+	Created            time.Time               `json:"created,omitempty"`
+	Expiration         *time.Time              `json:"expiration,omitempty"`
+	Expired            bool                    `json:"expired"`
+	Permissions        keyPerm                 `json:"permissions"`
+	BucketsPermissions []keyInfoBucketResponse `json:"buckets"`
 }
 
 // keyInfoBucketResponse mirrors KeyInfoBucketResponse (garage-admin-v2.json:3490-3527).

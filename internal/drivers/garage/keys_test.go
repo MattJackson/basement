@@ -21,9 +21,9 @@ func TestGetKey(t *testing.T) {
 			ID:     "access-key-id",
 			Name:   "Test Key",
 			SecretAccessKey: &secret,
-			BucketsPermissions: []bucketPermissionResp{
-				{BucketID: "bucket-1", Read: true, Write: false, Owner: false},
-				{BucketID: "bucket-2", Read: true, Write: true, Owner: true},
+			BucketsPermissions: []keyInfoBucketResponse{
+				{ID: "bucket-1", Permissions: apiBucketKeyPerm{Read: true, Write: false, Owner: false}},
+				{ID: "bucket-2", Permissions: apiBucketKeyPerm{Read: true, Write: true, Owner: true}},
 			},
 		}
 
@@ -95,7 +95,7 @@ func TestCreateKey(t *testing.T) {
 			ID:     "new-access-key",
 			Name:   "my-new-key",
 			SecretAccessKey: &secret,
-			BucketsPermissions: []bucketPermissionResp{},
+			BucketsPermissions: []keyInfoBucketResponse{},
 		}
 
 		w.Header().Set("Content-Type", "application/json")
