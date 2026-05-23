@@ -201,6 +201,18 @@ func (d *usageSizedDriver) PutObjectLegalHold(_ context.Context, _, _, _ string,
 	return driver.ErrUnsupported
 }
 
+// v1.10.0d Bucket Encryption — usage stub doesn't exercise SSE.
+func (d *usageSizedDriver) SSESupport() (bool, bool) { return false, false }
+func (d *usageSizedDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (d *usageSizedDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+
 const usageSizedDriverName = "stub-usage-sized"
 
 var usageSizedRegisterOnce sync.Once

@@ -253,6 +253,18 @@ func (d *restoreDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ 
 	return driver.ErrUnsupported
 }
 
+// v1.10.0d Bucket Encryption — restore driver doesn't exercise SSE.
+func (d *restoreDriver) SSESupport() (bool, bool) { return false, false }
+func (d *restoreDriver) GetBucketEncryption(_ context.Context, _ string) (*driver.BucketEncryption, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *restoreDriver) PutBucketEncryption(_ context.Context, _ string, _ driver.BucketEncryption) error {
+	return driver.ErrUnsupported
+}
+func (d *restoreDriver) DeleteBucketEncryption(_ context.Context, _ string) error {
+	return driver.ErrUnsupported
+}
+
 // restoreDriverCounter monotonically increments so each test gets
 // unique driver-factory names. driver.Register panics on duplicate
 // registration; isolation per test means the registry inside a test
