@@ -15,7 +15,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "smoke": "bash ../scripts/postdeploy-ui-smoke.sh",
+    "smoke:full": "bash ../scripts/comprehensive-smoke.sh"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
