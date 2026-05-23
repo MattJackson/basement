@@ -605,6 +605,23 @@ func (s *Server) routes() {
 			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/versions", s.userListObjectVersionsHandler)
 			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/versions/{versionId}", s.userGetObjectVersionHandler)
 			userG.Delete("/user/regions/{regionId}/buckets/{bid}/o/{key}/versions/{versionId}", s.userDeleteObjectVersionHandler)
+
+			// v1.10.0c OBJECT_LOCK — bucket-level config + per-version
+			// retention + legal hold. Layered on top of versioning per
+			// the S3 spec. Capability-gated (drivers without Object
+			// Lock support return 501 NOT_SUPPORTED on the mutating
+			// paths, and supported=false on the GET so the FE can
+			// hide the card). Audit events:
+			//   bucket:object_lock_enabled
+			//   bucket:object_lock_default_retention_set
+			//   object:retention_set / _extended / _reduced
+			//   object:legal_hold_set / _released
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/object-lock", s.userGetBucketObjectLockHandler)
+			userG.Put("/user/regions/{regionId}/buckets/{bid}/object-lock", s.userPutBucketObjectLockHandler)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/retention", s.userGetObjectRetentionHandler)
+			userG.Put("/user/regions/{regionId}/buckets/{bid}/o/{key}/retention", s.userPutObjectRetentionHandler)
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/legal-hold", s.userGetObjectLegalHoldHandler)
+			userG.Put("/user/regions/{regionId}/buckets/{bid}/o/{key}/legal-hold", s.userPutObjectLegalHoldHandler)
 		})
 	})
 
