@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 import type { components } from "@/shared/api/types.gen";
 
@@ -470,6 +470,7 @@ export interface CreateUserKeyRequest {
 // the FE label moved to match the operator's "key-first" mental model
 // (a user may add multiple keys against the same endpoint).
 export function useCreateUserKey() {
+  const queryClient = useQueryClient();
   return useMutation<UserRegion, Error, CreateUserKeyRequest>({
     mutationFn: async (input) => {
       const res = await fetch("/api/v1/user/regions", {
@@ -481,6 +482,9 @@ export function useCreateUserKey() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("user/regions/create", res.status, body);
       return body as UserRegion;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "regions"] });
     },
   });
 }
@@ -511,6 +515,7 @@ export interface BulkCreateUserKeyResponse {
 }
 
 export function useBulkCreateUserKeys() {
+  const queryClient = useQueryClient();
   return useMutation<BulkCreateUserKeyResponse, Error, BulkCreateUserKeyRow[]>({
     mutationFn: async (rows) => {
       const res = await fetch("/api/v1/user/regions/bulk", {
@@ -522,6 +527,9 @@ export function useBulkCreateUserKeys() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("user/regions/bulk", res.status, body);
       return body as BulkCreateUserKeyResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "regions"] });
     },
   });
 }
@@ -538,6 +546,7 @@ export interface RotateUserRegionRequest {
 }
 
 export function useRotateUserRegion() {
+  const queryClient = useQueryClient();
   return useMutation<UserRegion, Error, RotateUserRegionRequest>({
     mutationFn: async ({ regionId, accessKeyId, secretKey }) => {
       const res = await fetch(
@@ -553,10 +562,21 @@ export function useRotateUserRegion() {
       if (!res.ok) throw apiError(`user/regions/rotate/${regionId}`, res.status, body);
       return body as UserRegion;
     },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "regions"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "regions", vars.regionId] });
+    },
   });
 }
 
+// v1.11.0.14: invalidate ["user","regions"] so the operator's /files/keys
+// list refreshes immediately after a delete instead of waiting for a
+// manual page reload. The router.invalidate() call on the caller side
+// only refreshes route loaders, not React Query state, so the cache
+// stayed warm with the now-deleted row until staleTime expired (30s) or
+// a tab refocus refetch fired — both surprised the operator.
 export function useDeleteUserRegion() {
+  const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(`/api/v1/user/regions/${encodeURIComponent(id)}`, {
@@ -567,6 +587,10 @@ export function useDeleteUserRegion() {
         const body = await res.json().catch(() => null);
         throw apiError(`user/regions/delete/${id}`, res.status, body);
       }
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "regions"] });
+      queryClient.removeQueries({ queryKey: ["user", "regions", id] });
     },
   });
 }
@@ -643,6 +667,7 @@ export function useUserRegionMultipartPartPresign(
 }
 
 export function useUserRegionMultipartComplete(regionId: string | null, bid: string | null) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ uploadId, parts }: { uploadId: string; parts: { partNumber: number; etag: string }[] }) => {
       if (!regionId || !bid || !uploadId) throw new Error("Missing required parameters");
@@ -657,6 +682,10 @@ export function useUserRegionMultipartComplete(regionId: string | null, bid: str
         const body = await res.json().catch(() => null);
         throw apiError(`user/regions/${regionId}/multipart/complete/${uploadId}`, res.status, body);
       }
+    },
+    onSuccess: () => {
+      // Upload finished — refetch the bucket object listing(s).
+      queryClient.invalidateQueries({ queryKey: ["user", "regions", regionId, "buckets", bid] });
     },
   });
 }
@@ -682,6 +711,7 @@ export function useUserRegionMultipartAbort(regionId: string | null, bid: string
 }
 
 export function useDeleteUserRegionObject(regionId: string | null, bid: string | null) {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (key: string) => {
       if (!regionId || !bid || !key) throw new Error("Missing required parameters");
@@ -691,6 +721,13 @@ export function useDeleteUserRegionObject(regionId: string | null, bid: string |
         const body = await res.json().catch(() => null);
         throw apiError(`user/regions/${regionId}/objects/delete/${key}`, res.status, body);
       }
+    },
+    onSuccess: () => {
+      // Both the page-at-a-time and infinite browsing variants share the
+      // prefix ["user","regions",regionId,"buckets",bid,"objects"] / "objects-inf".
+      // Wiping the wider region/bucket subtree is the cheapest correct
+      // refetch — re-pulls just the visible page on the next render.
+      queryClient.invalidateQueries({ queryKey: ["user", "regions", regionId, "buckets", bid] });
     },
   });
 }
@@ -759,6 +796,7 @@ export function useUserShares() {
 }
 
 export function useCreateUserShare() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: {
       connectionId: string;
@@ -773,10 +811,14 @@ export function useCreateUserShare() {
       if (!response.ok || !result) throw apiError("user/shares/create", response.status, error);
       return result as components["schemas"]["Share"];
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "shares"] });
+    },
   });
 }
 
 export function useRevokeUserShare() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (token: string) => {
       const { data, error, response } = await client.DELETE("/user/shares/{token}", {
@@ -784,6 +826,9 @@ export function useRevokeUserShare() {
       });
       if (!response.ok || !data) throw apiError(`user/shares/revoke/${token}`, response.status, error);
       return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "shares"] });
     },
   });
 }
@@ -902,16 +947,21 @@ export function useUserSync(id: string | null) {
 }
 
 export function useCreateUserSync() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: components["schemas"]["UserSyncCreateRequest"]) => {
       const { data: result, error, response } = await client.POST("/user/syncs", { body: data });
       if (!response.ok || !result) throw apiError("user/syncs/create", response.status, error);
       return result as components["schemas"]["CreateSyncResponse"];
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "syncs"] });
+    },
   });
 }
 
 export function useDeleteUserSync() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error, response } = await client.DELETE("/user/syncs/{id}", {
@@ -920,10 +970,15 @@ export function useDeleteUserSync() {
       if (!response.ok) throw apiError(`user/syncs/delete/${id}`, response.status, error);
       return data;
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "syncs"] });
+      queryClient.removeQueries({ queryKey: ["user", "syncs", id] });
+    },
   });
 }
 
 export function usePauseUserSync() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error, response } = await client.POST("/user/syncs/{id}/pause", {
@@ -932,10 +987,15 @@ export function usePauseUserSync() {
       if (!response.ok || !data) throw apiError(`user/syncs/pause/${id}`, response.status, error);
       return data as { state: string };
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "syncs"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "syncs", id] });
+    },
   });
 }
 
 export function useResumeUserSync() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error, response } = await client.POST("/user/syncs/{id}/resume", {
@@ -943,6 +1003,10 @@ export function useResumeUserSync() {
       });
       if (!response.ok || !data) throw apiError(`user/syncs/resume/${id}`, response.status, error);
       return data as { state: string };
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "syncs"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "syncs", id] });
     },
   });
 }
@@ -995,16 +1059,21 @@ export function useUserBackup(id: string | null) {
 }
 
 export function useCreateUserBackup() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: UserBackupCreateRequest) => {
       const { data, error, response } = await client.POST("/user/backups", { body });
       if (!response.ok || !data) throw apiError("user/backups/create", response.status, error);
       return data as Backup;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "backups"] });
+    },
   });
 }
 
 export function useUpdateUserBackup() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (args: { id: string; body: UserBackupCreateRequest }) => {
       const { data, error, response } = await client.PUT("/user/backups/{id}", {
@@ -1014,10 +1083,15 @@ export function useUpdateUserBackup() {
       if (!response.ok || !data) throw apiError(`user/backups/update/${args.id}`, response.status, error);
       return data as Backup;
     },
+    onSuccess: (_data, args) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "backups"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "backups", args.id] });
+    },
   });
 }
 
 export function useDeleteUserBackup() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { error, response } = await client.DELETE("/user/backups/{id}", {
@@ -1026,10 +1100,15 @@ export function useDeleteUserBackup() {
       if (!response.ok) throw apiError(`user/backups/delete/${id}`, response.status, error);
       return null;
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "backups"] });
+      queryClient.removeQueries({ queryKey: ["user", "backups", id] });
+    },
   });
 }
 
 export function useRunUserBackup() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const { data, error, response } = await client.POST("/user/backups/{id}/run", {
@@ -1037,6 +1116,14 @@ export function useRunUserBackup() {
       });
       if (!response.ok || !data) throw apiError(`user/backups/run/${id}`, response.status, error);
       return data as { id: string; status: string };
+    },
+    onSuccess: (_data, id) => {
+      // Run kicks the job; the per-row record (lastResult, status,
+      // snapshots) updates within one engine tick. Invalidate both
+      // the list and the per-item detail so the page reflects it
+      // ahead of the next poll.
+      queryClient.invalidateQueries({ queryKey: ["user", "backups"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "backups", id] });
     },
   });
 }
@@ -1049,6 +1136,7 @@ export type RestoreRequest = components["schemas"]["RestoreRequest"];
 export type RestoreResult = components["schemas"]["RestoreResult"];
 
 export function useRestoreUserBackup() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (args: { id: string; body: RestoreRequest }) => {
       const { data, error, response } = await client.POST("/user/backups/{id}/restore", {
@@ -1057,6 +1145,15 @@ export function useRestoreUserBackup() {
       });
       if (!response.ok || !data) throw apiError(`user/backups/restore/${args.id}`, response.status, error);
       return data as RestoreResult;
+    },
+    onSuccess: (_data, args) => {
+      // Restore writes objects into the chosen destination bucket; if
+      // a destination region's bucket browser is open we want it to
+      // refetch. Backups list/detail aren't mutated by the restore
+      // itself, but the snapshots query may be (restores don't, but
+      // future runs against the same backup do — touch it to keep
+      // pages consistent).
+      queryClient.invalidateQueries({ queryKey: ["user", "backups", args.id, "snapshots"] });
     },
   });
 }
@@ -1130,6 +1227,7 @@ export function usePolicies() {
 }
 
 export function useUpsertRole() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (role: Omit<PolicyRole, "seed" | "deprecated"> & { seed?: boolean; deprecated?: boolean }) => {
       const res = await fetch("/api/v1/admin/policies/roles", {
@@ -1142,10 +1240,14 @@ export function useUpsertRole() {
       if (!res.ok) throw apiError(`admin/policies/roles/upsert/${role.id}`, res.status, body);
       return body as PolicyRole;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
+    },
   });
 }
 
 export function useDeleteRole() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/v1/admin/policies/roles/${encodeURIComponent(id)}`, {
@@ -1158,10 +1260,14 @@ export function useDeleteRole() {
       }
       return null;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
+    },
   });
 }
 
 export function useAssignRole() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (assignment: PolicyAssignment) => {
       const res = await fetch("/api/v1/admin/policies/assignments", {
@@ -1174,10 +1280,18 @@ export function useAssignRole() {
       if (!res.ok) throw apiError("admin/policies/assignments/assign", res.status, body);
       return body as PolicyAssignment;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
+      // Per-cluster admins view aggregates from the same assignment
+      // store; touch the whole admin/clusters subtree so any open
+      // /admin/clusters/{cid} page picks up the new scope row.
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
+    },
   });
 }
 
 export function useUnassignRole() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (a: PolicyAssignment) => {
       const params = new URLSearchParams({
@@ -1194,6 +1308,10 @@ export function useUnassignRole() {
         throw apiError("admin/policies/assignments/unassign", res.status, body);
       }
       return null;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters"] });
     },
   });
 }
@@ -1302,6 +1420,7 @@ export function useOIDCGroupMappings() {
 }
 
 export function useUpdateOIDCGroupMappings() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (mappings: OIDCGroupMapping[]) => {
       const res = await fetch("/api/v1/admin/oidc-group-mappings", {
@@ -1313,6 +1432,9 @@ export function useUpdateOIDCGroupMappings() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("admin/oidc-group-mappings/put", res.status, body);
       return body as OIDCGroupMappingsResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "oidc-group-mappings"] });
     },
   });
 }
@@ -1371,6 +1493,7 @@ export function useBucketLifecycle(cid: string, bid: string) {
 // an empty rules array to clear the policy (backend translates to
 // DeleteBucketLifecycle on S3, empty UpdateBucket on Garage).
 export function usePutBucketLifecycle(cid: string, bid: string) {
+  const queryClient = useQueryClient();
   return useMutation<LifecycleResponse, Error, { rules: LifecycleRule[] }>({
     mutationFn: async ({ rules }) => {
       const url = `/api/v1/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
@@ -1383,6 +1506,16 @@ export function usePutBucketLifecycle(cid: string, bid: string) {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`bucket-lifecycle-put/${cid}/${bid}`, res.status, body);
       return body as LifecycleResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "clusters", cid, "buckets", bid, "lifecycle"],
+      });
+      // The bucket detail summary surfaces "lifecycle policy: N rules"
+      // — refresh the per-bucket detail too.
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "clusters", cid, "buckets", bid],
+      });
     },
   });
 }
@@ -1595,6 +1728,7 @@ export function useInvites() {
 }
 
 export function useCreateInvite() {
+  const queryClient = useQueryClient();
   return useMutation<InviteCreateResponse, Error, { label?: string; ttlHours?: number }>({
     mutationFn: async (input) => {
       const res = await fetch("/api/v1/admin/invites", {
@@ -1607,10 +1741,14 @@ export function useCreateInvite() {
       if (!res.ok) throw apiError("admin/invites/create", res.status, body);
       return body as InviteCreateResponse;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "invites"] });
+    },
   });
 }
 
 export function useRevokeInvite() {
+  const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(`/api/v1/admin/invites/${encodeURIComponent(id)}`, {
@@ -1622,10 +1760,14 @@ export function useRevokeInvite() {
         throw apiError(`admin/invites/revoke/${id}`, res.status, body);
       }
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "invites"] });
+    },
   });
 }
 
 export function useRotateInvite() {
+  const queryClient = useQueryClient();
   return useMutation<InviteCreateResponse, Error, { id: string; ttlHours?: number }>({
     mutationFn: async ({ id, ttlHours }) => {
       const res = await fetch(`/api/v1/admin/invites/${encodeURIComponent(id)}/rotate`, {
@@ -1637,6 +1779,9 @@ export function useRotateInvite() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`admin/invites/rotate/${id}`, res.status, body);
       return body as InviteCreateResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "invites"] });
     },
   });
 }
@@ -1691,6 +1836,7 @@ export function useClusterScrub(cid: string) {
 }
 
 export function useStartClusterScrub(cid: string) {
+  const queryClient = useQueryClient();
   return useMutation<ScrubResponse, Error, void>({
     mutationFn: async () => {
       const res = await fetch(
@@ -1704,6 +1850,9 @@ export function useStartClusterScrub(cid: string) {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`admin/clusters/${cid}/scrub`, res.status, body);
       return body as ScrubResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "scrub"] });
     },
   });
 }
@@ -1811,6 +1960,7 @@ export function useFederation(id: string | null) {
 }
 
 export function useCreateFederation() {
+  const queryClient = useQueryClient();
   return useMutation<FederatedBucket, Error, FederatedBucketCreateRequest>({
     mutationFn: async (body) => {
       const res = await fetch("/api/v1/user/federated-buckets", {
@@ -1823,10 +1973,18 @@ export function useCreateFederation() {
       if (!res.ok) throw apiError("user/federated-buckets/create", res.status, resp);
       return resp as FederatedBucket;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "federations"] });
+      // Reverse-lookup badges on every (region,bucket) pair the new
+      // federation touches need to re-render — cheapest correct move
+      // is to nuke the whole by-target subtree.
+      queryClient.invalidateQueries({ queryKey: ["federation-by-target"] });
+    },
   });
 }
 
 export function useUpdateFederation() {
+  const queryClient = useQueryClient();
   return useMutation<FederatedBucket, Error, { id: string; body: FederatedBucketCreateRequest }>({
     mutationFn: async ({ id, body }) => {
       const res = await fetch(
@@ -1842,10 +2000,16 @@ export function useUpdateFederation() {
       if (!res.ok) throw apiError(`user/federated-buckets/update/${id}`, res.status, resp);
       return resp as FederatedBucket;
     },
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "federations"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "federations", id] });
+      queryClient.invalidateQueries({ queryKey: ["federation-by-target"] });
+    },
   });
 }
 
 export function useDeleteFederation() {
+  const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -1857,10 +2021,16 @@ export function useDeleteFederation() {
         throw apiError(`user/federated-buckets/delete/${id}`, res.status, body);
       }
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "federations"] });
+      queryClient.removeQueries({ queryKey: ["user", "federations", id] });
+      queryClient.invalidateQueries({ queryKey: ["federation-by-target"] });
+    },
   });
 }
 
 export function useFailoverFederation() {
+  const queryClient = useQueryClient();
   return useMutation<FederatedBucket, Error, { id: string; body: FederationFailoverRequest }>({
     mutationFn: async ({ id, body }) => {
       const res = await fetch(
@@ -1875,6 +2045,11 @@ export function useFailoverFederation() {
       const resp = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/federated-buckets/failover/${id}`, res.status, resp);
       return resp as FederatedBucket;
+    },
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "federations"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "federations", id] });
+      queryClient.invalidateQueries({ queryKey: ["federation-by-target"] });
     },
   });
 }
@@ -1916,6 +2091,7 @@ export function useFederationByTarget(
 }
 
 export function useResyncFederation() {
+  const queryClient = useQueryClient();
   return useMutation<{ id: string; status: string }, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -1929,6 +2105,9 @@ export function useResyncFederation() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/federated-buckets/resync/${id}`, res.status, body);
       return body as { id: string; status: string };
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "federations", id] });
     },
   });
 }
@@ -2008,6 +2187,7 @@ export function useServiceAccount(id: string | null) {
 }
 
 export function useCreateServiceAccount() {
+  const queryClient = useQueryClient();
   return useMutation<ServiceAccountWithSecret, Error, CreateServiceAccountRequest>({
     mutationFn: async (req) => {
       const res = await fetch("/api/v1/admin/service-accounts", {
@@ -2020,10 +2200,14 @@ export function useCreateServiceAccount() {
       if (!res.ok) throw apiError("admin/service-accounts/create", res.status, body);
       return body as ServiceAccountWithSecret;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "service-accounts"] });
+    },
   });
 }
 
 export function useUpdateServiceAccount() {
+  const queryClient = useQueryClient();
   return useMutation<ServiceAccount, Error, { id: string; patch: UpdateServiceAccountRequest }>({
     mutationFn: async ({ id, patch }) => {
       const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id)}`, {
@@ -2036,10 +2220,15 @@ export function useUpdateServiceAccount() {
       if (!res.ok) throw apiError(`admin/service-accounts/update/${id}`, res.status, body);
       return body as ServiceAccount;
     },
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "service-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "service-accounts", id] });
+    },
   });
 }
 
 export function useDeleteServiceAccount() {
+  const queryClient = useQueryClient();
   return useMutation<null, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id)}`, {
@@ -2052,10 +2241,15 @@ export function useDeleteServiceAccount() {
       }
       return null;
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "service-accounts"] });
+      queryClient.removeQueries({ queryKey: ["admin", "service-accounts", id] });
+    },
   });
 }
 
 export function useRotateServiceAccount() {
+  const queryClient = useQueryClient();
   return useMutation<ServiceAccountWithSecret, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -2069,6 +2263,10 @@ export function useRotateServiceAccount() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`admin/service-accounts/rotate/${id}`, res.status, body);
       return body as ServiceAccountWithSecret;
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "service-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "service-accounts", id] });
     },
   });
 }
@@ -2203,6 +2401,7 @@ export function useWebhook(id: string | null) {
 }
 
 export function useCreateWebhook() {
+  const queryClient = useQueryClient();
   return useMutation<WebhookMintResponse, Error, WebhookCreateRequest>({
     mutationFn: async (body) => {
       const res = await fetch("/api/v1/user/webhooks", {
@@ -2215,6 +2414,9 @@ export function useCreateWebhook() {
       if (!res.ok) throw apiError("user/webhooks/create", res.status, resp);
       return resp as WebhookMintResponse;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks"] });
+    },
   });
 }
 
@@ -2224,6 +2426,7 @@ export function useCreateWebhook() {
 // We type the response as the wider union so the route can branch on
 // the rotated case at the call site.
 export function useUpdateWebhook() {
+  const queryClient = useQueryClient();
   return useMutation<
     Webhook | WebhookMintResponse,
     Error,
@@ -2243,10 +2446,15 @@ export function useUpdateWebhook() {
       if (!res.ok) throw apiError(`user/webhooks/update/${id}`, res.status, resp);
       return resp as Webhook | WebhookMintResponse;
     },
+    onSuccess: (_data, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks", id] });
+    },
   });
 }
 
 export function useDeleteWebhook() {
+  const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -2258,6 +2466,10 @@ export function useDeleteWebhook() {
         throw apiError(`user/webhooks/delete/${id}`, res.status, body);
       }
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks"] });
+      queryClient.removeQueries({ queryKey: ["user", "webhooks", id] });
+    },
   });
 }
 
@@ -2265,6 +2477,7 @@ export function useDeleteWebhook() {
 // 202 Accepted comes back immediately; the operator polls the detail
 // page (auto-refresh on a 5s interval) to see lastDelivery flip.
 export function useTestWebhook() {
+  const queryClient = useQueryClient();
   return useMutation<{ id: string; status: string; event: string }, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -2279,10 +2492,14 @@ export function useTestWebhook() {
       if (!res.ok) throw apiError(`user/webhooks/test/${id}`, res.status, body);
       return body as { id: string; status: string; event: string };
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks", id] });
+    },
   });
 }
 
 export function useEnableWebhook() {
+  const queryClient = useQueryClient();
   return useMutation<Webhook, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -2297,10 +2514,15 @@ export function useEnableWebhook() {
       if (!res.ok) throw apiError(`user/webhooks/enable/${id}`, res.status, body);
       return body as Webhook;
     },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks", id] });
+    },
   });
 }
 
 export function useDisableWebhook() {
+  const queryClient = useQueryClient();
   return useMutation<Webhook, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
@@ -2314,6 +2536,10 @@ export function useDisableWebhook() {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/webhooks/disable/${id}`, res.status, body);
       return body as Webhook;
+    },
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks"] });
+      queryClient.invalidateQueries({ queryKey: ["user", "webhooks", id] });
     },
   });
 }
@@ -2442,6 +2668,7 @@ export function usePutBucketVersioning(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<VersioningStatusResponse, Error, { status: "enabled" | "suspended" }>({
     mutationFn: async ({ status }) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
@@ -2457,6 +2684,17 @@ export function usePutBucketVersioning(
         throw apiError(`user/regions/${regionId}/buckets/${bucket}/versioning/put`, res.status, body);
       }
       return body as VersioningStatusResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "versioning"],
+      });
+      // Object-lock card is double-gated on versioning state; refresh
+      // its read too so the "requires versioning" hint flips at the
+      // same time.
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "object-lock"],
+      });
     },
   });
 }
@@ -2536,6 +2774,7 @@ export function useDeleteObjectVersion(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<void, Error, { key: string; versionId: string }>({
     mutationFn: async ({ key, versionId }) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
@@ -2549,6 +2788,17 @@ export function useDeleteObjectVersion(
           body,
         );
       }
+    },
+    onSuccess: (_data, { key }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "object-versions", key],
+      });
+      // Dropping the current version may flip the bucket browser's
+      // row (the next-most-recent version becomes "latest"). Refresh
+      // the object listings for this bucket too.
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket],
+      });
     },
   });
 }
@@ -2612,6 +2862,7 @@ export function usePutObjectLockConfig(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<ObjectLockConfigResponse, Error, ObjectLockConfigRequest>({
     mutationFn: async (req) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
@@ -2627,6 +2878,11 @@ export function usePutObjectLockConfig(
         throw apiError(`user/regions/${regionId}/buckets/${bucket}/object-lock/put`, res.status, body);
       }
       return body as ObjectLockConfigResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "object-lock"],
+      });
     },
   });
 }
@@ -2670,6 +2926,7 @@ export function usePutObjectRetention(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<
     ObjectRetentionResponse,
     Error,
@@ -2696,6 +2953,11 @@ export function usePutObjectRetention(
         throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/retention/put`, res.status, body);
       }
       return body as ObjectRetentionResponse;
+    },
+    onSuccess: (_data, { key, versionId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "object-retention", key, versionId],
+      });
     },
   });
 }
@@ -2735,6 +2997,7 @@ export function usePutObjectLegalHold(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<
     ObjectLegalHoldResponse,
     Error,
@@ -2754,6 +3017,11 @@ export function usePutObjectLegalHold(
         throw apiError(`user/regions/${regionId}/buckets/${bucket}/o/${key}/legal-hold/put`, res.status, body);
       }
       return body as ObjectLegalHoldResponse;
+    },
+    onSuccess: (_data, { key, versionId }) => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "object-legal-hold", key, versionId],
+      });
     },
   });
 }
@@ -2819,6 +3087,7 @@ export function usePutBucketEncryption(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<BucketEncryptionResponse, Error, BucketEncryptionRequest>({
     mutationFn: async (req) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
@@ -2835,6 +3104,11 @@ export function usePutBucketEncryption(
       }
       return body as BucketEncryptionResponse;
     },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "encryption"],
+      });
+    },
   });
 }
 
@@ -2842,6 +3116,7 @@ export function useDeleteBucketEncryption(
   regionId: string | null,
   bucket: string | null,
 ) {
+  const queryClient = useQueryClient();
   return useMutation<BucketEncryptionResponse, Error, void>({
     mutationFn: async () => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
@@ -2852,6 +3127,11 @@ export function useDeleteBucketEncryption(
         throw apiError(`user/regions/${regionId}/buckets/${bucket}/encryption/delete`, res.status, body);
       }
       return body as BucketEncryptionResponse;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["user", "regions", regionId, "buckets", bucket, "encryption"],
+      });
     },
   });
 }

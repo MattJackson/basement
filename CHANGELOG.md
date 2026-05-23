@@ -4,6 +4,52 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.14 — 2026-05-23
+
+Mutation cache-invalidation audit. Operator-reported bug: deleting a
+UserRegion key on `/files/keys` left the row visible until a manual
+page refresh. Root cause: `useDeleteUserRegion` succeeded server-side
+but never called `queryClient.invalidateQueries({queryKey:["user","regions"]})`,
+so the React Query cache that `useUserRegions` reads stayed warm with
+the deleted row until `staleTime` (30s) expired or a window-focus
+refetch fired. The `router.invalidate()` call on the caller side only
+refreshes route loaders, not React Query state.
+
+Same shape bug class existed across 33 other mutation hooks in
+`frontend/src/shared/api/queries.ts` — every freshman who added a
+mutation in the v1.x cycle forgot the `onSuccess: () => invalidate`
+pattern that `mutations.ts` (cluster/bucket/key admin) follows.
+
+- **Fix the operator's repro**: `useDeleteUserRegion` now invalidates
+  `["user","regions"]` and removes the per-detail cache entry. After
+  this tag deploys, delete an ephemeral `smoke-*` key on /files/keys —
+  the row vanishes immediately, no manual refresh needed.
+- **Audit + fix 33 additional mutations**: create/update/delete/state-
+  change hooks for UserRegions (3), backups (4), syncs (4), shares (2),
+  policies (4), OIDC mappings (1), invites (3), scrub (1), federation
+  (4), service accounts (4), webhooks (6), bucket versioning (1), object
+  versions (1), object lock (3), bucket encryption (2), lifecycle (1).
+  Each now invalidates the matching list cache and any per-item detail
+  cache the operator may be looking at.
+- **Parameterised test pattern**: new
+  `frontend/src/shared/api/__tests__/invalidation.test.ts` exercises
+  the bug class — render hook, mutate, assert
+  `queryClient.invalidateQueries` was called with the expected key.
+  23 mutation-invalidation cases covering the highest-risk hooks
+  (delete + state-change paths) so the bug class can't silently come
+  back when a freshman adds a new mutation.
+- **Test harness fix**: the v1.4.0b batch-delete fan-out test
+  (`/files/$regionId/b/$bid` batch ops) asserted total `fetch` count;
+  now that `useDeleteUserRegionObject` invalidates the bucket subtree
+  on success, the listing refetch counts as extra fetches. The
+  assertion now filters by `method === "DELETE"` to keep the focus on
+  the fan-out itself, not the inevitable refetch.
+
+Touched: `frontend/src/shared/api/queries.ts`,
+`frontend/src/shared/api/__tests__/invalidation.test.ts` (new),
+`frontend/src/routes/files/$regionId/b/__tests__/$bid.test.tsx`,
+`CHANGELOG.md`.
+
 ## v1.11.0.12 — 2026-05-23
 
 Tier 1 CI quality gates — every release ships through 10 automated

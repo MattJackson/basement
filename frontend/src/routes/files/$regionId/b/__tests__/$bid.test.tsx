@@ -314,15 +314,22 @@ describe("/files/$regionId/b/$bid — batch operations (v1.4.0b)", () => {
     await userEvent.click(screen.getByTestId("batch-action-bar-delete"));
     await userEvent.click(screen.getByTestId("batch-delete-confirm-action"));
 
-    // Three DELETEs to the per-key endpoint.
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    for (const call of fetchMock.mock.calls) {
+    // Three DELETEs to the per-key endpoint. v1.11.0.14 added
+    // queryClient.invalidateQueries on success, which can fan out a
+    // refetch on the bucket subtree — filter by method to keep the
+    // assertion focused on the delete fan-out itself.
+    const deleteCalls = fetchMock.mock.calls.filter((call: any) => {
+      const init = call[1] as RequestInit | undefined;
+      return init?.method === "DELETE";
+    });
+    expect(deleteCalls.length).toBe(3);
+    for (const call of deleteCalls) {
       const [url, init] = call as [string, RequestInit];
       expect(init.method).toBe("DELETE");
       expect(url).toMatch(/\/api\/v1\/user\/regions\/lsi-region-id\/buckets\/lsi\/objects\//);
     }
     // Each of a.txt / b.txt / c.txt fired exactly once.
-    const urls = fetchMock.mock.calls.map((c: any) => c[0] as string);
+    const urls = deleteCalls.map((c: any) => c[0] as string);
     expect(urls.some((u) => u.endsWith("/objects/a.txt"))).toBe(true);
     expect(urls.some((u) => u.endsWith("/objects/b.txt"))).toBe(true);
     expect(urls.some((u) => u.endsWith("/objects/c.txt"))).toBe(true);
