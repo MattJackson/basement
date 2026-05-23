@@ -30,6 +30,15 @@ vi.mock("@/shared/auth/elevation", () => ({
   useElevationPrompt: () => vi.fn(() => Promise.resolve()),
 }));
 
+// v1.9.0e.1: PersonaPill now consults the URL to distinguish
+// admin-mode-on-admin-page from admin-mode-on-user-page. Tests in this
+// file pin the warning-ramp + drop-privileges behaviour, which is URL-
+// independent — default the pathname to /admin/* so the visual variant
+// is the historical "solid" one and the existing assertions hold.
+vi.mock("@tanstack/react-router", () => ({
+  useLocation: () => ({ pathname: "/admin/clusters" }),
+}));
+
 function newClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
