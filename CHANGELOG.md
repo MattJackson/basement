@@ -4,6 +4,46 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.10.0.2 — 2026-05-22
+
+Continuation of the v1.10.0.1 "bug tested to death" pass — same shapes
+the smoke flagged on adjacent surfaces, all four mopped up in one
+hotfix tag:
+
+- **`/admin/users/new` blank submit silently did nothing.** Same shape
+  as the keys/new + federated-buckets/new fixes in v1.10.0.1 — submit
+  was `disabled` while the username was blank, so an operator clicking
+  a pristine form got no feedback. Now submit stays enabled, the click
+  fires per-field validation (username + password-length when
+  invite-only is off), inline `role="alert"` messages render next to
+  each offending input, `aria-invalid` flips on the inputs, and the
+  alerts auto-clear once the operator starts typing.
+- **`ThemeToggle` 32px tall on mobile.** The `Button size="icon"`
+  default (`size-8`) sat below the WCAG/iOS HIG 44×44 mobile tap
+  threshold flagged in smoke section [E]. Added
+  `min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0` so the tap area
+  is >=44px on touch viewports and snaps back to the 32px visual on
+  desktop (where the smoke audit did not flag this control).
+- **`UserMenu` trigger ~40px on mobile.** Same fix shape — added the
+  44px floor on touch viewports, cleared on `sm:`.
+- **`/files` "+ Add a key" CTA 36px on mobile.** The header action +
+  empty-state CTA shared a `px-4 py-2 text-sm` recipe that rendered
+  ~36px tall. Same `min-h-[44px] sm:min-h-0` floor on the link.
+
+Tests: new unit tests cover (a) `/admin/users/new` blank-submit
+inline alerts (each input flips `aria-invalid` + a `role=alert`
+renders; alert clears when the operator types), (b) the password-too-
+short alert, (c) `ThemeToggle` carries the tap-target utilities, (d)
+`UserMenu` trigger carries them, (e) the `/files` Add-a-key CTAs
+carry the tap-target utility. Touched:
+`frontend/src/routes/admin/users/new.tsx`,
+`frontend/src/routes/files/index.tsx`,
+`frontend/src/shared/theme/ThemeToggle.tsx`,
+`frontend/src/shared/ui/UserMenu.tsx`, plus their `__tests__/`.
+359/359 frontend tests + `go test -race ./...` green; comprehensive
+smoke re-run against the deploy promotes the four affected checks
+from `bug` to `no-bug`.
+
 ## v1.10.0.1 — 2026-05-22
 
 Smoke-caught bug-fix cycle on top of v1.10.0e. Three findings from

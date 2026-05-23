@@ -105,7 +105,13 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="flex items-center gap-2 rounded-lg px-1.5 py-1 sm:px-3 sm:py-1.5 text-sm font-medium hover:bg-muted/50 transition-colors"
+        // v1.10.0.2 — pre-fix the trigger rendered at ~40px tall on
+        // mobile (the inner 32px avatar + 1px×2 padding), below the
+        // WCAG/iOS HIG 44×44 tap-target threshold flagged in the
+        // v1.10.0.1 smoke audit. min-h/min-w 44px on touch viewports
+        // satisfies the threshold; sm: clears it on desktop where the
+        // smoke didn't flag this control.
+        className="flex items-center gap-2 rounded-lg px-1.5 py-1 sm:px-3 sm:py-1.5 text-sm font-medium hover:bg-muted/50 transition-colors min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0"
         aria-label="Open admin menu"
       >
         <span className="h-8 w-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">

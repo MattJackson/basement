@@ -38,7 +38,7 @@ function FilesHome() {
           regions.length > 0 ? (
             <a
               href="/files/keys/new"
-              className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 min-h-[44px] sm:min-h-0"
             >
               + Add a key
             </a>
@@ -72,7 +72,7 @@ function FilesHome() {
           action={
             <a
               href="/files/keys/new"
-              className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 min-h-[44px] sm:min-h-0"
             >
               + Add a key
             </a>

@@ -129,6 +129,32 @@ describe("FilesHome (region tier, ADR-0002)", () => {
     expect(screen.getByText("via s3.amazonaws.com")).toBeInTheDocument();
   });
 
+  // v1.10.0.2 — the empty-state CTA and the header action both
+  // rendered at ~36px tall on mobile (px-4 py-2 + text-sm line-height),
+  // below the WCAG/iOS HIG 44×44 tap-target threshold flagged in the
+  // v1.10.0.1 smoke audit. Class-based assertion since jsdom doesn't
+  // run Tailwind's stylesheet.
+  it("Add-a-key CTAs carry the 44px min-height tap-target utility on mobile", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+      isPending: false,
+      refetch: vi.fn(),
+    } as any);
+
+    renderWithProviders(<FilesHome />);
+
+    const ctas = screen
+      .getAllByText("+ Add a key")
+      .map((el) => el.closest("a"))
+      .filter((el): el is HTMLAnchorElement => el !== null);
+    expect(ctas.length).toBeGreaterThanOrEqual(1);
+    for (const cta of ctas) {
+      expect(cta.className).toMatch(/min-h-\[44px\]/);
+    }
+  });
+
   it("renders ErrorBanner when useUserRegions returns an error", async () => {
     const mockError = new Error("Failed to fetch regions");
 
