@@ -25,6 +25,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -77,37 +78,52 @@ var sensitiveConfigKeys = map[string]bool{
 // Connection represents a backend connection configuration.
 //
 // ConfigEnc carries the AES-GCM ciphertext of the sensitive subset of
-// Config (per sensitiveConfigKeys). It is `json:"-"` on this public
-// struct so API responses keep the v0.2.x shape callers expect — a
-// single Config map. Disk persistence routes through connectionDisk
-// which DOES marshal the field. See load/save below.
+// Config (per sensitiveConfigKeys) under the legacy JWT-derived key
+// (v1.0.0a). It is `json:"-"` on this public struct so API responses
+// keep the v0.2.x shape callers expect — a single Config map. Disk
+// persistence routes through connectionDisk which DOES marshal the
+// field. See load/save below.
+//
+// ConfigEncCSK (v1.12.0b / ADR-0007) carries the same JSON-marshalled
+// sensitive subset re-encrypted under the cluster's CSK once the
+// operator has bootstrapped per-cluster envelope encryption AND the
+// first unlock has run the lazy migration. The legacy ConfigEnc is
+// kept as a bridge — load() continues to decrypt under JWT until the
+// CSK-aware load path lands in a follow-up cycle. Future code that
+// needs CSK-protected secrets reads ConfigEncCSK via the clustersecret
+// manager when the cluster is unlocked; everything else uses the
+// existing JWT path.
 //
 // Invariant: in-memory Config is the unified view (plaintext + the
-// decrypted sensitive subset). On-disk Config carries only the
-// non-sensitive subset; the rest is in ConfigEnc.
+// decrypted sensitive subset from ConfigEnc). On-disk Config carries
+// only the non-sensitive subset; ConfigEnc holds the JWT-encrypted
+// blob; ConfigEncCSK (when populated) holds the CSK-encrypted parallel.
 type Connection struct {
-	ID        string            `json:"id"`              // UUID
-	Label     string            `json:"label"`           // operator-set, mutable, unique case-insensitive
-	Driver    string            `json:"driver"`          // "garage" | "garage-v1" | "aws-s3"
-	Config    map[string]string `json:"config"`          // per-driver keys: adminUrl, adminToken, region, accessKey, secretKey, endpoint
-	ConfigEnc []byte            `json:"-"`               // AES-GCM(json(sensitive-subset)); never on the API wire
-	Color     string            `json:"color,omitempty"` // hex; default "#C9874B" if empty
-	Owner     string            `json:"owner"`           // "org" always for v0.2.0
-	CreatedAt time.Time         `json:"createdAt"`
+	ID           string            `json:"id"`              // UUID
+	Label        string            `json:"label"`           // operator-set, mutable, unique case-insensitive
+	Driver       string            `json:"driver"`          // "garage" | "garage-v1" | "aws-s3"
+	Config       map[string]string `json:"config"`          // per-driver keys: adminUrl, adminToken, region, accessKey, secretKey, endpoint
+	ConfigEnc    []byte            `json:"-"`               // AES-GCM(json(sensitive-subset)) under JWT-derived key; never on the API wire
+	ConfigEncCSK []byte            `json:"-"`               // AES-GCM(json(sensitive-subset)) under CSK (v1.12.0b+); never on the API wire
+	Color        string            `json:"color,omitempty"` // hex; default "#C9874B" if empty
+	Owner        string            `json:"owner"`           // "org" always for v0.2.0
+	CreatedAt    time.Time         `json:"createdAt"`
 }
 
 // connectionDisk is the on-disk JSON shape: identical to Connection but
-// with ConfigEnc marshalled. Used only by load/save — never returned to
-// callers. Keeping the struct private keeps the API JSON shape sealed.
+// with ConfigEnc + ConfigEncCSK marshalled. Used only by load/save —
+// never returned to callers. Keeping the struct private keeps the API
+// JSON shape sealed.
 type connectionDisk struct {
-	ID        string            `json:"id"`
-	Label     string            `json:"label"`
-	Driver    string            `json:"driver"`
-	Config    map[string]string `json:"config"`
-	ConfigEnc []byte            `json:"configEnc,omitempty"`
-	Color     string            `json:"color,omitempty"`
-	Owner     string            `json:"owner"`
-	CreatedAt time.Time         `json:"createdAt"`
+	ID           string            `json:"id"`
+	Label        string            `json:"label"`
+	Driver       string            `json:"driver"`
+	Config       map[string]string `json:"config"`
+	ConfigEnc    []byte            `json:"configEnc,omitempty"`
+	ConfigEncCSK []byte            `json:"configEncCSK,omitempty"`
+	Color        string            `json:"color,omitempty"`
+	Owner        string            `json:"owner"`
+	CreatedAt    time.Time         `json:"createdAt"`
 }
 
 // Connections interface defines the CRUD operations for connection records.
@@ -119,6 +135,30 @@ type Connections interface {
 	Delete(ctx context.Context, id string) error
 	// Convenience for boot-time auto-seed:
 	Count(ctx context.Context) (int, error)
+
+	// SwapClusterSecret atomically replaces the CSK-encrypted
+	// sensitive-subset blob (ConfigEncCSK) for cid. Used by the
+	// v1.12.0b lazy migration from JWT-encrypted ConfigEnc to
+	// CSK-encrypted ConfigEncCSK (ADR-0007).
+	//
+	// Idempotency: the swap only fires when the on-disk ConfigEncCSK
+	// byte-matches oldConfigEnc. If another goroutine raced and
+	// already migrated, the supplied oldConfigEnc won't match the
+	// fresh on-disk value and SwapClusterSecret returns nil without
+	// touching disk — safe for concurrent first-unlock by two
+	// admins. Pass nil/empty oldConfigEnc when initiating the first
+	// migration (the field starts empty).
+	//
+	// Atomic: the rewrite goes through the same tmp+fsync+rename
+	// pipeline as every other store mutation. The legacy ConfigEnc
+	// field is NEVER touched here — the JWT-encrypted bridge stays
+	// in place so the existing load() path keeps working until a
+	// future cycle teaches load to read ConfigEncCSK.
+	//
+	// Returns an error if cid is not found, if the on-disk read
+	// fails, or if the persist fails (in which case the in-memory
+	// cache is rolled back to match disk).
+	SwapClusterSecret(ctx context.Context, cid string, oldConfigEnc, newConfigEnc []byte) error
 }
 
 // store implements Connections using JSON file persistence.
@@ -199,14 +239,15 @@ func (s *store) load() error {
 	migrated := false
 	for _, d := range disk {
 		c := Connection{
-			ID:        d.ID,
-			Label:     d.Label,
-			Driver:    d.Driver,
-			Color:     d.Color,
-			Owner:     d.Owner,
-			CreatedAt: d.CreatedAt,
-			Config:    cloneStringMap(d.Config),
-			ConfigEnc: d.ConfigEnc,
+			ID:           d.ID,
+			Label:        d.Label,
+			Driver:       d.Driver,
+			Color:        d.Color,
+			Owner:        d.Owner,
+			CreatedAt:    d.CreatedAt,
+			Config:       cloneStringMap(d.Config),
+			ConfigEnc:    d.ConfigEnc,
+			ConfigEncCSK: d.ConfigEncCSK,
 		}
 		if c.Config == nil {
 			c.Config = map[string]string{}
@@ -270,14 +311,28 @@ func (s *store) save() error {
 // saveLocked is save assuming connsMu is already held (Lock, not RLock).
 // load() and the mutating ops call this directly; encryption errors
 // surface as a save failure rather than corrupt-data-on-disk.
+//
+// As a side effect, the cache's ConfigEnc field is back-filled with
+// the freshly-computed ciphertext so subsequent Get/List calls see
+// the same legacy blob that's on disk — required by the v1.12.0b
+// migration helper which reads conn.ConfigEnc to know what to
+// re-encrypt under CSK. Without this back-fill the cache and disk
+// would disagree on the ConfigEnc field after every Create/Update
+// (cache empty, disk populated).
 func (s *store) saveLocked() error {
 	disk := make([]connectionDisk, 0, len(s.connsCache))
-	for _, c := range s.connsCache {
-		dc, err := s.toDisk(c)
+	for i := range s.connsCache {
+		dc, err := s.toDisk(s.connsCache[i])
 		if err != nil {
-			return fmt.Errorf("preparing connection %q for disk: %w", c.ID, err)
+			return fmt.Errorf("preparing connection %q for disk: %w", s.connsCache[i].ID, err)
 		}
 		disk = append(disk, dc)
+		// Keep the in-memory ConfigEnc / ConfigEncCSK in lockstep
+		// with what just went to disk. Required so the v1.12.0b
+		// CSK migration helper (api.maybeMigrateLegacyClusterSecret)
+		// sees the legacy ciphertext via Get without a fresh load.
+		s.connsCache[i].ConfigEnc = dc.ConfigEnc
+		s.connsCache[i].ConfigEncCSK = dc.ConfigEncCSK
 	}
 	return saveJSON(s.connPath, disk)
 }
@@ -285,17 +340,23 @@ func (s *store) saveLocked() error {
 // toDisk splits a Connection's unified Config into the plaintext on-disk
 // subset + an encrypted blob holding the sensitive subset. Encryption-
 // off mode (s.jwtSecret == nil) round-trips the Config plaintext as-is.
+//
+// ConfigEncCSK is preserved verbatim — toDisk does NOT regenerate it;
+// the CSK blob is only ever (re)written by SwapClusterSecret which
+// owns the migration semantics. This keeps a routine Update/Create
+// from accidentally clobbering an existing migration record.
 func (s *store) toDisk(c Connection) (connectionDisk, error) {
 	if s.jwtSecret == nil {
 		return connectionDisk{
-			ID:        c.ID,
-			Label:     c.Label,
-			Driver:    c.Driver,
-			Config:    cloneStringMap(c.Config),
-			ConfigEnc: nil,
-			Color:     c.Color,
-			Owner:     c.Owner,
-			CreatedAt: c.CreatedAt,
+			ID:           c.ID,
+			Label:        c.Label,
+			Driver:       c.Driver,
+			Config:       cloneStringMap(c.Config),
+			ConfigEnc:    nil,
+			ConfigEncCSK: c.ConfigEncCSK,
+			Color:        c.Color,
+			Owner:        c.Owner,
+			CreatedAt:    c.CreatedAt,
 		}, nil
 	}
 
@@ -322,14 +383,15 @@ func (s *store) toDisk(c Connection) (connectionDisk, error) {
 	}
 
 	return connectionDisk{
-		ID:        c.ID,
-		Label:     c.Label,
-		Driver:    c.Driver,
-		Config:    plain,
-		ConfigEnc: enc,
-		Color:     c.Color,
-		Owner:     c.Owner,
-		CreatedAt: c.CreatedAt,
+		ID:           c.ID,
+		Label:        c.Label,
+		Driver:       c.Driver,
+		Config:       plain,
+		ConfigEnc:    enc,
+		ConfigEncCSK: c.ConfigEncCSK,
+		Color:        c.Color,
+		Owner:        c.Owner,
+		CreatedAt:    c.CreatedAt,
 	}, nil
 }
 
@@ -535,6 +597,53 @@ func (s *store) Delete(ctx context.Context, id string) error {
 	}
 
 	return fmt.Errorf("connection not found: %s", id)
+}
+
+// SwapClusterSecret implements Connections. See the interface doc for
+// the contract; v1.12.0b / ADR-0007 wires the lazy migration of a
+// cluster's sensitive Config blob from the JWT-derived key to the
+// per-cluster CSK on first unlock.
+//
+// The swap targets ConfigEncCSK and never mutates the legacy
+// ConfigEnc; the JWT-encrypted bridge stays in place so an
+// already-deployed v1.12.0a process restarted on disk written by
+// v1.12.0b still loads cleanly via the existing JWT path. A future
+// cycle teaches load() to prefer ConfigEncCSK when CSK is wired and
+// the operator has unlocked, at which point ConfigEnc can be retired
+// in a one-shot purge.
+func (s *store) SwapClusterSecret(ctx context.Context, cid string, oldConfigEnc, newConfigEnc []byte) error {
+	s.connsMu.Lock()
+	defer s.connsMu.Unlock()
+
+	for i := range s.connsCache {
+		if s.connsCache[i].ID != cid {
+			continue
+		}
+		conn := &s.connsCache[i]
+
+		// Idempotency / concurrent-migration guard: only swap when the
+		// expected old value matches the current on-disk-equivalent.
+		// bytes.Equal handles nil vs empty consistently — callers pass
+		// nil when they expect "no CSK blob yet" which matches a
+		// freshly-loaded connection whose ConfigEncCSK is also nil.
+		if !bytes.Equal(conn.ConfigEncCSK, oldConfigEnc) {
+			return nil
+		}
+
+		// Snapshot for rollback on save failure so callers don't
+		// observe a half-applied swap if the rename to final fails.
+		before := conn.ConfigEncCSK
+
+		conn.ConfigEncCSK = append([]byte(nil), newConfigEnc...)
+
+		if err := s.saveLocked(); err != nil {
+			conn.ConfigEncCSK = before
+			return fmt.Errorf("persisting cluster secret swap: %w", err)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("connection not found: %s", cid)
 }
 
 // Count returns the number of connections.

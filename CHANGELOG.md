@@ -63,6 +63,65 @@ Touched: `docs/adr/0008-pluggable-skins.md` (new), `internal/skin/`
 `frontend/src/shared/layout/__tests__/UserShell.test.tsx`,
 `CHANGELOG.md`.
 
+## v1.12.0b — 2026-05-23
+
+Store-layer swap-and-save plumbing + OpenAPI regen for the v1.12.0a
+deferred work. The CSK HTTP surface now actually migrates legacy
+JWT-encrypted ConfigEnc blobs into CSK-encrypted ConfigEncCSK blobs
+on first unlock, and the FE's type-generated client carries the five
+new endpoints + three schemas.
+
+- **`store.Connections.SwapClusterSecret(ctx, cid, oldEnc, newEnc)`** —
+  atomic + idempotent per-record swap of the CSK ciphertext field.
+  Bytes-equal guard rejects stale writes from racing concurrent
+  unlocks (two admins migrating at once: the second is a silent
+  no-op). Persists through the same `tmp+fsync+rename` pipeline as
+  every other store mutation. Never touches the legacy `ConfigEnc`
+  field — the JWT bridge stays recoverable until a future cycle
+  retires it.
+- **New on-disk schema field `configEncCSK`** alongside the existing
+  `configEnc`. `load()` round-trips both; `saveLocked()` back-fills
+  the in-memory cache with both freshly-computed values so the
+  v1.12.0b migration helper sees the legacy ciphertext through a
+  bare `Get`.
+- **`maybeMigrateLegacyClusterSecret` wired** — on every successful
+  unlock the helper reads `conn.ConfigEnc`, runs
+  `clustersecret.MigrateFromJWTMap` (decrypt under JWT → validate
+  JSON shape → re-seal under in-memory CSK), and calls
+  `SwapClusterSecret(cid, conn.ConfigEncCSK, newBlob)`. First-time
+  migrators see `migrated=true` and fire `cluster:csk_migrated`;
+  raced second-callers see `migrated=false` (no double-audit). All
+  errors log + leave on-disk state untouched so the next unlock
+  retries cleanly — the bridge is never burned before the new path
+  is verified.
+- **`clusterRequiresLegacyMigration` wired** — `/lock-status` now
+  reports `requiresMigration=true` exactly when the connection has
+  a populated `ConfigEnc` AND an empty `ConfigEncCSK`. The FE's
+  "first unlock will migrate" banner stops being a stub.
+- **OpenAPI `openapi/basement.yaml`** — five new endpoints under
+  `/admin/clusters/{cid}/`: `POST unlock`, `POST lock`,
+  `GET lock-status`, `POST admins`, `DELETE admins/{adminUserId}`,
+  plus three new schemas (`ClusterUnlockRequest`,
+  `ClusterAddAdminRequest`, `ClusterLockStatus`). All carry
+  `x-basement-since: '1.12'` so the FE's per-version gates work.
+  `pnpm build` regenerates `frontend/src/shared/api/types.gen.ts`
+  cleanly.
+- **Tests** — `internal/store/connections_csk_swap_test.go` covers
+  happy-path swap + on-disk shape + idempotent race + legacy
+  preservation + not-found error. `internal/api/admin_cluster_
+  secrets_migration_test.go` covers the unlock-driven round trip
+  (legacy → CSK), the no-op-on-second-unlock case, and the
+  `requiresMigration` flag flip.
+
+Touched: `internal/store/connections.go`,
+`internal/store/connections_csk_swap_test.go` (new),
+`internal/api/admin_cluster_secrets.go`,
+`internal/api/admin_cluster_secrets_migration_test.go` (new),
+`internal/api/admin_clusters_test.go` (mock + SwapClusterSecret),
+`internal/driver/registry_test.go` (mock + SwapClusterSecret),
+`openapi/basement.yaml`, `frontend/src/shared/api/types.gen.ts`
+(regen), `CHANGELOG.md`.
+
 ## v1.12.0a — 2026-05-23
 
 Per-cluster envelope encryption (ADR-0007). Cluster admins set a

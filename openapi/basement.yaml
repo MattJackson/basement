@@ -1607,6 +1607,302 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/unlock:
+      post:
+        operationId: unlockCluster
+        summary: Unlock the cluster's CSK (v1.12+)
+        description: 'Unlocks per-cluster envelope encryption (ADR-0007) by
+          deriving the wrapping key from the supplied admin password via
+          Argon2id (~100ms) and AES-GCM-decrypting one of the stored
+          wrappedCSK records. On success the cluster''s 256-bit CSK is
+          cached in process memory until Lock or restart; subsequent
+          encrypt/decrypt of stored cluster secrets succeed and the FE
+          can stop showing the unlock modal. Wrong password returns 401
+          INVALID_PASSWORD (deliberately distinct from 403 so the FE can
+          distinguish "your password is wrong" from "you lack
+          cluster:edit"). Cluster with no wrappedCSK records yet returns
+          404 NO_CSK_ADMIN — the FE offers the "set up encryption" flow
+          instead. Also triggers the lazy v1.12.0b migration of any
+          legacy JWT-encrypted ConfigEnc into ConfigEncCSK; migration
+          failures log + leave the legacy bridge in place but never fail
+          the unlock response.'
+        tags:
+        - AdminCluster
+        x-basement-since: '1.12'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: cid
+          in: path
+          required: true
+          description: Cluster (connection) ID
+          schema:
+            type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterUnlockRequest'
+        responses:
+          '200':
+            description: Cluster unlocked; CSK now in memory
+            content:
+              application/json:
+                schema:
+                  type: object
+                  required:
+                  - unlocked
+                  properties:
+                    unlocked:
+                      type: boolean
+                      description: Always true on a 200; the field is
+                        explicit so the FE doesn't depend on a bare
+                        empty body.
+          '400':
+            description: Missing password or invalid request body
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: Wrong password (INVALID_PASSWORD) or no session
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Cluster not found, or cluster has no CSK admins
+              yet (NO_CSK_ADMIN — bootstrap via POST /admins first)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: Cluster secret manager not wired on this deploy
+              (CLUSTER_SECRETS_NOT_WIRED)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/lock:
+      post:
+        operationId: lockCluster
+        summary: Lock the cluster's CSK (v1.12+)
+        description: 'Zeroes the in-memory CSK for this cluster
+          (ADR-0007). Idempotent — locking an already-locked cluster
+          still returns 204. After lock, any handler that needs the
+          CSK to decrypt a stored secret returns 423 LOCKED and the FE
+          surfaces the unlock modal. Background jobs (federation,
+          backup runner) skip clusters whose CSK is not in memory and
+          auto-resume on the next unlock.'
+        tags:
+        - AdminCluster
+        x-basement-since: '1.12'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: cid
+          in: path
+          required: true
+          description: Cluster (connection) ID
+          schema:
+            type: string
+        responses:
+          '204':
+            description: Cluster locked (or already was)
+          '401':
+            description: No active session or insufficient role
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: Cluster secret manager not wired on this deploy
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/lock-status:
+      get:
+        operationId: getClusterLockStatus
+        summary: Get the cluster's CSK lock status (v1.12+)
+        description: 'Lightweight predicate read — no Argon2id work.
+          The FE polls this on the cluster detail page to refresh the
+          lock-state badge and to decide whether to show the
+          "first-unlock will migrate legacy secrets" banner. Gated on
+          cluster:test (the broader probe capability) rather than
+          cluster:edit so viewers who can health-check a cluster can
+          also see whether it''s locked.'
+        tags:
+        - AdminCluster
+        x-basement-since: '1.12'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: cid
+          in: path
+          required: true
+          description: Cluster (connection) ID
+          schema:
+            type: string
+        responses:
+          '200':
+            description: Current lock status
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ClusterLockStatus'
+          '401':
+            description: No active session or insufficient role
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: Cluster secret manager not wired on this deploy
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/admins:
+      post:
+        operationId: addClusterAdmin
+        summary: Add or bootstrap a CSK admin for the cluster (v1.12+)
+        description: 'First call (no existing wrappedCSK records for
+          the cluster) bootstraps per-cluster envelope encryption:
+          server generates a random 256-bit CSK, wraps it under
+          Argon2id(password, fresh salt), persists the WrappedCSK,
+          and leaves the cluster unlocked so the caller can use it
+          immediately. Subsequent calls require the cluster to be
+          already unlocked (the in-memory CSK is wrapped under the new
+          admin''s password) — return 423 LOCKED otherwise. Trying to
+          add an admin user ID that already holds a wrappedCSK returns
+          409 ADMIN_ALREADY_EXISTS; rotate by remove-then-add.'
+        tags:
+        - AdminCluster
+        x-basement-since: '1.12'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: cid
+          in: path
+          required: true
+          description: Cluster (connection) ID
+          schema:
+            type: string
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterAddAdminRequest'
+        responses:
+          '201':
+            description: Admin created (bootstrap=true on the first
+              admin, false on subsequent)
+            content:
+              application/json:
+                schema:
+                  type: object
+                  required:
+                  - adminId
+                  properties:
+                    adminId:
+                      type: string
+                      description: The admin user ID that was wrapped.
+                    bootstrap:
+                      type: boolean
+                      description: True when this call generated the
+                        cluster''s CSK; false when an existing CSK was
+                        re-wrapped for a new admin.
+                    unlocked:
+                      type: boolean
+                      description: True on bootstrap (CSK cached in
+                        memory). Absent on subsequent adds.
+          '400':
+            description: Missing adminUserId or password
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '401':
+            description: No active session or insufficient role
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '404':
+            description: Cluster not found
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '409':
+            description: Admin user ID already holds a wrappedCSK for
+              this cluster (ADMIN_ALREADY_EXISTS — rotate via DELETE
+              then POST)
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '423':
+            description: Cluster is locked — unlock with an existing
+              admin's password before adding another admin
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: Cluster secret manager not wired on this deploy
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+  /admin/clusters/{cid}/admins/{adminUserId}:
+      delete:
+        operationId: removeClusterAdmin
+        summary: Remove a CSK admin from the cluster (v1.12+)
+        description: 'Deletes the wrappedCSK record for the supplied
+          admin user ID. Other admins are unaffected — the cluster''s
+          CSK is unchanged and they keep their wraps. Removing the
+          last admin while the cluster is currently unlocked is
+          allowed: the in-memory CSK still works for the rest of the
+          process lifetime, but a restart leaves no path back. The FE
+          confirms before going through with last-admin removal.'
+        tags:
+        - AdminCluster
+        x-basement-since: '1.12'
+        security:
+        - cookieAuth: []
+        parameters:
+        - name: cid
+          in: path
+          required: true
+          description: Cluster (connection) ID
+          schema:
+            type: string
+        - name: adminUserId
+          in: path
+          required: true
+          description: Admin user ID whose wrappedCSK to delete
+          schema:
+            type: string
+        responses:
+          '204':
+            description: Admin record deleted (or wasn't present)
+          '401':
+            description: No active session or insufficient role
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
+          '503':
+            description: Cluster secret manager not wired on this deploy
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/ErrorResponse'
   /admin/clusters/{cid}/keys/{id}/_arm-delete:
       post:
         operationId: armDeleteKeyByCluster
@@ -3941,6 +4237,74 @@ components:
           message:
             type: string
             description: Human-readable status message.
+      ClusterUnlockRequest:
+        type: object
+        required:
+        - password
+        properties:
+          password:
+            type: string
+            format: password
+            description: The cluster admin password that wraps this
+              caller's WrappedCSK record. Server runs Argon2id over
+              this value (~100ms) and AES-GCM-opens the stored
+              wrapped CSK; on success the plaintext CSK is cached in
+              process memory until Lock or restart. NEVER logged,
+              audited, or echoed in any response.
+      ClusterAddAdminRequest:
+        type: object
+        required:
+        - adminUserId
+        - password
+        properties:
+          adminUserId:
+            type: string
+            description: User ID to associate the new wrappedCSK
+              record with. On bootstrap (no existing admin) this is
+              the first cluster CSK admin; on subsequent calls this
+              admin is added alongside existing admins, each holding
+              their own independently-rotatable wrap of the same CSK.
+          password:
+            type: string
+            format: password
+            description: Password the new admin will type to unlock.
+              Server runs Argon2id over it with a fresh per-admin
+              salt and wraps the in-memory CSK (or freshly-generated
+              CSK on bootstrap) under the derived key. NEVER logged
+              or audited.
+      ClusterLockStatus:
+        type: object
+        required:
+        - unlocked
+        - hasCsk
+        - requiresMigration
+        - admins
+        properties:
+          unlocked:
+            type: boolean
+            description: True when the cluster's CSK is currently in
+              process memory (set by Unlock, cleared by Lock or
+              restart).
+          hasCsk:
+            type: boolean
+            description: True when at least one wrappedCSK record
+              exists for this cluster — i.e. CSK has been bootstrapped
+              at some point. False on a fresh cluster that has never
+              had encryption enabled; the FE offers the setup flow.
+          requiresMigration:
+            type: boolean
+            description: True when the Connection still carries a
+              legacy v1.0.0a JWT-encrypted ConfigEnc with no
+              CSK-encrypted parallel yet. The next successful unlock
+              runs the v1.12.0b lazy migration; the FE renders a
+              "first unlock will migrate" banner when this is true.
+          admins:
+            type: array
+            items:
+              type: string
+            description: Admin user IDs that hold a wrappedCSK for
+              this cluster. Order matches the underlying store's
+              natural order. Empty array (not null) when no admins.
       AggregatedBucketsResponse:
         type: object
         required:

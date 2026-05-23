@@ -31,6 +31,7 @@ type testMockConnectionStore struct {
 	createFunc  func(ctx context.Context, c store.Connection) (store.Connection, error)
 	updateFunc  func(ctx context.Context, id string, patch store.Connection) (store.Connection, error)
 	deleteFunc  func(ctx context.Context, id string) error
+	swapFunc    func(ctx context.Context, cid string, oldEnc, newEnc []byte) error
 }
 
 func (m *testMockConnectionStore) List(ctx context.Context) ([]store.Connection, error) {
@@ -100,6 +101,41 @@ func (m *testMockConnectionStore) Delete(ctx context.Context, id string) error {
 
 func (m *testMockConnectionStore) Count(ctx context.Context) (int, error) {
 	return len(m.conns), nil
+}
+
+// SwapClusterSecret implements the v1.12.0b store.Connections addition.
+// Mirrors the real store's bytes-equal idempotency check so the API
+// migration helper exercises the same control flow under test.
+func (m *testMockConnectionStore) SwapClusterSecret(ctx context.Context, cid string, oldEnc, newEnc []byte) error {
+	if m.swapFunc != nil {
+		return m.swapFunc(ctx, cid, oldEnc, newEnc)
+	}
+	for i := range m.conns {
+		if m.conns[i].ID != cid {
+			continue
+		}
+		if !bytesEqualForTest(m.conns[i].ConfigEncCSK, oldEnc) {
+			return nil
+		}
+		m.conns[i].ConfigEncCSK = append([]byte(nil), newEnc...)
+		return nil
+	}
+	return fmt.Errorf("connection not found: %s", cid)
+}
+
+// bytesEqualForTest mirrors bytes.Equal — duplicated here so the
+// mock doesn't pull a runtime dep into every other test file that
+// happens to compile this package.
+func bytesEqualForTest(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TestListClustersHandler_HappyPath tests GET /admin/clusters with data.

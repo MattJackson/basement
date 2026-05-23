@@ -36,8 +36,10 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -413,51 +415,120 @@ func (s *Server) removeAdminHandler(w http.ResponseWriter, r *http.Request) {
 // ─── migration helpers ──────────────────────────────────────────────
 
 // maybeMigrateLegacyClusterSecret re-encrypts the cluster's
-// JWT-encrypted ConfigEnc (v1.0.0a) under the CSK. Idempotent: when
-// the Connection record already carries no legacy ConfigEnc OR a
-// CSK-encrypted blob has already been recorded, the function is a
-// no-op.
+// JWT-encrypted ConfigEnc (v1.0.0a) under the CSK and persists the
+// result via store.Connections.SwapClusterSecret (v1.12.0b /
+// ADR-0007). Idempotent:
 //
-// v1.12.0a wires the helper here as a stub call site; the actual
-// re-encryption of Connection.ConfigEnc lives behind a store-level
-// hook (internal/store will expose a MigrateConfigEncToCSK method in
-// a follow-up). For now the helper returns (false, nil) so the
-// unlock handler doesn't depend on store-layer plumbing that hasn't
-// landed yet. The audit event is still emitted by the unlock handler
-// when the helper returns migrated=true so the field is properly
-// wired the moment the store-layer hook lands.
+//   - Connection has no legacy ConfigEnc → no-op (nothing to migrate).
+//   - Connection already carries a ConfigEncCSK that matches the
+//     freshly re-encrypted value → no-op via SwapClusterSecret's
+//     bytes-equal guard (a concurrent unlock raced and won).
+//   - Cluster is locked when called → ErrLocked from the manager,
+//     surfaced as an error the caller logs but doesn't fail on.
 //
-// Returns (migrated, error). migrated=true means a re-encryption
-// happened and the unlock handler should audit cluster:csk_migrated.
+// Safety: the legacy ConfigEnc is NEVER mutated. The CSK-encrypted
+// parallel goes into ConfigEncCSK so the JWT-decryptable bridge stays
+// recoverable until a future cycle teaches load() to prefer CSK and
+// schedule the legacy field for purge. On any partial failure
+// (decrypt fails, re-encrypt fails, swap save fails), the on-disk
+// state is unchanged and the next unlock retries the migration with
+// the same legacy ConfigEnc input.
+//
+// Returns (migrated, error). migrated=true means a fresh CSK blob
+// was written to disk AND the audit event cluster:csk_migrated should
+// fire. migrated=false with nil error means the no-op cases above.
 func (s *Server) maybeMigrateLegacyClusterSecret(r *http.Request, cid string) (bool, error) {
-	// The store-layer migration hook lands in a follow-up cycle so
-	// we don't burn the bridge before the new path is verified at
-	// scale. For v1.12.0a the helper is a safe no-op — every
-	// existing Connection keeps its JWT-encrypted ConfigEnc, the
-	// CSK manager is wired and ready, and the unlock flow exercises
-	// the full HTTP surface. The migration code on the store side
-	// already exists in clustersecret.MigrateFromJWTMap; what's
-	// missing is the per-record swap-and-save inside store/connections.go.
-	//
-	// Returning false here keeps the audit log + tests honest until
-	// the store-layer swap lands.
-	_ = r
-	_ = cid
-	return false, nil
+	if s.clusterSecrets == nil {
+		return false, nil
+	}
+	if s.conns == nil {
+		return false, nil
+	}
+
+	conn, err := s.conns.Get(r.Context(), cid)
+	if err != nil {
+		return false, fmt.Errorf("get connection for migration: %w", err)
+	}
+
+	// Nothing on the legacy path → nothing to migrate.
+	if len(conn.ConfigEnc) == 0 {
+		return false, nil
+	}
+
+	jwtSecret := s.cfg.JWT.Secret
+	if len(jwtSecret) == 0 {
+		// Encryption-off mode (tests / dev): can't decrypt the legacy
+		// blob, but also nothing meaningful to migrate. Skip without
+		// surfacing an error.
+		return false, nil
+	}
+
+	// Re-encrypt under the in-memory CSK. MigrateFromJWTMap is a pure
+	// value transform — it decrypts under JWT (validating the JSON
+	// shape) then seals under CSK with a fresh nonce. ErrLocked means
+	// the cluster was relocked between the unlock path's IsUnlocked
+	// check and this call — propagate so the unlock handler logs and
+	// the next unlock retries.
+	newBlob, err := s.clusterSecrets.MigrateFromJWTMap(cid, conn.ConfigEnc, jwtSecret)
+	if err != nil {
+		return false, fmt.Errorf("re-encrypt under CSK: %w", err)
+	}
+	if len(newBlob) == 0 {
+		// Defensive: MigrateFromJWTMap returns nil for an empty input
+		// which we already short-circuited above; treat any other nil
+		// as "no-op, nothing to write."
+		return false, nil
+	}
+
+	// Idempotency: pass the connection's CURRENT ConfigEncCSK as the
+	// expected old-value. First-time migration: empty → match the
+	// freshly-loaded empty field. Second admin races: the store's
+	// bytes-equal guard rejects the stale swap.
+	if err := s.conns.SwapClusterSecret(r.Context(), cid, conn.ConfigEncCSK, newBlob); err != nil {
+		return false, fmt.Errorf("swap cluster secret: %w", err)
+	}
+
+	// SwapClusterSecret no-ops silently when the bytes-equal check
+	// fails (concurrent migration). To distinguish "we migrated" from
+	// "someone else already did" we re-read and compare; on a true
+	// no-op we report migrated=false so the audit log doesn't double-
+	// count the same migration.
+	post, err := s.conns.Get(r.Context(), cid)
+	if err != nil {
+		// Swap succeeded but the post-read failed; report migrated
+		// optimistically so the audit fires. Worst case is one
+		// duplicate audit event on a transient store read failure.
+		return true, nil
+	}
+	if !bytes.Equal(post.ConfigEncCSK, newBlob) {
+		// Another goroutine got there first; their swap won.
+		return false, nil
+	}
+	return true, nil
 }
 
 // clusterRequiresLegacyMigration reports whether the cluster's
-// Connection still carries a legacy JWT-encrypted ConfigEnc that the
-// next unlock will migrate. The /lock-status handler surfaces this so
-// the FE can render a "first unlock will migrate" banner.
+// Connection still carries a legacy JWT-encrypted ConfigEnc with no
+// CSK parallel yet — i.e. the next successful unlock will run the
+// v1.12.0b migration. The /lock-status handler surfaces this so the
+// FE can render a "first unlock will migrate" banner.
 //
-// Same scope-limit as maybeMigrateLegacyClusterSecret — returns false
-// until the store-layer migration hook lands. Once it lands the impl
-// is "len(conn.ConfigEnc) > 0 && cluster has CSK admins".
+// Returns false in the no-conns and no-legacy cases; never errors on
+// a missing cluster (the status handler converts a get-failure into
+// "migration not required" rather than surfacing a stuck banner).
 func (s *Server) clusterRequiresLegacyMigration(r *http.Request, cid string) (bool, error) {
-	_ = r
-	_ = cid
-	return false, nil
+	if s.conns == nil {
+		return false, nil
+	}
+	conn, err := s.conns.Get(r.Context(), cid)
+	if err != nil {
+		return false, err
+	}
+	// Migration is needed when there IS a legacy blob AND there is
+	// no CSK parallel yet. Once ConfigEncCSK is populated the bridge
+	// has been crossed (even if ConfigEnc stays around as a safety
+	// fallback until the future cycle that retires it).
+	return len(conn.ConfigEnc) > 0 && len(conn.ConfigEncCSK) == 0, nil
 }
 
 // requireCapabilityCallerID is a thin wrapper that returns the caller's
