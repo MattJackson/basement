@@ -87,3 +87,34 @@ func (m *mockDriver) GetObjectVersion(_ context.Context, _, _, _ string) (Stream
 func (m *mockDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
 	return ErrUnsupported
 }
+
+// v1.10.0c Object Lock shims — same pattern as the versioning shims
+// above. The driver-package registry tests don't exercise Object Lock
+// directly; these stubs satisfy the interface so the existing tests
+// keep compiling.
+
+func (m *mockDriver) ObjectLockSupport() bool { return false }
+
+func (m *mockDriver) GetObjectLockConfig(_ context.Context, _ string) (*ObjectLockConfig, error) {
+	return nil, ErrUnsupported
+}
+
+func (m *mockDriver) PutObjectLockConfig(_ context.Context, _ string, _ ObjectLockConfig) error {
+	return ErrUnsupported
+}
+
+func (m *mockDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*ObjectLockRetention, error) {
+	return nil, ErrUnsupported
+}
+
+func (m *mockDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ ObjectLockRetention, _ bool) error {
+	return ErrUnsupported
+}
+
+func (m *mockDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, ErrUnsupported
+}
+
+func (m *mockDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return ErrUnsupported
+}

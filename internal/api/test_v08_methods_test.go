@@ -229,3 +229,89 @@ func (m *fanoutDriver) GetObjectVersion(_ context.Context, _, _, _ string) (driv
 func (m *fanoutDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) error {
 	return driver.ErrUnsupported
 }
+
+// v1.10.0c Object Lock shims — default behaviour: report unsupported.
+// Same posture as the versioning shims above. Tests that exercise the
+// Object Lock handlers use the regionMockDriver + testMockDriver pair
+// which have overridable hooks; these shims only exist to keep the
+// rest of the package compiling.
+
+func (m *layoutDriver) ObjectLockSupport() bool { return false }
+func (m *layoutDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *layoutDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (m *layoutDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *layoutDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (m *layoutDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (m *layoutDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
+
+func (m *stubDriver) ObjectLockSupport() bool { return false }
+func (m *stubDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *stubDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (m *stubDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *stubDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (m *stubDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (m *stubDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
+
+func (m *mockDriver) ObjectLockSupport() bool { return false }
+func (m *mockDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *mockDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (m *mockDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *mockDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (m *mockDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (m *mockDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
+
+func (m *fanoutDriver) ObjectLockSupport() bool { return false }
+func (m *fanoutDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *fanoutDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (m *fanoutDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (m *fanoutDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (m *fanoutDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (m *fanoutDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
