@@ -1,0 +1,62 @@
+name: Feature request
+description: Suggest a capability or polish for basement.
+title: "[feat] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are welcome. The clearer you can articulate
+        the operator problem you're trying to solve, the better the
+        chance of landing.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The operator problem
+      description: What are you trying to do? What's the failure mode without this feature?
+      placeholder: |
+        I administer 12 Garage clusters across 3 sites and want to see
+        per-site capacity rollups on /admin/usage. Today I have to
+        eyeball the per-cluster column and add it up.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution (optional)
+      description: |
+        If you have a concrete UI / API / driver-method proposal,
+        sketch it here. Otherwise leave this blank and let the
+        maintainer + community discuss approaches.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or other tools you've used to solve this.
+
+  - type: dropdown
+    id: drivers
+    attributes:
+      label: Backend driver(s) this would touch
+      multiple: true
+      options:
+        - Garage v1
+        - Garage v2
+        - AWS S3
+        - MinIO / OpenMaxIO
+        - Not driver-specific
+        - New driver
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I have searched existing issues + the roadmap in README.md.
+          required: true
+        - label: I have read CONTRIBUTING.md and am open to discussing scope.
+          required: true
