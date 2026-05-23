@@ -47,7 +47,13 @@ func (s *Server) listBucketsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, buckets)
 }
 
-// getBucketHandler handles GET /admin/buckets/{id}.
+// getBucketHandler handles GET /admin/clusters/{cid}/buckets/{id}.
+//
+// v1.11.0.2: routes through s.reg.For(ctx, cid) per-cluster driver
+// instead of the global s.drv default. Earlier handlers ignored {cid}
+// and silently operated on whichever cluster s.drv pointed at, which
+// in multi-cluster deployments meant every per-cluster route landed on
+// the same one. Caught by Garage v2 hands-on testing.
 func (s *Server) getBucketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -60,7 +66,13 @@ func (s *Server) getBucketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bucket, err := s.drv.GetBucket(r.Context(), id)
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
+	bucket, err := drv.GetBucket(r.Context(), id)
 	if err != nil {
 		writeDriverError(w, "GetBucket", err)
 		return
@@ -68,6 +80,24 @@ func (s *Server) getBucketHandler(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, bucket)
 }
+
+// driverForRouteCluster resolves the per-cluster driver from the route's
+// {cid} URL param. cid is REQUIRED — no "default cluster" fallback. Per
+// v1.11.0.2: the old handlers used s.drv (global default) regardless of
+// {cid}, which silently routed every per-cluster API call to whichever
+// cluster s.drv pointed at. Operator-confirmed posture: cid required or
+// the request is malformed.
+func (s *Server) driverForRouteCluster(r *http.Request) (driver.Driver, error) {
+	cid := chi.URLParam(r, "cid")
+	if cid == "" {
+		return nil, errMissingClusterID
+	}
+	return s.reg.For(r.Context(), cid)
+}
+
+// errMissingClusterID surfaces as 400 CLUSTER_ID_REQUIRED via
+// writeRegistryForError. Internal sentinel; not exported.
+var errMissingClusterID = errors.New("cluster id required")
 
 // createBucketHandler handles POST /admin/clusters/{cid}/buckets.
 //
@@ -103,7 +133,13 @@ func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existing, listErr := s.drv.ListBuckets(r.Context()); listErr == nil {
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
+	if existing, listErr := drv.ListBuckets(r.Context()); listErr == nil {
 		if ve := requireUniqueName("alias", spec.Alias, existing, func(b driver.Bucket) []string {
 			return b.Aliases
 		}); ve != nil {
@@ -112,7 +148,7 @@ func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	bucket, err := s.drv.CreateBucket(r.Context(), spec)
+	bucket, err := drv.CreateBucket(r.Context(), spec)
 	if err != nil {
 		s.auditFailure(r, "bucket:create", resourceBucket(chi.URLParam(r, "cid"), spec.Alias), err)
 		writeDriverError(w, "CreateBucket", err)
@@ -155,7 +191,13 @@ func (s *Server) updateBucketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bucket, err := s.drv.UpdateBucket(r.Context(), id, update)
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
+	bucket, err := drv.UpdateBucket(r.Context(), id, update)
 	if err != nil {
 		s.auditFailure(r, "bucket:edit_alias", resourceBucket(chi.URLParam(r, "cid"), id), err)
 		writeDriverError(w, "UpdateBucket", err)
@@ -195,7 +237,12 @@ func (s *Server) armDeleteBucketHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Confirm the bucket exists before issuing a token. Avoids handing
 	// out tokens for nonexistent IDs and surfaces 404 cleanly.
-	if _, err := s.drv.GetBucket(r.Context(), id); err != nil {
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+	if _, err := drv.GetBucket(r.Context(), id); err != nil {
 		writeDriverError(w, "GetBucket", err)
 		return
 	}
@@ -265,7 +312,12 @@ func (s *Server) deleteBucketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.drv.DeleteBucket(r.Context(), id); err != nil {
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+	if err := drv.DeleteBucket(r.Context(), id); err != nil {
 		s.auditFailure(r, "bucket:delete", resourceBucket(cid, id), err)
 		writeDriverError(w, "DeleteBucket", err)
 		return
