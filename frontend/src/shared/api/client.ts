@@ -2,6 +2,7 @@ import createClient from "openapi-fetch";
 import type { paths } from "./types.gen";
 import { observeResponse } from "./buildWatcher";
 import { promptElevationFromAnywhere } from "@/shared/auth/elevation";
+import { promptUnlockFromAnywhere } from "@/shared/auth/clusterUnlock";
 import type { AuthMode } from "@/shared/auth/mode";
 
 export const client = createClient<paths>({
@@ -54,6 +55,33 @@ client.use({
     } catch {
       // Ignore body-parse failures — they imply a non-JSON 403
       // (unlikely for our backend) and there's nothing useful to do.
+    }
+  },
+});
+
+// v1.12.0a (ADR-0007): detect 423 LOCKED at the wire level and open
+// the cluster-unlock modal eagerly. Safety net for code paths that
+// haven't wrapped themselves in useClusterUnlockGuard — the caller
+// still sees the original 423 error and decides whether to retry,
+// but the operator is shown the password prompt instead of a silent
+// failure.
+client.use({
+  async onResponse({ response }) {
+    if (response.status !== 423) return;
+    try {
+      const cloned = response.clone();
+      const body = (await cloned.json().catch(() => null)) as
+        | { error?: { code?: string; details?: { cluster_id?: string } } }
+        | null;
+      if (body?.error?.code !== "LOCKED") return;
+      const cid = body.error.details?.cluster_id;
+      if (!cid) return;
+      // Fire-and-forget: a failure here (no provider mounted, or
+      // user cancelled) is already conveyed as the original 423 to
+      // the caller.
+      promptUnlockFromAnywhere(cid).catch(() => {});
+    } catch {
+      // Non-JSON 423 (unexpected from this backend) — nothing to do.
     }
   },
 });

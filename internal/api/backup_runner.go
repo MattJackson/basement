@@ -82,6 +82,32 @@ func (s *Server) runBackupOnce(ctx context.Context, b backup.Backup) backup.Back
 		return result
 	}
 
+	// v1.12.0a (ADR-0007): if either side's Connection uses a CSK
+	// for its stored secrets and the cluster is currently locked,
+	// skip the run rather than fail it. The scheduler will fire
+	// again on the next interval; an admin unlock between now and
+	// then lets the next run succeed without manual intervention
+	// ("auto-resume on unlock" per the ADR).
+	//
+	// In v1.12.0a no Connection has been migrated to CSK yet (the
+	// store-layer hook lands in a follow-up cycle), so this branch
+	// is a no-op in practice. Wiring it now keeps the runner correct
+	// the moment the migration completes for any single cluster.
+	if s.clusterSecrets != nil {
+		for _, cid := range []string{srcConn, dstConn} {
+			if !s.clusterSecrets.IsUnlocked(cid) {
+				hasCSK, _ := s.clusterSecrets.HasAdmins(cid)
+				if hasCSK {
+					result.CompletedAt = time.Now().UTC()
+					result.Errors = []string{fmt.Sprintf("cluster %s is locked — skipped; will retry on next scheduled run", cid)}
+					s.logger.Info("backup: skipping locked cluster",
+						"backupId", b.ID, "clusterId", cid)
+					return result
+				}
+			}
+		}
+	}
+
 	srcDrv, err := s.reg.For(ctx, srcConn)
 	if err != nil {
 		result.CompletedAt = time.Now().UTC()

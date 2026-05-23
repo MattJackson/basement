@@ -28,9 +28,15 @@ import {
   useAssignRole,
   useUnassignRole,
   usePolicies,
+  useClusterLockStatus,
+  useLockCluster,
+  useAddClusterAdmin,
+  useRemoveClusterAdmin,
   type ClusterAdminAssignment,
   type PolicyRole,
 } from "@/shared/api/queries";
+import { LockBadge } from "@/shared/ui/LockBadge";
+import { useClusterUnlockPrompt } from "@/shared/auth/clusterUnlock";
 import { client } from "@/shared/api/client";
 import { useDeleteCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
@@ -51,6 +57,7 @@ function ClusterDetailScreen() {
   const { data: capabilities } = useCapabilities();
   const { data: buckets, isLoading: bucketsLoading } = useClusterBuckets(cid);
   const { data: keys, isLoading: keysLoading } = useClusterKeys(cid);
+  const { data: lockStatus } = useClusterLockStatus(cid);
   const deleteCluster = useDeleteCluster();
   // ADR-0003 v1.2.0b: cluster:delete is ELEVATED-min — wrap the
   // click handler so a 403 ELEVATION_REQUIRED triggers the password
@@ -119,6 +126,13 @@ function ClusterDetailScreen() {
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{cluster.label}</h1>
           <DriverBadge driver={cluster.driver} />
           <HealthPill status={status} message={testResult?.message} />
+          {lockStatus ? (
+            <LockBadge
+              unlocked={lockStatus.unlocked}
+              hasCsk={lockStatus.hasCsk}
+              requiresMigration={lockStatus.requiresMigration}
+            />
+          ) : null}
           <div className="flex-1" />
           <Button
             variant="outline"
@@ -193,6 +207,12 @@ function ClusterDetailScreen() {
           because "who runs this cluster" is the operator's first
           question when they hit a cluster detail page. v1.3.0e. */}
       <ClusterAdminsSection cid={cid} />
+
+      {/* v1.12.0a (ADR-0007) — per-cluster envelope encryption.
+          Lives next to the persona-level admin list because the
+          two questions ("who runs this cluster" + "who can unlock
+          its secrets") are operationally adjacent. */}
+      <ClusterEncryptionSection cid={cid} clusterLabel={cluster.label} />
 
       {/* Buckets section — admin-grade columns */}
       <section className="space-y-3">
@@ -914,6 +934,274 @@ function AddClusterAdminDialog({
         </Button>
         <Button onClick={handleAssign} disabled={assign.isPending}>
           {assign.isPending ? "Assigning…" : "Assign"}
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  );
+}
+
+// ─── v1.12.0a (ADR-0007) ─────────────────────────────────────────────
+// ClusterEncryptionSection: per-cluster envelope encryption pane.
+// Three states:
+//   1. No CSK yet → "Enable encryption" CTA opens the bootstrap dialog.
+//   2. CSK + unlocked → list admins, "Add admin" / "Remove" actions,
+//      "Lock cluster" button.
+//   3. CSK + locked → "Unlock cluster" button (opens the unlock modal).
+function ClusterEncryptionSection({
+  cid,
+  clusterLabel,
+}: {
+  cid: string;
+  clusterLabel: string;
+}) {
+  const { data: status, isLoading } = useClusterLockStatus(cid);
+  const promptUnlock = useClusterUnlockPrompt();
+  const lock = useLockCluster(cid);
+  const addAdmin = useAddClusterAdmin(cid);
+  const removeAdmin = useRemoveClusterAdmin(cid);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [bootstrapOpen, setBootstrapOpen] = useState(false);
+
+  if (isLoading || !status) {
+    return (
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Envelope encryption</h2>
+        <Skeleton className="h-20 w-full rounded-lg" />
+      </section>
+    );
+  }
+
+  const handleLock = () => {
+    lock.mutate(undefined, {
+      onSuccess: () => toast.success("Cluster locked"),
+      onError: (e) => toast.error(e.message || "Lock failed"),
+    });
+  };
+
+  const handleUnlock = () => {
+    promptUnlock(cid, clusterLabel).catch(() => {
+      // User cancelled — modal closes, no toast needed.
+    });
+  };
+
+  const handleRemove = (adminUserId: string) => {
+    const ok = window.confirm(
+      `Remove ${adminUserId} from the cluster admins? Other admins still hold their own wrapped CSK; ${adminUserId} just loses the ability to unlock.`,
+    );
+    if (!ok) return;
+    removeAdmin.mutate(
+      { adminUserId },
+      {
+        onSuccess: () => toast.success(`Removed ${adminUserId}`),
+        onError: (e) => toast.error(e.message || "Remove failed"),
+      },
+    );
+  };
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">Envelope encryption</h2>
+        <span className="text-xs text-muted-foreground">ADR-0007</span>
+      </div>
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          {!status.hasCsk ? (
+            <div className="space-y-3">
+              <p className="text-sm">
+                This cluster has no CSK admin yet. Stored secrets are protected by
+                the deployment-wide JWT key only. Enable per-cluster envelope
+                encryption to wrap secrets under a CSK that only the admin
+                password can unlock.
+              </p>
+              <Button size="sm" onClick={() => setBootstrapOpen(true)}>
+                Enable encryption
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-muted-foreground">Status:</span>
+                {status.unlocked ? (
+                  <span className="text-green-700">Unlocked — secrets accessible</span>
+                ) : (
+                  <span className="text-red-700">Locked — mutations needing secrets will prompt for password</span>
+                )}
+              </div>
+
+              {status.requiresMigration ? (
+                <p className="text-xs rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
+                  Legacy JWT-encrypted secret will migrate to CSK on next unlock.
+                </p>
+              ) : null}
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">
+                  Admins ({status.admins.length})
+                </div>
+                <ul className="space-y-1">
+                  {status.admins.map((u) => (
+                    <li key={u} className="flex items-center justify-between text-sm">
+                      <span className="font-mono">{u}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRemove(u)}
+                        disabled={removeAdmin.isPending}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                {status.unlocked ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={handleLock} disabled={lock.isPending}>
+                      {lock.isPending ? "Locking…" : "Lock cluster"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+                      Add admin
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="sm" onClick={handleUnlock}>
+                    Unlock cluster
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <AddAdminDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onSubmit={(adminUserId, password) =>
+          addAdmin.mutate(
+            { adminUserId, password },
+            {
+              onSuccess: () => {
+                toast.success(`Added ${adminUserId}`);
+                setAddOpen(false);
+              },
+              onError: (e) => toast.error(e.message || "Add admin failed"),
+            },
+          )
+        }
+        pending={addAdmin.isPending}
+        title="Add cluster admin"
+        description="Wrap the cluster's CSK under a new admin's password. The new admin can then unlock the cluster with their own password."
+      />
+
+      <AddAdminDialog
+        open={bootstrapOpen}
+        onClose={() => setBootstrapOpen(false)}
+        onSubmit={(adminUserId, password) =>
+          addAdmin.mutate(
+            { adminUserId, password },
+            {
+              onSuccess: () => {
+                toast.success("Envelope encryption enabled");
+                setBootstrapOpen(false);
+              },
+              onError: (e) => toast.error(e.message || "Enable failed"),
+            },
+          )
+        }
+        pending={addAdmin.isPending}
+        title="Enable envelope encryption"
+        description="Choose the first cluster admin user ID and a password. The password derives an Argon2id wrapping key that protects the cluster's secrets at rest."
+      />
+    </section>
+  );
+}
+
+function AddAdminDialog({
+  open,
+  onClose,
+  onSubmit,
+  pending,
+  title,
+  description,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: (adminUserId: string, password: string) => void;
+  pending: boolean;
+  title: string;
+  description: string;
+}) {
+  const [adminUserId, setAdminUserId] = useState("");
+  const [password, setPassword] = useState("");
+  // Reset-on-close via render-time check rather than an effect — the
+  // react-hooks/set-state-in-effect rule rejects state writes inside
+  // useEffect for "synchronise external systems" use cases like this.
+  // Mirrors the pattern in shared/ui/DeleteClusterConfirm.tsx.
+  const [openKey, setOpenKey] = useState<boolean>(false);
+  if (open && !openKey) {
+    setOpenKey(true);
+  }
+  if (!open && openKey) {
+    setOpenKey(false);
+    if (adminUserId !== "") setAdminUserId("");
+    if (password !== "") setPassword("");
+  }
+
+  const submit = () => {
+    if (!adminUserId || !password) return;
+    onSubmit(adminUserId, password);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogHeader>
+        <DialogTitle>{title}</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-3 pt-2">
+        <p className="text-sm text-muted-foreground">{description}</p>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">
+            Admin user ID
+          </label>
+          <Input
+            autoFocus
+            value={adminUserId}
+            onChange={(e) => setAdminUserId(e.target.value)}
+            placeholder="matthew"
+            data-testid="add-admin-userid"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">
+            Password
+          </label>
+          <Input
+            type="password"
+            autoComplete="off"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Cluster admin password"
+            data-testid="add-admin-password"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+        </div>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose} disabled={pending}>
+          Cancel
+        </Button>
+        <Button onClick={submit} disabled={pending || !adminUserId || !password}>
+          {pending ? "Saving…" : "Save"}
         </Button>
       </DialogFooter>
     </Dialog>
