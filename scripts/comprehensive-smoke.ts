@@ -1082,6 +1082,148 @@ async function main(): Promise<number> {
       }
     });
 
+    // ============================================================
+    // I. Extended detail-page coverage (more screenshots, more states)
+    // ============================================================
+    section("[I] extended detail-page screenshots");
+
+    // /admin/clusters/{cid} subpaths in detail for both viewports.
+    if (realClusterId) {
+      const subpaths = ["", "/edit", "/layout", "/scrub"];
+      for (const sp of subpaths) {
+        await check(`[I] /admin/clusters/{cid}${sp} (desktop+mobile dedicated)`, async () => {
+          await elevateToAdmin(desktop!).catch(() => {});
+          await elevateToAdmin(mobile!).catch(() => {});
+          const url = `${BASE_URL}/admin/clusters/${realClusterId}${sp}`;
+          await desktop!.goto(url, { waitUntil: "networkidle" });
+          await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+          await shotDesktop(desktop!, `I-cluster-detail${sp.replace(/\//g, "-")}`);
+          await mobile!.goto(url, { waitUntil: "networkidle" });
+          await mobile!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+          await shotMobile(mobile!, `I-cluster-detail${sp.replace(/\//g, "-")}`);
+        });
+      }
+    }
+
+    // Bucket detail page (admin side) + lifecycle subpage if it exists.
+    if (realClusterId) {
+      await check("[I] /admin/clusters/{cid}/buckets/{bid} discovery + screenshot", async () => {
+        await elevateToAdmin(desktop!).catch(() => {});
+        const r = await desktop!.request.get(`${BASE_URL}/api/v1/admin/clusters/${realClusterId}/buckets`);
+        if (!r.ok()) {
+          warnLine(`  admin buckets list → ${r.status()}; skipping bucket detail`);
+          return;
+        }
+        const buckets = await r.json();
+        if (!Array.isArray(buckets) || buckets.length === 0) {
+          warnLine("  no buckets in admin cluster; skipping bucket detail");
+          return;
+        }
+        const bid = buckets[0].id;
+        await desktop!.goto(`${BASE_URL}/admin/clusters/${realClusterId}/buckets/${bid}`, {
+          waitUntil: "networkidle",
+        });
+        await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotDesktop(desktop!, "I-admin-bucket-detail");
+        await mobile!.goto(`${BASE_URL}/admin/clusters/${realClusterId}/buckets/${bid}`, {
+          waitUntil: "networkidle",
+        });
+        await mobile!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotMobile(mobile!, "I-admin-bucket-detail");
+
+        // Lifecycle new sub-route (v1.x lifecycle UI).
+        await desktop!.goto(
+          `${BASE_URL}/admin/clusters/${realClusterId}/buckets/${bid}/lifecycle/new`,
+          { waitUntil: "networkidle" },
+        );
+        await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotDesktop(desktop!, "I-admin-bucket-lifecycle-new");
+      });
+
+      await check("[I] /admin/clusters/{cid}/keys/{kid} discovery + screenshot", async () => {
+        await elevateToAdmin(desktop!).catch(() => {});
+        const r = await desktop!.request.get(`${BASE_URL}/api/v1/admin/clusters/${realClusterId}/keys`);
+        if (!r.ok()) {
+          warnLine(`  admin keys list → ${r.status()}; skipping key detail`);
+          return;
+        }
+        const keys = await r.json();
+        if (!Array.isArray(keys) || keys.length === 0) {
+          warnLine("  no keys in admin cluster; skipping key detail");
+          return;
+        }
+        const kid = keys[0].id;
+        await desktop!.goto(`${BASE_URL}/admin/clusters/${realClusterId}/keys/${kid}`, {
+          waitUntil: "networkidle",
+        });
+        await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotDesktop(desktop!, "I-admin-key-detail");
+        await mobile!.goto(`${BASE_URL}/admin/clusters/${realClusterId}/keys/${kid}`, {
+          waitUntil: "networkidle",
+        });
+        await mobile!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotMobile(mobile!, "I-admin-key-detail");
+      });
+    }
+
+    // Object browser at different prefix depths.
+    if (realRegionId && realBucketId) {
+      const prefixes = ["", "?prefix=test%2F", "?prefix=nope%2F"];
+      for (const qs of prefixes) {
+        await check(`[I] object browser ${qs || "<root>"}`, async () => {
+          const u = `${BASE_URL}/files/${realRegionId}/b/${realBucketId}${qs}`;
+          await desktop!.goto(u, { waitUntil: "networkidle" });
+          await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+          const safeName = qs.replace(/[^a-z0-9]/gi, "_") || "root";
+          await shotDesktop(desktop!, `I-object-browser-${safeName}`);
+          await mobile!.goto(u, { waitUntil: "networkidle" });
+          await mobile!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+          await shotMobile(mobile!, `I-object-browser-${safeName}`);
+        });
+      }
+    }
+
+    // Region-detail page (under /files/{regionId}/) — the user-side
+    // bucket list for one region.
+    if (realRegionId) {
+      await check("[I] /files/{regionId} bucket list (desktop + mobile)", async () => {
+        await desktop!.goto(`${BASE_URL}/files/${realRegionId}`, { waitUntil: "networkidle" });
+        await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotDesktop(desktop!, "I-files-region");
+        await mobile!.goto(`${BASE_URL}/files/${realRegionId}`, { waitUntil: "networkidle" });
+        await mobile!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotMobile(mobile!, "I-files-region");
+      });
+    }
+
+    // User shell pages — full screenshot of each at both viewports
+    // explicitly, even though [A]/[E] already captured them. This
+    // gives the operator a denser "what each page looked like THIS
+    // deploy" reference grid.
+    const denseUserPages = [
+      { p: "/files", k: "files" },
+      { p: "/files/keys", k: "files-keys" },
+      { p: "/files/keys/new", k: "files-keys-new" },
+      { p: "/files/shares", k: "files-shares" },
+      { p: "/files/syncs", k: "files-syncs" },
+      { p: "/files/backups", k: "files-backups" },
+      { p: "/files/backups/new", k: "files-backups-new" },
+      { p: "/files/federated-buckets", k: "files-federated" },
+      { p: "/files/federated-buckets/new", k: "files-federated-new" },
+      { p: "/files/webhooks", k: "files-webhooks" },
+      { p: "/files/webhooks/new", k: "files-webhooks-new" },
+    ];
+    for (const u of denseUserPages) {
+      await check(`[I] dense capture ${u.p}`, async () => {
+        await desktop!.goto(`${BASE_URL}${u.p}`, { waitUntil: "networkidle" });
+        await desktop!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotDesktop(desktop!, `I-dense-${u.k}`);
+        await mobile!.goto(`${BASE_URL}${u.p}`, { waitUntil: "networkidle" });
+        await mobile!.waitForSelector("h1, body", { timeout: 10_000 }).catch(() => {});
+        await shotMobile(mobile!, `I-dense-${u.k}`);
+      });
+    }
+
     // Touch-target heuristic (also belongs to [E] mobile section).
     section("[E] mobile touch-target audit");
     await check("[E] mobile /files: touch targets >= 44px tall (heuristic)", async () => {
