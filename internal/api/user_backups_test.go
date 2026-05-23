@@ -525,6 +525,145 @@ func TestSnapshotsList_UserRegionDestination_FallsBackToRegionDriver(t *testing.
 	}
 }
 
+// TestSnapshotsList_UserRegionPreferredOverAdminBridge covers the
+// v1.11.0.18 priority-inversion fix. The v1.11.0.6 helper preferred
+// the admin-bridge driver whenever the destination endpoint matched
+// a registered Connection, and fell back to the UserRegion driver
+// only when the admin-bridge resolution errored. That logic broke
+// against Garage v2: admin Connections are admin-tier only (ADR-
+// 0001 strips per-user S3 creds), so the admin driver's
+// s3Client==nil and ListObjects returns ErrUnsupported even though
+// the connection itself resolved fine. Live repro on basement.pq.io
+// at v1.11.0.15:
+//
+//	GET /api/v1/user/backups/{id}/snapshots → 500
+//	  "driver(garage).ListObjects: S3 endpoint not configured ..."
+//
+// The fix: when dstRegionID resolves to a UserRegion owned by the
+// caller, always use the UserRegion path. The user's own S3 key is
+// the right credential for data-plane snapshot enumeration anyway —
+// the backup runner wrote those snapshot prefixes with that same
+// key. Admin-bridge path stays as a back-compat branch for legacy
+// callers passing a Connection.ID directly.
+//
+// Test strategy: register BOTH (a) a Connection mapped to a driver
+// that would 500 on ListObjects (mirrors the broken admin-tier
+// shape), and (b) a UserRegion at the same endpoint backed by a
+// driver that returns the empty list cleanly. With the v1.11.0.6
+// ordering, the test 500s on the conn driver; with v1.11.0.18, the
+// region driver runs and we get 200 []. The conn driver is wired
+// via SetRegionDriverBuilder NOT being called — instead we register
+// a real driver factory that explodes when ListObjects is invoked.
+func TestSnapshotsList_UserRegionPreferredOverAdminBridge(t *testing.T) {
+	const explodingDriver = "test-exploding-admin"
+	driver.Register(explodingDriver, func(_ driver.Config) (driver.Driver, error) {
+		// Per-call driver: ListObjects always returns ErrUnsupported
+		// to mirror the Garage v2 admin-tier failure mode that the
+		// previous v1.11.0.6 ordering surfaced as a 500.
+		d := &testMockDriver{}
+		d.listObjectsFunc = func(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
+			return driver.ObjectPage{}, &driver.Error{
+				Op:      "ListObjects",
+				Driver:  explodingDriver,
+				Err:     driver.ErrUnsupported,
+				Message: "S3 endpoint not configured — set s3_endpoint in connection config",
+			}
+		}
+		return d, nil
+	})
+
+	dataDir := t.TempDir()
+	cfg := newTestConfig()
+	cfg.DataDir = dataDir
+	st, err := store.Open(dataDir, 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	if err := st.WireUserRegions(cfg.JWT.Secret); err != nil {
+		t.Fatalf("WireUserRegions: %v", err)
+	}
+
+	// regionMock is the UserRegion driver — succeeds cleanly with []
+	// of object prefixes. With the v1.11.0.18 priority order, this
+	// is the driver snapshotListingDriver should hand back.
+	regionMock := &testMockDriver{}
+	regionMock.listObjectsFunc = func(_ context.Context, _, _, _, _ string, _ int) (driver.ObjectPage, error) {
+		return driver.ObjectPage{}, nil
+	}
+
+	// Pre-seed a Connection at the same endpoint as the UserRegion.
+	// The resolveBackupConn alias path (region → connection ID via
+	// endpoint match) would resolve to this Connection under the old
+	// ordering, then fail downstream on ListObjects. Under the new
+	// ordering, this Connection should never be touched.
+	conns := &testMockConnectionStore{
+		conns: []store.Connection{
+			{
+				ID:     "explode-conn",
+				Label:  "garage-admin-only",
+				Driver: explodingDriver,
+				Config: map[string]string{
+					"admin_url":   "https://admin.example.com",
+					"admin_token": "tok",
+				},
+			},
+		},
+	}
+	reg := driver.NewRegistry(conns)
+	reg.SetUserRegionsStore(st.UserRegions())
+	reg.SetRegionDriverBuilder(func(_, _, _, _, _ string) (driver.Driver, error) {
+		return regionMock, nil
+	})
+
+	srv := New(cfg, st, conns, nil, reg)
+	bs, _ := backup.NewFileStore(dataDir)
+	sched := backup.NewScheduler(bs, backup.RunnerFunc(func(_ context.Context, _ backup.Backup) backup.BackupResult {
+		return backup.BackupResult{Success: true}
+	}), nil)
+	srv.SetBackups(bs, sched)
+	t.Cleanup(func() {
+		sched.Stop()
+		os.RemoveAll(dataDir)
+	})
+
+	ur := st.UserRegions()
+	region, err := ur.Create(context.Background(), store.UserRegion{
+		UserID:       "matthew",
+		Alias:        "dst",
+		Endpoint:     "https://s3.example.com",
+		AccessKeyID:  "AK",
+		SecretKeyEnc: []byte("SK"),
+	})
+	if err != nil {
+		t.Fatalf("UserRegions.Create: %v", err)
+	}
+
+	created, err := bs.Create(context.Background(), backup.Backup{
+		OwnerUserID: "matthew",
+		Name:        "ordering-regression",
+		Schedule:    backup.ScheduleManual,
+		Mode:        backup.BackupModeSnapshot,
+		DstRegionID: region.ID,
+		DstBucket:   "dst-bucket",
+		Retention:   backup.DefaultRetention(),
+	})
+	if err != nil {
+		t.Fatalf("backup.Create: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/user/backups/"+created.ID+"/snapshots", nil)
+	req.AddCookie(userCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 (UserRegion driver preferred), got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if body != "[]\n" && body != "[]" {
+		t.Fatalf("expected empty array (region driver returned no prefixes), got %q", body)
+	}
+}
+
 // TestSnapshotsList_MirrorReturnsEmpty: a mirror-mode backup never
 // has snapshots — the endpoint short-circuits to [] without dialling
 // the destination driver. Important: lets the detail page poll the

@@ -514,63 +514,63 @@ func (s *Server) userListBackupSnapshotsHandler(w http.ResponseWriter, r *http.R
 // snapshotListingDriver resolves a backup destination to a driver
 // usable for the S3-only snapshot-listing operations (ListObjects to
 // enumerate timestamp prefixes; ListObjects again per prefix to count
-// objects/bytes). Two paths:
+// objects/bytes). Priority order:
 //
-//  1. Admin bridge available — the destination is registered as an
-//     admin Connection (matched by canonical endpoint), so we hand
-//     back the admin-tier driver instance the way every other
-//     backup-runner code path does.
-//  2. UserRegion destination, no admin bridge — fall back to building
-//     a region-scoped driver directly from the UserRegion's stored
-//     S3 credentials. The snapshot listing is pure data-plane (S3
-//     ListObjects), so the user's own key suffices; we don't need
-//     admin endpoints to enumerate the snapshot prefixes that the
-//     backup runner itself wrote with that same key.
+//  1. UserRegion path — when dstRegionID is a UserRegion ID owned by
+//     ownerUserID, build a region-scoped driver directly from the
+//     stored S3 credentials. Snapshot listing is pure data-plane (S3
+//     ListObjects against the destination bucket's snapshot-prefix
+//     tree), so the user's own key — the same key the backup runner
+//     wrote those prefixes with — is exactly the right credential.
+//     Critically, this is the only path that works against Garage v2
+//     admin Connections: those Connections are admin-tier only (ADR-
+//     0001 strips per-user S3 creds), so their driver instance has
+//     s3Client==nil and ListObjects returns ErrUnsupported. The
+//     UserRegion's stored S3 key bypasses that gap.
+//  2. Admin-bridge fallback — when dstRegionID isn't a UserRegion
+//     owned by this user (legacy callers that pass a Connection.ID
+//     directly), resolve it as a Connection and use the admin-tier
+//     driver. This path is preserved for back-compat but is the
+//     less-preferred branch for the ADR-0002 user-tier model.
 //
 // Centralised so the helper can also be reused by restore + future
-// snapshot-driven readers without re-implementing the fallback chain.
-// Added in v1.11.0.6 to close BUG05.
+// snapshot-driven readers without re-implementing the resolution.
+// v1.11.0.6 added the helper to close BUG05; v1.11.0.18 inverted the
+// priority order to also handle the v1.11.0.15-deploy case where a
+// UserRegion's endpoint matches a registered admin Connection — the
+// previous "admin-bridge first" preference picked the admin driver,
+// which doesn't speak S3 on Garage v2 admin-only connections.
 func (s *Server) snapshotListingDriver(ctx context.Context, ownerUserID, dstRegionID string) (driver.Driver, error) {
-	// Try the admin-bridge path first — when an admin Connection is
-	// registered at the destination's endpoint, that's strictly more
-	// capable than the user's region key (covers cross-bucket reads,
-	// future admin-only metadata, etc.) so we prefer it.
-	dstConn, err := s.resolveBackupConn(ctx, ownerUserID, dstRegionID)
-	if err == nil {
-		drv, derr := s.reg.For(ctx, dstConn)
-		if derr == nil {
+	// 1. UserRegion path — try this first. The user's own S3 key is
+	// always the right credential for data-plane snapshot enumeration
+	// (the backup runner wrote those prefixes with this same key), and
+	// it sidesteps the Garage v2 admin-tier limitation entirely.
+	regions := s.regionsStore()
+	if regions != nil {
+		region, err := regions.Get(ctx, dstRegionID)
+		if err == nil && region.UserID == ownerUserID {
+			secret, derr := regions.Decrypt(region)
+			if derr != nil {
+				return nil, fmt.Errorf("decrypt region key: %w", derr)
+			}
+			drv, derr := s.reg.ForUserRegion(ctx, region.Endpoint, region.AccessKeyID, secret, region.Region, region.AddressingStyle)
+			if derr != nil {
+				return nil, fmt.Errorf("build region driver: %w", derr)
+			}
 			return drv, nil
 		}
-		// Connection lookup failed — fall through to the UserRegion
-		// path. The lookup error is informational only; the user-
-		// region fallback either succeeds with its own driver or
-		// surfaces its own (more actionable) error.
 	}
 
-	// Admin-bridge path failed — try the UserRegion path. dstRegionID
-	// may BE a UserRegion ID (the ADR-0002 user-tier case the smoke
-	// caught); look it up against the caller's keychain and build a
-	// region-scoped driver. The store's ownership check (region.UserID
-	// == ownerUserID) closes the cross-tenant leak.
-	regions := s.regionsStore()
-	if regions == nil {
-		return nil, errors.New("region keychain store is not wired")
-	}
-	region, err := regions.Get(ctx, dstRegionID)
-	if err != nil || region.UserID != ownerUserID {
-		// Match the wire-error style of the admin-bridge path so the
-		// caller sees a consistent INTERNAL_ERROR / 500 message rather
-		// than a leak that distinguishes "not yours" from "doesn't
-		// exist".
-		return nil, fmt.Errorf("backup destination %q not resolvable (admin bridge unavailable and not a known user region)", dstRegionID)
-	}
-	secret, err := regions.Decrypt(region)
+	// 2. Admin-bridge fallback — dstRegionID isn't a UserRegion we
+	// own, so treat it as a Connection identifier (or a legacy alias
+	// that resolveBackupConn can translate).
+	dstConn, err := s.resolveBackupConn(ctx, ownerUserID, dstRegionID)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt region key: %w", err)
+		return nil, fmt.Errorf("backup destination %q not resolvable (not a user region and %w)", dstRegionID, err)
 	}
-	drv, err := s.reg.ForUserRegion(ctx, region.Endpoint, region.AccessKeyID, secret, region.Region, region.AddressingStyle)
+	drv, err := s.reg.For(ctx, dstConn)
 	if err != nil {
-		return nil, fmt.Errorf("build region driver: %w", err)
+		return nil, fmt.Errorf("build connection driver: %w", err)
 	}
 	return drv, nil
 }
