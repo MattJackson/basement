@@ -29,8 +29,12 @@ function checkBuild(res: Response): void {
   if (mismatched) return;
   const serverBuild = res.headers.get("x-build");
   if (!serverBuild || SKIP_VALUES.has(serverBuild)) return;
-  if (SKIP_VALUES.has(__BUILD_COMMIT__)) return;
-  if (serverBuild === __BUILD_COMMIT__) return;
+  
+  // Use globalThis for test compatibility
+  const clientBuild = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : (globalThis as any).__BUILD_COMMIT__;
+  if (SKIP_VALUES.has(clientBuild)) return;
+  if (serverBuild === clientBuild) return;
+  
   mismatched = true;
   for (const l of listeners) l(true);
 }
@@ -78,7 +82,8 @@ export function subscribe(fn: (m: boolean) => void): () => void {
 }
 
 export function getBuildCommit(): string {
-  return __BUILD_COMMIT__;
+  // Use globalThis for test compatibility
+  return typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : ((globalThis as any).__BUILD_COMMIT__ || "");
 }
 
 // Exposed for tests
