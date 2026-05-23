@@ -30,6 +30,7 @@ import { UploadDialog } from "@/components/upload/UploadDialog";
 import { VersioningSection } from "@/shared/ui/VersioningSection";
 import { ObjectVersionsPanel } from "@/shared/ui/ObjectVersionsPanel";
 import { ObjectLockSection } from "@/shared/ui/ObjectLockSection";
+import { EncryptionSection } from "@/shared/ui/EncryptionSection";
 
 // Object browser for buckets reached via a UserRegion (ADR-0002, v1.1.0c).
 // Every backend call goes through /api/v1/user/regions/{regionId}/buckets/
@@ -506,6 +507,12 @@ function UserRegionBucketObjects() {
         bucket={bid}
         versioningState={versioningState}
       />
+
+      {/* v1.10.0d — Bucket default server-side encryption card.
+          Standalone (no versioning prerequisite). The card surfaces the
+          unsupported / SSE-S3-only / full branches internally, so we
+          mount it unconditionally. */}
+      <EncryptionSection regionId={regionId} bucket={bid} />
 
       {presignMutation.isError && (
         <ErrorBanner message="Failed to generate download link. Try again." />
