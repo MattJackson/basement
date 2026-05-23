@@ -2725,3 +2725,101 @@ export function usePutObjectLegalHold(
     },
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// v1.10.0d — Bucket default server-side encryption (SSE-S3 + SSE-KMS)
+// ─────────────────────────────────────────────────────────────────────────
+//
+// Two algorithms surfaced:
+//   - SSE-S3 (AES256): backend manages the data-encryption key end-to-end.
+//   - SSE-KMS (aws:kms): operator supplies a KMS key ARN; backend can't
+//     decrypt without the KMS still granting access.
+//
+// SSE-C (customer-provided keys per request) is intentionally out of
+// scope — niche, complicates the upload path, no Garage parity story.
+//
+// The card is double-gated: both SSE-S3 and SSE-KMS capability flags
+// come back on the GET response. UI gating:
+//   - both false → hide the card / show "not supported by {driver}"
+//   - only S3 true → show the SSE-S3 toggle alone
+//   - both true → show the algorithm radio + KMS key ID + bucket key
+
+export type SSEAlgorithm = "AES256" | "aws:kms";
+
+export interface BucketEncryptionResponse {
+  enabled: boolean;
+  algorithm?: SSEAlgorithm;
+  kmsKeyId?: string;
+  bucketKey?: boolean;
+  supportedS3: boolean;
+  supportedKms: boolean;
+}
+
+export interface BucketEncryptionRequest {
+  algorithm: SSEAlgorithm;
+  kmsKeyId?: string;
+  bucketKey?: boolean;
+}
+
+export function useBucketEncryption(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useQuery<BucketEncryptionResponse>({
+    queryKey: ["user", "regions", regionId, "buckets", bucket, "encryption"],
+    queryFn: async () => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
+      const res = await fetch(url, { credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/encryption`, res.status, body);
+      }
+      return body as BucketEncryptionResponse;
+    },
+    enabled: !!regionId && !!bucket,
+    staleTime: 30_000,
+    retry: 1,
+  });
+}
+
+export function usePutBucketEncryption(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<BucketEncryptionResponse, Error, BucketEncryptionRequest>({
+    mutationFn: async (req) => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
+      const res = await fetch(url, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/encryption/put`, res.status, body);
+      }
+      return body as BucketEncryptionResponse;
+    },
+  });
+}
+
+export function useDeleteBucketEncryption(
+  regionId: string | null,
+  bucket: string | null,
+) {
+  return useMutation<BucketEncryptionResponse, Error, void>({
+    mutationFn: async () => {
+      if (!regionId || !bucket) throw new Error("Region id and bucket required");
+      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw apiError(`user/regions/${regionId}/buckets/${bucket}/encryption/delete`, res.status, body);
+      }
+      return body as BucketEncryptionResponse;
+    },
+  });
+}
