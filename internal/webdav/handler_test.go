@@ -499,6 +499,66 @@ func TestLockReturns501(t *testing.T) {
 	}
 }
 
+// stubOrgCaps satisfies OrgCapsLookup for the v1.9.0b gating tests
+// without dragging in a real *OrgCapabilitiesStore + filesystem path.
+type stubOrgCaps struct{ caps store.OrgCapabilities }
+
+func (s *stubOrgCaps) Get() store.OrgCapabilities { return s.caps }
+
+// TestWebDAVDisabled_Returns403: when the operator has flipped
+// Gateways.WebDAV.Enabled to false in /admin/system, every WebDAV
+// verb — including OPTIONS — short-circuits with a typed 403
+// GATEWAY_DISABLED before auth runs. This is the v1.9.0b core
+// contract: the kill switch works without re-deploying.
+func TestWebDAVDisabled_Returns403(t *testing.T) {
+	h, _ := buildHandler(t)
+	h.deps.OrgCaps = &stubOrgCaps{caps: store.OrgCapabilities{
+		Gateways: store.GatewaySettings{
+			WebDAV: store.WebDAVSettings{Enabled: false},
+		},
+	}}
+
+	// Authenticated PROPFIND is rejected with 403, not 207 + listing.
+	w := do(t, h, "PROPFIND", "/webdav/", map[string]string{
+		"Authorization": basic("alice", "alicepw"),
+		"Depth":         "1",
+	}, nil)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("PROPFIND disabled: want 403 got %d body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, "GATEWAY_DISABLED") {
+		t.Errorf("body missing GATEWAY_DISABLED code: %s", got)
+	}
+
+	// OPTIONS also blocked — no DAV discovery should leak through on
+	// a disabled gateway, otherwise Finder will keep retrying creds.
+	wo := do(t, h, http.MethodOptions, "/webdav/", nil, nil)
+	if wo.Code != http.StatusForbidden {
+		t.Errorf("OPTIONS disabled: want 403 got %d", wo.Code)
+	}
+}
+
+// TestWebDAVEnabled_AllowsRequests: the same Get() returning
+// Enabled=true keeps the gateway operational. Guards against a
+// regression where a typo in the toggle check (e.g. inverted
+// boolean) would silently disable WebDAV on every install.
+func TestWebDAVEnabled_AllowsRequests(t *testing.T) {
+	h, _ := buildHandler(t)
+	h.deps.OrgCaps = &stubOrgCaps{caps: store.OrgCapabilities{
+		Gateways: store.GatewaySettings{
+			WebDAV: store.WebDAVSettings{Enabled: true},
+		},
+	}}
+
+	w := do(t, h, "PROPFIND", "/webdav/", map[string]string{
+		"Authorization": basic("alice", "alicepw"),
+		"Depth":         "1",
+	}, nil)
+	if w.Code != http.StatusMultiStatus {
+		t.Fatalf("PROPFIND enabled: want 207 got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestSAAuthAccepted(t *testing.T) {
 	// Wire a stub SA store with one registered key.
 	dir := t.TempDir()

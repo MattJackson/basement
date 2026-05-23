@@ -20,6 +20,15 @@ export const Route = createFileRoute("/admin/system")({
   component: adminPage(OrgCapabilitiesPage),
 });
 
+type WebDAVSettings = {
+  enabled?: boolean;
+  baseUrl?: string;
+};
+
+type GatewaySettings = {
+  webdav?: WebDAVSettings;
+};
+
 type OrgCapabilities = {
   signupMode?: "closed" | "invite" | "open";
   enabledDrivers?: string[];
@@ -32,6 +41,12 @@ type OrgCapabilities = {
    * Backend clamps on save so any value outside the range gets snapped.
    */
   adminSessionTtlSec?: number;
+  /**
+   * v1.9.0b GATEWAYS: per-protocol gateway toggles + overrides. WebDAV
+   * is the only configurable gateway today; SMB is documented as
+   * not-supported-natively elsewhere on the page.
+   */
+  gateways?: GatewaySettings;
 };
 
 // TTL preset choices for the dropdown. Each entry's `value` is in
@@ -212,6 +227,20 @@ function OrgCapabilitiesPage() {
 
         <Button onClick={handleSave}>Save Changes</Button>
       </div>
+
+      {/* v1.9.0b GATEWAYS — operator-facing settings + status for the */}
+      {/* native-protocol gateways. WebDAV ships in v1.9.0a and is */}
+      {/* on by default; SMB is documented as not-supported-natively */}
+      {/* with a pointer to the Time Machine integration doc. */}
+      <GatewaysCard
+        gateways={data.gateways ?? { webdav: { enabled: true } }}
+        onChange={(next) =>
+          setData((prev) => (prev ? { ...prev, gateways: next } : prev))
+        }
+        onSave={async () => {
+          await handleSave();
+        }}
+      />
 
       {/* ADR-0003 v1.3.0a.4 amendment — operator-configurable admin */}
       {/* session TTL. Card lives below the Save Changes button on its */}
@@ -459,6 +488,243 @@ function AdminSessionTTLCard({
             {saving ? "Saving…" : "Save timeout"}
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// v1.9.0b GATEWAYS card — WebDAV settings + SMB explainer.
+//
+// WebDAV section:
+//   - Enabled toggle (default on). Off → /webdav/* returns 403
+//     GATEWAY_DISABLED at the backend.
+//   - Mount URL: window.location.origin + "/webdav" with a Copy
+//     button. Operators behind a reverse proxy with a different
+//     external host can pin via the BaseURL override field; when
+//     set, the display uses that instead of the auto-derived URL.
+//   - Per-platform connect hints (macOS / Windows / Linux / iOS).
+//
+// SMB section:
+//   - Not supported natively. Brief explanation + link to the
+//     Time Machine integration doc that explains the Samba-sidecar
+//     pattern for legacy SMB-only clients.
+export function GatewaysCard({
+  gateways,
+  onChange,
+  onSave,
+}: {
+  gateways: GatewaySettings;
+  onChange: (next: GatewaySettings) => void;
+  onSave: () => Promise<void>;
+}) {
+  const webdav = gateways.webdav ?? { enabled: true };
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Compute the mount URL: operator override wins, otherwise derive
+  // from the current page origin. typeof check keeps SSR / vitest
+  // happy when window isn't defined yet.
+  const autoOrigin =
+    typeof window !== "undefined" ? window.location.origin : "https://basement.example";
+  const displayURL =
+    (webdav.baseUrl && webdav.baseUrl.trim() !== "")
+      ? webdav.baseUrl.trim()
+      : `${autoOrigin}/webdav`;
+
+  async function handleCopy() {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(displayURL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
+    } catch {
+      // Clipboard write can fail under permissions; the user can
+      // still select-and-copy the URL manually from the field.
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function setWebDAV(next: WebDAVSettings) {
+    onChange({ ...gateways, webdav: { ...webdav, ...next } });
+  }
+
+  return (
+    <Card data-testid="gateways-card">
+      <CardHeader>
+        <CardTitle>Gateways</CardTitle>
+        <CardDescription>
+          Native-protocol mounts that let desktop and mobile clients talk
+          to basement without the web UI. WebDAV ships built-in; SMB
+          requires a sidecar &mdash; see the Time Machine doc below for
+          the supported pattern.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* ----- WebDAV section ----- */}
+        <section
+          className="space-y-3"
+          data-testid="gateways-webdav-section"
+          aria-labelledby="gateways-webdav-heading"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3
+                id="gateways-webdav-heading"
+                className="text-base font-medium"
+              >
+                WebDAV
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Mount basement as a network drive from Finder, Explorer,
+                Nautilus, and the iOS Files app.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                data-testid="gateways-webdav-enabled"
+                checked={webdav.enabled ?? true}
+                onChange={(e) => setWebDAV({ enabled: e.target.checked })}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              Enabled
+            </label>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium" htmlFor="webdav-mount-url">
+              Mount URL
+            </label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="webdav-mount-url"
+                data-testid="gateways-webdav-mount-url"
+                readOnly
+                value={displayURL}
+                className="font-mono text-xs"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleCopy}
+                data-testid="gateways-webdav-copy"
+              >
+                {copied ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label
+              className="text-sm font-medium"
+              htmlFor="webdav-base-url-override"
+            >
+              Base URL override (optional)
+            </label>
+            <Input
+              id="webdav-base-url-override"
+              data-testid="gateways-webdav-base-url"
+              placeholder="https://files.example.com/webdav"
+              value={webdav.baseUrl ?? ""}
+              onChange={(e) => setWebDAV({ baseUrl: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Use this when basement sits behind a reverse proxy that
+              exposes WebDAV on a different host. Leave blank to use the
+              current origin.
+            </p>
+          </div>
+
+          <details className="rounded-md border border-input bg-muted/30 p-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              Connect from your platform
+            </summary>
+            <ul className="mt-3 space-y-2 text-sm">
+              <li>
+                <strong>macOS Finder:</strong> press &#8984;K, paste the
+                mount URL, then enter your basement username and password.
+              </li>
+              <li>
+                <strong>Windows Explorer:</strong> This PC &rarr; Map
+                network drive, paste the URL into the Folder field, and
+                authenticate with basement credentials.
+              </li>
+              <li>
+                <strong>Linux (Nautilus):</strong> Connect to Server,
+                paste the URL with the <code>davs://</code> scheme
+                (e.g. <code>davs://basement.example/webdav</code>).
+              </li>
+              <li>
+                <strong>iOS Files:</strong> Browse tab &rarr; &hellip;
+                menu &rarr; Connect to Server, paste the URL, choose
+                Registered User, enter credentials.
+              </li>
+            </ul>
+            <p className="mt-3 text-xs text-muted-foreground">
+              For automation, use a service account from{" "}
+              <Link to="/admin/service-accounts" className="underline">
+                /admin/service-accounts
+              </Link>{" "}
+              &mdash; the <code>BMNT&hellip;</code> key goes in the
+              username field, the shown-once secret in the password
+              field. See the{" "}
+              <a
+                href="/docs/integrations/webdav.md"
+                className="underline"
+                target="_blank"
+                rel="noreferrer"
+              >
+                WebDAV integration guide
+              </a>{" "}
+              for the full walkthrough.
+            </p>
+          </details>
+
+          <div className="flex justify-end">
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              data-testid="gateways-webdav-save"
+            >
+              {saving ? "Saving…" : "Save WebDAV settings"}
+            </Button>
+          </div>
+        </section>
+
+        {/* ----- SMB section ----- */}
+        <section
+          className="space-y-2 rounded-md border border-input bg-muted/20 p-4"
+          data-testid="gateways-smb-section"
+          aria-labelledby="gateways-smb-heading"
+        >
+          <h3 id="gateways-smb-heading" className="text-base font-medium">
+            SMB &mdash; not supported natively in basement
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Time Machine and legacy SMB-only apps can connect through a
+            Samba sidecar that reads basement&rsquo;s S3 backend. SMB-in-Go
+            isn&rsquo;t production-grade, so we don&rsquo;t ship one &mdash;
+            for Mac backups we recommend the basement BACKUP wizard
+            pointed at a NAS volume instead.
+          </p>
+          <a
+            href="/docs/integrations/time-machine.md"
+            className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Read the Time Machine integration notes &rarr;
+          </a>
+        </section>
       </CardContent>
     </Card>
   );

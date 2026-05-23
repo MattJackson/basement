@@ -380,6 +380,9 @@ func main() {
 		Audit:       auditLogger,
 		Logger:      slog.Default(),
 		Connections: connStore,
+		// v1.9.0b: gate the gateway on the operator-configurable
+		// toggle at /admin/system → Gateways → WebDAV.Enabled.
+		OrgCaps: st.OrgCapabilities(),
 	})
 	srv.SetWebDAVHandler(webdavHandler)
 

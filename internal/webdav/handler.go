@@ -57,6 +57,21 @@ type Deps struct {
 	// be nil; in that case the bridge is skipped and the user-key
 	// ListBuckets answers directly (matching AWS S3 + MinIO).
 	Connections store.Connections
+
+	// OrgCaps is consulted on every request to honour the v1.9.0b
+	// operator toggle at /admin/system → Gateways → WebDAV.Enabled.
+	// When nil the gateway acts as if Enabled=true so older test
+	// setups (and main.go calls that predate v1.9.0b) keep working.
+	OrgCaps OrgCapsLookup
+}
+
+// OrgCapsLookup is the narrow read interface the handler uses to
+// resolve the WebDAV.Enabled toggle. Production wires
+// *store.OrgCapabilitiesStore (which already has a Get() returning
+// store.OrgCapabilities); the handler only needs the gateway slice,
+// so we keep the interface tight to make stubbing in tests trivial.
+type OrgCapsLookup interface {
+	Get() store.OrgCapabilities
 }
 
 // Handler is the HTTP handler mounted at /webdav/. Build one at boot,
@@ -102,6 +117,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// tolerate the absence of locking.
 	if r.Method == "LOCK" || r.Method == "UNLOCK" {
 		http.Error(w, "LOCK/UNLOCK not implemented", http.StatusNotImplemented)
+		return
+	}
+
+	// v1.9.0b: operator-toggleable kill switch. When the operator has
+	// flipped Gateways.WebDAV.Enabled off in /admin/system we refuse
+	// every request — including OPTIONS — with a typed 403 so a
+	// probing client surfaces "the operator turned this off" rather
+	// than a confusing 401 cycle. Skip the check when no OrgCaps was
+	// wired (older test setups) so existing tests still pass.
+	if h.deps.OrgCaps != nil && !h.deps.OrgCaps.Get().Gateways.WebDAV.Enabled {
+		writeGatewayDisabled(w)
 		return
 	}
 
@@ -155,6 +181,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.auditDispatch(r, actor)
 
 	wdh.ServeHTTP(w, r)
+}
+
+// writeGatewayDisabled emits a 403 with a JSON body matching the
+// /api/v1 error shape ({"code":"GATEWAY_DISABLED", "message":...}).
+// We keep the shape consistent with the /webdav 503 WEBDAV_NOT_WIRED
+// path in internal/api so an operator probing both routes sees the
+// same envelope. WebDAV clients won't parse the body but humans (and
+// curl) will, and rclone surfaces the message on -vv.
+func writeGatewayDisabled(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_, _ = w.Write([]byte(`{"code":"GATEWAY_DISABLED","message":"WebDAV gateway is disabled by the operator."}`))
 }
 
 // writeOptions emits a DAV-compatible OPTIONS response without

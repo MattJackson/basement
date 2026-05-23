@@ -30,6 +30,42 @@ type OrgCapabilities struct {
 	// of env-only. Defaults to AdminSessionTTLDefaultSec when zero (older
 	// org_capabilities.json files predate this field).
 	AdminSessionTTLSec int `json:"adminSessionTtlSec,omitempty"`
+	// Gateways holds per-protocol gateway toggles + overrides. v1.9.0b
+	// introduces this nest so the operator can disable a shipped gateway
+	// (WebDAV) without re-deploying. Each protocol defaults to "on" for
+	// upgraded installs — see normalizeGateways() for the legacy-file
+	// migration rule that flips a zero-value WebDAV into the default-on
+	// shape rather than silently disabling a working gateway.
+	Gateways GatewaySettings `json:"gateways"`
+}
+
+// GatewaySettings groups the per-protocol gateway toggles. Each nested
+// struct lives under Gateways.{Protocol} so the on-disk JSON reads
+// naturally: gateways.webdav.enabled, gateways.smb.* (future), etc.
+//
+// We model SMB explicitly as "not supported" rather than omitting it so
+// the UI can render a deliberate "not supported natively" panel + link
+// to docs/integrations/time-machine.md instead of an empty section.
+type GatewaySettings struct {
+	WebDAV WebDAVSettings `json:"webdav"`
+}
+
+// WebDAVSettings is the operator-facing config for the v1.9.0a gateway.
+//
+// Enabled defaults to true on a fresh install so the gateway works the
+// moment basement comes up — operators who want to lock it down flip
+// the toggle in /admin/system and the handler returns 403 GATEWAY_DISABLED
+// from then on.
+//
+// BaseURL is an optional override for the URL the UI displays in the
+// "connect from your platform" hint. Empty (the default) means the FE
+// computes window.location.origin + "/webdav" — which is the right
+// answer for the common single-origin deployment. Operators who front
+// basement behind a reverse proxy with a different external WebDAV
+// host can pin it here.
+type WebDAVSettings struct {
+	Enabled bool   `json:"enabled"`
+	BaseURL string `json:"baseUrl,omitempty"`
 }
 
 // DefaultOrgCapabilities returns the default org capabilities.
@@ -41,7 +77,31 @@ func DefaultOrgCapabilities() OrgCapabilities {
 		UserBackendDrivers: []string{},
 		OIDCOnly:           false,
 		AdminSessionTTLSec: AdminSessionTTLDefaultSec,
+		Gateways: GatewaySettings{
+			WebDAV: WebDAVSettings{Enabled: true},
+		},
 	}
+}
+
+// normalizeGateways migrates a legacy on-disk file that predates
+// v1.9.0b — no Gateways nest, no WebDAV.Enabled field — into the
+// default-on shape. Without this a fresh upgrade would read
+// Enabled=false (the zero value) and silently disable the working
+// WebDAV gateway. The migration flag is the legacy marker we use: if
+// the on-disk JSON has no gateways key at all, MigratedFromLegacy
+// stays at its tag-default false → we treat the whole block as
+// missing and substitute defaults.
+//
+// We do NOT mutate the on-disk file here — that happens lazily on the
+// next Update() call. Read paths get the live defaults, write paths
+// persist them, and an operator hand-editing the JSON between reads
+// and writes still wins.
+func normalizeGateways(g GatewaySettings, hadField bool) GatewaySettings {
+	if !hadField {
+		// Legacy file, no gateways block at all: default on.
+		return GatewaySettings{WebDAV: WebDAVSettings{Enabled: true}}
+	}
+	return g
 }
 
 // ClampAdminSessionTTL returns the input clamped into the
@@ -108,6 +168,19 @@ func (s *OrgCapabilitiesStore) load() error {
 	if err := json.Unmarshal(data, &s.data); err != nil {
 		return err
 	}
+
+	// Detect whether the on-disk file predates v1.9.0b's gateways
+	// nest. We can't rely on Go's zero value (Enabled=false) because
+	// a legacy file simply lacks the key entirely — we have to peek
+	// at the raw JSON to tell "operator deliberately disabled" from
+	// "field never existed". The raw map is cheap to allocate once
+	// at boot; subsequent Get() / Update() cycles use the struct.
+	var raw map[string]json.RawMessage
+	hadGateways := false
+	if err := json.Unmarshal(data, &raw); err == nil {
+		_, hadGateways = raw["gateways"]
+	}
+	s.data.Gateways = normalizeGateways(s.data.Gateways, hadGateways)
 
 	// Migrate legacy: ensure enabled drivers have defaults if empty
 	if s.data.EnabledDrivers == nil || len(s.data.EnabledDrivers) == 0 {
