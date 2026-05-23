@@ -77,6 +77,31 @@ if (!existsSync(PLAYWRIGHT_INDEX)) {
 const PLAYWRIGHT_ENTRY = pathToFileURL(PLAYWRIGHT_INDEX).href;
 const { chromium } = (await import(PLAYWRIGHT_ENTRY)) as { chromium: typeof ChromiumApi };
 
+// ---------- axe-core (a11y) — optional, dynamic import ----------
+// Cycle v1.11.0.12 wires axe-core into the screenshot pass so every
+// route gets a free a11y audit alongside its desktop screenshot.
+// Soft-loaded: if @axe-core/playwright isn't installed, the script
+// still runs — a11y checks are skipped with a warn line. Install
+// with: pnpm -C frontend add -D @axe-core/playwright
+const AXE_INDEX = join(FRONTEND_NODE_MODULES, "@axe-core", "playwright", "dist", "index.js");
+type AxeBuilderCtor = new (opts: { page: Page }) => {
+  analyze(): Promise<{
+    violations: Array<{ id: string; impact?: string; description: string; nodes: unknown[] }>;
+  }>;
+};
+let AxeBuilder: AxeBuilderCtor | undefined;
+if (existsSync(AXE_INDEX)) {
+  try {
+    const mod = (await import(pathToFileURL(AXE_INDEX).href)) as {
+      default?: AxeBuilderCtor;
+      AxeBuilder?: AxeBuilderCtor;
+    };
+    AxeBuilder = mod.AxeBuilder ?? mod.default;
+  } catch (e) {
+    process.stderr.write(`[warn] axe-core load failed: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+}
+
 // ---------- config ----------
 const BASE_URL = (process.env.BASE_URL ?? "https://basement.pq.io").replace(/\/$/, "");
 const USERNAME = process.env.BUI_USERNAME ?? process.env.BASEMENT_USERNAME ?? "matthew";
@@ -177,10 +202,33 @@ function attachListeners(page: Page) {
 }
 
 // ---------- screenshot helpers ----------
+// Cycle v1.11.0.12: shotDesktop now ALSO runs an axe-core a11y audit
+// (if @axe-core/playwright is installed) and tags any violations
+// into the bug report. Failures from axe never fail the smoke run —
+// a11y is tracked over time, not gated on. See axeAudits[] for the
+// rollup that lands in the final summary.
+type AxeAudit = { route: string; routeUrl: string; violations: number; ids: string[] };
+const axeAudits: AxeAudit[] = [];
+async function runAxe(page: Page, name: string) {
+  if (!AxeBuilder) return;
+  try {
+    const audit = await new AxeBuilder({ page }).analyze();
+    if (audit.violations.length > 0) {
+      const ids = audit.violations.map((v) => v.id);
+      axeAudits.push({ route: name, routeUrl: page.url(), violations: audit.violations.length, ids });
+      // Loud-but-non-failing — a11y is signal, not a gate.
+      process.stdout.write(`  [a11y] ${name}: ${audit.violations.length} issues (${ids.join(", ")})\n`);
+    }
+  } catch {
+    // Network errors, page-closed-during-analyze, etc — never fail
+    // the smoke just because axe stumbled.
+  }
+}
 async function shotDesktop(page: Page, name: string) {
   try {
     await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
     await page.screenshot({ path: join(SHOT_DESKTOP, `${name}.png`), fullPage: true });
+    await runAxe(page, name);
   } catch {}
 }
 async function shotMobile(page: Page, name: string) {
@@ -1371,6 +1419,23 @@ async function main(): Promise<number> {
     for (const b of bugReport) {
       process.stderr.write(`${C.yellow}*${C.reset} ${b}\n`);
     }
+  }
+
+  // axe-core a11y rollup. Not a gate — surfaced so per-route trends
+  // are visible in CI/local-run output. Cycle v1.11.0.12.
+  if (AxeBuilder) {
+    section("=== A11Y (axe-core) ===");
+    if (axeAudits.length === 0) {
+      process.stdout.write(`${C.green}no axe violations across screenshotted routes${C.reset}\n`);
+    } else {
+      const totalIssues = axeAudits.reduce((n, a) => n + a.violations, 0);
+      process.stdout.write(`${C.yellow}${axeAudits.length} routes with axe violations (${totalIssues} issues total)${C.reset}\n`);
+      for (const a of axeAudits) {
+        process.stdout.write(`  - ${a.route} (${a.violations}): ${a.ids.join(", ")}\n`);
+      }
+    }
+  } else {
+    process.stdout.write(`${C.dim}[a11y] @axe-core/playwright not installed — a11y audit skipped (install with: pnpm -C frontend add -D @axe-core/playwright)${C.reset}\n`);
   }
 
   return failed === 0 ? 0 : 1;

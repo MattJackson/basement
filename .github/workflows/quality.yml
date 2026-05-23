@@ -1,0 +1,146 @@
+name: Quality
+
+# Tier 1 CI quality gates — runs on every push to main + every PR.
+#
+# Each job is independent so a failure in one (e.g. govulncheck flags a
+# transitive dep) does not block unrelated signal. Cycle v1.11.0.12
+# wires these in as warn-now-block-later; the gosec/govulncheck rules
+# are documented in docs/security-audit-baseline.md and tightened in a
+# follow-up cycle once the baseline is clean.
+#
+# Jobs:
+#   - go-lint:           golangci-lint
+#   - go-vet:            go vet ./...
+#   - go-security:       gosec (warn on findings, see .gosec.yml)
+#   - go-vulns:          govulncheck (warn on findings)
+#   - secrets-scan:      gitleaks
+#   - openapi-lint:      spectral against openapi/basement.yaml
+#   - frontend-lint:     pnpm -C frontend lint
+#   - frontend-typecheck: pnpm -C frontend exec tsc --noEmit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+        continue-on-error: true  # warn-mode; flip to false after baseline clean
+
+  go-vet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: go vet
+        run: go vet ./...
+
+  go-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: gosec
+        uses: securego/gosec@master
+        with:
+          args: -conf .gosec.yml -severity high ./...
+        continue-on-error: true  # warn-mode while baseline is being cleaned
+
+  go-vulns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+        continue-on-error: true  # warn-mode until known-CVE survey is documented
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  openapi-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: spectral
+        uses: stoplightio/spectral-action@v0.8.13
+        with:
+          file_glob: 'openapi/basement.yaml'
+          spectral_ruleset: 'https://unpkg.com/@stoplight/spectral-rulesets/dist/oas/index.json'
+        continue-on-error: true  # warn-mode; openapi spec audit lands in a later cycle
+
+  frontend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: install
+        run: pnpm -C frontend install --frozen-lockfile
+      - name: lint
+        run: pnpm -C frontend lint
+        continue-on-error: true  # baseline at v1.11.0.12 is dirty (188 errors, mostly
+                                  # react-hooks rule additions); follow-up cycle cleans
+                                  # + flips to block-mode. See docs/security-audit-baseline.md.
+
+  frontend-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: install
+        run: pnpm -C frontend install --frozen-lockfile
+      - name: generate
+        run: pnpm -C frontend run gen:api && pnpm -C frontend run gen:routes
+      - name: typecheck
+        run: pnpm -C frontend exec tsc --noEmit
+        continue-on-error: true  # `pnpm build` runs tsc -b first so production is gated
+                                  # via build; this is the explicit type-only check that
+                                  # may surface latent strict-mode issues. Flip after baseline.

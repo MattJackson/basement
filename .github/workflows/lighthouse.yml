@@ -1,0 +1,35 @@
+name: Lighthouse
+
+# Run Lighthouse CI against the live deploy on every PR that touches
+# the frontend. Thresholds live in .lighthouserc.json.
+#
+# Cycle v1.11.0.12 — this is the perf+a11y gate; runs against
+# basement.pq.io because the PR builder doesn't host a previewable URL
+# of its own yet. When PR-preview deploys land (future cycle), point
+# this at the preview URL instead.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.lighthouserc.json'
+      - '.github/workflows/lighthouse.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          configPath: .lighthouserc.json
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+        continue-on-error: true  # warn-mode until baseline scores are recorded

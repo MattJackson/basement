@@ -107,6 +107,43 @@ go test -race ./internal/api/...    # subset
 gofmt -l . | tee /dev/stderr        # any output = unformatted files
 ```
 
+## Testing — the basement test pyramid
+
+basement maintains a layered test strategy so every change has a
+fast feedback loop AND eventually a deep one. From fastest to most
+exhaustive:
+
+1. **Unit tests** — `go test -race ./...` and
+   `pnpm -C frontend test:run`. Sub-second per package; this is what
+   pre-commit and CI run on every push. Add new tests under
+   `_test.go` (Go) or `__tests__/` (vitest).
+
+2. **Integration smoke** — `bash scripts/feature-smoke.sh`. Runs
+   the per-feature functional smoke against the 10x Garage v2 test
+   backend (10.1.7.11:38xx). Hard safety gate: every destructive op
+   asserts the target cluster label starts with `garage-v2-test-`.
+
+3. **UI smoke** — `pnpm -C frontend smoke` (curated, ~70 checks) and
+   `pnpm -C frontend smoke:full` (comprehensive walk, every route +
+   axe-core a11y pass). Both target the live deploy
+   (`basement.pq.io`) using the matthew/password credentials.
+
+4. **Fuzz** — `go test -fuzz=FuzzMatchFilter -fuzztime=30s
+   ./internal/audit/...` (cycle v1.11.0.12 starter). Pure-function
+   fuzzers live alongside the code they exercise as `*_fuzz_test.go`.
+   When you add a fuzz target, add it to the `Makefile` fuzz-*
+   targets so it's discoverable.
+
+5. **Quality gates** — `make quality` runs lint + vet + test +
+   gosec + govulncheck locally. CI runs the same gates per
+   `.github/workflows/quality.yml`. Tightening from warn-mode to
+   block-mode is per-gate and tracked in
+   `docs/security-audit-baseline.md`.
+
+6. **Pre-commit hooks** — install once with `pre-commit install`.
+   Hooks run gitleaks + whitespace fixers + gofmt on every commit,
+   and `go test -race ./...` on every push (slow, push-stage only).
+
 ## Code style
 
 - **Go**: `gofmt` (any unformatted file fails review).

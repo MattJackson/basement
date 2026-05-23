@@ -1,0 +1,58 @@
+# pre-commit hooks for basement contributors. Cycle v1.11.0.12.
+#
+# Install once with:
+#   pip install pre-commit
+#   pre-commit install
+#
+# After that, every `git commit` runs whitespace + JSON/YAML + gitleaks
+# + `go test` locally. CI repeats the same checks; the local hook just
+# catches the obvious problems before push.
+#
+# Skip a one-off commit with SKIP=hook-id git commit -m ... — never
+# --no-verify (which silently skips every hook).
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.gen\.(ts|go)$'
+      - id: end-of-file-fixer
+        exclude: '\.gen\.(ts|go)$'
+      - id: check-yaml
+        args: ['--unsafe']  # allow GitHub Actions custom tags
+      - id: check-json
+        exclude: 'tsconfig.*\.json$'  # tsconfig allows comments
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=512']
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: go-test
+        name: go test (-race)
+        entry: go test -race ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+        stages: [pre-push]  # heavy — pre-push, not pre-commit
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: gofmt
+        name: gofmt
+        entry: bash -c 'unformatted=$(gofmt -l "$@"); if [ -n "$unformatted" ]; then echo "unformatted:"; echo "$unformatted"; exit 1; fi' --
+        language: system
+        types: [go]
