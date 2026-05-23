@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from "./routes/__root"
+import { Route as SignupRouteImport } from "./routes/signup"
 import { Route as LoginRouteImport } from "./routes/login"
 import { Route as IndexRouteImport } from "./routes/index"
 import { Route as FilesIndexRouteImport } from "./routes/files/index"
@@ -66,6 +67,11 @@ import { Route as AdminClustersCidBucketsIdRouteImport } from "./routes/admin/cl
 import { Route as AdminClustersCidBucketsIdLifecycleNewRouteImport } from "./routes/admin/clusters/$cid/buckets/$id/lifecycle/new"
 import { Route as AdminClustersCidBucketsIdLifecycleRuleIdEditRouteImport } from "./routes/admin/clusters/$cid/buckets/$id/lifecycle/$ruleId/edit"
 
+const SignupRoute = SignupRouteImport.update({
+  id: "/signup",
+  path: "/signup",
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: "/login",
   path: "/login",
@@ -357,6 +363,7 @@ const AdminClustersCidBucketsIdLifecycleRuleIdEditRoute =
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute
   "/login": typeof LoginRoute
+  "/signup": typeof SignupRoute
   "/admin/audit": typeof AdminAuditRoute
   "/admin/first-run": typeof AdminFirstRunRoute
   "/admin/login": typeof AdminLoginRoute
@@ -415,6 +422,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   "/": typeof IndexRoute
   "/login": typeof LoginRoute
+  "/signup": typeof SignupRoute
   "/admin/audit": typeof AdminAuditRoute
   "/admin/first-run": typeof AdminFirstRunRoute
   "/admin/login": typeof AdminLoginRoute
@@ -465,6 +473,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   "/": typeof IndexRoute
   "/login": typeof LoginRoute
+  "/signup": typeof SignupRoute
   "/admin/audit": typeof AdminAuditRoute
   "/admin/first-run": typeof AdminFirstRunRoute
   "/admin/login": typeof AdminLoginRoute
@@ -525,6 +534,7 @@ export interface FileRouteTypes {
   fullPaths:
     | "/"
     | "/login"
+    | "/signup"
     | "/admin/audit"
     | "/admin/first-run"
     | "/admin/login"
@@ -583,6 +593,7 @@ export interface FileRouteTypes {
   to:
     | "/"
     | "/login"
+    | "/signup"
     | "/admin/audit"
     | "/admin/first-run"
     | "/admin/login"
@@ -632,6 +643,7 @@ export interface FileRouteTypes {
     | "__root__"
     | "/"
     | "/login"
+    | "/signup"
     | "/admin/audit"
     | "/admin/first-run"
     | "/admin/login"
@@ -691,6 +703,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  SignupRoute: typeof SignupRoute
   AdminAuditRoute: typeof AdminAuditRoute
   AdminFirstRunRoute: typeof AdminFirstRunRoute
   AdminLoginRoute: typeof AdminLoginRoute
@@ -724,6 +737,13 @@ export interface RootRouteChildren {
 
 declare module "@tanstack/react-router" {
   interface FileRoutesByPath {
+    "/signup": {
+      id: "/signup"
+      path: "/signup"
+      fullPath: "/signup"
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     "/login": {
       id: "/login"
       path: "/login"
@@ -1276,6 +1296,7 @@ const AdminClustersCidBucketsIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  SignupRoute: SignupRoute,
   AdminAuditRoute: AdminAuditRoute,
   AdminFirstRunRoute: AdminFirstRunRoute,
   AdminLoginRoute: AdminLoginRoute,
