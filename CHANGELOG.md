@@ -4,6 +4,40 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.1 — 2026-05-22
+
+Garage v2 driver: admin-tier (admin-only) connections fixed.
+
+- **Bug.** Adding a Garage v2 cluster with only `admin_token` (no
+  `access_key_id` / `secret_key`) — the ADR-0001 operator-level "admin
+  tier" connection — created the cluster but `GET
+  /api/v1/admin/clusters/$CID/buckets` returned
+  `DRIVER_BUILD_FAILED: ... missing required config key:
+  access_key_id`. The v1 driver
+  (`internal/drivers/garage_v1/garage.go`) already gates S3 client
+  construction on all three of `s3_endpoint` + `access_key_id` +
+  `secret_key` (v0.9.0d); the v2 driver only checked `s3_endpoint`
+  and propagated the missing-creds error up through `newDriver`.
+- **Fix.** Mirror the v1 gate in `internal/drivers/garage/garage.go`:
+  build the S3 client only when all three keys are present. Admin
+  ops (`ListBuckets`, `CreateBucket`, key/cluster CRUD) flow through
+  the admin API + `admin_token` and need no S3 client; the v1.1.0d
+  region bridge takes over for S3 data-plane work via user-region
+  keys. S3 ops on an admin-only driver already returned
+  `ErrUnsupported` via the existing `if d.s3Client == nil` guards
+  in `s3.go`, so the only fix needed was the constructor gate.
+- **Tests.** Added five unit tests to
+  `internal/drivers/garage/s3_test.go`:
+  (a) `newDriver` succeeds with admin-only config + leaves
+  `s3Client` nil; (b) `newDriver` succeeds when `s3_endpoint` is set
+  but creds absent (region-bridge lookup mode) + leaves `s3Client`
+  nil while preserving `s3Endpoint`; (c) `ListBuckets` works on an
+  admin-only driver against a mock admin server (the regression
+  test for the deploy failure); (d) S3 ops return `ErrUnsupported`
+  cleanly on admin-only drivers; (e) the full-creds path remains
+  unchanged + builds the S3 client. `go test -race ./...` green;
+  `pnpm build` clean.
+
 ## v1.11.0b — 2026-05-22
 
 Production deployment guide cycle (docs-only).
