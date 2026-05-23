@@ -81,6 +81,68 @@ you `go test ./internal/docslint/...` from the repo root or from
 elsewhere. No FE / Go source code changed; `go test -race ./...`
 + `pnpm build` green.
 
+## v1.11.0c — 2026-05-22
+
+**5-minute install.** Bootstrap path so `docker run` against the
+default image with no env vars at all comes up working, prints the
+auto-generated admin password to stdout, and lands the operator on
+the dashboard. Three deliverables in one cycle:
+
+- **Auto-bootstrap on first boot.** Three env vars become optional:
+  `BASEMENT_JWT_SECRET` auto-generates 32 random bytes on first boot
+  and persists hex-encoded to `{DATA_DIR}/.jwt-secret` (0600) so the
+  secret survives container restarts. `BASEMENT_ADMIN_PASSWORD_HASH`
+  auto-generates a 24-char random password (no ambiguous chars),
+  bcrypt-hashes it, prints `INITIAL ADMIN PASSWORD: <pw>` to stdout
+  for `docker logs basement | grep` retrieval, and persists the
+  plaintext to `{DATA_DIR}/.initial-admin-password` (0600) so the
+  operator can recover it after the log line scrolls off. New
+  `BASEMENT_ADMIN_PASSWORD` (plaintext) convenience env var:
+  bcrypt-hashes at boot, never persists plaintext. `BASEMENT_DRIVER`
+  is now optional too — when unset, basement boots without a default
+  cluster wired and the operator adds one via `/admin/clusters`.
+  Bootstrap is fully idempotent: explicit env vars short-circuit
+  every auto-generation path with zero behaviour change, and an
+  existing `.jwt-secret` / `.initial-admin-password` file is reused
+  rather than rotated.
+
+- **`scripts/install.sh` — one-liner installer.** `curl -sSL .../install.sh | bash`
+  detects Docker, picks a writable install directory (`./basement/`
+  or `/opt/basement/`), generates a minimal `docker-compose.yml`,
+  pulls `ghcr.io/mattjackson/basement:latest`, starts the container,
+  tails logs until the listening line, then prints the
+  auto-generated admin password in a banner. Idempotent — re-running
+  pulls + restarts without touching the data volume so the password
+  the operator saw on first install still works. POSIX shell + bash;
+  no jq/yq/python dependency.
+
+- **Docs: 5-minute README + auto-bootstrap section in
+  `docs/deployment/docker.md`.** README quickstart shrinks to three
+  commands (`docker run`, `docker logs | grep`, open browser). The
+  v1.11.0b `docs/deployment/docker.md` gains an Auto-bootstrap
+  section at the top covering the evaluation posture; the existing
+  production-deploy walk-through stays as-is.
+  `docs/configuration.md` updates the admin-auth + JWT secret rows
+  to "No (auto-bootstrap)" and adds a 5-minute-evaluation block.
+
+Tests: new `internal/config/bootstrap_test.go` covers the seven paths
+(no env vars → full mint + persist, plaintext env var → hash + no
+persist, existing `.jwt-secret` → reuse, existing
+`.initial-admin-password` → reuse, explicit env vars → strict no-op
++ no disk writes, corrupt `.jwt-secret` → clean error,
+randomPassword alphabet contract). Existing config tests updated:
+`TestLoad_MissingJWTSecret` → `..._BootstrapsInstead`,
+`TestLoad_MissingAdminPasswordHash` → `..._BootstrapsInstead`,
+`TestLoad_MissingDriver` → `..._NowOptional`, `TestLoad_AggregatedErrors`
+expects only the driver-specific vars. Touched:
+`internal/config/{config.go,bootstrap.go,config_test.go,bootstrap_test.go}`,
+`cmd/basement-server/main.go`, `scripts/install.sh`,
+`docs/deployment/docker.md`, `docs/configuration.md`, `README.md`.
+`go test -race ./...` + `pnpm build` + 359/359 frontend tests green.
+End-to-end smoke (no env vars → server boots, prints password, files
+created at 0600; reboot → reuses both files; plaintext env → no
+persistence) verified locally.
+
 ## v1.11.0.1 — 2026-05-22
 
 Garage v2 driver: admin-tier (admin-only) connections fixed.

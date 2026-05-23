@@ -9,6 +9,83 @@ For TLS topologies, see [`tls.md`](tls.md). For the reverse-proxy
 Caddyfile / Nginx / Traefik recipes, see
 [`reverse-proxy.md`](reverse-proxy.md).
 
+## 5-minute evaluation (v1.11.0c auto-bootstrap)
+
+The shortest path to a working basement. No env vars, no bcrypt CLI,
+no JWT secret to generate up front:
+
+```bash
+docker run -d --name basement -p 8080:8080 \
+  -v basement-data:/var/lib/basement \
+  ghcr.io/mattjackson/basement:latest
+
+# Wait ~5 seconds, then read the auto-generated admin password:
+docker logs basement 2>&1 | grep "INITIAL ADMIN PASSWORD"
+# INITIAL ADMIN PASSWORD: <24-char string>
+
+# Open http://localhost:8080 and log in as admin / <password>.
+```
+
+### What auto-bootstrap does on first boot
+
+When `BASEMENT_JWT_SECRET`, `BASEMENT_ADMIN_PASSWORD_HASH`, and
+`BASEMENT_ADMIN_PASSWORD` are all unset, basement fills in defaults
+under the data directory (`/var/lib/basement` inside the container,
+backed by the `basement-data` volume above):
+
+| File | Mode | Purpose |
+|------|------|---------|
+| `.jwt-secret` | 0600 | 32 random bytes (hex-encoded) used to sign JWT cookies. Reused on every restart so existing sessions survive. |
+| `.initial-admin-password` | 0600 | The plaintext of the password printed on first boot. Lets you recover it after the log line scrolls off; safe to delete once you change the password via `/admin/users`. |
+
+`BASEMENT_ADMIN_USER` defaults to `admin` when bootstrap fires.
+Bootstrap is fully idempotent — restarting the container reuses the
+same JWT secret and the same admin password (so sessions survive and
+the password you wrote down still works).
+
+### One-liner installer
+
+`scripts/install.sh` wraps the `docker run` above with Docker
+detection, image pull, compose-file generation, log tailing, and a
+final banner that prints the auto-generated password:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh | bash
+```
+
+For review-before-run:
+
+```bash
+curl -sSLo install.sh https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh
+less install.sh
+bash install.sh
+```
+
+### Convenience: supply a plaintext password without bcrypt
+
+If you'd rather pick the admin password than read one out of the logs,
+set `BASEMENT_ADMIN_PASSWORD` (plaintext). basement bcrypt-hashes it
+at boot and never persists the plaintext to disk:
+
+```bash
+docker run -d --name basement -p 8080:8080 \
+  -v basement-data:/var/lib/basement \
+  -e BASEMENT_ADMIN_PASSWORD=changeme \
+  ghcr.io/mattjackson/basement:latest
+```
+
+The JWT secret still auto-generates in this posture; supply
+`BASEMENT_JWT_SECRET` explicitly to take it over for production.
+
+### When to move past auto-bootstrap
+
+Auto-bootstrap is fine for evaluation and small single-operator
+installs. For production posture (explicit secrets, no plaintext on
+disk, reverse-proxied TLS, backed-up data dir, image-tag pinned) skip
+to the [Annotated docker-compose.yml](#annotated-docker-composeyml)
+section below and the
+[`hardening.md`](hardening.md) checklist.
+
 ## Image
 
 ```

@@ -201,9 +201,39 @@ permission grid · OIDC login · Multi-cluster bucket list
 (See `docs/screenshots/` for full size; see
 `docs/screenshots/SHOTLIST.md` for descriptions.)
 
-## Quickstart
+## Quickstart (5 minutes, evaluation)
 
-5-minute install (see [`docs/deployment/docker.md`](docs/deployment/docker.md) for full details):
+```bash
+docker run -d --name basement -p 8080:8080 \
+  -v basement-data:/var/lib/basement \
+  ghcr.io/mattjackson/basement:latest
+
+# Wait ~5 seconds, then read the auto-generated admin password:
+docker logs basement 2>&1 | grep "INITIAL ADMIN PASSWORD"
+
+# Open http://localhost:8080 and log in as admin / <password>.
+```
+
+No env vars, no bcrypt CLI, no JWT secret to generate up front —
+basement auto-bootstraps both on first boot (v1.11.0c). See
+[`docs/deployment/docker.md`](docs/deployment/docker.md) for what
+gets persisted to disk and how to upgrade to a production posture.
+
+Prefer a guided one-liner that pulls the image, drops a
+`docker-compose.yml` alongside it, and prints the password for you?
+
+```bash
+curl -sSL https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh | bash
+```
+
+(Review-before-run recommended:
+`curl -sSLo install.sh https://.../install.sh && less install.sh && bash install.sh`.)
+
+### Production posture
+
+For production, set the secrets explicitly so basement never auto-
+generates them on a fresh data volume (and so no plaintext password
+sits at `{DATA_DIR}/.initial-admin-password`):
 
 ```bash
 docker run -d \
@@ -222,7 +252,9 @@ to register your first backend.
 
 For production deployment behind Caddy / Nginx / Traefik with TLS,
 backups, and a hardening checklist, see
-[`docs/deployment/`](docs/deployment/).
+[`docs/deployment/`](docs/deployment/) (annotated Compose, bcrypt +
+JWT rotation, reverse-proxy recipes, TLS topologies, hardening,
+backup-and-restore, upgrade procedure).
 
 ## Comparison vs other OSS admin UIs
 

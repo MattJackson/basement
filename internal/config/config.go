@@ -185,13 +185,27 @@ func Load() (*Config, error) {
 		cfg.OIDC.RedirectURL = strings.TrimRight(cfg.PublicURL, "/") + "/api/v1/auth/oidc/callback"
 	}
 
+	// v1.11.0c — 5-minute install. Auto-generate JWT secret and admin
+	// password when missing so `docker run` with no env vars just works.
+	// Bootstrap is a strict no-op for operators who set every env var
+	// explicitly (the early-return checks in bootstrap_*.go). When it
+	// does fire, the generated values are persisted to BASEMENT_DATA_DIR
+	// (.jwt-secret + .initial-admin-password, 0600) so a container
+	// restart reuses them.
+	if err := applyBootstrap(cfg); err != nil {
+		return nil, err
+	}
+
 	// Validation - aggregate all errors
 	var errs []error
 
-	// Validate driver name (required)
-	if cfg.Driver.Name == "" {
-		errs = append(errs, errors.New("BASEMENT_DRIVER is required"))
-	} else if cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" && cfg.Driver.Name != "aws-s3" && cfg.Driver.Name != "minio" {
+	// Validate driver name. v1.11.0c: optional — when empty, basement
+	// boots without a default cluster wired from env. The operator
+	// adds clusters via /admin/clusters after first login. The
+	// 5-minute-install path needs this to land at the dashboard with
+	// nothing more than `docker run`. When the value IS set it still
+	// has to be a registered driver name.
+	if cfg.Driver.Name != "" && cfg.Driver.Name != "garage" && cfg.Driver.Name != "garage-v1" && cfg.Driver.Name != "aws-s3" && cfg.Driver.Name != "minio" {
 		errs = append(errs, fmt.Errorf("BASEMENT_DRIVER=%q: supported values are \"garage\" (v2 admin API), \"garage-v1\" (v1 admin API), \"aws-s3\", or \"minio\"", cfg.Driver.Name))
 	}
 

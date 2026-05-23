@@ -176,7 +176,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
-	} else {
+	} else if cfg.Driver.Name != "" {
 		driverCfg := map[string]string{
 			"admin_url":    cfg.Driver.Garage.AdminURL,
 			"admin_token":  cfg.Driver.Garage.AdminToken,
@@ -200,6 +200,15 @@ func main() {
 			slog.Error("failed to open legacy driver", "driver", cfg.Driver.Name, "error", err)
 			os.Exit(1)
 		}
+	} else {
+		// v1.11.0c — no env-derived driver and no persisted connection.
+		// This is the 5-minute-install posture: boot to the dashboard
+		// with no default cluster wired. Operator adds clusters via
+		// /admin/clusters → New cluster. defaultDrv stays nil; the
+		// api/handler layer is tolerant of a nil default driver
+		// (everything routes through the per-connection registry once
+		// the operator adds one).
+		slog.Info("no BASEMENT_DRIVER set and no persisted connections — booting without a default cluster; add one via /admin/clusters")
 	}
 
 	st, err := store.Open(cfg.DataDir, cfg.AuditRetention)
