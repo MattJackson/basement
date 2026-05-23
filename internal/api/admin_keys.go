@@ -33,7 +33,12 @@ func (s *Server) listKeysHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, keys)
 }
 
-// getKeyHandler handles GET /admin/keys/{id}.
+// getKeyHandler handles GET /admin/clusters/{cid}/keys/{id}.
+//
+// v1.11.0.3: routes through s.driverForRouteCluster (resolves cid via
+// Registry.For) instead of the global s.drv default. Same bug class
+// as the v1.11.0.2 bucket fix — every per-cluster key read was
+// silently landing on whichever cluster s.drv pointed at.
 func (s *Server) getKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -46,7 +51,13 @@ func (s *Server) getKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := s.drv.GetKey(r.Context(), id)
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
+	key, err := drv.GetKey(r.Context(), id)
 	if err != nil {
 		writeDriverError(w, "GetKey", err)
 		return
@@ -59,10 +70,11 @@ func (s *Server) getKeyHandler(w http.ResponseWriter, r *http.Request) {
 //
 // Per ADR-0001 v0.9.0f: gated on key:create at "key:{cid}:*".
 //
-// v0.9.0m: routes through the connection-scoped Registry so multi-cluster
-// operators hitting /admin/clusters/cluster-B/keys mint into cluster B,
-// not the default. Falls back to s.drv when no cid (legacy) or when the
-// registry is unwired (older tests that pass nil for reg).
+// v1.11.0.3: cid is REQUIRED and routes through driverForRouteCluster
+// (Registry.For). Earlier (v0.9.0m) fallback-to-s.drv branch is gone —
+// the route is mounted only under /admin/clusters/{cid}/keys, so a
+// missing cid is a routing bug, not a legacy caller. Matches the
+// v1.11.0.2 posture for the bucket handlers.
 //
 // IMPORTANT: the driver's CreateKey response includes SecretAccessKey
 // — Garage returns it exactly once at creation and never again. The
@@ -83,17 +95,10 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pick the per-cluster driver when possible; fall back to s.drv
-	// when no registry / no cid. Mirrors listKeysByClusterHandler so
-	// the create + list pair stay consistent for any given cid.
-	drv := s.drv
-	if cid != "" && s.reg != nil {
-		d, err := s.reg.For(r.Context(), cid)
-		if err != nil {
-			writeRegistryForError(w, err)
-			return
-		}
-		drv = d
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
 	}
 
 	var spec driver.KeySpec
@@ -135,6 +140,9 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 // Supports updating bucketsPermissions (required) and name (returns 501 if only name is set).
 //
 // Per ADR-0001 v0.9.0f: gated on key:edit_permissions at "key:{cid}:{id}".
+//
+// v1.11.0.3: routes through driverForRouteCluster instead of s.drv —
+// same bug class as the v1.11.0.2 bucket handler fix.
 func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPatch {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PATCH required")
@@ -155,7 +163,7 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Name               *string                   `json:"name,omitempty"`
+		Name               *string                    `json:"name,omitempty"`
 		BucketsPermissions *[]driver.BucketPermission `json:"bucketsPermissions,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -163,9 +171,15 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+
 	// Handle permissions update first (if provided)
 	if body.BucketsPermissions != nil {
-		if err := s.drv.UpdateKeyPermissions(r.Context(), id, *body.BucketsPermissions); err != nil {
+		if err := drv.UpdateKeyPermissions(r.Context(), id, *body.BucketsPermissions); err != nil {
 			s.auditFailure(r, "key:edit_permissions", resourceKey(cid, id), err)
 			writeDriverError(w, "UpdateKeyPermissions", err)
 			return
@@ -180,7 +194,7 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key, err := s.drv.GetKey(r.Context(), id)
+	key, err := drv.GetKey(r.Context(), id)
 	if err != nil {
 		writeDriverError(w, "GetKey", err)
 		return
@@ -216,7 +230,13 @@ func (s *Server) armDeleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Confirm the key exists before issuing a token. Avoids handing
 	// out tokens for nonexistent IDs and surfaces 404 cleanly.
-	if _, err := s.drv.GetKey(r.Context(), id); err != nil {
+	// v1.11.0.3: per-cluster driver, not the global s.drv default.
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+	if _, err := drv.GetKey(r.Context(), id); err != nil {
 		writeDriverError(w, "GetKey", err)
 		return
 	}
@@ -286,7 +306,13 @@ func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.drv.DeleteKey(r.Context(), id); err != nil {
+	// v1.11.0.3: per-cluster driver, not the global s.drv default.
+	drv, err := s.driverForRouteCluster(r)
+	if err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+	if err := drv.DeleteKey(r.Context(), id); err != nil {
 		s.auditFailure(r, "key:delete", resourceKey(cid, id), err)
 		writeDriverError(w, "DeleteKey", err)
 		return
