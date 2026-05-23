@@ -622,6 +622,20 @@ func (s *Server) routes() {
 			userG.Put("/user/regions/{regionId}/buckets/{bid}/o/{key}/retention", s.userPutObjectRetentionHandler)
 			userG.Get("/user/regions/{regionId}/buckets/{bid}/o/{key}/legal-hold", s.userGetObjectLegalHoldHandler)
 			userG.Put("/user/regions/{regionId}/buckets/{bid}/o/{key}/legal-hold", s.userPutObjectLegalHoldHandler)
+
+			// v1.10.0d ENCRYPTION — bucket-level default server-side
+			// encryption. SSE-S3 (backend-managed key) + SSE-KMS
+			// (operator-supplied KMS key). Capability-gated per axis
+			// (driver returns (s3, kms) capability bits; API rejects
+			// algorithm requests that don't match an advertised axis
+			// with 501 + the specific capability hint). Audit events:
+			//   bucket:encryption_enabled
+			//   bucket:encryption_disabled
+			//   bucket:encryption_algorithm_changed
+			//   bucket:encryption_kms_key_changed
+			userG.Get("/user/regions/{regionId}/buckets/{bid}/encryption", s.userGetBucketEncryptionHandler)
+			userG.Put("/user/regions/{regionId}/buckets/{bid}/encryption", s.userPutBucketEncryptionHandler)
+			userG.Delete("/user/regions/{regionId}/buckets/{bid}/encryption", s.userDeleteBucketEncryptionHandler)
 		})
 	})
 
