@@ -85,6 +85,14 @@ func (m *mockConnStore) Count(ctx context.Context) (int, error) {
 	return len(m.conns), nil
 }
 
+// SwapClusterSecret satisfies the v1.12.0b Connections interface
+// addition. The driver registry tests don't exercise the CSK
+// migration path, so this is a no-op that lets the type assertion
+// pass through; the API-layer migration tests cover the real swap.
+func (m *mockConnStore) SwapClusterSecret(ctx context.Context, cid string, oldEnc, newEnc []byte) error {
+	return nil
+}
+
 // TestRegistryForCaches verifies that For() returns cached instances.
 // We use a mock driver registered for testing purposes.
 func TestRegistryForCaches(t *testing.T) {
