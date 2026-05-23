@@ -396,6 +396,11 @@ function healthClass(health: FederationHealth): string {
       return "border-amber-600/40 bg-amber-600/10 text-amber-700 dark:text-amber-400";
     case "lagging":
       return "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400";
+    case "pending":
+      // v1.11.0.4: engine hasn't yet verified the replica. Neutral
+      // grey rather than green so the operator doesn't read it as
+      // "everything's fine".
+      return "border-slate-500/40 bg-slate-500/10 text-slate-700 dark:text-slate-400";
     default:
       return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400";
   }

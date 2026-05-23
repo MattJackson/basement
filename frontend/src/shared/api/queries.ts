@@ -1720,7 +1720,7 @@ export function useStartClusterScrub(cid: string) {
 //     "Promote to primary".
 
 export type FederationSyncMode = "continuous" | "scheduled";
-export type FederationHealth = "" | "in-sync" | "lagging" | "stale" | "broken";
+export type FederationHealth = "" | "pending" | "in-sync" | "lagging" | "stale" | "broken";
 
 export interface FederationReplicaTarget {
   regionId: string;
