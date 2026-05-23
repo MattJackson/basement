@@ -74,8 +74,13 @@ team) running it on infrastructure they own**. The trust boundaries:
   key-derivation function (SHA-256) that wraps per-user S3 secrets
   at rest. Rotate it and every encrypted secret is unreadable.
   Treat it like a database master key.
-- The seed admin password (`BASEMENT_ADMIN_INITIAL_PASSWORD`) and
-  any local user passwords (stored as bcrypt cost-12 hashes).
+- The seed admin password — either `BASEMENT_ADMIN_PASSWORD_HASH`
+  (bcrypt hash, recommended for production) or `BASEMENT_ADMIN_PASSWORD`
+  (plaintext, bcrypted at boot, never persisted) — and any local
+  user passwords (stored as bcrypt cost-12 hashes). On a fresh install
+  with both unset, the v1.11.0c auto-bootstrap path mints a random
+  24-char password and persists it to `{DATA_DIR}/.initial-admin-password`
+  (0600); see [`docs/deployment/docker.md`](docs/deployment/docker.md#5-minute-evaluation-v1110c-auto-bootstrap).
 - OIDC discovery responses and JWKs from the configured IdP, when
   OIDC is enabled.
 

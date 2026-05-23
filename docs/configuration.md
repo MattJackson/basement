@@ -1,128 +1,171 @@
 # Configuration Reference
 
-This document lists every environment variable supported by `basement`. All variables are prefixed with `BASEMENT_` and read at startup. No runtime configuration — changes require a restart.
+Every environment variable basement reads at startup. All variables
+are prefixed with `BASEMENT_`. basement has no runtime config —
+changes require a process restart.
 
-See [`internal/config/config.go`](../internal/config/config.go) for the source of truth (lines cited in each section).
+Source of truth: [`internal/config/config.go`](../internal/config/config.go).
 
 ---
 
-## Server Configuration
+## Server
 
 | Variable | Type | Required? | Default | Description |
 |----------|------|-----------|---------|-------------|
-| `BASEMENT_LISTEN` | string | No | `:8080` | TCP address to listen on. Format: `[host]:port`. See [`config.go:80`](../internal/config/config.go) |
-| `BASEMENT_DATA_DIR` | string | No | `/var/lib/basement` | Directory for JSON store (users, grants, shares) and audit logs. See [`config.go:16-17`](../internal/config/config.go) |
-| `BASEMENT_PUBLIC_URL` | string | No | *(empty)* | Absolute base URL for share links. If set, used to generate absolute URLs in `/share/:token` redirects. See [`config.go:17-18`](../internal/config/config.go) |
-| `BASEMENT_LOG_LEVEL` | string | No | `info` | One of `debug`, `info`, `warn`, `error`. Validates at load time. See [`config.go:18`](../internal/config/config.go), [`config.go:182-185`](../internal/config/config.go) |
-| `BASEMENT_SESSION_TTL` | duration | No | `24h` | Session sliding TTL as Go duration string (e.g., `1h`, `30m`). Parsed at startup. See [`config.go:19`](../internal/config/config.go), [`config.go:86-93`](../internal/config/config.go) |
-| `BASEMENT_AUDIT_RETENTION_DAYS` | int | No | `90` | Days to retain audit logs before cleanup. Parsed as integer at startup. See [`config.go:20`](../internal/config/config.go), [`config.go:96-103`](../internal/config/config.go) |
+| `BASEMENT_LISTEN` | string | No | `:8080` | TCP address to listen on. Format: `[host]:port`. |
+| `BASEMENT_DATA_DIR` | string | No | `/var/lib/basement` | Directory for JSON store + audit logs + auto-bootstrap files. |
+| `BASEMENT_PUBLIC_URL` | string | No | *(empty)* | Absolute base URL the reverse proxy serves on. Used for share links, OIDC redirect URI, invite emails. Set this in production. |
+| `BASEMENT_LOG_LEVEL` | string | No | `info` | One of `debug`, `info`, `warn`, `error`. |
+| `BASEMENT_LOG_FORMAT` | string | No | `json` | `json` (one parseable line per event) or `text` (key=value for local dev). v1.11.0f. |
+| `BASEMENT_SESSION_TTL` | duration | No | `24h` | Session sliding TTL as a Go duration string (`1h`, `30m`, etc.). |
+| `BASEMENT_AUDIT_RETENTION_DAYS` | int | No | `90` | Days to retain audit-log JSONL files. Files older than this are deleted on the daily sweep. |
+| `BASEMENT_METRICS_TOKEN` | string | No | *(empty)* | When set, gates `/metrics` behind bearer-token auth. Unset = unauthenticated (standard Prometheus convention; gate via network). v1.11.0f. |
 
 ---
 
-## Driver Configuration
+## Admin auth (with v1.11.0c auto-bootstrap)
 
 | Variable | Type | Required? | Default | Description |
 |----------|------|-----------|---------|-------------|
-| `BASEMENT_DRIVER` | string | **Yes** | — | Backend driver name. Only `"garage"` supported in v1.0. See [`config.go:30`](../internal/config/config.go), [`config.go:106`](../internal/config/config.go), [`config.go:149-152`](../internal/config/config.go) |
-| `BASEMENT_DRIVER_GARAGE_ADMIN_URL` | string | **Yes** (if driver=garage) | — | Admin API URL of Garage cluster (e.g., `http://garage:3903`). See [`config.go:37`](../internal/config/config.go), [`config.go:109`](../internal/config/config.go), [`config.go:156-158`](../internal/config/config.go) |
-| `BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN` | string | **Yes** (if driver=garage) | — | Bearer token for Garage admin API. Never exposed to browser; stored server-side. See [`config.go:38`](../internal/config/config.go), [`config.go:110`](../internal/config/config.go), [`config.go:157-159`](../internal/config/config.go) |
-| `BASEMENT_DRIVER_GARAGE_S3_URL` | string | No | *(empty)* | S3 data-plane URL (e.g., `http://garage:3900`). Optional if only admin operations needed. See [`config.go:39`](../internal/config/config.go), [`config.go:111`](../internal/config/config.go) |
-| `BASEMENT_DRIVER_GARAGE_S3_REGION` | string | No | *(empty)* | S3 region name (e.g., `garage`). Used in SigV4 signing. See [`config.go:40`](../internal/config/config.go), [`config.go:112`](../internal/config/config.go) |
-| `BASEMENT_DRIVER_GARAGE_S3_ACCESS_KEY` | string | No | *(empty)* | S3 access key for data-plane operations (buckets, objects). See [`config.go:41`](../internal/config/config.go), [`config.go:113`](../internal/config/config.go) |
-| `BASEMENT_DRIVER_GARAGE_S3_SECRET_KEY` | string | No | *(empty)* | S3 secret key for data-plane operations. See [`config.go:42`](../internal/config/config.go), [`config.go:114`](../internal/config/config.go) |
+| `BASEMENT_ADMIN_USER` | string | No | `admin` (when bootstrap fires) | Admin username. When neither `BASEMENT_ADMIN_PASSWORD_HASH` nor `BASEMENT_ADMIN_PASSWORD` is set, the v1.11.0c bootstrap path defaults the username to `admin`. |
+| `BASEMENT_ADMIN_PASSWORD_HASH` | string | No (auto-bootstrap) | — | bcrypt hash of the admin password. Production posture. When unset (and `BASEMENT_ADMIN_PASSWORD` also unset), basement auto-generates a 24-char random password on first boot, prints it to stdout as `INITIAL ADMIN PASSWORD: <pw>`, and persists the plaintext to `{DATA_DIR}/.initial-admin-password` (0600). |
+| `BASEMENT_ADMIN_PASSWORD` | string | No | — | Plaintext admin password (v1.11.0c convenience). When set, basement bcrypt-hashes it at boot and never persists the plaintext. Useful for `docker run -e BASEMENT_ADMIN_PASSWORD=...`. Production should use `BASEMENT_ADMIN_PASSWORD_HASH` so no plaintext sits in the env. |
+| `BASEMENT_JWT_SECRET` | base64 bytes | No (auto-bootstrap) | — | HMAC-SHA256 secret for session JWTs **and** the AES-256-GCM key-derivation source for encrypting stored S3 credentials + admin tokens at rest. Must decode to ≥32 bytes. When unset, basement auto-generates 32 random bytes on first boot and persists them to `{DATA_DIR}/.jwt-secret` (0600, hex-encoded) so the same secret is reused across restarts. **Set explicitly for production** — a regenerated secret invalidates every session and renders every encrypted credential unreadable. |
+
+See [`deployment/docker.md`](deployment/docker.md#rotating-basement_jwt_secret)
+for the JWT-secret rotation procedure.
 
 ---
 
-## Admin Authentication (v1.0)
+## Drivers
+
+basement supports four drivers; you do not need to pick one at the
+env layer. In v1.x, the recommended pattern is:
+
+- **Run basement with auto-bootstrap** (no `BASEMENT_DRIVER`).
+- **Add clusters at runtime** via `/admin/clusters` — each cluster
+  picks its own driver (`garage` (v2 admin API), `garage-v1`,
+  `aws-s3`, `minio`) and supplies its own admin endpoint + token.
+
+The `BASEMENT_DRIVER` family of env vars (below) seeds *one* default
+cluster at boot. It exists for zero-touch first-run automation (CI,
+k8s bootstrap, immutable infra). Most operators do not need it.
+
+### Driver name
 
 | Variable | Type | Required? | Default | Description |
 |----------|------|-----------|---------|-------------|
-| `BASEMENT_ADMIN_USER` | string | No (bootstrap defaults to `admin`) | `admin` (when bootstrap fires) | Admin username. Single admin account in v1.0; multi-user planned for v1.1+. When `BASEMENT_ADMIN_PASSWORD_HASH` is also unset, the v1.11.0c bootstrap path defaults the username to `admin`. |
-| `BASEMENT_ADMIN_PASSWORD_HASH` | string | No (auto-bootstrap) | — | bcrypt hash of admin password. Generate with `bcrypt-cli` or Node's `bcrypt`. **v1.11.0c**: when unset (and `BASEMENT_ADMIN_PASSWORD` also unset), basement auto-generates a random password on first boot, prints it to stdout as `INITIAL ADMIN PASSWORD: <pw>`, and persists the plaintext to `{DATA_DIR}/.initial-admin-password` (0600). |
-| `BASEMENT_ADMIN_PASSWORD` | string | No | — | **v1.11.0c convenience**: plaintext admin password. When set and `BASEMENT_ADMIN_PASSWORD_HASH` is unset, basement bcrypt-hashes it at boot and never persists the plaintext. Useful for `docker run -e BASEMENT_ADMIN_PASSWORD=...` first-boot. Production should set `BASEMENT_ADMIN_PASSWORD_HASH` directly so no plaintext sits in the env. |
-| `BASEMENT_JWT_SECRET` | base64 bytes | No (auto-bootstrap) | — | Secret for signing HS256 JWTs. Must be ≥32 bytes after decoding (base64 in env). **v1.11.0c**: when unset, basement auto-generates 32 random bytes on first boot and persists them to `{DATA_DIR}/.jwt-secret` (0600, hex-encoded) so the same secret is reused across container restarts and existing sessions survive. Set explicitly for production so a fresh data volume keeps the same signing key. |
+| `BASEMENT_DRIVER` | string | No | *(empty)* | Seed one cluster at boot. One of `garage` (v2 admin API), `garage-v1`, `aws-s3`, `minio`. Empty = no env-seeded cluster; add via `/admin/clusters`. |
 
----
-
-## OIDC Configuration (v1.3+)
+### Garage v1 / v2 (`BASEMENT_DRIVER=garage` or `garage-v1`)
 
 | Variable | Type | Required? | Default | Description |
 |----------|------|-----------|---------|-------------|
-| `BASEMENT_OIDC_ISSUER` | string | No | *(empty)* | OIDC issuer URL (e.g., `https://auth.example.com`). Optional; only used if v1.3+ enabled. See [`config.go:58`](../internal/config/config.go), [`config.go:131`](../internal/config/config.go) |
-| `BASEMENT_OIDC_CLIENT_ID` | string | No | *(empty)* | OIDC client ID from issuer registration. See [`config.go:59`](../internal/config/config.go), [`config.go:132`](../internal/config/config.go) |
-| `BASEMENT_OIDC_CLIENT_SECRET` | string | No | *(empty)* | OIDC client secret from issuer registration. See [`config.go:60`](../internal/config/config.go), [`config.go:133`](../internal/config/config.go) |
-| `BASEMENT_OIDC_AUTO_PROVISION` | bool | No | `false` | Auto-create local user on first OIDC login if no matching username exists. See [`config.go:61`](../internal/config/config.go), [`config.go:136-143`](../internal/config/config.go) |
+| `BASEMENT_DRIVER_GARAGE_ADMIN_URL` | string | **Yes** (when DRIVER=garage*) | — | Admin API URL (e.g. `http://garage:3903`). |
+| `BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN` | string | **Yes** (when DRIVER=garage*) | — | Bearer token for the Garage admin API. Stored AES-256-GCM at rest. |
+| `BASEMENT_DRIVER_GARAGE_S3_URL` | string | No | *(empty)* | Optional S3 data-plane URL (e.g. `http://garage:3900`). |
+| `BASEMENT_DRIVER_GARAGE_S3_REGION` | string | No | *(empty)* | S3 region name (used in SigV4 signing). |
+| `BASEMENT_DRIVER_GARAGE_S3_ACCESS_KEY` | string | No | *(empty)* | Optional default S3 access key. |
+| `BASEMENT_DRIVER_GARAGE_S3_SECRET_KEY` | string | No | *(empty)* | Optional default S3 secret key. |
+
+### AWS S3 (`BASEMENT_DRIVER=aws-s3`)
+
+| Variable | Type | Required? | Default | Description |
+|----------|------|-----------|---------|-------------|
+| `BASEMENT_DRIVER_AWS_S3_REGION` | string | **Yes** (when DRIVER=aws-s3) | — | AWS region (e.g. `us-east-1`). |
+| `BASEMENT_DRIVER_AWS_S3_ACCESS_KEY` | string | **Yes** (when DRIVER=aws-s3) | — | IAM access key ID. |
+| `BASEMENT_DRIVER_AWS_S3_SECRET_KEY` | string | **Yes** (when DRIVER=aws-s3) | — | IAM secret access key. Encrypted at rest. |
+| `BASEMENT_DRIVER_AWS_S3_ENDPOINT` | string | No | *(empty)* | Override endpoint for S3-compatible non-AWS services. |
+
+### MinIO (`BASEMENT_DRIVER=minio`)
+
+MinIO clusters added via `/admin/clusters` are the typical path
+(the wizard prompts for the admin endpoint + access key + secret).
+The env-var family is the same shape as the AWS S3 driver.
 
 ---
 
-## Generating bcrypt + JWT secret
+## OIDC (optional, v1.3+)
 
-### bcrypt password hash (admin account)
+OIDC is disabled when `BASEMENT_OIDC_ISSUER` is empty. Local-password
+sign-in always remains available (for break-glass when OIDC is down).
 
-**Option A — `bcrypt-cli` CLI:**
+| Variable | Type | Required? | Default | Description |
+|----------|------|-----------|---------|-------------|
+| `BASEMENT_OIDC_ISSUER` | string | No | *(empty)* | OIDC issuer URL (e.g. `https://auth.example.com`). Setting this enables OIDC. |
+| `BASEMENT_OIDC_CLIENT_ID` | string | Required if Issuer set | *(empty)* | Client ID registered at your IdP. |
+| `BASEMENT_OIDC_CLIENT_SECRET` | string | Required if Issuer set | *(empty)* | Client secret from your IdP. |
+| `BASEMENT_OIDC_REDIRECT_URL` | string | No (derived from PublicURL) | *(empty)* | OAuth callback URL the IdP redirects to. Derives from `${PublicURL}/api/v1/auth/oidc/callback` when `BASEMENT_PUBLIC_URL` is set. |
+| `BASEMENT_OIDC_AUTO_PROVISION` | bool | No | `false` | Auto-create a local user on first OIDC login if no matching username exists. |
+| `BASEMENT_OIDC_ELEVATION_PROMPT` | string | No | `login` | The `prompt` parameter the elevation flow appends to the IdP authorize URL. Defaults to `login` so an OIDC user elevating via `/auth/elevate/oidc/start` gets an IdP-side re-auth prompt even if a session is cached. `consent` or `""` are also accepted. |
+
+---
+
+## Generating secrets
+
+### `BASEMENT_ADMIN_PASSWORD_HASH`
+
+Production posture is a bcrypt hash, not a plaintext password.
+
 ```bash
-# Generate 12-cost hash (default for basement)
-echo "your-password" | bcrypt -g 12
-# Output: $2a$12$...
-```
+# Option A: htpasswd (Apache tools, available everywhere)
+htpasswd -bnBC 12 "" 'your-password-here' | tr -d ':\n'
 
-**Option B — Node.js one-liner:**
-```bash
-node -e 'const bcrypt = require("bcrypt"); bcrypt.hashSync("your-password", 12)'
-# Output: $2a$12$...
-```
+# Option B: Python with bcrypt
+python3 -c 'import bcrypt; print(bcrypt.hashpw(b"your-password-here", bcrypt.gensalt(12)).decode())'
 
-**Option C — Go (if you have Go toolchain):**
-```bash
+# Option C: Go
 go run - <<'EOF'
 package main
 import ("fmt"; "golang.org/x/crypto/bcrypt")
-func main() { h, _ := bcrypt.GenerateFromPassword([]byte("your-password"), bcrypt.DefaultCost); fmt.Println(string(h)) }
+func main() { h, _ := bcrypt.GenerateFromPassword([]byte("your-password-here"), 12); fmt.Println(string(h)) }
 EOF
-# Output: $2a$12$...
 ```
 
-### JWT secret (base64-encoded)
+Cost-12 is the basement default; lower than 10 is rejected.
 
-**Option A — `openssl` (macOS / Linux):**
+> **Shell quoting gotcha.** The hash starts with `$2y$` (or `$2a$`,
+> `$2b$`). In `.env` or YAML, wrap the value in single quotes so
+> the `$2y` is not interpreted as a shell variable:
+> `BASEMENT_ADMIN_PASSWORD_HASH='$2y$12$...'`.
+
+### `BASEMENT_JWT_SECRET`
+
+32 random bytes, base64-encoded.
+
 ```bash
-# Generate 32 random bytes, base64 encode for env var
 openssl rand -base64 32
-# Output: <96-char string>
+# Output: <44-char string that decodes to 32 raw bytes>
 ```
-
-**Option B — `node` one-liner:**
-```bash
-node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'
-# Output: <96-char string>
-```
-
-**Option C — Python (if available):**
-```bash
-python3 -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())'
-# Output: <96-char string>
-```
-
-**Important:** The JWT secret must be ≥32 bytes **after** base64 decoding. A 96-character base64 string decodes to exactly 32 bytes (minimum). Use the full output — do not truncate.
 
 ---
 
-## Quick reference (minimum for v1.0)
+## Minimum env for production
 
 ```bash
-BASEMENT_DRIVER=garage
-BASEMENT_DRIVER_GARAGE_ADMIN_URL=http://garage:3903
-BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN=<your-garage-admin-token>
+BASEMENT_PUBLIC_URL=https://basement.example.com
 BASEMENT_ADMIN_USER=admin
-BASEMENT_ADMIN_PASSWORD_HASH=$2a$12$...
-BASEMENT_JWT_SECRET=$(openssl rand -base64 32)
+BASEMENT_ADMIN_PASSWORD_HASH='$2y$12$...'
+BASEMENT_JWT_SECRET='base64-string-32-bytes-or-more'
+
+# Optional but recommended for production posture
+BASEMENT_LOG_LEVEL=info
+BASEMENT_LOG_FORMAT=json
+BASEMENT_SESSION_TTL=24h
+BASEMENT_AUDIT_RETENTION_DAYS=90
 ```
 
-## 5-minute evaluation (v1.11.0c, no env vars at all)
+The driver settings are no longer required at the env layer — add
+clusters via `/admin/clusters` after first login. See
+[`deployment/docker.md`](deployment/docker.md) for the
+production-shape Compose file.
 
-The auto-bootstrap path lets you run basement with **zero** secrets
-configured — useful for kicking the tyres or smoke-testing a new
-image tag without writing a `.env` first:
+---
+
+## 5-minute evaluation (v1.11.0c, no env at all)
+
+The auto-bootstrap path lets you run basement with zero secrets
+configured — useful for kicking the tyres without writing a `.env`:
 
 ```bash
 docker run -d --name basement -p 8080:8080 \
@@ -131,28 +174,38 @@ docker run -d --name basement -p 8080:8080 \
 
 # Wait ~5 seconds, then:
 docker logs basement 2>&1 | grep "INITIAL ADMIN PASSWORD"
+# INITIAL ADMIN PASSWORD: <24-char string>
 ```
 
-The driver settings (`BASEMENT_DRIVER`, `BASEMENT_DRIVER_GARAGE_*` or
-`BASEMENT_DRIVER_AWS_S3_*`) are still required when you want basement
-to manage a specific backend at boot. Without them, basement comes up
-with no default cluster and you add one via `/admin/clusters` after
-first login. See
-[`docs/deployment/docker.md`](deployment/docker.md) for the
-auto-bootstrap behaviour and the production checklist.
+See [`deployment/docker.md`](deployment/docker.md#5-minute-evaluation-v1110c-auto-bootstrap)
+for what auto-bootstrap does, where it persists state, and when to
+move past it.
 
 ---
 
 ## Validation errors
 
-On startup, `basement` aggregates all validation failures and exits with a single error message. Common cases:
+On startup, `basement` aggregates every validation failure and exits
+with a single combined error message. Common cases:
 
-- `BASEMENT_DRIVER is required` — driver name must be set
-- `BASEMENT_DRIVER="foo": only "garage" supported in v1.0` — unsupported driver value
-- `BASEMENT_ADMIN_USER is required` / `BASEMENT_ADMIN_PASSWORD_HASH is required` — admin account incomplete
-- `BASEMENT_JWT_SECRET is required` — missing secret entirely
+- `BASEMENT_DRIVER="foo": supported values are "garage" (v2 admin API), "garage-v1" (v1 admin API), "aws-s3", or "minio"` — unsupported driver name
+- `BASEMENT_DRIVER_GARAGE_ADMIN_URL is required when DRIVER=garage` — driver-tier env incomplete
+- `BASEMENT_DRIVER_AWS_S3_REGION is required when DRIVER=aws-s3` — same shape for AWS
+- `BASEMENT_ADMIN_USER is required` / `BASEMENT_ADMIN_PASSWORD_HASH is required` — admin account incomplete (only when bootstrap is also off — i.e. `BASEMENT_JWT_SECRET` is set explicitly but no password path is configured)
 - `BASEMENT_JWT_SECRET must be at least 32 bytes after base64 decoding (got <n>)` — secret too short
 - `BASEMENT_LOG_LEVEL="foo": must be one of debug|info|warn|error` — invalid log level
+- `BASEMENT_LOG_FORMAT="foo": must be one of json|text` — invalid log format
 - `invalid BASEMENT_SESSION_TTL: ...` / `invalid BASEMENT_AUDIT_RETENTION_DAYS: ...` — parse failures
 
-All errors are printed together so you can fix multiple issues at once.
+All errors print together so you can fix multiple issues at once.
+
+## See also
+
+- [`deployment/docker.md`](deployment/docker.md) — annotated Compose
+  file + 5-minute auto-bootstrap walkthrough + secret generation
+- [`deployment/hardening.md`](deployment/hardening.md) — production
+  posture checklist
+- [`observability/README.md`](observability/README.md) — `/metrics`
+  + slog (`BASEMENT_LOG_FORMAT`, `BASEMENT_METRICS_TOKEN`) walkthrough
+- [`../SECURITY.md`](../SECURITY.md) — threat model + what basement
+  encrypts at rest
