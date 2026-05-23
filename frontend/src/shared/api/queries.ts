@@ -3115,3 +3115,159 @@ export function useDeleteBucketEncryption(
     },
   });
 }
+
+// ─── v1.12.0a (ADR-0007) per-cluster envelope encryption ────────────
+//
+// Five endpoints: unlock, lock, lock-status, add admin, remove admin.
+// All hit /api/v1/admin/clusters/{cid}/... and the openapi.yaml hasn't
+// been regenerated yet, so these hooks go through plain fetch.
+
+export interface ClusterLockStatus {
+  unlocked: boolean;
+  hasCsk: boolean;
+  requiresMigration: boolean;
+  admins: string[];
+}
+
+/**
+ * useClusterLockStatus — polls the per-cluster lock-state. Cheap
+ * (no Argon2id work on the server side); 30s stale window lets the
+ * cluster detail page show "locked" without a manual refresh after
+ * another tab issued a lock/unlock.
+ */
+export function useClusterLockStatus(cid: string) {
+  return useQuery<ClusterLockStatus>({
+    queryKey: ["admin", "clusters", cid, "lock-status"],
+    queryFn: async () => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/lock-status`,
+        { credentials: "include" },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        // 503 CLUSTER_SECRETS_NOT_WIRED is the most common non-2xx —
+        // surface as "no CSK" rather than as an error so the
+        // operator's cluster detail page still renders cleanly on
+        // deploys that haven't wired the manager yet.
+        const code = (body && typeof body === "object" && "error" in body
+          ? (body as { error?: { code?: string } }).error?.code
+          : undefined) ?? "";
+        if (res.status === 503 && code === "CLUSTER_SECRETS_NOT_WIRED") {
+          return { unlocked: true, hasCsk: false, requiresMigration: false, admins: [] };
+        }
+        throw apiError(`admin/clusters/${cid}/lock-status`, res.status, body);
+      }
+      return body as ClusterLockStatus;
+    },
+    enabled: !!cid,
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    retry: 1,
+  });
+}
+
+/**
+ * useUnlockCluster — POST /unlock {password}. On success, invalidates
+ * lock-status so the badge flips immediately; the caller is responsible
+ * for re-running the request that triggered the 423 (the elevation-guard
+ * pattern at the request layer handles this in section 3+).
+ */
+export function useUnlockCluster(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<{ unlocked: true }, Error, { password: string }>({
+    mutationFn: async ({ password }) => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/unlock`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/clusters/${cid}/unlock`, res.status, body);
+      return body as { unlocked: true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "lock-status"] });
+    },
+  });
+}
+
+/**
+ * useLockCluster — POST /lock. 204 on success; idempotent.
+ */
+export function useLockCluster(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, void>({
+    mutationFn: async () => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/lock`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`admin/clusters/${cid}/lock`, res.status, body);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "lock-status"] });
+    },
+  });
+}
+
+/**
+ * useAddClusterAdmin — POST /admins {adminUserId,password}.
+ * First-admin call also bootstraps the CSK; subsequent calls require
+ * the cluster to be already unlocked (the server returns 423 LOCKED
+ * otherwise, which the request layer maps to an unlock prompt).
+ */
+export function useAddClusterAdmin(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { bootstrap: boolean; unlocked?: boolean; adminId: string },
+    Error,
+    { adminUserId: string; password: string }
+  >({
+    mutationFn: async ({ adminUserId, password }) => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/admins`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ adminUserId, password }),
+        },
+      );
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError(`admin/clusters/${cid}/admins`, res.status, body);
+      return body as { bootstrap: boolean; unlocked?: boolean; adminId: string };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "lock-status"] });
+    },
+  });
+}
+
+/**
+ * useRemoveClusterAdmin — DELETE /admins/{adminUserId}.
+ */
+export function useRemoveClusterAdmin(cid: string) {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { adminUserId: string }>({
+    mutationFn: async ({ adminUserId }) => {
+      const res = await fetch(
+        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/admins/${encodeURIComponent(adminUserId)}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError(`admin/clusters/${cid}/admins/${adminUserId}`, res.status, body);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "lock-status"] });
+    },
+  });
+}

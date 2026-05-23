@@ -9,6 +9,7 @@ import { applyCookieThemeEarly } from "./shared/theme/useTheme";
 import { AuthModeProvider } from "./shared/auth/mode";
 import { AuthModeHydrator } from "./shared/auth/AuthModeHydrator";
 import { ElevationProvider } from "./shared/auth/elevation";
+import { ClusterUnlockProvider } from "./shared/auth/clusterUnlock";
 
 // Apply the cookie-stored theme before React paints so users with a
 // non-system preference don't see a flash of the wrong palette.
@@ -46,7 +47,12 @@ createRoot(document.getElementById("root")!).render(
       <AuthModeProvider>
         <AuthModeHydrator />
         <ElevationProvider>
-          <RouterProvider router={router} />
+          {/* v1.12.0a (ADR-0007): cluster-unlock modal at root so a */}
+          {/* 423 LOCKED from any mutation opens the prompt and a */}
+          {/* successful unlock retries the original call. */}
+          <ClusterUnlockProvider>
+            <RouterProvider router={router} />
+          </ClusterUnlockProvider>
         </ElevationProvider>
       </AuthModeProvider>
     </QueryClientProvider>

@@ -4,6 +4,70 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.12.0a — 2026-05-23
+
+Per-cluster envelope encryption (ADR-0007). Cluster admins set a
+password that derives an Argon2id wrapping key (OWASP 2026: time=3,
+memory=64MiB, threads=4); the wrapping key opens a random 256-bit
+Cluster Secret Key (CSK) that protects the cluster's stored secrets.
+Plaintext CSK lives only in process memory between unlock and lock or
+restart.
+
+- **New package `internal/clustersecret`** — `ClusterSecretManager`
+  (Unlock/Lock/IsUnlocked/Encrypt/Decrypt/AddAdmin/RemoveAdmin/
+  BootstrapFirstAdmin/MigrateFromJWT), `FileStore` (atomic JSON
+  persistence under `{dataDir}/cluster_secrets.json`), `MemoryStore`
+  for tests. Multi-admin: N wrappedCSK records per cluster (one per
+  admin user ID), each independently rotatable. Restart = locked.
+- **Five new HTTP endpoints** under `/api/v1/admin/clusters/{cid}/`:
+  `POST unlock {password}`, `POST lock`, `GET lock-status`,
+  `POST admins {adminUserId,password}`, `DELETE admins/{adminUserId}`.
+  Gated on `cluster:edit` (status read uses `cluster:test`).
+  First-admin POST bootstraps the CSK; subsequent admin adds require
+  the cluster to be already unlocked.
+- **423 LOCKED response code** — handlers that need a CSK-decrypted
+  secret can call `requireUnlocked(w, cid)` to return 423 with
+  `{cluster_id, hint}`. The FE intercepts this at the wire layer and
+  pops the unlock modal, then retries the original call on success.
+- **Frontend**: `LockBadge` in the cluster header, `ClusterEncryption`
+  section on `/admin/clusters/{cid}` (enable / lock / unlock / add
+  admin / remove admin), `UnlockClusterModal` mounted at the root via
+  `ClusterUnlockProvider`. Password fields use `type=password` +
+  `autocomplete="off"`.
+- **Backup runner respects locked clusters** — a scheduled run whose
+  source or destination connection lives on a locked CSK cluster
+  skips and logs; the next scheduled run auto-resumes once an admin
+  unlocks. No-op in practice for v1.12.0a (no Connection has migrated
+  to CSK yet — the store-layer per-record swap lands in a follow-up
+  cycle), wired now so the gate is correct the moment the migration
+  completes.
+- **Federation engine intentionally not gated** — federation resolves
+  via per-user UserRegion secrets which stay on the JWT-derived path
+  per ADR-0007 (different trust model, per-user not per-cluster).
+- **Hard constraints honoured** — CSK plaintext never written to disk,
+  never in audit metadata, never in logs. Audit events:
+  `cluster:csk_first_admin_bootstrapped`, `cluster:csk_unlocked`,
+  `cluster:csk_locked`, `cluster:csk_admin_added`,
+  `cluster:csk_admin_removed`, `cluster:csk_migrated`. `defer
+  mgr.LockAll()` in main.go zeros cached CSKs on graceful shutdown.
+- **Migration safety** — legacy v1.0.0a JWT-encrypted ConfigEnc keeps
+  working until first-unlock retries the swap. The bridge is never
+  burned before the new path is verified; partial-failure leaves the
+  legacy ciphertext in place for the next attempt.
+
+Touched: `docs/adr/0007-per-cluster-envelope-encryption.md` (new),
+`internal/clustersecret/` (new package: `clustersecret.go`, `store.go`,
+`clustersecret_test.go`), `internal/api/server.go`,
+`internal/api/admin_cluster_secrets.go`,
+`internal/api/admin_cluster_secrets_test.go`,
+`internal/api/backup_runner.go`, `cmd/basement-server/main.go`,
+`frontend/src/main.tsx`, `frontend/src/shared/api/client.ts`,
+`frontend/src/shared/api/queries.ts`,
+`frontend/src/shared/auth/clusterUnlock.tsx` (new),
+`frontend/src/shared/ui/UnlockClusterModal.tsx` (new),
+`frontend/src/shared/ui/LockBadge.tsx` (new),
+`frontend/src/routes/admin/clusters/$cid/index.tsx`, `CHANGELOG.md`.
+
 ## v1.11.0.17 — 2026-05-23
 
 Mobile UI audit + inline fixes for the obvious phone-viewport bugs.
