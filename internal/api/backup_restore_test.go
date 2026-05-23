@@ -231,6 +231,28 @@ func (d *restoreDriver) DeleteObjectVersion(_ context.Context, _, _, _ string) e
 	return driver.ErrUnsupported
 }
 
+// v1.10.0c Object Lock — restore driver doesn't exercise Object Lock;
+// default unsupported.
+func (d *restoreDriver) ObjectLockSupport() bool { return false }
+func (d *restoreDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *restoreDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (d *restoreDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *restoreDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (d *restoreDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (d *restoreDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
+
 // restoreDriverCounter monotonically increments so each test gets
 // unique driver-factory names. driver.Register panics on duplicate
 // registration; isolation per test means the registry inside a test

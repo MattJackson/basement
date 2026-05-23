@@ -172,6 +172,27 @@ func (d *schedulerStubDriver) DeleteObjectVersion(_ context.Context, _, _, _ str
 	return driver.ErrUnsupported
 }
 
+// v1.10.0c Object Lock — stubs report unsupported (matches Garage v1/v2).
+func (d *schedulerStubDriver) ObjectLockSupport() bool { return false }
+func (d *schedulerStubDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (d *schedulerStubDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
+
 // TestRunOneCycle_HappyPath drives one cycle across two clusters
 // with two buckets each and asserts four snapshots were recorded.
 func TestRunOneCycle_HappyPath(t *testing.T) {

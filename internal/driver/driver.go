@@ -312,6 +312,52 @@ type ObjectVersion struct {
 	IsDeleteMarker bool      `json:"isDeleteMarker,omitempty"`
 }
 
+// ObjectLockMode names the two S3 Object Lock retention modes
+// (v1.10.0c). Governance is the "operator can override with a
+// bypass" mode; Compliance is the strict mode where NO ONE — not
+// even the bucket owner — can reduce or remove the retention until
+// the date expires. The UI treats these distinctly: governance
+// surfaces a "Bypass governance" confirmation toggle on destructive
+// actions; compliance hides destructive controls entirely while the
+// retention is active.
+type ObjectLockMode string
+
+const (
+	// ObjectLockGovernance allows users with the
+	// s3:BypassGovernanceRetention permission to delete or reduce
+	// retention. Useful for "approval-gated" workflows.
+	ObjectLockGovernance ObjectLockMode = "GOVERNANCE"
+	// ObjectLockCompliance is strict — retention can only expire
+	// naturally. Used by regulators (SEC 17a-4, FINRA, etc).
+	ObjectLockCompliance ObjectLockMode = "COMPLIANCE"
+)
+
+// ObjectLockRetention captures a single per-object retention policy.
+// Mode controls override semantics (see ObjectLockMode); RetainUntilDate
+// is the wall-clock deadline at which the object becomes deletable
+// again. Both fields are required when setting a retention — the API
+// layer rejects partial requests at the wire shape.
+type ObjectLockRetention struct {
+	Mode            ObjectLockMode `json:"mode"`
+	RetainUntilDate time.Time      `json:"retainUntilDate"`
+}
+
+// ObjectLockConfig is the bucket-level Object Lock configuration.
+// Enabled mirrors S3's ObjectLockEnabled flag. DefaultRetention is
+// optional — when present, every new object inherits this retention
+// at PUT time (the UI surfaces this as "default retention" in the
+// bucket settings card).
+//
+// NOTE: S3 only allows ObjectLockEnabled to be set TRUE — there is
+// no S3 contract for turning it back off on a bucket that already
+// has it enabled. The API layer rejects attempts to flip it from
+// true to false with a 400; the FE never surfaces a "disable" button
+// for the same reason.
+type ObjectLockConfig struct {
+	Enabled          bool                 `json:"enabled"`
+	DefaultRetention *ObjectLockRetention `json:"defaultRetention,omitempty"`
+}
+
 // ScrubState carries the live state of a block-scrub operation.
 // Running flips to true the moment a scrub kicks off and back to
 // false once Garage flushes the completion record; the UI polls
@@ -459,4 +505,47 @@ type Driver interface {
 	ListObjectVersions(ctx context.Context, bucket, prefix, versionIDMarker string, limit int) ([]ObjectVersion, string, error)
 	GetObjectVersion(ctx context.Context, bucket, key, versionID string) (StreamResult, error)
 	DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error
+
+	// Object Lock (v1.10.0c). Layered on top of versioning per the
+	// S3 spec — Object Lock REQUIRES versioning to be enabled on
+	// the bucket. The API layer enforces that ordering; drivers
+	// that don't advertise Object Lock (Garage v1 / v2 today)
+	// return ErrUnsupported from all six ops and the FE hides the
+	// settings card entirely.
+	//
+	// GetObjectLockConfig returns the bucket's current config. On
+	// buckets that have never had Object Lock enabled, S3 returns
+	// an "ObjectLockConfigurationNotFoundError" — drivers normalize
+	// this to ObjectLockConfig{Enabled: false} so the FE can render
+	// the off-state UI without an error banner. Buckets with the
+	// flag set but no default retention come back as {Enabled: true,
+	// DefaultRetention: nil}.
+	//
+	// PutObjectLockConfig writes the bucket-level config. S3's
+	// contract is one-way — once Enabled is true, the only valid
+	// PUT is another true (with or without a DefaultRetention
+	// change). Drivers reject attempts to flip back to false with
+	// ErrInvalid so a UI bug or direct caller doesn't silently leak
+	// a compliance violation.
+	//
+	// GetObjectRetention / PutObjectRetention read and write the
+	// per-version retention policy. versionID is required — the
+	// per-object surface always pins to a specific version row.
+	// bypassGovernance is honoured only when the existing mode is
+	// GOVERNANCE; with COMPLIANCE, ANY attempt to reduce or remove
+	// retention rejects regardless of the bypass flag.
+	//
+	// GetObjectLegalHold / PutObjectLegalHold toggle the per-version
+	// legal-hold flag. Independent of retention — a legal hold can
+	// be on or off regardless of retention state, and it can persist
+	// past the retain-until date. Removal requires the
+	// s3:PutObjectLegalHold permission; the driver surfaces backend
+	// errors verbatim via the standard error mapping.
+	ObjectLockSupport() bool
+	GetObjectLockConfig(ctx context.Context, bucket string) (*ObjectLockConfig, error)
+	PutObjectLockConfig(ctx context.Context, bucket string, cfg ObjectLockConfig) error
+	GetObjectRetention(ctx context.Context, bucket, key, versionID string) (*ObjectLockRetention, error)
+	PutObjectRetention(ctx context.Context, bucket, key, versionID string, retention ObjectLockRetention, bypassGovernance bool) error
+	GetObjectLegalHold(ctx context.Context, bucket, key, versionID string) (bool, error)
+	PutObjectLegalHold(ctx context.Context, bucket, key, versionID string, on bool) error
 }

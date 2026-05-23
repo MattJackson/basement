@@ -66,6 +66,17 @@ type testMockDriver struct {
 	listObjectVersionsFunc  func(ctx context.Context, bucket, prefix, versionIDMarker string, limit int) ([]driver.ObjectVersion, string, error)
 	getObjectVersionFunc    func(ctx context.Context, bucket, key, versionID string) (driver.StreamResult, error)
 	deleteObjectVersionFunc func(ctx context.Context, bucket, key, versionID string) error
+
+	// v1.10.0c Object Lock hooks. nil-default reports unsupported
+	// (matches Garage v1/v2 posture). Tests that exercise the
+	// Object Lock surface override these per case.
+	objectLockSupportFunc    func() bool
+	getObjectLockConfigFunc  func(ctx context.Context, bucket string) (*driver.ObjectLockConfig, error)
+	putObjectLockConfigFunc  func(ctx context.Context, bucket string, cfg driver.ObjectLockConfig) error
+	getObjectRetentionFunc   func(ctx context.Context, bucket, key, versionID string) (*driver.ObjectLockRetention, error)
+	putObjectRetentionFunc   func(ctx context.Context, bucket, key, versionID string, retention driver.ObjectLockRetention, bypassGovernance bool) error
+	getObjectLegalHoldFunc   func(ctx context.Context, bucket, key, versionID string) (bool, error)
+	putObjectLegalHoldFunc   func(ctx context.Context, bucket, key, versionID string, on bool) error
 }
 
 func (m *testMockDriver) Capabilities(_ context.Context) (driver.Caps, error) { return driver.Caps{}, nil }
@@ -344,6 +355,58 @@ func (m *testMockDriver) GetObjectVersion(ctx context.Context, bucket, key, vers
 func (m *testMockDriver) DeleteObjectVersion(ctx context.Context, bucket, key, versionID string) error {
 	if m.deleteObjectVersionFunc != nil {
 		return m.deleteObjectVersionFunc(ctx, bucket, key, versionID)
+	}
+	return driver.ErrUnsupported
+}
+
+// v1.10.0c Object Lock hooks — overridable funcs so the Object Lock
+// handler tests can plug in custom behaviour. Defaults: unsupported
+// (matches Garage v1/v2 posture) and methods return ErrUnsupported.
+func (m *testMockDriver) ObjectLockSupport() bool {
+	if m.objectLockSupportFunc != nil {
+		return m.objectLockSupportFunc()
+	}
+	return false
+}
+
+func (m *testMockDriver) GetObjectLockConfig(ctx context.Context, bucket string) (*driver.ObjectLockConfig, error) {
+	if m.getObjectLockConfigFunc != nil {
+		return m.getObjectLockConfigFunc(ctx, bucket)
+	}
+	return nil, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) PutObjectLockConfig(ctx context.Context, bucket string, cfg driver.ObjectLockConfig) error {
+	if m.putObjectLockConfigFunc != nil {
+		return m.putObjectLockConfigFunc(ctx, bucket, cfg)
+	}
+	return driver.ErrUnsupported
+}
+
+func (m *testMockDriver) GetObjectRetention(ctx context.Context, bucket, key, versionID string) (*driver.ObjectLockRetention, error) {
+	if m.getObjectRetentionFunc != nil {
+		return m.getObjectRetentionFunc(ctx, bucket, key, versionID)
+	}
+	return nil, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) PutObjectRetention(ctx context.Context, bucket, key, versionID string, retention driver.ObjectLockRetention, bypassGovernance bool) error {
+	if m.putObjectRetentionFunc != nil {
+		return m.putObjectRetentionFunc(ctx, bucket, key, versionID, retention, bypassGovernance)
+	}
+	return driver.ErrUnsupported
+}
+
+func (m *testMockDriver) GetObjectLegalHold(ctx context.Context, bucket, key, versionID string) (bool, error) {
+	if m.getObjectLegalHoldFunc != nil {
+		return m.getObjectLegalHoldFunc(ctx, bucket, key, versionID)
+	}
+	return false, driver.ErrUnsupported
+}
+
+func (m *testMockDriver) PutObjectLegalHold(ctx context.Context, bucket, key, versionID string, on bool) error {
+	if m.putObjectLegalHoldFunc != nil {
+		return m.putObjectLegalHoldFunc(ctx, bucket, key, versionID, on)
 	}
 	return driver.ErrUnsupported
 }

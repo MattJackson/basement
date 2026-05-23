@@ -179,6 +179,28 @@ func (d *usageSizedDriver) DeleteObjectVersion(_ context.Context, _, _, _ string
 	return driver.ErrUnsupported
 }
 
+// v1.10.0c Object Lock — usage stub doesn't exercise Object Lock;
+// default unsupported.
+func (d *usageSizedDriver) ObjectLockSupport() bool { return false }
+func (d *usageSizedDriver) GetObjectLockConfig(_ context.Context, _ string) (*driver.ObjectLockConfig, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) PutObjectLockConfig(_ context.Context, _ string, _ driver.ObjectLockConfig) error {
+	return driver.ErrUnsupported
+}
+func (d *usageSizedDriver) GetObjectRetention(_ context.Context, _, _, _ string) (*driver.ObjectLockRetention, error) {
+	return nil, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) PutObjectRetention(_ context.Context, _, _, _ string, _ driver.ObjectLockRetention, _ bool) error {
+	return driver.ErrUnsupported
+}
+func (d *usageSizedDriver) GetObjectLegalHold(_ context.Context, _, _, _ string) (bool, error) {
+	return false, driver.ErrUnsupported
+}
+func (d *usageSizedDriver) PutObjectLegalHold(_ context.Context, _, _, _ string, _ bool) error {
+	return driver.ErrUnsupported
+}
+
 const usageSizedDriverName = "stub-usage-sized"
 
 var usageSizedRegisterOnce sync.Once
