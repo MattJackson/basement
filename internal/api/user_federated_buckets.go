@@ -236,13 +236,22 @@ func toFederatedBucketResponse(fb federation.FederatedBucket) federatedBucketRes
 
 // healthRank assigns an ordinal to each health value so the worst can
 // be picked with a > comparison. Higher means worse.
+//
+// v1.11.0.9 inserts HealthPending between in-sync and lagging so a
+// federation with one fresh-but-not-yet-verified replica surfaces as
+// "pending" in the summary computedHealth rather than silently
+// inheriting "in-sync" from the unranked branch. Pending is a yellow
+// signal — the engine hasn't verified the replica yet, so it's worse
+// than confirmed in-sync but better than confirmed-behind (lagging).
 func healthRank(h string) int {
 	switch h {
 	case federation.HealthBroken:
-		return 3
+		return 4
 	case federation.HealthStale:
-		return 2
+		return 3
 	case federation.HealthLagging:
+		return 2
+	case federation.HealthPending:
 		return 1
 	}
 	return 0

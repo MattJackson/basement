@@ -185,6 +185,53 @@ const (
 	// second-rounding gap, while still letting the steady-state filter
 	// short-circuit HEADs on quiescent buckets.
 	LastSyncSlack = 2 * time.Second
+
+	// ObjectReplicateTimeout caps the wall-clock duration of a single
+	// per-object PutObjectStream / ServerSideCopy call. Added in
+	// v1.11.0.9 to fix the per-federation goroutine wedge: without a
+	// per-object timeout a wedged backend (TCP socket black-hole,
+	// half-open WAN connection, multi-GB upload over a slow link)
+	// blocks the per-federation goroutine inside replicateBatch's
+	// wg.Wait — every subsequent tick from the ticker channel is then
+	// lost because the for-select can't return to consume them.
+	//
+	// 60 seconds is long enough to transfer ~100 MB over a 15 Mbit/s
+	// WAN link (the modest case the engine is designed for) and short
+	// enough that a single pathological object can't permanently strand
+	// a federation. Each cancelled object becomes a recordFailure that
+	// the next tick will re-attempt — convergence over many ticks rather
+	// than blocking one tick indefinitely.
+	//
+	// Per-Policy override lands in a future cycle; v1.11.0.9 ships the
+	// constant only.
+	ObjectReplicateTimeout = 60 * time.Second
+
+	// TickDeadline caps the wall-clock duration of one whole tick
+	// (computeDiff + replicateBatch + recordSuccess/Failure). Defaults
+	// to MaxBatchPerTick (100) * 10 seconds = 1000 seconds, comfortably
+	// above the worst-case sequential replicate of every object in a
+	// full batch at ObjectReplicateTimeout/6 average per object, while
+	// still bounding a single tick to ~16 minutes.
+	//
+	// When the deadline fires the in-flight goroutines see ctx.Done()
+	// on their per-object contexts and exit promptly; replicateBatch
+	// returns the partial count + the first error (which will be
+	// ctx.Err()). The next tick fires on schedule because the
+	// for-select unblocks and consumes the next ticker C signal.
+	TickDeadline = time.Duration(MaxBatchPerTick) * 10 * time.Second
+
+	// StopGracePeriod bounds how long Stop waits for in-flight
+	// replicates + per-federation loops to exit before abandoning them.
+	// A wedged driver that ignores ctx cancellation (no per-call
+	// timeout in the upstream HTTP client, for instance) shouldn't
+	// hang the entire process at shutdown; 10 seconds is generous for
+	// the well-behaved case and short enough that a stuck shutdown is
+	// visible in the operator's terminal.
+	//
+	// Abandoned goroutines are logged at Warn level with the count of
+	// outstanding work so the operator can correlate "Stop returned
+	// with N inflight" to subsequent process exit / re-start behaviour.
+	StopGracePeriod = 10 * time.Second
 )
 
 // Engine is the federation replication engine. Construct via NewEngine,
@@ -208,6 +255,22 @@ type Engine struct {
 	tickInterval     time.Duration
 	watchdogInterval time.Duration
 	workers          int
+
+	// objectReplicateTimeout caps one per-object replicate. Defaults to
+	// ObjectReplicateTimeout; tests override via SetObjectReplicateTimeout
+	// so a wedged-driver test doesn't have to wait the production 60s.
+	objectReplicateTimeout time.Duration
+
+	// tickDeadline caps one whole tick (diff + replicate batch +
+	// recordSuccess/Failure). Defaults to TickDeadline; tests override
+	// via SetTickDeadline for fast cancellation assertions.
+	tickDeadline time.Duration
+
+	// stopGracePeriod caps the wall-clock time Stop waits for in-flight
+	// loops + replicates to drain before abandoning them. Defaults to
+	// StopGracePeriod; tests override via SetStopGracePeriod so a
+	// non-clean-shutdown assertion finishes quickly.
+	stopGracePeriod time.Duration
 
 	mu sync.Mutex
 	// fedQuit carries one channel per running federation goroutine; a
@@ -264,6 +327,22 @@ type Engine struct {
 	// SubscribeToEvents has never been called (the polling-only mode
 	// pre-v1.7.0f or a test that never wires webhooks).
 	unsubscribeWebhook func()
+
+	// engineCtx is the engine-level cancellation context. Set by
+	// Start, cancelled by Stop. tickFederation derives its per-tick
+	// ctx from this so cancellation cascades all the way down to the
+	// per-object PutObjectStream / DeleteObject calls — well-behaved
+	// drivers exit promptly when Stop is invoked, before the
+	// per-object timeout would naturally fire.
+	//
+	// engineCancel is the matching CancelFunc, called by Stop.
+	//
+	// Both are nil until Start is called; tickFederation falls back
+	// to the caller-supplied parent ctx when engineCtx is nil so the
+	// test path (tests call tickFederation directly without going
+	// through Start) still works.
+	engineCtx    context.Context
+	engineCancel context.CancelFunc
 }
 
 // eventTask is one single-object replicate or delete kicked off by a
@@ -298,18 +377,21 @@ func NewEngine(store FederatedBuckets, resolver DriverResolver, audit audit.Logg
 		logger = slog.Default()
 	}
 	return &Engine{
-		store:            store,
-		resolver:         resolver,
-		audit:            audit,
-		logger:           logger,
-		tickInterval:     DefaultTickInterval,
-		watchdogInterval: DefaultWatchdogInterval,
-		workers:          DefaultWorkers,
-		fedQuit:          make(map[string]chan struct{}),
-		triggers:         make(map[string]chan struct{}),
-		failures:         make(map[string]int),
-		watchdogQuit:     make(map[string]chan struct{}),
-		eventTasks:       make(map[string]chan eventTask),
+		store:                  store,
+		resolver:               resolver,
+		audit:                  audit,
+		logger:                 logger,
+		tickInterval:           DefaultTickInterval,
+		watchdogInterval:       DefaultWatchdogInterval,
+		workers:                DefaultWorkers,
+		objectReplicateTimeout: ObjectReplicateTimeout,
+		tickDeadline:           TickDeadline,
+		stopGracePeriod:        StopGracePeriod,
+		fedQuit:                make(map[string]chan struct{}),
+		triggers:               make(map[string]chan struct{}),
+		failures:               make(map[string]int),
+		watchdogQuit:           make(map[string]chan struct{}),
+		eventTasks:             make(map[string]chan eventTask),
 	}
 }
 
@@ -348,6 +430,43 @@ func (e *Engine) SetWatchdogInterval(d time.Duration) {
 	}
 }
 
+// SetObjectReplicateTimeout overrides the per-object replicate
+// timeout. Production keeps the ObjectReplicateTimeout default (60s);
+// tests use this to assert wedged-driver semantics without waiting
+// the production duration.
+//
+// Must be called before Start / tickFederation; runtime changes are
+// not picked up by an in-flight replicate.
+func (e *Engine) SetObjectReplicateTimeout(d time.Duration) {
+	if d > 0 {
+		e.objectReplicateTimeout = d
+	}
+}
+
+// SetTickDeadline overrides the per-tick wall-clock cap. Production
+// keeps the TickDeadline default (~1000s); tests use this to assert
+// "the tick aborted at the deadline" semantics without waiting.
+//
+// Must be called before Start / tickFederation.
+func (e *Engine) SetTickDeadline(d time.Duration) {
+	if d > 0 {
+		e.tickDeadline = d
+	}
+}
+
+// SetStopGracePeriod overrides how long Stop waits for in-flight work
+// to drain before abandoning. Production keeps the StopGracePeriod
+// default (10s); tests use this to assert "Stop returns even when the
+// driver wedges" without waiting the production duration.
+//
+// Must be called before Stop. Re-call before each Stop in tests that
+// flip the value over the lifetime of a single Engine.
+func (e *Engine) SetStopGracePeriod(d time.Duration) {
+	if d > 0 {
+		e.stopGracePeriod = d
+	}
+}
+
 // Start launches one goroutine per persisted federation. Returns
 // immediately; the engine then runs in the background until ctx is
 // cancelled OR Stop is called.
@@ -371,6 +490,14 @@ func (e *Engine) Start(ctx context.Context) {
 		e.logger.Warn("federation engine: no driver resolver wired — engine inert")
 		return
 	}
+
+	// v1.11.0.9: engine-level cancellation context. Cancelled by Stop
+	// so in-flight per-object PutObjectStream / DeleteObject calls
+	// (which derive their per-call ctx from this through
+	// runFederation -> tickFederation -> replicateBatch) unblock
+	// promptly when shutdown begins, rather than waiting for the
+	// per-object timeout to fire.
+	e.engineCtx, e.engineCancel = context.WithCancel(ctx)
 
 	feds, err := e.store.All(ctx)
 	if err != nil {
@@ -398,9 +525,18 @@ func (e *Engine) Start(ctx context.Context) {
 // in-flight replicates to finish. Safe to call multiple times; the
 // second + call is a no-op.
 //
-// Stop does NOT respect a caller-supplied context; the contract is
-// "wait until in-flight finishes" because dropping replicates mid-write
-// is the failure mode operators have explicitly asked us to avoid.
+// v1.11.0.9 caps the wait at StopGracePeriod (10s default). A wedged
+// driver that ignores per-object ctx cancellation shouldn't hang the
+// process shutdown; once the grace expires Stop returns even if the
+// goroutine is still mid-PUT — the leaked goroutine eventually exits
+// when its upstream connection times out (or when the process dies).
+// A non-clean shutdown logs at Warn with the count of outstanding
+// loops + in-flight replicates so the operator sees the leak.
+//
+// Stop does NOT respect a caller-supplied context; the grace period
+// is the only deadline. Callers that need a shorter / longer drain
+// can adjust StopGracePeriod (compile-time today; future cycle may
+// promote to a per-engine field).
 func (e *Engine) Stop() {
 	if !e.stopped.CompareAndSwap(false, true) {
 		return
@@ -414,7 +550,23 @@ func (e *Engine) Stop() {
 		e.unsubscribeWebhook = nil
 	}
 
+	// Cancel the engine-level context BEFORE closing the quit channels
+	// so in-flight per-object PutObjectStream / DeleteObject calls see
+	// ctx.Done() and exit promptly. Well-behaved drivers honour ctx and
+	// return immediately; ctx-ignoring drivers will be abandoned by the
+	// grace-period bound below. Either way, the per-federation loop's
+	// for-select returns to its quit case once the inner replicateBatch
+	// unwinds.
+	//
+	// engineCancel is nil when Start was never called (test path that
+	// drives tickFederation directly); the nil-check keeps Stop safe
+	// for the "construct but never Start" path.
+	if e.engineCancel != nil {
+		e.engineCancel()
+	}
+
 	e.mu.Lock()
+	loopsAtStop := len(e.fedQuit) + len(e.watchdogQuit)
 	for _, ch := range e.fedQuit {
 		close(ch)
 	}
@@ -434,9 +586,61 @@ func (e *Engine) Stop() {
 	// draining the inflight set. e.loops.Wait covers both the
 	// replication and watchdog goroutines — see spawnWatchdog / spawnLoop
 	// for the loops.Add(1) bookkeeping.
-	e.loops.Wait()
-	e.inflight.Wait()
-	e.logger.Info("federation engine: stopped")
+	grace := e.stopGracePeriod
+	loopsDone := waitChan(&e.loops)
+	cleanLoops := false
+	select {
+	case <-loopsDone:
+		cleanLoops = true
+	case <-time.After(grace):
+	}
+
+	inflightDone := waitChan(&e.inflight)
+	cleanInflight := false
+	if cleanLoops {
+		// Loops finished within the grace; the remaining budget goes
+		// to draining inflight replicates. Caps total wait at
+		// 2 * grace which matches the operator's "shutdown shouldn't
+		// hang" intent while letting a well-behaved-but-slow drain
+		// finish.
+		select {
+		case <-inflightDone:
+			cleanInflight = true
+		case <-time.After(grace):
+		}
+	} else {
+		// Loops didn't drain in time — best-effort: peek at inflight
+		// non-blockingly. If it's already 0 we can still call this a
+		// clean stop; otherwise we abandon.
+		select {
+		case <-inflightDone:
+			cleanInflight = true
+		default:
+		}
+	}
+
+	if cleanLoops && cleanInflight {
+		e.logger.Info("federation engine: stopped",
+			"loopsAtStop", loopsAtStop)
+		return
+	}
+	e.logger.Warn("federation engine: stopped with outstanding work — grace period exceeded, abandoning",
+		"loopsAtStop", loopsAtStop,
+		"loopsDrainedCleanly", cleanLoops,
+		"inflightDrainedCleanly", cleanInflight,
+		"gracePeriod", grace.String())
+}
+
+// waitChan turns a sync.WaitGroup into a channel that closes when
+// the group drains. Used by Stop to select-around the wait with a
+// grace-period timeout.
+func waitChan(wg *sync.WaitGroup) <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+	return ch
 }
 
 // TriggerNow asks the engine to re-tick a specific federation
@@ -546,6 +750,12 @@ func (e *Engine) RemoveLoop(fbID string) {
 // channel is the destination for SubscribeToEvents callbacks; the
 // worker calls replicateOne / DeleteObject per task. Both goroutines
 // share the same fedQuit close-signal for clean shutdown.
+//
+// v1.11.0.9: the loop's ctx is taken from e.engineCtx when Start has
+// been called — Stop cancels that ctx which cascades cancellation to
+// per-object PutObjectStream calls (via tickFederation → replicateBatch).
+// The supplied ctx is used as the fallback for the test path where
+// EnsureLoop is called before Start.
 func (e *Engine) spawnLoop(ctx context.Context, fbID string) {
 	quit := make(chan struct{})
 	trigger := make(chan struct{}, 1)
@@ -566,24 +776,34 @@ func (e *Engine) spawnLoop(ctx context.Context, fbID string) {
 	e.fedQuit[fbID] = quit
 	e.triggers[fbID] = trigger
 	e.eventTasks[fbID] = tasks
+	// Prefer the engine-level ctx so Stop-driven cancellation reaches
+	// per-object replicates inside this loop's tickFederation calls.
+	loopCtx := ctx
+	if e.engineCtx != nil {
+		loopCtx = e.engineCtx
+	}
 	e.mu.Unlock()
 
 	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
-		e.runFederation(ctx, fbID, quit, trigger)
+		e.runFederation(loopCtx, fbID, quit, trigger)
 	}()
 
 	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
-		e.runEventWorker(ctx, fbID, quit, tasks)
+		e.runEventWorker(loopCtx, fbID, quit, tasks)
 	}()
 }
 
 // spawnWatchdog registers fbID's watchdog and launches its goroutine.
 // Caller must hold no locks; the function acquires + releases e.mu
 // briefly. No-op if a watchdog is already running for fbID.
+//
+// v1.11.0.9: same engine-ctx-preference as spawnLoop — Stop's
+// engineCancel cascades through to in-flight ListObjects probes
+// inside probePrimary so a hung backend probe doesn't block shutdown.
 func (e *Engine) spawnWatchdog(ctx context.Context, fbID string) {
 	quit := make(chan struct{})
 
@@ -594,12 +814,16 @@ func (e *Engine) spawnWatchdog(ctx context.Context, fbID string) {
 		return
 	}
 	e.watchdogQuit[fbID] = quit
+	watchdogCtx := ctx
+	if e.engineCtx != nil {
+		watchdogCtx = e.engineCtx
+	}
 	e.mu.Unlock()
 
 	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
-		e.runWatchdog(ctx, fbID, quit)
+		e.runWatchdog(watchdogCtx, fbID, quit)
 	}()
 }
 
@@ -660,13 +884,24 @@ func (e *Engine) runFederation(ctx context.Context, fbID string, quit <-chan str
 //
 // Per ADR-0005 only SyncMode == "continuous" is implemented in v1.6.0b;
 // scheduled mode is recognised but skipped by the polling loop.
-func (e *Engine) tickFederation(ctx context.Context, fbID string) {
+//
+// v1.11.0.9 wraps the incoming ctx with TickDeadline so the whole tick
+// is bounded — without this a wedged replicate on one replica blocks
+// the per-federation goroutine indefinitely and every subsequent
+// ticker.C send is missed (the for-select can't return to consume them).
+// When the deadline fires the per-object contexts derived inside
+// replicateBatch see Done() and exit; the next scheduled tick fires
+// on time.
+func (e *Engine) tickFederation(parentCtx context.Context, fbID string) {
 	defer func() {
 		if r := recover(); r != nil {
 			e.logger.Error("federation engine: panic in tick",
 				"federationId", fbID, "panic", r)
 		}
 	}()
+
+	ctx, cancel := context.WithTimeout(parentCtx, e.tickDeadline)
+	defer cancel()
 
 	fb, err := e.store.Get(ctx, fbID)
 	if err != nil {
@@ -914,6 +1149,17 @@ func trimQuotes(s string) string {
 // One audit event per object replicated (federation:replicate_object) —
 // high volume by design per ADR-0005; the audit-log view in v1.6.0c
 // filters it out of the default page.
+//
+// v1.11.0.9 changes:
+//   - Each per-object replicate runs inside a context.WithTimeout
+//     (ObjectReplicateTimeout, 60s default) so a wedged backend can't
+//     strand the whole batch. Drivers that honour ctx unblock on the
+//     deadline; drivers that ignore ctx are abandoned by the parent
+//     when Stop's grace period elapses.
+//   - The outer wg.Wait is wrapped in a select that releases on
+//     parent-ctx Done so a cancelled batch returns promptly with the
+//     partial counters; in-flight workers eventually exit via their
+//     per-object contexts (or are abandoned by Stop).
 func (e *Engine) replicateBatch(ctx context.Context, fb FederatedBucket, replica ReplicaTarget, primaryDrv, replicaDrv ReplicationClient, diff []diffEntry) (int64, int64, error) {
 	sem := make(chan struct{}, e.workers)
 	var wg sync.WaitGroup
@@ -921,21 +1167,37 @@ func (e *Engine) replicateBatch(ctx context.Context, fb FederatedBucket, replica
 	var firstErr error
 	var copied, bytes int64
 
+	setFirstErr := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+	}
+
 	for _, d := range diff {
 		// Honour cancellation before queueing more work.
 		select {
 		case <-ctx.Done():
-			wg.Wait()
-			if firstErr == nil {
-				firstErr = ctx.Err()
-			}
-			return copied, bytes, firstErr
+			setFirstErr(ctx.Err())
+			waitOrAbandon(ctx, &wg)
+			return atomic.LoadInt64(&copied), atomic.LoadInt64(&bytes), firstErrSnapshot(&mu, &firstErr)
 		default:
 		}
 
 		wg.Add(1)
 		e.inflight.Add(1)
-		sem <- struct{}{}
+		// Acquire the worker slot in a select so a cancelled batch
+		// doesn't block here while the prior workers drain.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Done()
+			e.inflight.Done()
+			setFirstErr(ctx.Err())
+			waitOrAbandon(ctx, &wg)
+			return atomic.LoadInt64(&copied), atomic.LoadInt64(&bytes), firstErrSnapshot(&mu, &firstErr)
+		}
 
 		go func(entry diffEntry) {
 			defer wg.Done()
@@ -945,21 +1207,20 @@ func (e *Engine) replicateBatch(ctx context.Context, fb FederatedBucket, replica
 				if r := recover(); r != nil {
 					e.logger.Error("federation engine: panic in replicate",
 						"federationId", fb.ID, "key", entry.key, "panic", r)
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("panic replicating %q: %v", entry.key, r)
-					}
-					mu.Unlock()
+					setFirstErr(fmt.Errorf("panic replicating %q: %v", entry.key, r))
 				}
 			}()
 
-			err := e.replicateOne(ctx, fb, replica, primaryDrv, replicaDrv, entry)
+			// Per-object timeout. Drivers that honour ctx will return
+			// promptly on deadline; drivers that ignore ctx will be
+			// abandoned by Stop's grace period — see ObjectReplicateTimeout
+			// godoc + Stop().
+			objCtx, objCancel := context.WithTimeout(ctx, e.objectReplicateTimeout)
+			defer objCancel()
+
+			err := e.replicateOne(objCtx, fb, replica, primaryDrv, replicaDrv, entry)
 			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
+				setFirstErr(err)
 				e.audit.Log(audit.Event{
 					Actor:    fb.OwnerUserID,
 					Action:   "federation:replicate_object",
@@ -981,8 +1242,38 @@ func (e *Engine) replicateBatch(ctx context.Context, fb FederatedBucket, replica
 		}(d)
 	}
 
-	wg.Wait()
-	return atomic.LoadInt64(&copied), atomic.LoadInt64(&bytes), firstErr
+	waitOrAbandon(ctx, &wg)
+	return atomic.LoadInt64(&copied), atomic.LoadInt64(&bytes), firstErrSnapshot(&mu, &firstErr)
+}
+
+// waitOrAbandon blocks until either the WaitGroup drains OR the
+// supplied context is Done. On ctx cancellation it returns immediately
+// — the in-flight goroutines that derived their per-object contexts
+// from ctx see Done() and exit naturally; any goroutine whose driver
+// ignores ctx will leak until Stop's grace period elapses or the
+// process exits. Logged at the call site so a chronic leak surfaces.
+//
+// Returns when wg.Wait completes OR ctx is Done, whichever first.
+func waitOrAbandon(ctx context.Context, wg *sync.WaitGroup) {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		// Caller will (or has already) logged the cancellation reason.
+	}
+}
+
+// firstErrSnapshot returns the current firstErr value under the
+// supplied mutex. Helper used by replicateBatch's early-return paths
+// to avoid duplicating the lock-load-unlock boilerplate.
+func firstErrSnapshot(mu *sync.Mutex, firstErr *error) error {
+	mu.Lock()
+	defer mu.Unlock()
+	return *firstErr
 }
 
 // replicateOne performs a single primary→replica object copy. Tries
