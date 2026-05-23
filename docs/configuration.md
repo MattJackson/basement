@@ -37,9 +37,10 @@ See [`internal/config/config.go`](../internal/config/config.go) for the source o
 
 | Variable | Type | Required? | Default | Description |
 |----------|------|-----------|---------|-------------|
-| `BASEMENT_ADMIN_USER` | string | **Yes** | — | Admin username. Single admin account in v1.0; multi-user planned for v1.1+. See [`config.go:47`](../internal/config/config.go), [`config.go:117`](../internal/config/config.go), [`config.go:167-168`](../internal/config/config.go) |
-| `BASEMENT_ADMIN_PASSWORD_HASH` | string | **Yes** | — | bcrypt hash of admin password. Generate with `bcrypt-cli` or Node's `bcrypt`. See [`config.go:48`](../internal/config/config.go), [`config.go:118`](../internal/config/config.go), [`config.go:167-169`](../internal/config/config.go) |
-| `BASEMENT_JWT_SECRET` | base64 bytes | **Yes** | — | Secret for signing HS256 JWTs. Must be ≥32 bytes after decoding (base64 in env). See [`config.go:53`](../internal/config/config.go), [`config.go:121-128`](../internal/config/config.go), [`config.go:175-179`](../internal/config/config.go) |
+| `BASEMENT_ADMIN_USER` | string | No (bootstrap defaults to `admin`) | `admin` (when bootstrap fires) | Admin username. Single admin account in v1.0; multi-user planned for v1.1+. When `BASEMENT_ADMIN_PASSWORD_HASH` is also unset, the v1.11.0c bootstrap path defaults the username to `admin`. |
+| `BASEMENT_ADMIN_PASSWORD_HASH` | string | No (auto-bootstrap) | — | bcrypt hash of admin password. Generate with `bcrypt-cli` or Node's `bcrypt`. **v1.11.0c**: when unset (and `BASEMENT_ADMIN_PASSWORD` also unset), basement auto-generates a random password on first boot, prints it to stdout as `INITIAL ADMIN PASSWORD: <pw>`, and persists the plaintext to `{DATA_DIR}/.initial-admin-password` (0600). |
+| `BASEMENT_ADMIN_PASSWORD` | string | No | — | **v1.11.0c convenience**: plaintext admin password. When set and `BASEMENT_ADMIN_PASSWORD_HASH` is unset, basement bcrypt-hashes it at boot and never persists the plaintext. Useful for `docker run -e BASEMENT_ADMIN_PASSWORD=...` first-boot. Production should set `BASEMENT_ADMIN_PASSWORD_HASH` directly so no plaintext sits in the env. |
+| `BASEMENT_JWT_SECRET` | base64 bytes | No (auto-bootstrap) | — | Secret for signing HS256 JWTs. Must be ≥32 bytes after decoding (base64 in env). **v1.11.0c**: when unset, basement auto-generates 32 random bytes on first boot and persists them to `{DATA_DIR}/.jwt-secret` (0600, hex-encoded) so the same secret is reused across container restarts and existing sessions survive. Set explicitly for production so a fresh data volume keeps the same signing key. |
 
 ---
 
@@ -116,6 +117,29 @@ BASEMENT_ADMIN_USER=admin
 BASEMENT_ADMIN_PASSWORD_HASH=$2a$12$...
 BASEMENT_JWT_SECRET=$(openssl rand -base64 32)
 ```
+
+## 5-minute evaluation (v1.11.0c, no env vars at all)
+
+The auto-bootstrap path lets you run basement with **zero** secrets
+configured — useful for kicking the tyres or smoke-testing a new
+image tag without writing a `.env` first:
+
+```bash
+docker run -d --name basement -p 8080:8080 \
+  -v basement-data:/var/lib/basement \
+  ghcr.io/mattjackson/basement:latest
+
+# Wait ~5 seconds, then:
+docker logs basement 2>&1 | grep "INITIAL ADMIN PASSWORD"
+```
+
+The driver settings (`BASEMENT_DRIVER`, `BASEMENT_DRIVER_GARAGE_*` or
+`BASEMENT_DRIVER_AWS_S3_*`) are still required when you want basement
+to manage a specific backend at boot. Without them, basement comes up
+with no default cluster and you add one via `/admin/clusters` after
+first login. See
+[`docs/deployment/docker.md`](deployment/docker.md) for the
+auto-bootstrap behaviour and the production checklist.
 
 ---
 

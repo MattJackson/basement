@@ -51,19 +51,23 @@ func TestLoad_AllRequiredPresent(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingDriver(t *testing.T) {
-	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
-	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
+// TestLoad_MissingDriver_NowOptional — v1.11.0c made BASEMENT_DRIVER
+// optional so the 5-minute-install path works with zero env vars.
+// The operator adds clusters via /admin/clusters after first login.
+// This test pins the new "no driver, no error" behaviour at the Load()
+// boundary; main.go skips the legacy driver.Open fallback when the
+// name is empty.
+func TestLoad_MissingDriver_NowOptional(t *testing.T) {
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
 	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load with no driver should succeed, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "BASEMENT_DRIVER") {
-		t.Errorf("error missing BASEMENT_DRIVER: %v", err)
+	if cfg.Driver.Name != "" {
+		t.Errorf("Driver.Name=%q, want \"\" (empty when env not set)", cfg.Driver.Name)
 	}
 }
 
@@ -115,35 +119,48 @@ func TestLoad_MissingAdminUser(t *testing.T) {
 	}
 }
 
-func TestLoad_MissingAdminPasswordHash(t *testing.T) {
+// TestLoad_MissingAdminPasswordHash_BootstrapsInstead is the v1.11.0c
+// successor to the original "missing hash is fatal" test. With the
+// 5-minute-install bootstrap landed, an unset BASEMENT_ADMIN_PASSWORD_HASH
+// (and unset BASEMENT_ADMIN_PASSWORD) no longer aborts boot — basement
+// mints a random password, prints it to stdout, and persists the
+// plaintext to {DataDir}/.initial-admin-password. Bootstrap is covered
+// in detail by bootstrap_test.go; this test just pins the integration
+// behaviour at the Load() boundary.
+func TestLoad_MissingAdminPasswordHash_BootstrapsInstead(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "garage")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+	t.Setenv("BASEMENT_DATA_DIR", t.TempDir())
 
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "BASEMENT_ADMIN_PASSWORD_HASH") {
-		t.Errorf("error missing BASEMENT_ADMIN_PASSWORD_HASH: %v", err)
+	if cfg.Admin.PasswordHash == "" {
+		t.Error("expected bootstrap to fill PasswordHash, got empty")
 	}
 }
 
-func TestLoad_MissingJWTSecret(t *testing.T) {
+// TestLoad_MissingJWTSecret_BootstrapsInstead — see comment on
+// TestLoad_MissingAdminPasswordHash_BootstrapsInstead. Same shape:
+// v1.11.0c bootstrap fills in the JWT secret instead of aborting boot.
+func TestLoad_MissingJWTSecret_BootstrapsInstead(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "garage")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
 	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_DATA_DIR", t.TempDir())
 
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "BASEMENT_JWT_SECRET") {
-		t.Errorf("error missing BASEMENT_JWT_SECRET: %v", err)
+	if len(cfg.JWT.Secret) < 32 {
+		t.Errorf("expected bootstrap to fill JWT.Secret with >= 32 bytes, got %d", len(cfg.JWT.Secret))
 	}
 }
 
@@ -433,8 +450,14 @@ func TestLoad_OIDCAutoProvisionInvalid(t *testing.T) {
 }
 
 func TestLoad_AggregatedErrors(t *testing.T) {
-	// Only set one required field, expect all others to be reported
+	// Only set the driver name and a tempdir; expect the driver-specific
+	// vars (no auto-bootstrap path for those) to all surface in the
+	// aggregated error. ADMIN_PASSWORD_HASH + JWT_SECRET are auto-
+	// bootstrapped in v1.11.0c, so they no longer appear in the missing-
+	// required-vars list. ADMIN_USER defaults to "admin" inside
+	// bootstrap when admin auto-gen fires, so it likewise drops out.
 	t.Setenv("BASEMENT_DRIVER", "garage")
+	t.Setenv("BASEMENT_DATA_DIR", t.TempDir())
 
 	_, err := Load()
 	if err == nil {
@@ -445,9 +468,6 @@ func TestLoad_AggregatedErrors(t *testing.T) {
 	requiredVars := []string{
 		"BASEMENT_DRIVER_GARAGE_ADMIN_URL",
 		"BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN",
-		"BASEMENT_ADMIN_USER",
-		"BASEMENT_ADMIN_PASSWORD_HASH",
-		"BASEMENT_JWT_SECRET",
 	}
 
 	for _, varName := range requiredVars {
