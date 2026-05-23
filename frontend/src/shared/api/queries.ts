@@ -716,7 +716,7 @@ export function useDeleteUserRegionObject(regionId: string | null, bid: string |
 // Inlined type until OrgCapabilities schema lands in basement.yaml +
 // types.gen.ts; the user-facing surface is intentionally narrow.
 export interface UserVisibleOrgCapabilities {
-  signupMode?: "closed" | "invite" | "open";
+  signupMode: "closed" | "invite" | "open";
   enabledDrivers?: string[];
   allowUserBackends?: boolean;
   userBackendDrivers?: string[];
@@ -732,6 +732,10 @@ export function useOrgCapabilities() {
       return res.json();
     },
   });
+}
+
+export function isSignupEnabled(signupMode?: string): boolean {
+  return signupMode === "open" || signupMode === "invite";
 }
 
 // v1.11.0a — first-run onboarding wizard state. UIAdmin-gated on the

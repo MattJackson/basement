@@ -1,6 +1,6 @@
 // v1.11.0.27 — Heartbeat polling for NewVersionBanner.
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 describe("buildWatcher", () => {
   let clearIntervalSpy: any;

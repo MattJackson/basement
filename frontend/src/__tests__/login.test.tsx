@@ -24,6 +24,8 @@ vi.mock("@/shared/theme/ThemeToggle", () => ({
 // otherwise have to mock per-test.
 vi.mock("@/shared/api/queries", () => ({
   useVersion: () => ({ data: undefined }),
+  useOrgCapabilities: () => ({ data: { signupMode: "invite" } as any }),
+  isSignupEnabled: (mode?: string) => mode === "open" || mode === "invite",
 }));
 
 function newClient(): QueryClient {
@@ -189,3 +191,9 @@ describe("LoginForm — OIDC SSO integration", () => {
     expect(banner).toHaveTextContent(/SOMETHING_NEW/);
   });
 });
+
+// NOTE: Signup link visibility tests require more sophisticated mocking.
+// They should verify that the sign-up link is shown when signupMode is 'open' or 'invite',
+// and hidden when it's 'closed'. This can be added once proper React Query mocking
+// is established for these tests.
+
