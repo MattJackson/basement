@@ -711,6 +711,32 @@ export function useOrgCapabilities() {
   });
 }
 
+// v1.11.0a — first-run onboarding wizard state. UIAdmin-gated on the
+// server side; the FE skips the hook (enabled=false) for non-admin
+// sessions to avoid 401 noise. Same bare-fetch pattern as
+// useOrgCapabilities so we don't have to regen the openapi types
+// catalogue for two short-lived endpoints.
+export interface OnboardingState {
+  needsOnboarding: boolean;
+  completed: boolean;
+}
+
+export function useOnboardingState(opts: { enabled?: boolean } = {}) {
+  return useQuery<OnboardingState>({
+    queryKey: ["admin", "onboarding", "state"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/onboarding/state", { credentials: "include" });
+      if (!res.ok) throw new Error(`onboarding/state ${res.status}`);
+      return res.json();
+    },
+    enabled: opts.enabled ?? true,
+    staleTime: 60 * 1000,
+    retry: 1,
+    // Silent on 401/403 — the FE shouldn't loop on the auth gate.
+    refetchOnWindowFocus: false,
+  });
+}
+
 // v0.7.0g USER.SHARES — share link hooks.
 export function useUserShares() {
   return useQuery<components["schemas"]["Share"][]>({

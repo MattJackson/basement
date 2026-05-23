@@ -161,6 +161,77 @@ func TestOrgCapabilities_V190b_MigratesToProtocolsMap(t *testing.T) {
 	}
 }
 
+// v1.11.0a — an existing org_capabilities.json file that predates the
+// onboardingCompleted field belongs to an already-configured operator
+// and must read as completed=true on upgrade, otherwise the AppShell
+// would bounce them into the first-run wizard at the next admin entry.
+// Conversely, a fresh install has NO file on disk and reads from the
+// in-memory default (completed=false) so the wizard auto-shows.
+func TestOrgCapabilities_LegacyFile_OnboardingCompletedOnUpgrade(t *testing.T) {
+	dir := t.TempDir()
+	// Hand-craft a legacy file: no onboardingCompleted key.
+	legacy := map[string]any{
+		"signupMode": "invite",
+		"gateways": map[string]any{
+			"webdav": map[string]any{"enabled": true},
+		},
+	}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+	if !caps.OnboardingCompleted {
+		t.Errorf("OnboardingCompleted: want true on upgrade (legacy file present), got false — operator would be bounced into first-run wizard")
+	}
+}
+
+// v1.11.0a — a brand new install has no on-disk file, so
+// OpenOrgCapabilities returns the in-memory default. That default keeps
+// OnboardingCompleted at its zero value (false) so the FE auto-routes
+// into the wizard.
+func TestOrgCapabilities_FreshInstall_OnboardingNotCompleted(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+	if caps.OnboardingCompleted {
+		t.Errorf("OnboardingCompleted: want false on fresh install (no on-disk file), got true — wizard wouldn't auto-show")
+	}
+}
+
+// v1.11.0a — MarkOnboardingCompleted is the dismiss latch the API
+// handler calls. Persists across re-open and is idempotent.
+func TestOrgCapabilities_MarkOnboardingCompletedPersists(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := s.MarkOnboardingCompleted(); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	// Idempotent: second call is a no-op.
+	if err := s.MarkOnboardingCompleted(); err != nil {
+		t.Fatalf("mark (second): %v", err)
+	}
+
+	s2, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	if !s2.Get().OnboardingCompleted {
+		t.Errorf("after dismiss + re-open: OnboardingCompleted = false, want true (latch should persist)")
+	}
+}
+
 // v1.9.0d: a v1.9.0b-shaped PATCH (mutates only the legacy WebDAV
 // field) must end up with the Protocols["webdav"] entry kept in
 // sync. Without syncGatewaySettings the new card would render stale.

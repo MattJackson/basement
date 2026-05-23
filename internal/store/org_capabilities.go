@@ -37,6 +37,15 @@ type OrgCapabilities struct {
 	// migration rule that flips a zero-value WebDAV into the default-on
 	// shape rather than silently disabling a working gateway.
 	Gateways GatewaySettings `json:"gateways"`
+	// OnboardingCompleted records whether the v1.11.0a first-run wizard
+	// has been dismissed (Done step OR explicit "I'll set up later").
+	// Once true, the AppShell never auto-routes /admin/* entries to
+	// /admin/first-run again — manual navigation always remains
+	// available. Defaults to false on a fresh install; the load() path
+	// promotes it to true when the on-disk file predates v1.11.0a
+	// (legacyOnboardingMigration) so existing operators with a working
+	// deploy aren't bounced into the wizard on upgrade.
+	OnboardingCompleted bool `json:"onboardingCompleted,omitempty"`
 }
 
 // GatewaySettings groups the per-protocol gateway toggles. v1.9.0b
@@ -288,10 +297,24 @@ func (s *OrgCapabilitiesStore) load() error {
 	// at boot; subsequent Get() / Update() cycles use the struct.
 	var raw map[string]json.RawMessage
 	hadGateways := false
+	hadOnboarding := false
 	if err := json.Unmarshal(data, &raw); err == nil {
 		_, hadGateways = raw["gateways"]
+		_, hadOnboarding = raw["onboardingCompleted"]
 	}
 	s.data.Gateways = normalizeGateways(s.data.Gateways, hadGateways)
+
+	// v1.11.0a — upgrade-safety: an on-disk file that predates the
+	// onboardingCompleted field belongs to an existing operator (this
+	// file only exists because they've already configured the deploy
+	// at least once). Promote them to "completed" so the AppShell
+	// onboarding redirect never fires on upgrade. Fresh installs hit
+	// the OpenOrgCapabilities default-construct path BEFORE load()
+	// and the file doesn't exist yet — they correctly read as
+	// completed=false and the wizard auto-shows.
+	if !hadOnboarding {
+		s.data.OnboardingCompleted = true
+	}
 
 	// Migrate legacy: ensure enabled drivers have defaults if empty
 	if s.data.EnabledDrivers == nil || len(s.data.EnabledDrivers) == 0 {
@@ -350,6 +373,23 @@ func (s *OrgCapabilitiesStore) Update(capabilities OrgCapabilities) error {
 	s.data = capabilities
 	s.mu.Unlock()
 
+	return s.Save()
+}
+
+// MarkOnboardingCompleted flips OnboardingCompleted=true and persists.
+// Idempotent: a no-op when already true. Used by the v1.11.0a
+// /admin/onboarding/dismiss endpoint (operator clicked "I'll set up
+// later" or finished the wizard's Done step). Once set, the FE never
+// auto-routes to /admin/first-run again, but operators can still
+// reach the route manually.
+func (s *OrgCapabilitiesStore) MarkOnboardingCompleted() error {
+	s.mu.Lock()
+	if s.data.OnboardingCompleted {
+		s.mu.Unlock()
+		return nil
+	}
+	s.data.OnboardingCompleted = true
+	s.mu.Unlock()
 	return s.Save()
 }
 

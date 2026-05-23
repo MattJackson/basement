@@ -413,6 +413,16 @@ func (s *Server) routes() {
 			uiAdminG.Get("/admin/system", s.getOrgCapabilitiesHandler)
 			uiAdminG.Patch("/admin/system", s.updateOrgCapabilitiesHandler)
 
+			// v1.11.0a ONBOARDING — first-run wizard support.
+			// /state reports {needsOnboarding, completed} so the FE
+			// AppShell can auto-route fresh admin logins to
+			// /admin/first-run; /dismiss latches OnboardingCompleted
+			// so the wizard never auto-shows again. Both gated under
+			// the uiAdminG group (the wizard is host-admin-only) and
+			// dismiss carries an explicit host:manage_org_caps check.
+			uiAdminG.Get("/admin/onboarding/state", s.getOnboardingStateHandler)
+			uiAdminG.Post("/admin/onboarding/dismiss", s.dismissOnboardingHandler)
+
 			// v1.9.0c GATEWAYS: per-protocol gateway roster (real +
 			// stub) for the generalized /admin/gateways UI. Read-only;
 			// per-protocol toggles still go through PATCH /admin/system.

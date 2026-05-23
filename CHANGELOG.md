@@ -142,6 +142,52 @@ Production deployment guide cycle (docs-only).
 
 No code changes; `pnpm build` + `go test -race ./...` green.
 
+## v1.11.0a — 2026-05-22
+
+First-run onboarding wizard. Fresh operator installs basement, logs in
+as the host admin, and now gets walked through cluster + (optional)
+OIDC + (optional) team invite + done instead of an empty UI with no
+guidance. Five-step linear wizard at `/admin/first-run` with a stepper,
+Skip on every step, and the same dismiss latch reachable from "I'll set
+up later" on the welcome card.
+
+- **Detection.** New `GET /api/v1/admin/onboarding/state` reports
+  `{needsOnboarding, completed}`. `needsOnboarding` is `true` only when
+  the deploy has zero clusters AND zero non-admin users; `completed` is
+  the dismiss latch stored on `OrgCapabilities.OnboardingCompleted`.
+  The AppShell auto-routes admin entries to the wizard when
+  `needsOnboarding && !completed`.
+- **Upgrade-safety.** An existing `org_capabilities.json` that predates
+  the `onboardingCompleted` field auto-promotes to `completed=true` on
+  load — so operators upgrading from v1.10.x with a configured deploy
+  are never bounced into the wizard. Fresh installs (no file on disk)
+  read `completed=false` and see the wizard correctly.
+- **Dismiss latch.** `POST /api/v1/admin/onboarding/dismiss` (uiAdmin-
+  gated, audit-logged as `host:onboarding_dismissed`) flips the latch
+  to `true` and the FE never auto-shows the wizard again. Manual
+  navigation to `/admin/first-run` always works regardless of state.
+- **Wizard UX.** Linear stepper at top showing 1/5 → 5/5; each step has
+  Back + Skip + Next, all 44px tap targets. Step 2 (cluster) carries a
+  Test-connection button that creates + tests the connection via the
+  existing `/admin/clusters/{cid}/_test` endpoint and surfaces a green
+  ✓ / red inline error. Step 5 (Done) renders four nav cards to
+  Clusters / My Regions / System / docs.
+
+Tests: new Go tests cover the state endpoint (fresh-deploy / cluster-
+exists / dismiss-flips / 401 / 403), the store migration (legacy file
+auto-completes on upgrade / fresh install does not / latch persists
+across re-open), and a frontend unit test exercises the wizard step-
+through + dismiss paths. AppShell admin-redirect test updated to mock
+the new `useOnboardingState` hook. 363/363 frontend tests + `go test
+-race ./...` green.
+
+Touched: `internal/store/org_capabilities.go` (new field +
+`MarkOnboardingCompleted` + legacy-file migration), `internal/api/
+admin_onboarding.go` (state + dismiss handlers), `internal/api/
+server.go` (route wiring), `frontend/src/routes/admin/first-run.tsx`
+(new wizard route), `frontend/src/shared/layout/AppShell.tsx` (redirect
+effect), `frontend/src/shared/api/queries.ts` (`useOnboardingState`).
+
 ## v1.10.0.2 — 2026-05-22
 
 Continuation of the v1.10.0.1 "bug tested to death" pass — same shapes
