@@ -4,6 +4,24 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.9.0b — 2026-05-22
+
+Gateways settings + status UI + Time Machine docs. The WebDAV gateway
+shipped in v1.9.0a is now operator-facing in `/admin/system` via a new
+**Gateways** card: an Enabled toggle (default on, default-on migration
+for legacy `org_capabilities.json` files), the auto-derived mount URL
+with a Copy button, an optional Base URL override for reverse-proxy
+deployments, and per-platform connect hints for macOS Finder, Windows
+Explorer, Linux Nautilus, and iOS Files. Flipping Enabled off makes the
+backend `/webdav/*` tree return `403 GATEWAY_DISABLED` from the next
+request without a re-deploy. The Gateways card also has an explicit
+**SMB — not supported natively** section that links to the new
+`docs/integrations/time-machine.md` explainer (why we don't ship SMB,
+the Samba-sidecar pattern as a community-supported workaround, and the
+recommended NAS + basement BACKUP wizard pattern for Mac data). Full
+WebDAV walkthrough, auth, limitations, and troubleshooting moved into
+`docs/integrations/webdav.md`.
+
 ## v1.9.0a — 2026-05-22
 
 WebDAV gateway. New `/webdav/` tree on the same chi router as
