@@ -159,3 +159,67 @@ describe("AppShell — USER mode on /admin/* redirects to /files", () => {
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 });
+
+// v1.10.0e — hydration-race hardening (same shape as the v1.7.0a.3/a.4
+// AdminEntryElevationGuard hotfix). Without these guards, every full-
+// page navigation to /admin/* would bounce to /files even when the
+// cookie reports admin — because the AuthModeHydrator's setMode runs in
+// a SUBSEQUENT render so within the first render where user data
+// arrives, the provider's mode is still the conservative USER default.
+describe("AppShell — hydration-race guards on /admin/* redirect (v1.10.0e)", () => {
+  beforeEach(() => {
+    navigateSpy.mockClear();
+    vi.resetModules();
+  });
+
+  it("does not redirect while useUser() is loading", async () => {
+    mockedPath = "/admin/clusters";
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({
+        data: undefined,
+        isLoading: true,
+        isError: false,
+      }),
+    }));
+    const { AppShell } = await import("@/shared/layout/AppShell");
+    render(
+      <QueryClientProvider client={newClient()}>
+        <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
+          <AppShell>
+            <div data-testid="page-body" />
+          </AppShell>
+        </AuthModeProvider>
+      </QueryClientProvider>,
+    );
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect when /auth/me already reports admin even though provider mode is still user", async () => {
+    mockedPath = "/admin/clusters";
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({
+        data: {
+          username: "matthew",
+          role: "admin" as const,
+          uiAdmin: true,
+          oidcUser: false,
+          mode: "admin" as const,
+          modeExpiresAt: Math.floor(Date.now() / 1000) + 600,
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    }));
+    const { AppShell } = await import("@/shared/layout/AppShell");
+    render(
+      <QueryClientProvider client={newClient()}>
+        <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
+          <AppShell>
+            <div data-testid="page-body" />
+          </AppShell>
+        </AuthModeProvider>
+      </QueryClientProvider>,
+    );
+    expect(navigateSpy).not.toHaveBeenCalled();
+  });
+});
