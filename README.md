@@ -203,22 +203,26 @@ permission grid · OIDC login · Multi-cluster bucket list
 
 ## Quickstart
 
+5-minute install (see [`docs/deployment/docker.md`](docs/deployment/docker.md) for full details):
+
 ```bash
-git clone https://github.com/mattjackson/basement
-cd basement/deploy
-cp .env.example .env  # edit values
-docker compose -f docker-compose.example.yml up -d
-# basement on https://localhost (or your hostname behind Caddy)
+docker run -d \
+  --name basement \
+  -p 8080:8080 \
+  -v basement-data:/var/lib/basement \
+  -e BASEMENT_JWT_SECRET=$(openssl rand -base64 32) \
+  -e BASEMENT_ADMIN_USER=admin \
+  -e BASEMENT_ADMIN_PASSWORD_HASH="$(htpasswd -bnBC 12 '' 'changeme' | tr -d ':\n')" \
+  ghcr.io/mattjackson/basement:latest
 ```
 
-This brings up three example clusters side by side:
-- A Garage container (single-node, dev-quality)
-- A MinIO container (single-node, dev-quality)
-- An AWS S3 connection (uses env-supplied creds)
+Then visit http://localhost:8080 and sign in as `admin` / `changeme`
+to land on the empty `/admin/clusters` page — click **Add cluster**
+to register your first backend.
 
-Sign in with the env-seeded admin (default `admin / changeme`).
-
-See `docs/configuration.md` for production env vars.
+For production deployment behind Caddy / Nginx / Traefik with TLS,
+backups, and a hardening checklist, see
+[`docs/deployment/`](docs/deployment/).
 
 ## Comparison vs other OSS admin UIs
 
