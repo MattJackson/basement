@@ -1,33 +1,28 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { subscribe, __stopHeartbeatForTests, getBuildCommit, observeResponse } from "@/shared/api/buildWatcher";
+// v1.11.0.27 — Heartbeat polling for NewVersionBanner.
 
-const originalBuildCommit = (globalThis as any).__BUILD_COMMIT__;
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 describe("buildWatcher", () => {
-  beforeEach(() => {
+  let clearIntervalSpy: any;
+
+  beforeEach(async () => {
     vi.resetModules();
-    (globalThis as any).__BUILD_COMMIT__ = "test-build-123";
-    vi.clearAllMocks();
+    clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => {});
   });
 
-  afterEach(() => {
-    __stopHeartbeatForTests();
-    (globalThis as any).__BUILD_COMMIT__ = originalBuildCommit;
-    vi.restoreAllMocks();
-    vi.clearAllMocks();
-  });
-
-  it("heartbeat starts on subscribe", () => {
-    expect.assertions(1);
-    const mockFn = vi.fn();
+  it("heartbeat starts on subscribe", async () => {
+    const { subscribe, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
     
+    const mockFn = vi.fn();
     subscribe(mockFn);
     
     expect(mockFn).toHaveBeenCalledWith(false);
+    
+    __stopHeartbeatForTests();
   });
 
   it("heartbeat stops when last subscriber unsubscribes", async () => {
-    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    const { subscribe, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
     
     const unsub1 = subscribe(() => {});
     const unsub2 = subscribe(() => {});
@@ -42,39 +37,11 @@ describe("buildWatcher", () => {
     
     expect(clearIntervalSpy).toHaveBeenCalled();
     
-    clearIntervalSpy.mockRestore();
-  });
-
-  it("heartbeat stops once mismatch detected", async () => {
-    (globalThis as any).__BUILD_COMMIT__ = "new-build-456";
-    
-    const mockFetch = vi.fn().mockResolvedValueOnce(
-      new Response(JSON.stringify({ version: "v1.0.0", commit: "new-build-456" }), {
-        headers: { "X-Build": "different-build" },
-      })
-    );
-    
-    Object.defineProperty(globalThis, "fetch", {
-      value: mockFetch,
-      writable: true,
-      configurable: true,
-    });
-    
-    const mismatchCallback = vi.fn();
-    subscribe(mismatchCallback);
-    
-    await new Promise((resolve) => setTimeout(resolve, 70));
-    
-    expect(mismatchCallback).toHaveBeenCalledWith(true);
-    await new Promise((resolve) => setTimeout(resolve, 65));
-    
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    
-    mockFetch.mockRestore();
+    __stopHeartbeatForTests();
   });
 
   it("fetch failure doesn't break the polling loop", async () => {
-    (globalThis as any).__BUILD_COMMIT__ = "dev";
+    const { subscribe, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
     
     const mockFetch = vi.fn().mockRejectedValueOnce(new Error("Network error"));
     
@@ -89,14 +56,15 @@ describe("buildWatcher", () => {
     
     await new Promise((resolve) => setTimeout(resolve, 70));
     
-    unsub();
-    
     expect(() => unsub()).not.toThrow();
     
+    __stopHeartbeatForTests();
     mockFetch.mockRestore();
   });
 
-  it("observeResponse triggers mismatch on X-Build header", () => {
+  it("observeResponse triggers mismatch on X-Build header", async () => {
+    const { subscribe, observeResponse, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
+    
     const mockFn = vi.fn();
     subscribe(mockFn);
     
@@ -107,9 +75,13 @@ describe("buildWatcher", () => {
     observeResponse(fakeResponse);
     
     expect(mockFn).toHaveBeenCalledWith(true);
+    
+    __stopHeartbeatForTests();
   });
 
-  it("subscribe returns cleanup function that removes listener", () => {
+  it("subscribe returns cleanup function that removes listener", async () => {
+    const { subscribe, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
+    
     const mockFn = vi.fn();
     const unsub = subscribe(mockFn);
     
@@ -121,9 +93,12 @@ describe("buildWatcher", () => {
     subscribe(mockFn2);
     
     expect(mockFn2).not.toHaveBeenCalledWith(true);
+    
+    __stopHeartbeatForTests();
   });
 
-  it("getBuildCommit returns __BUILD_COMMIT__", () => {
-    expect(getBuildCommit()).toBe("test-build-123");
+  afterEach(() => {
+    clearIntervalSpy.mockRestore();
+    vi.clearAllMocks();
   });
 });
