@@ -37,9 +37,11 @@ In order, stopping on the first failure:
    first configured cluster. Budget: **≤10s** (matches the Garage v1
    client timeout). `ok:false` is acceptable; what we're testing is
    that the timeout fires within budget.
-5. **`GET /api/v1/admin/buckets`** and **`GET /api/v1/admin/keys`** —
-   cross-cluster aggregated reads. Budget: **≤4s each** (3s per-cluster
-   deadline + overhead, even with one stalled cluster).
+5. **`GET /api/v1/admin/buckets`** — cross-cluster aggregated read.
+   Budget: **≤4s** (3s per-cluster deadline + overhead, even with one
+   stalled cluster). The matching `/admin/keys` aggregate was retired
+   in v1.11.0.15 (keys are per-cluster only); per-cluster key reads
+   are exercised by `scripts/feature-smoke.ts`.
 6. **Bucket lifecycle** on a healthy cluster — create → get → arm-delete
    → delete (with `X-Confirm-Delete` token) → verify 404. Uses
    `smoke-life-<timestamp>-<pid>` as the alias so leftover resources are
@@ -153,9 +155,8 @@ In order, with screenshots of each major screen saved under
    card (aws-s3).
 7. **Aggregated buckets** — `/admin/buckets` redirects to `/admin`
    and renders the "My Buckets" page with rows (or the empty state).
-8. **Aggregated keys** — `/admin/keys` renders the "Access keys" page
-   with rows (or the empty state).
-9. **Console + pageerror gate** — fails if any `console.error` or
+   (Keys aggregate retired in v1.11.0.15 — see per-cluster smoke.)
+8. **Console + pageerror gate** — fails if any `console.error` or
    `pageerror` fired across the whole run. Warnings are surfaced
    inline but don't fail the run.
 

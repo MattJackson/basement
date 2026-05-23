@@ -539,7 +539,9 @@ async function main(): Promise<number> {
       { path: "/admin/clusters", key: "admin-clusters", requiresAdmin: true, assertText: "Clusters" },
       { path: "/admin/clusters/new", key: "admin-clusters-new", requiresAdmin: true },
       { path: "/admin/buckets", key: "admin-buckets", requiresAdmin: true },
-      { path: "/admin/keys", key: "admin-keys", requiresAdmin: true, assertText: "Access keys" },
+      // v1.11.0.15: /admin/keys removed — keys are per-cluster only.
+      // Covered indirectly via the /admin/clusters/{cid} detail page
+      // entry below (which renders this cluster's keys section).
       { path: "/admin/audit", key: "admin-audit", requiresAdmin: true, assertText: "Audit log" },
       { path: "/admin/policies", key: "admin-policies", requiresAdmin: true },
       { path: "/admin/service-accounts", key: "admin-sa", requiresAdmin: true },
@@ -754,13 +756,10 @@ async function main(): Promise<number> {
       });
     }
 
-    // /admin/keys populated state.
-    await check("[B] /admin/keys populated screenshot", async () => {
-      await elevateToAdmin(desktop!);
-      await desktop!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
-      await desktop!.waitForSelector("h1", { timeout: 10_000 }).catch(() => {});
-      await shotDesktop(desktop!, "B-state-admin-keys");
-    });
+    // v1.11.0.15: /admin/keys populated state removed alongside the
+    // route itself. Keys are per-cluster only; the cluster detail
+    // page's keys section is the canonical view and is screenshotted
+    // under the cluster-detail block above when realClusterId resolves.
 
     await check("[B] /admin/audit populated screenshot", async () => {
       await elevateToAdmin(desktop!);
@@ -773,12 +772,9 @@ async function main(): Promise<number> {
     });
 
     // Mobile equivalents of the populated states.
-    await check("[B] mobile /admin/keys populated screenshot", async () => {
-      await elevateToAdmin(mobile!);
-      await mobile!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
-      await mobile!.waitForSelector("h1", { timeout: 10_000 }).catch(() => {});
-      await shotMobile(mobile!, "B-state-admin-keys");
-    });
+    // v1.11.0.15: mobile /admin/keys removed alongside the route.
+    // Cluster-detail mobile screenshot below covers the per-cluster
+    // keys section.
 
     if (realClusterId) {
       await check("[B] mobile /admin/clusters/{cid} populated screenshot", async () => {
@@ -970,30 +966,10 @@ async function main(): Promise<number> {
     }
 
     // ---------- Modal walks ----------
-    // /admin/keys "+ New" dialog (no submit — just open + cancel)
-    await check("[D] /admin/keys '+ New' dialog opens and cancels cleanly", async () => {
-      await desktop!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
-      const newBtn = desktop!.locator('button:has-text("New")').first();
-      if ((await newBtn.count()) === 0) {
-        warnLine("  /admin/keys: '+ New' button not found");
-        return;
-      }
-      await newBtn.click({ timeout: 5_000 });
-      const dialog = desktop!.locator('[role="dialog"], dialog').first();
-      await dialog.waitFor({ state: "visible", timeout: 5_000 });
-      await shotDesktop(desktop!, "D-admin-keys-new-dialog");
-      // Cancel without submit.
-      const cancel = desktop!.locator('button:has-text("Cancel"), button:has-text("Close")').first();
-      if ((await cancel.count()) > 0) {
-        await cancel.click({ timeout: 5_000 });
-      } else {
-        await desktop!.keyboard.press("Escape");
-      }
-      // Dialog should disappear.
-      await desktop!
-        .waitForFunction(() => document.querySelectorAll('[role="dialog"]:not([aria-hidden="true"])').length === 0, null, { timeout: 5_000 })
-        .catch(() => reportBug("modal", "/admin/keys '+ New' dialog did not dismiss after Cancel/Escape"));
-    });
+    // v1.11.0.15: /admin/keys "+ New" dialog probe removed alongside
+    // the route. Per-cluster key minting + delete is exercised end-to-end
+    // by scripts/feature-smoke.ts against ephemeral garage-v2-test-*
+    // clusters, which is the right place for destructive flows.
 
     // Elevation modal — drop to user, then navigate to /admin/* and verify
     // the elevation modal renders (we don't actually submit; just confirm

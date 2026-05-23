@@ -120,13 +120,10 @@ describe("AppShell — USER mode on /admin/* redirects to /files", () => {
     expect(navigateSpy).toHaveBeenCalledWith({ to: "/files", replace: true });
   });
 
-  it("USER on /admin/keys → navigate /files (replace)", async () => {
-    await renderShell({
-      path: "/admin/keys",
-      initial: { mode: "user", expiresAt: 0 },
-    });
-    expect(navigateSpy).toHaveBeenCalledWith({ to: "/files", replace: true });
-  });
+  // v1.11.0.15: /admin/keys route removed (keys are per-cluster only);
+  // dropped the USER-on-/admin/keys redirect assertion. The redirect
+  // middleware itself is covered by the /admin/clusters case above —
+  // it matches any /admin/* path the user lands on.
 
   it("ADMIN on /admin/clusters → no redirect", async () => {
     await renderShell({

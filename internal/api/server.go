@@ -434,7 +434,14 @@ func (s *Server) routes() {
 
 			// Cross-cluster aggregated reads (legacy paths, now return wrapped responses)
 			adminG.Get("/admin/buckets", s.listAllBucketsHandler)
-			adminG.Get("/admin/keys", s.listAllKeysHandler)
+
+			// v1.11.0.15: /admin/keys removed. Keys are inherently
+			// per-cluster (Garage admin model); a flat global list
+			// strips that context and the route had no FE consumer
+			// after the per-cluster route model landed in v1.11.0.3.
+			// Operators that bookmarked it now hit 404 — the
+			// canonical per-cluster list lives at
+			// /admin/clusters/{cid}/keys.
 		})
 
 		// UI Admin routes — require uiAdmin=true.

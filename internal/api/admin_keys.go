@@ -12,27 +12,6 @@ import (
 
 const opDeleteKey = "delete:key"
 
-// listKeysHandler handles GET /api/v1/admin/keys.
-// Calls driver.ListKeys and returns JSON []Key per OpenAPI schema.
-func (s *Server) listKeysHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
-		return
-	}
-
-	keys, err := s.drv.ListKeys(r.Context())
-	if err != nil {
-		writeDriverError(w, "ListKeys", err)
-		return
-	}
-
-	if keys == nil {
-		keys = []driver.Key{}
-	}
-
-	writeJSON(w, http.StatusOK, keys)
-}
-
 // getKeyHandler handles GET /admin/clusters/{cid}/keys/{id}.
 //
 // v1.11.0.3: routes through s.driverForRouteCluster (resolves cid via
@@ -284,7 +263,7 @@ func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	confirm := r.Header.Get("X-Confirm-Delete")
 	if confirm == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "CONFIRMATION_REQUIRED",
-			"X-Confirm-Delete header required. POST /admin/keys/{id}/_arm-delete first to obtain a token.")
+			"X-Confirm-Delete header required. POST /admin/clusters/{cid}/keys/{id}/_arm-delete first to obtain a token.")
 		return
 	}
 
@@ -298,10 +277,10 @@ func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, auth.ErrConfirmMismatch):
 			writeErrorSimple(w, http.StatusBadRequest, "CONFIRMATION_MISMATCH",
-				"Token does not match this key or user. Re-arm with POST /admin/keys/{id}/_arm-delete.")
+				"Token does not match this key or user. Re-arm with POST /admin/clusters/{cid}/keys/{id}/_arm-delete.")
 		default:
 			writeErrorSimple(w, http.StatusBadRequest, "CONFIRMATION_INVALID",
-				"Token invalid or expired. Re-arm with POST /admin/keys/{id}/_arm-delete.")
+				"Token invalid or expired. Re-arm with POST /admin/clusters/{cid}/keys/{id}/_arm-delete.")
 		}
 		return
 	}

@@ -4,6 +4,47 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.15 — 2026-05-23
+
+Delete-key post-nav fix + orphan `/admin/keys` route removed.
+
+- **Bugfix: post-delete navigation lands on a real route** — deleting
+  a key from `/admin/clusters/{cid}/keys/{id}` was redirecting to the
+  global `/admin/keys` page, which no longer fits the per-cluster
+  route model (and is now removed entirely — see below). The
+  `useDeleteKey` mutation's `onSuccess` now navigates to the
+  cluster detail page (`/admin/clusters/{cid}`), where the keys
+  section shows the live post-delete list. Also invalidates the
+  per-cluster keys query cache so the deleted row is gone on arrival.
+- **Breaking: `/admin/keys` route removed** — both the backend
+  endpoint (`GET /api/v1/admin/keys` cross-cluster aggregate) and the
+  FE page (`/admin/keys` "Access keys" screen) are deleted. Keys are
+  inherently per-cluster (Garage admin model); a flat global list
+  strips that context and the route had no canonical home after the
+  v1.11.0.3 per-cluster route split. Operators who bookmarked it now
+  hit 404; the per-cluster keys list lives on the cluster detail
+  page at `/admin/clusters/{cid}`. Scrubbed: AppShell nav item,
+  UserMenu dropdown item, cluster-detail "View all →" links,
+  smoke probes, OpenAPI paths, `AggregatedKeysResponse` +
+  `KeyWithConnectionId` schemas, `useKeys`/`useKeysFlat` hooks,
+  `listAllKeysHandler` + dead `listKeysHandler` Go handlers, fanout
+  tests for the aggregate.
+- **Per-cluster key detail "← Keys" back-link** now points at the
+  owning cluster's detail page (`/admin/clusters/{cid}`) rather than
+  the deleted global page; label reads `← Cluster`.
+
+Touched: `internal/api/server.go`, `internal/api/admin_clusters.go`,
+`internal/api/admin_keys.go`, `internal/api/admin_clusters_fanout_test.go`,
+`openapi/basement.yaml`, `frontend/src/shared/api/mutations.ts`,
+`frontend/src/shared/api/queries.ts`, `frontend/src/shared/layout/AppShell.tsx`,
+`frontend/src/shared/ui/UserMenu.tsx`, `frontend/src/shared/ui/SecretShownOnceDialog.tsx`,
+`frontend/src/routes/admin/clusters/$cid/index.tsx`,
+`frontend/src/routes/admin/clusters/$cid/keys/$id.tsx`,
+`frontend/src/routes/admin/keys/` (deleted),
+`frontend/src/shared/layout/__tests__/AppShell-admin-user-redirect.test.tsx`,
+`scripts/postdeploy-ui-smoke.ts`, `scripts/comprehensive-smoke.ts`,
+`scripts/README.md`, `CHANGELOG.md`.
+
 ## v1.11.0.14 — 2026-05-23
 
 Mutation cache-invalidation audit. Operator-reported bug: deleting a

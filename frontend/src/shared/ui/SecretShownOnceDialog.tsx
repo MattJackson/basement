@@ -16,7 +16,7 @@ import { McpConfigSection } from "@/shared/ui/McpConfigSection";
 
 // v1.7.0c — shared shown-once dialog for service-account mint + rotate.
 //
-// Mirrors the v0.9.0m Garage-key reveal flow on /admin/keys: dismissible
+// Mirrors the v0.9.0m Garage-key reveal flow on the cluster keys page: dismissible
 // is false (Escape + outside-click won't drop the only copy), the secret
 // can be revealed/hidden, and a "saved" checkbox gates the Done button
 // so the operator must affirmatively acknowledge they've copied it.
@@ -261,7 +261,7 @@ function copyToClipboard(value: string) {
 }
 
 // profileNameFor sanitises the SA name into something safe for an
-// aws-cli profile section header. Same rule the /admin/keys flow uses
+// aws-cli profile section header. Same rule the cluster keys flow uses
 // for its snippet: lowercase, keep [a-z0-9_-], collapse leading /
 // trailing dashes. Falls back to "basement" if the sanitiser empties
 // the string.
