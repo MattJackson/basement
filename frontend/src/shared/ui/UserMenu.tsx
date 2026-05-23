@@ -5,7 +5,12 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuLinkItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useNavigate } from "@tanstack/react-router";
@@ -16,6 +21,7 @@ import { useUser } from "@/shared/auth/useUser";
 import { useVersion } from "@/shared/api/queries";
 import { useElevationPrompt } from "@/shared/auth/elevation";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
+import { useTheme, type Theme } from "@/shared/theme/useTheme";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -40,6 +46,12 @@ export function UserMenu() {
   const promptForElevation = useElevationPrompt();
   const { mode } = useAuthMode();
   const setAuthMode = useSetAuthMode();
+  // v1.13.0a (ADR-0008) — the light/dark/system toggle moved out of
+  // the page chrome (formerly the standalone ThemeToggle button) and
+  // into a Theme submenu here. Per-user always, regardless of the
+  // org's skinPolicy — brand identity doesn't dictate whether a user
+  // sees light or dark mode.
+  const { theme, setTheme } = useTheme();
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
@@ -172,6 +184,41 @@ export function UserMenu() {
             System settings
           </DropdownMenuLinkItem>
         </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        {/* v1.13.0a (ADR-0008): Theme submenu — System / Light / Dark.
+            Replaces the standalone ThemeToggle button that used to sit
+            in the AppShell + UserShell headers. Radio-style; the
+            current choice carries the check icon. */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger data-testid="theme-submenu-trigger">
+            Theme
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup
+              value={theme}
+              onValueChange={(next) => setTheme(next as Theme)}
+            >
+              <DropdownMenuRadioItem
+                value="system"
+                data-testid="theme-system"
+              >
+                System
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem
+                value="light"
+                data-testid="theme-light"
+              >
+                Light
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem
+                value="dark"
+                data-testid="theme-dark"
+              >
+                Dark
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout}>Sign out</DropdownMenuItem>
         {version?.version && (

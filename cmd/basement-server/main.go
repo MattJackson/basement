@@ -30,6 +30,7 @@ import (
 	"github.com/mattjackson/basement/internal/gateway/smb"
 	"github.com/mattjackson/basement/internal/gateway/webdav"
 	"github.com/mattjackson/basement/internal/metrics"
+	"github.com/mattjackson/basement/internal/skin"
 	"github.com/mattjackson/basement/internal/store"
 	"github.com/mattjackson/basement/internal/version"
 	"github.com/mattjackson/basement/internal/webhook"
@@ -475,6 +476,19 @@ func main() {
 	// route under /webdav/ keeps dispatching. When more HTTP-mounted
 	// gateways land (v2.0 S3 gateway) we'll iterate the registry.
 	srv.SetWebDAVHandler(webdavGW.HTTPHandler())
+
+	// v1.13.0a (ADR-0008) — pluggable skin registry. Boot with
+	// basement-default registered; v1.13.0b adds a loader that walks
+	// {dataDir}/skins/ for user-uploaded .basement-skin.json files
+	// and registers each on boot. main.go fails loud on a registration
+	// error — a duplicate or empty-name skin at boot is a programming
+	// error, not a runtime condition.
+	skinRegistry := skin.New()
+	if err := skinRegistry.Register(skin.BuiltInDefault()); err != nil {
+		slog.Error("failed to register basement-default skin", "error", err)
+		os.Exit(1)
+	}
+	srv.SetSkinRegistry(skinRegistry)
 
 	// v1.7.0f FEDERATION.EVENT-DRIVEN: subscribe the federation engine
 	// to the webhook event bus so writes hitting the primary trigger

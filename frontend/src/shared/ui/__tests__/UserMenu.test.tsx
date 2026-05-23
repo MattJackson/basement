@@ -47,6 +47,28 @@ vi.mock("@/shared/api/queries", () => ({
   })),
 }));
 
+// v1.13.0a (ADR-0008): UserMenu now mounts useTheme() to drive the
+// Theme submenu. useTheme touches window.matchMedia at first render,
+// so every test in this file needs a stub or the component throws
+// before any assertion can run. Top-level beforeEach (not per-suite)
+// so a regression that adds a new describe doesn't silently break.
+beforeEach(() => {
+  Object.defineProperty(globalThis.window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+});
+
 function Wrapper({
   children,
   initialMode = { mode: "user", expiresAt: 0 },
@@ -201,6 +223,102 @@ describe("UserMenu — Switch to admin (v1.9.0e.2 routing)", () => {
 
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
+    });
+  });
+});
+
+// v1.13.0a (ADR-0008) — pluggable-skins foundation. The Theme submenu
+// replaces the standalone ThemeToggle button that used to sit in
+// AppShell / UserShell. Three radio options (System / Light / Dark);
+// clicking each persists via the same useTheme cookie hook as the
+// retired ThemeToggle.
+describe("UserMenu — Theme submenu (v1.13.0a)", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    Object.defineProperty(globalThis.window, "matchMedia", {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+    // Each test starts from a clean cookie slate so the radio's
+    // initial "system" default is observable.
+    document.cookie = "basement_theme=; Path=/; Max-Age=0; SameSite=Lax";
+  });
+
+  it("renders the Theme submenu trigger inside the open dropdown", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    const trigger = await screen.findByTestId("theme-submenu-trigger");
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveTextContent("Theme");
+  });
+
+  it("Theme submenu exposes System / Light / Dark radio options", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    const trigger = await screen.findByTestId("theme-submenu-trigger");
+    fireEvent.click(trigger);
+
+    expect(await screen.findByTestId("theme-system")).toHaveTextContent("System");
+    expect(await screen.findByTestId("theme-light")).toHaveTextContent("Light");
+    expect(await screen.findByTestId("theme-dark")).toHaveTextContent("Dark");
+  });
+
+  it("clicking Light persists the choice through the same cookie the old ThemeToggle wrote", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    const trigger = await screen.findByTestId("theme-submenu-trigger");
+    fireEvent.click(trigger);
+
+    const lightOption = await screen.findByTestId("theme-light");
+    fireEvent.click(lightOption);
+
+    await waitFor(() => {
+      expect(document.cookie).toMatch(/basement_theme=light/);
+    });
+  });
+
+  it("clicking Dark persists dark", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    const trigger = await screen.findByTestId("theme-submenu-trigger");
+    fireEvent.click(trigger);
+
+    const darkOption = await screen.findByTestId("theme-dark");
+    fireEvent.click(darkOption);
+
+    await waitFor(() => {
+      expect(document.cookie).toMatch(/basement_theme=dark/);
+    });
+  });
+
+  it("clicking System persists system", async () => {
+    // Seed a non-system value first so the click is a real change.
+    document.cookie = "basement_theme=light; Path=/; SameSite=Lax";
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    const trigger = await screen.findByTestId("theme-submenu-trigger");
+    fireEvent.click(trigger);
+
+    const systemOption = await screen.findByTestId("theme-system");
+    fireEvent.click(systemOption);
+
+    await waitFor(() => {
+      expect(document.cookie).toMatch(/basement_theme=system/);
     });
   });
 });

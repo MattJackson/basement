@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
-import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
 import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner";
@@ -187,8 +186,13 @@ export function AppShell({ children }: AppShellProps): ReactNode {
             {/* drop-privileges button. Sits before the user avatar */}
             {/* so the operator's eye lands on "what mode am I in?" */}
             {/* before "who am I logged in as?". */}
+            {/* v1.13.0a (ADR-0008): the standalone ThemeToggle button */}
+            {/* used to sit between PersonaPill and UserMenu. Moved */}
+            {/* into the UserMenu as a Theme submenu so the page */}
+            {/* chrome stays brand-clean for the pluggable-skins */}
+            {/* surface. Per-user theme persists regardless of */}
+            {/* skinPolicy. */}
             <PersonaPill />
-            <ThemeToggle />
             <UserMenu />
           </div>
         </div>

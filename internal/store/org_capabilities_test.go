@@ -232,6 +232,120 @@ func TestOrgCapabilities_MarkOnboardingCompletedPersists(t *testing.T) {
 	}
 }
 
+// v1.13.0a (ADR-0008) — a legacy file without ActiveSkin / SkinPolicy
+// reads as the basement-default + "default" pair on Get(). Substitutes
+// at read time without mutating the on-disk file behind the operator.
+func TestOrgCapabilities_LegacyFile_SkinDefaults(t *testing.T) {
+	dir := t.TempDir()
+	legacy := map[string]any{
+		"signupMode": "invite",
+	}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+	if caps.ActiveSkin != DefaultActiveSkin {
+		t.Errorf("ActiveSkin: got %q, want %q", caps.ActiveSkin, DefaultActiveSkin)
+	}
+	if caps.SkinPolicy != DefaultSkinPolicyDefault {
+		t.Errorf("SkinPolicy: got %q, want %q", caps.SkinPolicy, DefaultSkinPolicyDefault)
+	}
+}
+
+// v1.13.0a (ADR-0008) — operator-set values round-trip through
+// Update → re-open. Both the name (string) and the policy literal
+// (one of three) survive the JSON serialisation.
+func TestOrgCapabilities_SkinFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	caps := s.Get()
+	caps.ActiveSkin = "acme-corp"
+	caps.SkinPolicy = SkinPolicyLocked
+	if err := s.Update(caps); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	// Re-open from disk — both values survive.
+	s2, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	got := s2.Get()
+	if got.ActiveSkin != "acme-corp" {
+		t.Errorf("ActiveSkin round-trip: got %q, want %q", got.ActiveSkin, "acme-corp")
+	}
+	if got.SkinPolicy != SkinPolicyLocked {
+		t.Errorf("SkinPolicy round-trip: got %q, want %q", got.SkinPolicy, SkinPolicyLocked)
+	}
+}
+
+// v1.13.0a (ADR-0008) — an unknown SkinPolicy literal hand-edited
+// into the JSON (or smuggled through a downgrade-then-upgrade)
+// falls back to "default" rather than poisoning the FE renderer.
+// The store invariant is "Get() always returns a renderable
+// policy"; the clamp inside Update() enforces the symmetric
+// invariant on the write side.
+func TestOrgCapabilities_UnknownSkinPolicy_FallsBackToDefault(t *testing.T) {
+	dir := t.TempDir()
+	withGarbage := map[string]any{
+		"signupMode": "invite",
+		"activeSkin": "basement-default",
+		"skinPolicy": "WHATEVER_NEW",
+	}
+	data, _ := json.Marshal(withGarbage)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if got := s.Get().SkinPolicy; got != DefaultSkinPolicyDefault {
+		t.Errorf("unknown policy clamps to default: got %q, want %q",
+			got, DefaultSkinPolicyDefault)
+	}
+
+	// Now write a known-bad value through Update() — same clamp on
+	// the write side.
+	caps := s.Get()
+	caps.SkinPolicy = "ALSO_INVALID"
+	if err := s.Update(caps); err != nil {
+		t.Fatalf("update with invalid policy: %v", err)
+	}
+	if got := s.Get().SkinPolicy; got != DefaultSkinPolicyDefault {
+		t.Errorf("Update(invalid) clamp: got %q, want %q",
+			got, DefaultSkinPolicyDefault)
+	}
+}
+
+// v1.13.0a (ADR-0008) — IsValidSkinPolicy covers exactly the three
+// literals defined in ADR-0008. Pinned as a separate test so a
+// future cycle that adds a fourth policy literal trips this and
+// remembers to update the doctrine alongside the code.
+func TestIsValidSkinPolicy(t *testing.T) {
+	for _, p := range []string{DefaultSkinPolicyDefault, SkinPolicyLocked, SkinPolicyUserChoice} {
+		if !IsValidSkinPolicy(p) {
+			t.Errorf("IsValidSkinPolicy(%q) = false, want true", p)
+		}
+	}
+	for _, p := range []string{"", "USER_CHOICE", "default ", "anything"} {
+		if IsValidSkinPolicy(p) {
+			t.Errorf("IsValidSkinPolicy(%q) = true, want false", p)
+		}
+	}
+}
+
 // v1.9.0d: a v1.9.0b-shaped PATCH (mutates only the legacy WebDAV
 // field) must end up with the Protocols["webdav"] entry kept in
 // sync. Without syncGatewaySettings the new card would render stale.
