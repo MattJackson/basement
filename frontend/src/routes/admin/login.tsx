@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { LoginForm } from "@/shared/auth/LoginForm";
-
-type LoginSearch = { next?: string; error?: string };
 
 export const Route = createFileRoute("/admin/login")({
-  validateSearch: (search: Record<string, unknown>): LoginSearch => ({
-    next: typeof search.next === "string" ? search.next : undefined,
-    error: typeof search.error === "string" ? search.error : undefined,
-  }),
-  component: LoginForm,
+  beforeLoad: async () => {
+    // Use window.location.replace for true 301 redirect behavior
+    // TanStack Router's redirect() doesn't support custom status codes
+    if (typeof window !== "undefined") {
+      window.location.replace("/login");
+    }
+    throw new Error("Redirect to /login");
+  },
 });

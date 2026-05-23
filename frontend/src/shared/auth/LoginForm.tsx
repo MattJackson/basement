@@ -32,38 +32,16 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 // (window.location.href) rather than the router's Link.
 const oidcStartPath = "/api/v1/auth/oidc/start";
 
-// oidcErrorMessages translates the codes the backend returns from
-// internal/api/auth_oidc.go into user-facing copy. The backend currently
-// renders those errors as JSON 4xx responses, so users only see them
-// here if the operator (or a future revision of the callback) routes the
-// browser back to /admin/login?error=<code>.
-const oidcErrorMessages: Record<string, string> = {
-  OIDC_STATE_MISSING: "Sign-in session expired. Please try again.",
-  OIDC_STATE_INVALID: "Sign-in session was malformed. Please try again.",
-  OIDC_STATE_MISMATCH: "Sign-in could not be verified. Please try again.",
-  OIDC_CODE_MISSING: "Identity provider did not return an authorization code.",
-  OIDC_EXCHANGE_FAILED: "Could not exchange the authorization code with the identity provider.",
-  OIDC_ID_TOKEN_MISSING: "Identity provider response was missing the ID token.",
-  OIDC_ID_TOKEN_INVALID: "Identity provider's ID token failed verification.",
-  USER_NOT_PROVISIONED: "Your account isn't provisioned. Contact your administrator.",
-  OIDC_NOT_CONFIGURED: "Single sign-on is not configured on this server.",
-};
-
-function oidcErrorMessage(code: string): string {
-  return oidcErrorMessages[code] ?? `Sign-in failed (${code}).`;
-}
-
 export function LoginForm() {
   const navigate = useNavigate();
-  const search = useSearch({ from: "/admin/login" });
+  const search = useSearch({ from: "/login" });
   const queryClient = useQueryClient();
   const { data: version } = useVersion();
   const { data: oidcAvailable } = useOIDCAvailable();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const nextPath = typeof search.next === "string" ? search.next : "/";
-  const oidcError = typeof search.error === "string" ? search.error : null;
+  const nextPath = typeof search.next === "string" && search.next.startsWith("/") ? search.next : "/files";
 
   const {
     register,
@@ -121,14 +99,7 @@ export function LoginForm() {
           <CardDescription>Enter your credentials to access your account</CardDescription>
         </CardHeader>
         <CardContent>
-          {oidcError && (
-            <div
-              role="alert"
-              className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-            >
-              {oidcErrorMessage(oidcError)}
-            </div>
-          )}
+          {/* OIDC error handling removed in v1.11.0.24 - no longer supported via query param */}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-2">

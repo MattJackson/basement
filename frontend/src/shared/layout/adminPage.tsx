@@ -7,7 +7,7 @@ import { AppShell } from "./AppShell";
  * <ProtectedRoute><AppShell>{Page}</AppShell></ProtectedRoute>.
  *
  * Use this as the `component` value of every /admin/* route file
- * EXCEPT /admin/login (which is pre-auth and renders bare).
+ * EXCEPT /login (which is pre-auth and renders bare).
  */
 export function adminPage(Page: ComponentType): () => ReactNode {
   function AdminPageWrapper() {

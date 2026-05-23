@@ -56,10 +56,10 @@ export function AppShell({ children }: AppShellProps): ReactNode {
   const onAdmin = location.pathname.startsWith("/admin");
   useEffect(() => {
     if (!onAdmin) return;
-    // /admin/login is the pre-auth page and renders bare (outside
-    // AppShell), but defensively skip it so a deep-link to it can't
-    // bounce.
-    if (location.pathname === "/admin/login") return;
+   // /login is the pre-auth page and renders bare (outside
+// AppShell), but defensively skip it so a deep-link to it can't
+// bounce.
+if (location.pathname === "/login") return;
     // Defer while /auth/me is still loading — without this the redirect
     // fires on the first render before the cookie-derived mode lands
     // in the provider.
@@ -90,9 +90,9 @@ export function AppShell({ children }: AppShellProps): ReactNode {
   const isAdminUser = user?.uiAdmin === true;
   const inAdminMode = user?.mode === "admin" || user?.mode === "elevated" || mode !== "user";
   const onFirstRun = location.pathname === "/admin/first-run";
-  const onAdminLogin = location.pathname === "/admin/login";
+  const onLogin = location.pathname === "/login";
   const onboardingQueryEnabled =
-    isAdminUser && inAdminMode && onAdmin && !onAdminLogin && !userLoading;
+    isAdminUser && inAdminMode && onAdmin && !onLogin && !userLoading;
   const { data: onboardingState } = useOnboardingState({ enabled: onboardingQueryEnabled });
 
   useEffect(() => {

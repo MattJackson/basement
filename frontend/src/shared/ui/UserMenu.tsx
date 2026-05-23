@@ -66,7 +66,7 @@ export function UserMenu() {
     // Clear cached user state so ProtectedRoute sees "logged out" and
     // redirects on the next render.
     queryClient.removeQueries({ queryKey: ["auth", "me"] });
-    await navigate({ to: "/admin/login" });
+    await navigate({ to: "/login" });
   };
 
   const handleSwitchToAdmin = async () => {
