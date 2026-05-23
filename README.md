@@ -91,13 +91,13 @@ full index, per-shot notes, and the re-capture command.
 | Operability | Per-cluster usage growth analytics + anomaly banner; paginated audit log with CSV export; Garage block-scrub UI; layout editor (Garage); first-run onboarding wizard (v1.11); auto-bootstrap JWT + admin password (v1.11) | v1.4 / v1.11 |
 
 Per-release write-ups under [`docs/release-notes/`](docs/release-notes/)
-(v1.0 through v1.10). All releases ship as a single static Go
+(v1.0 through v1.11). All releases ship as a single static Go
 binary plus an embedded React app inside the `ghcr.io/mattjackson/basement`
 distroless container, running as UID 65532.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v1.10 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.11 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
@@ -126,25 +126,34 @@ distroless container, running as UID 65532.
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | AGPL-3.0         | AGPL                    | MIT               | AGPL (fork)     |
 
-With v1.10 shipped, basement matches MinIO Console feature-for-feature
+With v1.11 shipped, basement matches MinIO Console feature-for-feature
 on the security / integrity axis (versioning, object lock, SSE) while
-remaining the only multi-backend UI in the table.
+remaining the only multi-backend UI in the table — and on the
+operability + onboarding axis (first-run wizard, 5-min install,
+Prometheus + Grafana, production deployment guide, SECURITY +
+CONTRIBUTING + SBOM) v1.11 closes the launch-readiness gap that
+made earlier minors a self-hoster's project rather than a drop-in
+control plane.
 
 ## What's next
 
-**v1.11 (in flight)** is the launch-readiness minor — first-run
-onboarding wizard, production deployment guide, 5-minute install,
-trust + credibility docs (SECURITY, CONTRIBUTING, DCO, SBOM workflow),
-Garage v2 driver in admin-tier, and this screenshot gallery + README
-polish. Ahead of the Show HN / r/selfhosted post.
+**v1.x is complete.** v1.11 (shipped) is the launch-readiness
+milestone — first-run onboarding wizard, production deployment
+guide, 5-minute install, trust + credibility docs (SECURITY,
+CONTRIBUTING, DCO, SBOM workflow), Garage v2 driver in admin-tier,
+observability (Prometheus + Grafana + alert rules + slog), and the
+screenshots gallery + README polish. basement is now genuinely
+consumable by external operators without insider knowledge. See
+[`docs/release-notes/v1.11.0.md`](docs/release-notes/v1.11.0.md).
 
-**v2.0 — basement IS a backend (S3 gateway)** is the next major.
-Inbound S3 requests terminated and SigV4-verified by basement; routed
-via the v1.6 federation topology (read → nearest healthy replica;
-write → primary). v1.9's `Backend` interface is already S3-shaped, so
-the gateway implementation slots in alongside WebDAV without
-architecture churn. v1.10 versioning + object-lock + SSE primitives
-gate the per-object write path. ADR-0006 sketches the design.
+**v2.0 — basement IS a backend (S3 gateway)** is the next major
+when external demand surfaces. Inbound S3 requests terminated and
+SigV4-verified by basement; routed via the v1.6 federation topology
+(read → nearest healthy replica; write → primary). v1.9's `Backend`
+interface is already S3-shaped, so the gateway implementation slots
+in alongside WebDAV without architecture churn. v1.10 versioning +
+object-lock + SSE primitives gate the per-object write path.
+ADR-0006 sketches the design.
 
 The **v2.x line** carries the long-haul roadmap the v1.10 → v2.0
 boundary unlocks: client-side encryption (E2EE) for untrusted-backend
