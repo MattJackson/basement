@@ -8,6 +8,7 @@ and CI.
 |---|---|
 | [`postdeploy-smoke.sh`](#postdeploy-smokesh) | API-level smoke: timing budgets, auth, bucket lifecycle, validation gates, cache headers |
 | [`postdeploy-ui-smoke.sh`](#postdeploy-ui-smokesh) | UI-level smoke: route/navigation, render assertions, console errors via headless Chromium |
+| [`comprehensive-smoke.sh`](#comprehensive-smokesh) | Full-coverage UI smoke: every route, desktop+mobile, form validation, modal walks, ephemeral-only destructive ops |
 
 Run both after every deploy. The API smoke is faster (~10s); the UI
 smoke takes ~10-20s on a healthy deploy and exercises the bug class
@@ -213,3 +214,65 @@ diagnosing a failure visually after the fact, or for grabbing a
 "what the deploy looked like" snapshot. The directory is left in
 place after the run so you can scroll through it; clean it up with
 `rm -rf /tmp/basement-smoke/` periodically.
+
+---
+
+## `comprehensive-smoke.sh`
+
+Full systematic walk of every route in `frontend/src/routes/`, at
+both desktop (1280x900) and mobile (375x667) viewports, with form
+validation walks and modal coverage. Destructive coverage uses
+**ephemeral-only** resources tagged `smoke-{timestamp}-{nonce}-*` —
+real data (matthew's `lsi`/`cheshire`, real federations, real OIDC
+identities) is never touched.
+
+Where the curated `postdeploy-ui-smoke.sh` is a regression-focused
+spot-check (~70 checks, one viewport, no mutations), this is the
+exhaustive complement (~200+ checks, both viewports, ephemeral CRUD).
+
+### Safety guarantees
+
+- **No real-data mutation.** Every server-side mutation uses a name
+  starting with `smoke-{Date.now()}-{nonce}` so even a cleanup
+  failure leaves obvious leftover that's easy to reap.
+- **Baseline count check.** Real-resource counts (regions, SAs,
+  webhooks, backups, federations) are captured before any mutation
+  and compared at end-of-run. A mismatch is a loud failure.
+- **Cleanup runs in `finally`.** Even if a check throws, the
+  ephemeral reaper runs and tries to delete every tracked resource.
+  Failures are logged with IDs so an operator can scrub manually.
+
+### Coverage
+
+- Public routes (`/`, `/login`, `/admin/login`, `/share/$token` with
+  a bogus token)
+- All `/files/*` user routes (home, keys, shares, syncs, backups,
+  federated-buckets, webhooks, region/bucket/object pages)
+- All `/admin/*` routes (system, users, clusters, policies, keys,
+  audit, usage, service-accounts, migrate)
+- Form validation paths (blank submit, invalid data, valid data)
+- Modal walks (create-key, create-SA, federation wizard, backup
+  wizard, webhook create, elevation password modal, delete confirms)
+- Auth-state coverage (USER mode, ADMIN mode after elevation,
+  drop-to-user navigation)
+- WebDAV probe (OPTIONS for DAV headers)
+- PWA probe (manifest + service worker)
+- Mobile viewport re-run of read-only routes (touch targets,
+  horizontal nav scroll, card layouts)
+
+### Usage
+
+```bash
+./scripts/comprehensive-smoke.sh
+# or
+pnpm -C frontend run smoke:full
+```
+
+Output:
+
+- `/tmp/basement-smoke-<timestamp>/desktop/` — desktop screenshots
+- `/tmp/basement-smoke-<timestamp>/mobile/` — mobile screenshots
+- stdout: per-check pass/fail + final summary + bug report
+
+Exit code: `0` all checks pass, `1` any failure (cleanup still ran),
+`2` setup error.
