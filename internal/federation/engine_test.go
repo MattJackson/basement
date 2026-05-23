@@ -387,10 +387,14 @@ func TestEngine_HealthCalculation(t *testing.T) {
 		want         string
 	}{
 		{
-			name:        "zero lastSync renders in-sync",
+			// v1.11.0.4: a fresh replica that the engine has not yet
+			// verified renders as HealthPending rather than HealthInSync
+			// so the UI doesn't falsely advertise "all good" before any
+			// actual verification has happened.
+			name:        "zero lastSync renders pending",
 			lastSync:    time.Time{},
 			lagAlertSec: 300,
-			want:        HealthInSync,
+			want:        HealthPending,
 		},
 		{
 			name:        "within threshold",
@@ -672,9 +676,10 @@ func TestEngine_ScheduledModeSkippedByPollingLoop(t *testing.T) {
 	}
 }
 
-// TestEngine_LastSyncFiltersOlderObjects: objects modified BEFORE the
-// replica's LastSync are not HEAD-checked or replicated again. Lets
-// the steady-state engine skip the dominant cost on a quiescent bucket.
+// TestEngine_LastSyncFiltersOlderObjects: objects modified well BEFORE
+// the replica's LastSync (older than LastSyncSlack) are not HEAD-checked
+// or replicated again. Lets the steady-state engine skip the dominant
+// cost on a quiescent bucket.
 func TestEngine_LastSyncFiltersOlderObjects(t *testing.T) {
 	e, st, res, _ := newTestEngine(t)
 	ctx := context.Background()
@@ -721,6 +726,110 @@ func TestEngine_LastSyncFiltersOlderObjects(t *testing.T) {
 	}
 	if replica.has("r-bucket", "old.txt") {
 		t.Fatalf("old object should not be replicated when LastSync covers it")
+	}
+}
+
+// TestEngine_PollingReplicatesObjectAfterEmptyBootTick reproduces the
+// v1.11.0.4 no-op replication bug:
+//
+//  1. Federation is created with an empty primary.
+//  2. The engine's boot tick fires, sees zero objects, calls
+//     recordSuccess(0,0,0) which bumps LastSync to "now-with-nanoseconds".
+//  3. Operator uploads an object. The primary's S3-style backend
+//     records the object's LastModified at SECOND precision — same
+//     second as the LastSync was set in step 2, but missing the
+//     nanosecond tail.
+//  4. Next polling tick: without the v1.11.0.4 LastSyncSlack fix the
+//     LastSync filter sees obj.LastModified <= LastSync and PERMANENTLY
+//     skips the object on every subsequent tick. No replicate fires,
+//     no federation:replicate_object audit event, no Prometheus counter
+//     increment, and the replica stays empty while the health gauge
+//     keeps reporting "in-sync".
+//
+// With the fix in place the filter compares against LastSync minus
+// LastSyncSlack (2s), so the just-uploaded object is re-checked,
+// HEAD'd, and replicated.
+func TestEngine_PollingReplicatesObjectAfterEmptyBootTick(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	// Step 1: federation exists with empty primary bucket.
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Step 2: boot tick over an empty primary. recordSuccess writes
+	// LastSync = time.Now().UTC() (nanosecond precision).
+	e.tickFederation(ctx, fb.ID)
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get post-boot-tick: %v", err)
+	}
+	if got.Replicas[0].LastSync.IsZero() {
+		t.Fatalf("expected boot tick to set LastSync, still zero")
+	}
+	bootLastSync := got.Replicas[0].LastSync
+
+	// Step 3: operator uploads an object. Truncate the mtime to
+	// SECOND precision to mimic the Garage v2 / S3 listing behaviour
+	// that's at the heart of the bug. Pick a mtime that's later than
+	// the boot tick but whose nanoseconds were stripped — the same
+	// second as bootLastSync.
+	uploadMtime := bootLastSync.Truncate(time.Second)
+	primary.seed("p-bucket", "fresh.txt", []byte("after-boot"), uploadMtime)
+
+	// Step 4: next tick fires (we drive it manually). Before the
+	// LastSyncSlack fix this tick is a silent no-op — the LastSync
+	// filter skips the only source object.
+	auditBefore := rec.countByAction("federation:replicate_object")
+	e.tickFederation(ctx, fb.ID)
+	auditAfter := rec.countByAction("federation:replicate_object")
+
+	if !replica.has("r-bucket", "fresh.txt") {
+		t.Fatalf("expected the just-uploaded object to land on the replica on the next polling tick (whole-second mtime regression); replica still empty")
+	}
+	if auditAfter <= auditBefore {
+		t.Fatalf("expected at least one federation:replicate_object audit event from the polling tick; got delta %d",
+			auditAfter-auditBefore)
+	}
+
+	// Replica health should be in-sync after the actual successful replicate.
+	got2, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get post-replicate-tick: %v", err)
+	}
+	if got2.Replicas[0].Health != HealthInSync {
+		t.Fatalf("expected health=in-sync after successful replicate, got %q",
+			got2.Replicas[0].Health)
+	}
+	if got2.Replicas[0].LagObjects != 0 {
+		t.Fatalf("expected zero LagObjects after replicate, got %d",
+			got2.Replicas[0].LagObjects)
+	}
+}
+
+// TestEngine_FreshReplicaReportsPending verifies the false-positive
+// health fix: a federation whose engine hasn't yet ticked (LastSync
+// zero) renders as HealthPending, NOT HealthInSync. v1.11.0.4 changed
+// computeHealth's zero-LastSync branch from in-sync to pending so the
+// UI doesn't lie about "all good" before any verification has happened.
+func TestEngine_FreshReplicaReportsPending(t *testing.T) {
+	got := ComputeHealth(time.Time{}, time.Now().UTC(), 300, 0)
+	if got != HealthPending {
+		t.Fatalf("ComputeHealth(zero, ...) = %q, want %q", got, HealthPending)
 	}
 }
 

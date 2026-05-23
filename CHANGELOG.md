@@ -4,6 +4,48 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.4 — 2026-05-23
+
+Federation engine no-op replication fix. Caught by hands-on Garage v2
+testing against basement.pq.io: the polling tick ran (lag gauges
+advanced, tick logs fired) but `federation:replicate_object` audit
+events never emitted and `basement_federation_replicate_total` stayed
+absent. Replicas stayed empty while the health endpoint falsely
+reported "in-sync".
+
+Root cause: the LastSync filter in `computeDiff` compared an S3-style
+object's whole-second `LastModified` against a nanosecond-precision
+`replica.LastSync`. After the engine's boot tick set LastSync to a
+post-second-boundary nanosecond, any object uploaded the same second
+landed with `LastModified == LastSync.Truncate(time.Second)` —
+`LastModified.After(LastSync)` returned false and the engine
+permanently skipped the object.
+
+Fix:
+
+- `LastSyncSlack = 2 * time.Second` subtracted from `replica.LastSync`
+  before the `obj.LastModified.After(...)` comparison. Survives both
+  whole-second mtimes and modest clock skew while preserving the
+  steady-state HEAD-skipping optimisation for genuinely older objects.
+- `HealthPending` state added: `ComputeHealth(zero, ...)` now returns
+  pending instead of in-sync so the FE doesn't lie before the engine
+  has actually verified the replica.
+- `recordSuccess` no longer unconditionally flips to in-sync on an
+  empty-diff tick: a truncated scan now returns lagging so the
+  operator sees the replica isn't fully verified.
+- Structured slog (`Info`) at tick start, diff computation and batch
+  replicate so live-deploy debugging can correlate engine behaviour
+  with the audit log without log-format guesswork.
+
+Tests:
+
+- `TestEngine_PollingReplicatesObjectAfterEmptyBootTick` — pins the
+  exact bug repro (boot tick → upload at whole-second mtime → assert
+  replica receives object + `federation:replicate_object` audit fires).
+- `TestEngine_FreshReplicaReportsPending` — covers the new
+  HealthPending semantic.
+- `TestEngine_HealthCalculation` updated for zero-LastSync → pending.
+
 ## v1.11.0 — 2026-05-23
 
 Milestone release closing the v1.11 launch-readiness arc. See

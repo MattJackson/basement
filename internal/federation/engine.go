@@ -171,6 +171,20 @@ const (
 	// see this in the /files/federated-buckets detail view (v1.6.0d) and
 	// can manually resync.
 	BrokenFailureThreshold = 3
+
+	// LastSyncSlack is the safety margin subtracted from a replica's
+	// LastSync before comparing against a source object's LastModified
+	// in computeDiff. Added in v1.11.0.4 to fix the federation no-op
+	// replication bug: backends (Garage v2, S3) return object mtimes at
+	// SECOND precision, while the engine records LastSync at nanosecond
+	// precision. Without slack a tick that fires sub-second after an
+	// upload bumps LastSync past the just-uploaded object's whole-second
+	// mtime, permanently skipping the object on every subsequent tick.
+	//
+	// Two seconds is generous enough to cover typical clock skew + the
+	// second-rounding gap, while still letting the steady-state filter
+	// short-circuit HEADs on quiescent buckets.
+	LastSyncSlack = 2 * time.Second
 )
 
 // Engine is the federation replication engine. Construct via NewEngine,
@@ -681,7 +695,20 @@ func (e *Engine) tickFederation(ctx context.Context, fbID string) {
 // replicateToReplica computes the primary→replica diff and copies up
 // to MaxBatchPerTick objects. Updates the replica's health record at
 // the end of the pass.
+//
+// v1.11.0.4 adds structured slog logging at the start of each tick and
+// after computeDiff so live-deploy debugging can correlate engine
+// behaviour with the audit log (the operator's case: lag gauges
+// advanced but zero federation:replicate_object events fired). Every
+// pass logs at least one line per replica so a silent no-op tick is
+// distinguishable from a never-fired tick in the log.
 func (e *Engine) replicateToReplica(ctx context.Context, fb FederatedBucket, replica ReplicaTarget) {
+	e.logger.Debug("federation engine: tick start",
+		"federationId", fb.ID,
+		"primaryRegion", fb.Primary.RegionID, "primaryBucket", fb.Primary.Bucket,
+		"replicaRegion", replica.RegionID, "replicaBucket", replica.Bucket,
+		"lastSync", replica.LastSync)
+
 	primaryDrv, err := e.resolver.Resolve(ctx, fb.OwnerUserID, fb.Primary.RegionID)
 	if err != nil {
 		e.recordFailure(ctx, fb, replica, fmt.Errorf("resolve primary: %w", err))
@@ -693,15 +720,25 @@ func (e *Engine) replicateToReplica(ctx context.Context, fb FederatedBucket, rep
 		return
 	}
 
-	diff, err := e.computeDiff(ctx, fb.Primary, replica, primaryDrv, replicaDrv)
+	dr, err := e.computeDiff(ctx, fb.Primary, replica, primaryDrv, replicaDrv)
 	if err != nil {
 		e.recordFailure(ctx, fb, replica, fmt.Errorf("compute diff: %w", err))
 		return
 	}
+	diff := dr.entries
+
+	e.logger.Info("federation engine: diff computed",
+		"federationId", fb.ID,
+		"replicaRegion", replica.RegionID, "replicaBucket", replica.Bucket,
+		"sourceScanned", dr.scanned, "sourceHeaded", dr.headed,
+		"diffSize", len(diff), "truncated", dr.truncated)
 
 	if len(diff) == 0 {
-		// Nothing to replicate — update health to in-sync with zero lag.
-		e.recordSuccess(ctx, fb, replica, 0, 0)
+		// Nothing to replicate. Hand recordSuccess enough context so it
+		// can tell "genuinely synced" (scanned==0 OR every object HEAD'd)
+		// from "filter-skipped everything" (scanned>0 && headed==0 &&
+		// LastSync was set — i.e. we trusted a previous LastSync).
+		e.recordSuccess(ctx, fb, replica, 0, 0, 0, dr)
 		return
 	}
 
@@ -718,13 +755,19 @@ func (e *Engine) replicateToReplica(ctx context.Context, fb FederatedBucket, rep
 	for i := int(replicated); i < len(diff); i++ {
 		pendingBytes += diff[i].size
 	}
-	_ = bytesReplicated // metrics expose this in v1.6.0d; not used yet.
+
+	e.logger.Info("federation engine: batch replicated",
+		"federationId", fb.ID,
+		"replicaRegion", replica.RegionID, "replicaBucket", replica.Bucket,
+		"replicated", replicated, "bytesReplicated", bytesReplicated,
+		"pendingObjects", pendingObjects, "pendingBytes", pendingBytes,
+		"replicateErr", replicateErr)
 
 	if replicateErr != nil {
 		e.recordFailure(ctx, fb, replica, replicateErr)
 		return
 	}
-	e.recordSuccess(ctx, fb, replica, pendingObjects, pendingBytes)
+	e.recordSuccess(ctx, fb, replica, replicated, pendingObjects, pendingBytes, dr)
 }
 
 // diffEntry is one object that needs to be replicated from primary to
@@ -735,54 +778,98 @@ type diffEntry struct {
 	size int64
 }
 
-// computeDiff lists primary objects (filtered by LastSync if non-zero),
-// HeadObjects each on the replica, and returns the slice that needs to
-// be replicated. v1.6.0b is intentionally simple: an object is queued
-// when it's missing on the replica, ETags differ, or the replica's
-// LastModified predates the primary's.
+// diffResult bundles the per-tick diff with the bookkeeping fields the
+// caller needs to make a confident health decision. Added in v1.11.0.4
+// to fix the false-positive "in-sync" path — recordSuccess can now tell
+// "the source bucket is genuinely empty" (scanned==0) from "we filter-
+// skipped every object" (scanned>0 && headed==0).
+type diffResult struct {
+	entries []diffEntry
+	// scanned is the count of non-directory source objects visited
+	// during this tick (capped at scanCap).
+	scanned int
+	// headed is how many of those scanned objects were actually HEAD'd
+	// against the replica. scanned-headed is the count skipped by the
+	// LastSync prefilter.
+	headed int
+	// truncated indicates whether the source listing had more pages we
+	// stopped paginating because we hit MaxBatchPerTick or scanCap. When
+	// true, the caller MUST treat a zero-diff result as "not fully
+	// verified" — we couldn't observe the whole bucket this tick.
+	truncated bool
+}
+
+// computeDiff lists primary objects (filtered by LastSync if non-zero
+// minus LastSyncSlack), HeadObjects each on the replica, and returns
+// the slice that needs to be replicated. v1.6.0b is intentionally
+// simple: an object is queued when it's missing on the replica, ETags
+// differ, or the replica's LastModified predates the primary's.
 //
 // Listing is paginated with a hard cap of (4 × MaxBatchPerTick) source
 // objects scanned per tick to keep tick duration bounded even on
 // pathologically large buckets — the engine eventually converges over
 // many ticks rather than blocking one tick for minutes.
-func (e *Engine) computeDiff(ctx context.Context, primary, replica ReplicaTarget, primaryDrv, replicaDrv ReplicationClient) ([]diffEntry, error) {
+//
+// v1.11.0.4 changes:
+//   - The LastSync prefilter now subtracts LastSyncSlack from the
+//     replica's LastSync before comparison. Without slack, second-
+//     precision source mtimes (Garage v2, S3) would permanently
+//     skip objects whose mtime equals the recorded LastSync second.
+//   - Returns a diffResult with scanned/headed/truncated counters so
+//     recordSuccess can tell "genuinely empty" from "all filter-skipped"
+//     and avoid the false-positive in-sync claim.
+func (e *Engine) computeDiff(ctx context.Context, primary, replica ReplicaTarget, primaryDrv, replicaDrv ReplicationClient) (diffResult, error) {
 	const listPageSize = 1000
 	const scanCap = 4 * MaxBatchPerTick
 
 	var out []diffEntry
 	var continuation string
 	scanned := 0
+	headed := 0
+	truncated := false
 	for {
 		page, err := primaryDrv.ListObjects(ctx, primary.Bucket, continuation, listPageSize)
 		if err != nil {
-			return nil, fmt.Errorf("list primary: %w", err)
+			return diffResult{}, fmt.Errorf("list primary: %w", err)
 		}
 		for _, obj := range page.Objects {
 			if obj.IsDir {
 				continue
 			}
 			scanned++
-			// LastSync filter: if we already replicated past this object's
-			// LastModified, skip the HEAD entirely. Skips the dominant cost
-			// on steady-state federations where most objects are quiescent.
-			if !replica.LastSync.IsZero() && !obj.LastModified.After(replica.LastSync) {
-				continue
+			// LastSync filter (v1.11.0.4): if we already replicated past
+			// this object's LastModified (with slack for second-precision
+			// mtimes), skip the HEAD entirely. Skips the dominant cost on
+			// steady-state federations where most objects are quiescent.
+			//
+			// LastSyncSlack is critical: without it, an object uploaded
+			// within a tick of LastSync's recorded nanosecond would be
+			// permanently filter-skipped because Garage/S3 return mtimes
+			// at second precision.
+			if !replica.LastSync.IsZero() {
+				cutoff := replica.LastSync.Add(-LastSyncSlack)
+				if !obj.LastModified.After(cutoff) {
+					continue
+				}
 			}
 
+			headed++
 			head, herr := replicaDrv.StatObject(ctx, replica.Bucket, obj.Key)
 			if herr != nil {
 				// Treat any error as "missing on replica" — the worst case
 				// is an extra PUT which is idempotent at the S3 layer.
 				out = append(out, diffEntry{key: obj.Key, size: obj.Size})
 				if len(out) >= MaxBatchPerTick {
-					return out, nil
+					truncated = true
+					return diffResult{entries: out, scanned: scanned, headed: headed, truncated: truncated}, nil
 				}
 				continue
 			}
 			if etagsDiffer(obj.ETag, head.ETag) || head.LastModified.Before(obj.LastModified) {
 				out = append(out, diffEntry{key: obj.Key, size: obj.Size})
 				if len(out) >= MaxBatchPerTick {
-					return out, nil
+					truncated = true
+					return diffResult{entries: out, scanned: scanned, headed: headed, truncated: truncated}, nil
 				}
 			}
 		}
@@ -791,11 +878,12 @@ func (e *Engine) computeDiff(ctx context.Context, primary, replica ReplicaTarget
 		}
 		if scanned >= scanCap {
 			// Bound the tick; let convergence handle the long tail.
+			truncated = true
 			break
 		}
 		continuation = page.NextContinuation
 	}
-	return out, nil
+	return diffResult{entries: out, scanned: scanned, headed: headed, truncated: truncated}, nil
 }
 
 // etagsDiffer compares two ETag strings, normalising the leading +
@@ -1159,30 +1247,81 @@ func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
 	// HealthBroken. We reuse the polling-tick helpers so the
 	// auto-failover / broken-after-3 semantics stay identical between
 	// the two paths.
+	//
+	// The event-driven path operates on a SINGLE known-good object: we
+	// just replicated/deleted it. Synthesise a diffResult that asserts
+	// "scanned 1, headed 1, not truncated" so recordSuccess's empty-diff
+	// reasoning treats this as a genuine successful verification (the
+	// alternative — scanned=0 — would also work but loses semantic
+	// fidelity for any future tick-vs-event-path debugging).
 	if opErr != nil {
 		e.recordFailure(ctx, fb, task.target, opErr)
 		return
 	}
-	e.recordSuccess(ctx, fb, task.target, 0, 0)
+	e.recordSuccess(ctx, fb, task.target, 1, 0, 0, diffResult{scanned: 1, headed: 1})
 }
 
 // recordSuccess writes a replica-health update with the supplied
-// pending counters + the current time as LastSync. Resets the
-// per-replica consecutive-failure counter.
+// pending counters. Resets the per-replica consecutive-failure counter.
 //
+// replicatedThisTick is the number of objects actually copied on this
+// pass (zero on an empty-diff tick).
 // pendingObjects + pendingBytes describe what was DEFERRED to a future
 // tick (we capped at MaxBatchPerTick this tick). When pending is 0 the
 // replica is fully in sync.
-func (e *Engine) recordSuccess(ctx context.Context, fb FederatedBucket, replica ReplicaTarget, pendingObjects, pendingBytes int64) {
+//
+// v1.11.0.4 false-positive-health fix: the engine no longer
+// unconditionally bumps LastSync + sets HealthInSync on every
+// successful pass. Doing so on an empty-diff tick that REALLY meant
+// "filter-skipped everything" was the root cause of the no-op
+// replication bug — once LastSync was set, the LastSyncSlack window
+// would mark any whole-second mtime as "already replicated".
+//
+// Decision tree:
+//   - replicatedThisTick > 0           → InSync (or Lagging w/ pending);
+//                                        bump LastSync to now.
+//   - empty diff, scanned == 0         → source bucket is empty;
+//                                        genuinely InSync, bump LastSync.
+//   - empty diff, headed == scanned    → every source object was HEAD'd
+//                                        and matched; genuinely InSync,
+//                                        bump LastSync.
+//   - empty diff, headed  < scanned    → we trusted the LastSync filter
+//                                        for some objects; if LastSync
+//                                        was already set this is the
+//                                        normal steady-state path — bump
+//                                        LastSync, InSync. If LastSync
+//                                        was zero this is impossible
+//                                        (the filter never triggers when
+//                                        LastSync.IsZero()).
+//   - empty diff, truncated            → we stopped paginating; cannot
+//                                        confidently claim full sync.
+//                                        Bump LastSync, leave Lagging.
+func (e *Engine) recordSuccess(ctx context.Context, fb FederatedBucket, replica ReplicaTarget, replicatedThisTick, pendingObjects, pendingBytes int64, dr diffResult) {
 	e.resetFailureCount(fb.ID, replica)
 
 	now := time.Now().UTC()
-	health := computeHealth(now, now, fb.Policy.LagAlertSec, 0)
-	if pendingObjects > 0 {
-		// Even if we just successfully replicated, residual pending
-		// objects mean we're not yet caught up — surface that as lag.
-		// Approximate the lag as one tick interval per remaining batch.
+	health := HealthInSync
+
+	switch {
+	case pendingObjects > 0:
+		// Residual pending objects mean we're not yet caught up — surface
+		// that as lag even though this tick succeeded.
 		health = HealthLagging
+	case replicatedThisTick > 0:
+		// We just replicated objects this tick → genuinely InSync.
+	case dr.scanned == 0:
+		// Source bucket is empty → trivially in sync.
+	case dr.truncated:
+		// Tick was capped mid-scan; we can't claim full sync. The next
+		// tick continues paginating.
+		health = HealthLagging
+	default:
+		// scanned > 0, replicated 0, not truncated: we observed every
+		// source object either via filter-skip or HEAD. If LastSync was
+		// zero this is a genuine first-tick verification (the filter
+		// never runs in that case → every object was HEAD'd). If
+		// LastSync was set this is the normal steady-state empty-diff
+		// path. Either way InSync is justified.
 	}
 
 	upd := ReplicaTarget{
@@ -1639,10 +1778,12 @@ func (e *Engine) LoopCount() int {
 //   - lagAlertSec: Policy.LagAlertSec
 //   - failureCount: current consecutive-failure tally
 //
-// Output: one of HealthInSync, HealthLagging, HealthStale, HealthBroken.
-// A zero LastSync is treated as never-replicated and rendered InSync —
-// a fresh federation isn't unhealthy just because the engine hasn't
-// run yet.
+// Output: one of HealthPending, HealthInSync, HealthLagging,
+// HealthStale, HealthBroken. A zero LastSync (v1.11.0.4) is rendered
+// as HealthPending — a fresh federation that hasn't been verified by
+// the engine shouldn't claim "in-sync". The engine flips this to
+// HealthInSync after the first successful verification pass via
+// recordSuccess.
 func ComputeHealth(lastSync, now time.Time, lagAlertSec, failureCount int) string {
 	return computeHealth(lastSync, now, lagAlertSec, failureCount)
 }
@@ -1652,7 +1793,11 @@ func computeHealth(lastSync, now time.Time, lagAlertSec, failureCount int) strin
 		return HealthBroken
 	}
 	if lastSync.IsZero() {
-		return HealthInSync
+		// v1.11.0.4: changed from HealthInSync to HealthPending so a
+		// fresh federation reports "pending verification" instead of
+		// "all good". The engine writes the verified state via
+		// recordSuccess on the first tick that observes the replica.
+		return HealthPending
 	}
 	if lagAlertSec <= 0 {
 		return HealthInSync

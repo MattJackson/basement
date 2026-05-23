@@ -84,15 +84,23 @@ const (
 // Health constants — the legal values for ReplicaTarget.Health.
 //
 // The engine derives these from Policy.LagAlertSec:
-//   - HealthInSync: replicate succeeded within the last LagAlertSec
+//   - HealthPending: the engine has not yet verified this replica
+//     (no successful replicate, no observed zero-source confirmation).
+//     Added in v1.11.0.4 to stop the engine from falsely claiming
+//     "in-sync" on a brand-new federation where the boot tick fired
+//     against an empty primary before the operator's first upload.
+//   - HealthInSync: replicate succeeded within the last LagAlertSec OR
+//     the engine has confidently HEAD-verified every source object on
+//     the replica (no diff observed).
 //   - HealthLagging: behind by more than LagAlertSec but less than 10x
 //   - HealthStale: behind by more than 10 * LagAlertSec
 //   - HealthBroken: repeated sync errors regardless of lag
 //
 // Empty string is the zero/never-replicated state and renders the same
-// as HealthInSync in the FE (v1.6.0d) — a fresh federation isn't yet
-// reporting health.
+// as HealthPending in the FE (v1.6.0d / v1.11.0.4) — a fresh federation
+// isn't yet reporting health.
 const (
+	HealthPending = "pending"
 	HealthInSync  = "in-sync"
 	HealthLagging = "lagging"
 	HealthStale   = "stale"
