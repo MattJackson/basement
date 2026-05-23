@@ -668,59 +668,14 @@ async function main(): Promise<number> {
       await shot(page!, "08-aggregated-buckets");
     });
 
-// ============================================================
-    // 8. Aggregated keys
     // ============================================================
-    section("[8] aggregated keys");
-    await check("/admin/keys renders key rows", async () => {
-      await page!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
-      await page!.waitForURL(/\/admin\/keys$/, { timeout: 10_000 });
-      await page!.waitForSelector('h1:has-text("Access keys")', { timeout: 10_000 });
-      await page!.waitForFunction(
-        () => {
-          const rows = document.querySelectorAll('tbody tr');
-          const empty = document.body.innerText.includes("No keys yet")
-            || document.body.innerText.includes("No access keys");
-          return rows.length > 0 || empty;
-        },
-        { timeout: 15_000 },
-      );
-      const rowCount = await page!.locator('tbody tr').count();
-      if (rowCount === 0) {
-        warnLine("/admin/keys is empty — that may be expected on a fresh deploy");
-      }
-      await shot(page!, "09-aggregated-keys");
-    });
-
-    // v0.9.0m: "+ New" affordance must open the create-key form
-    // dialog with a name field. We don't submit — actually minting a
-    // key in the smoke would dirty the prod cluster — but we assert
-    // the dialog renders, the form takes input, and Cancel closes
-    // without mutating state.
-    await check("/admin/keys '+ New' opens create-key dialog (v0.9.0m)", async () => {
-      await page!.goto(`${BASE_URL}/admin/keys`, { waitUntil: "networkidle" });
-      await page!.waitForSelector('h1:has-text("Access keys")', { timeout: 10_000 });
-
-      // Header button labelled "New" (button, not a link).
-      const newBtn = page!.locator('button:has-text("New")').first();
-      await newBtn.waitFor({ state: "visible", timeout: 5_000 });
-      await newBtn.click();
-
-      // Dialog should show the create-key form.
-      await page!.waitForSelector('text=Create access key', { timeout: 5_000 });
-      await page!.waitForSelector('input[placeholder*="Key name"]', { timeout: 5_000 });
-
-      // Cancel — we intentionally do NOT submit; minting a real key
-      // here would leave a stray credential behind on every smoke run.
-      await page!.locator('button:has-text("Cancel")').first().click();
-
-      // Dialog should close — heading goes away.
-      await page!.waitForFunction(
-        () => !document.body.innerText.includes("Create access key"),
-        { timeout: 5_000 },
-      );
-      await shot(page!, "09a-create-key-dialog");
-    });
+    // 8. Aggregated keys — removed in v1.11.0.15
+    // ============================================================
+    // The cross-cluster /admin/keys aggregate page + endpoint were
+    // removed; keys are inherently per-cluster (Garage admin model).
+    // Per-cluster keys are exercised under [9.cluster-detail] via the
+    // cluster detail page's Keys section. A dedicated per-cluster
+    // smoke probe lives in scripts/feature-smoke.ts.
 
     // ============================================================
     // 11. User-tier endpoints (post-ADR-0002: regions, not clusters)
@@ -1284,9 +1239,11 @@ async function main(): Promise<number> {
         // There should NOT be a "View all →" link in the buckets section header area
         const viewAllLink = page!.locator('a').filter({ hasText: /View all →/ });
         
-        // We need to check that this link is NOT present near the Buckets heading
-        // The keys section should have its own "View all →" linking to /admin/keys
-        
+        // We need to check that this link is NOT present near the Buckets heading.
+        // v1.11.0.15: the keys section no longer has a "View all →"
+        // either — the cross-cluster /admin/keys aggregate was
+        // removed, keys are per-cluster only.
+
         // Check for buckets-section View all (should be absent) - it would point to "/"
         const bucketsSection = page!.locator('section').filter({ hasText: /^Buckets/ });
         const bucketsViewAll = bucketsSection.locator('a[href="/"]').first();

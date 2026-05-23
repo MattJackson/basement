@@ -156,9 +156,9 @@ export function UserMenu() {
           <DropdownMenuLinkItem href="/admin/clusters">
             Clusters
           </DropdownMenuLinkItem>
-          <DropdownMenuLinkItem href="/admin/keys">
-            Access keys
-          </DropdownMenuLinkItem>
+          {/* v1.11.0.15: "Access keys" item removed — keys are
+              per-cluster and live on the cluster detail page; the
+              global /admin/keys route was retired in the same cycle. */}
           <DropdownMenuLinkItem href="/admin/policies">
             Policies
           </DropdownMenuLinkItem>

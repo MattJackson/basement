@@ -244,9 +244,11 @@ function ClusterDetailScreen() {
             Keys
             {keys ? <span className="ml-1.5 text-muted-foreground/60">({keys.length})</span> : null}
           </h2>
-          <a href="/admin/keys" className="text-xs font-medium hover:underline text-muted-foreground">
-            View all →
-          </a>
+          {/* v1.11.0.15: no global "View all →" — keys are per-cluster
+              by design and this section already lists every key on
+              this cluster. The old cross-cluster /admin/keys
+              aggregate was removed (orphan route per the
+              per-cluster route model). */}
         </div>
         {keysLoading ? (
           <Skeleton className="h-24 w-full rounded-lg" />
@@ -275,8 +277,10 @@ function ClusterDetailScreen() {
             </Table>
             {keys.length > 8 && (
               <div className="px-4 py-2 text-xs text-muted-foreground border-t">
-                + {keys.length - 8} more —{" "}
-                <a href="/admin/keys" className="hover:underline font-medium">view all</a>
+                {/* v1.11.0.15: no link target — the global aggregate
+                    page was removed and keys are inherently
+                    per-cluster. Tail count only. */}
+                + {keys.length - 8} more on this cluster
               </div>
             )}
           </div>

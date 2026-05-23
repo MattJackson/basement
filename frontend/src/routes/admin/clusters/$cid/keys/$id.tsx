@@ -31,10 +31,20 @@ export const Route = createFileRoute("/admin/clusters/$cid/keys/$id")({
   component: adminPage(KeyDetailScreen),
 });
 
-function BackLink() {
+function BackLink({ cid }: { cid: string }) {
+  // v1.11.0.15: cluster-scoped back-target. The global /admin/keys
+  // route was removed; the cluster detail page is the canonical
+  // "all keys for this cluster" view (renders the keys section the
+  // operator came from). There's no standalone /admin/clusters/{cid}/keys/
+  // index route — keys are inherently per-cluster and live on the
+  // cluster detail.
   return (
-    <Link to="/admin/keys" className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-      ← Keys
+    <Link
+      to="/admin/clusters/$cid"
+      params={{ cid }}
+      className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-1"
+    >
+      ← Cluster
     </Link>
   );
 }
@@ -147,7 +157,7 @@ function KeyDetailScreen() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink cid={cid} />
         <ErrorBanner message="Couldn't load key details." />
       </div>
     );
@@ -156,7 +166,7 @@ function KeyDetailScreen() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink cid={cid} />
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-4 w-64" />
         <div className="rounded-lg border bg-card px-4 py-3 flex gap-8">
@@ -188,7 +198,7 @@ function KeyDetailScreen() {
   if (!key) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink cid={cid} />
         <EmptyState
           icon="key"
           title="Key not found"
@@ -284,7 +294,7 @@ function KeyDetailScreen() {
 
   return (
     <div className="space-y-6">
-      <BackLink />
+      <BackLink cid={cid} />
 
       {/* Header */}
       <div className="space-y-1.5">

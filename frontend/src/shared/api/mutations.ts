@@ -194,9 +194,17 @@ export function useDeleteKey() {
         throw apiError(`deleteKey/${id}`, del.response.status, del.error);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // v1.11.0.15: keys are per-cluster; the orphan global
+      // /admin/keys route was removed. Land back on the cluster
+      // detail page (which renders the keys section the operator
+      // came from) and invalidate the per-cluster keys cache so
+      // the deleted row is gone on arrival. There's no standalone
+      // /admin/clusters/{cid}/keys/ index route — the cluster
+      // detail IS the canonical "all keys for this cluster" view.
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", variables.cid, "keys"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
-      navigate({ to: "/admin/keys" });
+      navigate({ to: "/admin/clusters/$cid", params: { cid: variables.cid } });
     },
   });
 }

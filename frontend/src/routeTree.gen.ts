@@ -38,7 +38,6 @@ import { Route as FilesBackupsIndexRouteImport } from "./routes/files/backups/in
 import { Route as FilesRegionIdIndexRouteImport } from "./routes/files/$regionId/index"
 import { Route as AdminUsersIndexRouteImport } from "./routes/admin/users/index"
 import { Route as AdminServiceAccountsIndexRouteImport } from "./routes/admin/service-accounts/index"
-import { Route as AdminKeysIndexRouteImport } from "./routes/admin/keys/index"
 import { Route as AdminClustersIndexRouteImport } from "./routes/admin/clusters/index"
 import { Route as AdminBucketsIndexRouteImport } from "./routes/admin/buckets/index"
 import { Route as FilesWebhooksNewRouteImport } from "./routes/files/webhooks/new"
@@ -213,11 +212,6 @@ const AdminServiceAccountsIndexRoute =
     path: "/",
     getParentRoute: () => AdminServiceAccountsRoute,
   } as any)
-const AdminKeysIndexRoute = AdminKeysIndexRouteImport.update({
-  id: "/admin/keys/",
-  path: "/admin/keys/",
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AdminClustersIndexRoute = AdminClustersIndexRouteImport.update({
   id: "/admin/clusters/",
   path: "/admin/clusters/",
@@ -388,7 +382,6 @@ export interface FileRoutesByFullPath {
   "/files/webhooks/new": typeof FilesWebhooksNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
-  "/admin/keys/": typeof AdminKeysIndexRoute
   "/admin/service-accounts/": typeof AdminServiceAccountsIndexRoute
   "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$regionId/": typeof FilesRegionIdIndexRoute
@@ -437,7 +430,6 @@ export interface FileRoutesByTo {
   "/files/webhooks/new": typeof FilesWebhooksNewRoute
   "/admin/buckets": typeof AdminBucketsIndexRoute
   "/admin/clusters": typeof AdminClustersIndexRoute
-  "/admin/keys": typeof AdminKeysIndexRoute
   "/admin/service-accounts": typeof AdminServiceAccountsIndexRoute
   "/admin/users": typeof AdminUsersIndexRoute
   "/files/$regionId": typeof FilesRegionIdIndexRoute
@@ -496,7 +488,6 @@ export interface FileRoutesById {
   "/files/webhooks/new": typeof FilesWebhooksNewRoute
   "/admin/buckets/": typeof AdminBucketsIndexRoute
   "/admin/clusters/": typeof AdminClustersIndexRoute
-  "/admin/keys/": typeof AdminKeysIndexRoute
   "/admin/service-accounts/": typeof AdminServiceAccountsIndexRoute
   "/admin/users/": typeof AdminUsersIndexRoute
   "/files/$regionId/": typeof FilesRegionIdIndexRoute
@@ -556,7 +547,6 @@ export interface FileRouteTypes {
     | "/files/webhooks/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
-    | "/admin/keys/"
     | "/admin/service-accounts/"
     | "/admin/users/"
     | "/files/$regionId/"
@@ -605,7 +595,6 @@ export interface FileRouteTypes {
     | "/files/webhooks/new"
     | "/admin/buckets"
     | "/admin/clusters"
-    | "/admin/keys"
     | "/admin/service-accounts"
     | "/admin/users"
     | "/files/$regionId"
@@ -663,7 +652,6 @@ export interface FileRouteTypes {
     | "/files/webhooks/new"
     | "/admin/buckets/"
     | "/admin/clusters/"
-    | "/admin/keys/"
     | "/admin/service-accounts/"
     | "/admin/users/"
     | "/files/$regionId/"
@@ -713,7 +701,6 @@ export interface RootRouteChildren {
   FilesRegionsNewRoute: typeof FilesRegionsNewRoute
   AdminBucketsIndexRoute: typeof AdminBucketsIndexRoute
   AdminClustersIndexRoute: typeof AdminClustersIndexRoute
-  AdminKeysIndexRoute: typeof AdminKeysIndexRoute
   AdminClustersCidEditRoute: typeof AdminClustersCidEditRoute
   AdminClustersCidLayoutRoute: typeof AdminClustersCidLayoutRoute
   AdminClustersCidScrubRoute: typeof AdminClustersCidScrubRoute
@@ -926,13 +913,6 @@ declare module "@tanstack/react-router" {
       fullPath: "/admin/service-accounts/"
       preLoaderRoute: typeof AdminServiceAccountsIndexRouteImport
       parentRoute: typeof AdminServiceAccountsRoute
-    }
-    "/admin/keys/": {
-      id: "/admin/keys/"
-      path: "/admin/keys"
-      fullPath: "/admin/keys/"
-      preLoaderRoute: typeof AdminKeysIndexRouteImport
-      parentRoute: typeof rootRouteImport
     }
     "/admin/clusters/": {
       id: "/admin/clusters/"
@@ -1298,7 +1278,6 @@ const rootRouteChildren: RootRouteChildren = {
   FilesRegionsNewRoute: FilesRegionsNewRoute,
   AdminBucketsIndexRoute: AdminBucketsIndexRoute,
   AdminClustersIndexRoute: AdminClustersIndexRoute,
-  AdminKeysIndexRoute: AdminKeysIndexRoute,
   AdminClustersCidEditRoute: AdminClustersCidEditRoute,
   AdminClustersCidLayoutRoute: AdminClustersCidLayoutRoute,
   AdminClustersCidScrubRoute: AdminClustersCidScrubRoute,

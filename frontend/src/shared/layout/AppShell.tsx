@@ -151,13 +151,12 @@ export function AppShell({ children }: AppShellProps): ReactNode {
                   >
                     Clusters
                   </Link>
-                  <Link
-                    to="/admin/keys"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    Keys
-                  </Link>
+                  {/* v1.11.0.15: top-level "Keys" link removed. Keys
+                      are inherently per-cluster (Garage admin model);
+                      the canonical per-cluster keys list lives on
+                      the cluster detail page at /admin/clusters/{cid}.
+                      The orphan cross-cluster /admin/keys route was
+                      removed in the same cycle. */}
                 </>
               )}
             </nav>

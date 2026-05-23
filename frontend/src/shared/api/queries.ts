@@ -202,30 +202,10 @@ export function useBucket(cid: string, id: string) {
   });
 }
 
-export function useKeys() {
-  return useQuery<components["schemas"]["AggregatedKeysResponse"]>({
-    queryKey: ["admin", "keys"],
-    queryFn: async () => {
-      const { data, error, response } = await client.GET("/admin/keys");
-      if (!response.ok || !data) throw apiError("admin/keys", response.status, error);
-      return (data as unknown) as components["schemas"]["AggregatedKeysResponse"];
-    },
-    staleTime: 30 * 1000,
-    refetchInterval: 60 * 1000,
-    retry: 1,
-  });
-}
-
-export function useKeysFlat() {
-  const query = useKeys();
-  if (query.data) {
-    return {
-      ...query,
-      data: query.data.keys,
-    };
-  }
-  return query;
-}
+// v1.11.0.15: useKeys + useKeysFlat removed alongside the orphan
+// /admin/keys aggregate endpoint. Keys are inherently per-cluster
+// (Garage admin model); consumers must read them via useClusterKeys(cid)
+// (per-cluster list) or useKey(cid, id) (single key detail).
 
 export function useKey(cid: string, id: string) {
   return useQuery<Key>({

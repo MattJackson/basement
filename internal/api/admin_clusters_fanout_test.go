@@ -407,95 +407,11 @@ func TestListAllBucketsHandler_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-// TestListAllKeysHandler_HappyPath covers cross-cluster /admin/keys.
-func TestListAllKeysHandler_HappyPath(t *testing.T) {
-	registerFanoutDriver(t)
-
-	connsStore := makeFanoutConnsStore(map[string]string{
-		"k1": "ok",
-		"k2": "ok",
-	})
-	reg := driver.NewRegistry(connsStore)
-	srv := New(newTestConfig(), nil, connsStore, nil, reg)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/keys", nil)
-	req.AddCookie(adminCookie())
-	rr := httptest.NewRecorder()
-	srv.router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var resp AggregatedKeysResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Keys) != 2 {
-		t.Errorf("Keys count=%d, want 2", len(resp.Keys))
-	}
-	if len(resp.Errors) != 0 {
-		t.Errorf("Errors count=%d, want 0", len(resp.Errors))
-	}
-}
-
-// TestListAllKeysHandler_OneStalledOneHealthy mirrors the buckets stall test.
-func TestListAllKeysHandler_OneStalledOneHealthy(t *testing.T) {
-	registerFanoutDriver(t)
-
-	connsStore := makeFanoutConnsStore(map[string]string{
-		"good":     "ok",
-		"stuck-k":  "stall",
-	})
-	reg := driver.NewRegistry(connsStore)
-	srv := New(newTestConfig(), nil, connsStore, nil, reg)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/keys", nil)
-	req.AddCookie(adminCookie())
-	rr := httptest.NewRecorder()
-
-	start := time.Now()
-	srv.router.ServeHTTP(rr, req)
-	elapsed := time.Since(start)
-
-	if elapsed > 6*time.Second {
-		t.Errorf("handler took %v; expected <6s with per-cluster 3s deadline", elapsed)
-	}
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d", rr.Code)
-	}
-	var resp AggregatedKeysResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Keys) != 1 {
-		t.Errorf("Keys count=%d, want 1; got %+v", len(resp.Keys), resp.Keys)
-	}
-	if len(resp.Errors) != 1 {
-		t.Errorf("Errors count=%d, want 1", len(resp.Errors))
-	}
-}
-
-// TestListAllKeysHandler_StoreError covers the store-failure path.
-func TestListAllKeysHandler_StoreError(t *testing.T) {
-	registerFanoutDriver(t)
-	connsStore := &testMockConnectionStore{
-		listFunc: func(_ context.Context) ([]store.Connection, error) {
-			return nil, errors.New("store boom")
-		},
-	}
-	reg := driver.NewRegistry(connsStore)
-	srv := New(newTestConfig(), nil, connsStore, nil, reg)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/keys", nil)
-	req.AddCookie(adminCookie())
-	rr := httptest.NewRecorder()
-	srv.router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Errorf("status=%d, want 500", rr.Code)
-	}
-}
+// v1.11.0.15: TestListAllKeys* tests removed alongside the
+// /admin/keys route. Keys are inherently per-cluster (Garage admin
+// model); the per-cluster /admin/clusters/{cid}/keys handler is the
+// canonical path and has its own dispatch tests in
+// admin_per_cluster_dispatch_test.go.
 
 // TestListBucketsByClusterHandler_HappyPath covers the connection-scoped path.
 func TestListBucketsByClusterHandler_HappyPath(t *testing.T) {
