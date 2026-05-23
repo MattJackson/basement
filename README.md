@@ -98,7 +98,21 @@ users. Project **rebranded** `basement-ui` → `basement` (Go module
 **relicensed** MIT → AGPLv3 with a commercial-license escape hatch
 (contact matthew@pq.io). The v1.8.0a `basement` CLI binary was
 dropped in v1.8.0d — aws-cli covers S3 object CRUD and the web UI
-+ MCP cover the control plane.
++ MCP cover the control plane. v1.9 is the **native filesystem
+mount + pluggable gateway architecture** cycle: a new
+`internal/gateway/` package with `Gateway` + `Backend` + `Registry`
+interfaces makes the gateway tier as pluggable as the driver tier;
+**WebDAV** ships as the first real implementation (mount basement
+as a folder in Finder, Explorer, Nautilus, iOS Files, Android, or
+rclone — auth is HTTP Basic via password or a `BMNT...:secret`
+minted at `/admin/service-accounts`); four stub gateways (SMB,
+NFS, FTP, S3) register at boot so the `/admin/system` Gateways
+card + `GET /api/v1/admin/gateways` roster surface the full
+protocol matrix from day one. The Gateways card is registry-
+driven, with capability chips, live status counters, and per-
+platform connect hints. v2.0's S3 gateway becomes "just another
+Gateway implementation" — the `Backend` contract is already
+S3-shaped.
 
 ## Features
 
@@ -139,6 +153,9 @@ dropped in v1.8.0d — aws-cli covers S3 object CRUD and the web UI
 - **Installable Mobile PWA** (v1.8) — vite-plugin-pwa generates `dist/manifest.webmanifest` + `dist/sw.js`; service worker precaches the static app shell for offline shell loads; `/api/*` denylisted from the navigation fallback so auth-scoped responses always hit the network; iOS standalone meta tags (`apple-mobile-web-app-capable`, `apple-mobile-web-app-status-bar-style`) so Safari renders the installed app full-bleed; theme-color `#C9874B` tints the address bar on Chrome / Edge Android; `/site.webmanifest` retained alongside `/manifest.webmanifest` for back-compat with already-installed shortcuts
 - **Mobile-tuned bucket browser** (v1.8) — virtualized object browser flips to a stacked card layout below 640px; row height bumps to 56px so checkbox + filename tap targets meet iOS HIG's 44px minimum; size + last-modified columns hide so the file name is the primary visual element; `data-layout="card"` on the scroll container is the E2E observability seam
 - **Install-to-home-screen hint** (v1.8) — one-time dismissible banner on `/files` for mobile + display-mode=browser; explains Share → Add to Home Screen for Safari iOS (which doesn't auto-prompt); keyed on `localStorage["basement.pwaHintDismissed"]` so once dismissed it never re-shows for that device
+- **WebDAV gateway** (v1.9) — `/webdav/` tree on the same chi router as `/api/v1` mounts basement as a folder in Finder, Explorer, Nautilus, iOS Files, Android, or rclone; HTTP Basic auth via either username + password or a service-account `BMNT...:secret` pair (same key minted at `/admin/service-accounts`); MKCOL at a region root creates a bucket; MOVE / COPY use ServerSideCopy; LOCK / UNLOCK return 501 (read+write clients tolerate the absence); operator kill switch at `/admin/system → Gateways → WebDAV → Enabled`
+- **Pluggable gateway architecture** (v1.9) — `internal/gateway/{Gateway,Backend,Registry}` interfaces; `ProductionBackend` composes `config.Admin` + `store.Users` + `serviceaccount.ServiceAccounts` + `store.UserRegions` + `driver.Registry` + `store.Connections` into a single S3-shaped data plane every Gateway calls; SMB / NFS / FTP / S3 register as stubs at boot (`Implemented()=false`) so the full protocol matrix surfaces in `/admin/system` + `GET /api/v1/admin/gateways` from day one
+- **Registry-driven Gateways card** (v1.9) — `/admin/system` Gateways section renders one row per Gateway returned from `/api/v1/admin/gateways`: capability chips (read / write / delete / move / lock / basic-auth / bearer-auth / sigv4-auth), live status (running, active connections, last activity, total requests), mount URL with Copy button + per-platform connect hints (Finder Cmd-K, Explorer Map network drive, Nautilus `dav://`, iOS Files) for implemented gateways, "Coming soon" badge in place of an enable toggle for stubs; auto-refresh on a 30s tick
 - **Persistent invite tokens** (v1.3) — `/admin/users` "Pending invites" section: mint, label, revoke, rotate, copy-full-URL; 30-day default expiry; optional label feeds the auto-generated username
 - **Two deployment postures** — Company mode (default, Host Admin curates clusters) vs Multi-tenant mode (users BYO buckets via own keys)
 - **What-if policy simulator** — "Can user X do capability Y on scope Z?" with reasoning trace
@@ -181,7 +198,7 @@ See `docs/configuration.md` for production env vars.
 
 ## Comparison vs other OSS admin UIs
 
-| Feature                              | basement v1.8 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
+| Feature                              | basement v1.9 | khairul169/garage-webui | Noooste/garage-ui | OpenMaxIO       |
 |--------------------------------------|------------------|-------------------------|-------------------|-----------------|
 | Garage admin                         | yes (v1 + v2)    | yes                     | yes               | no              |
 | MinIO admin                          | yes              | no                      | no                | yes (MinIO-only)|
@@ -199,12 +216,14 @@ See `docs/configuration.md` for production env vars.
 | Event-driven federation replication  | yes (v1.7)       | no                      | no                | no              |
 | MCP server for AI agents             | yes (v1.8)       | no                      | no                | no              |
 | Installable mobile PWA               | yes (v1.8)       | no                      | no                | no              |
+| WebDAV gateway (native FS mount)     | yes (v1.9)       | no                      | no                | no              |
+| Pluggable gateway architecture       | yes (v1.9)       | no                      | no                | no              |
 | Bucket lifecycle wizard              | yes              | no                      | no                | (MinIO-driven)  |
 | Policy simulator (what-if)           | yes              | no                      | no                | no              |
 | Delete protection (two-phase)        | yes              | no                      | no                | no              |
 | Layout editor                        | yes (Garage)     | yes                     | yes               | n/a             |
 | Open source license                  | AGPL-3.0         | AGPL                    | MIT               | AGPL (fork)     |
-| Status (as of 2026-05-22)            | shipped v1.8     | active v1.1.0           | active v0.5       | active fork     |
+| Status (as of 2026-05-22)            | shipped v1.9     | active v1.1.0           | active v0.5       | active fork     |
 
 Full competitive write-up:
 [`competitive-landscape-2026-05-19.md`](https://github.com/mattjackson/basement-internal)
@@ -225,9 +244,10 @@ Full competitive write-up:
 - v1.5 — backup story: scheduled bucket-to-bucket backups with cron engine; mirror + snapshot modes; GFS retention with auto-prune; 3-step restore wizard with snapshot-level deep-link; mirror-mode short-circuit for backups that don't keep history (shipped — see [docs/release-notes/v1.5.0.md](docs/release-notes/v1.5.0.md))
 - v1.6 — federation + multi-backend replication: `FederatedBucket` first-class concept; polling-based replication engine with per-federation goroutines + per-replica worker pool + lag tracking; user-tier CRUD + manual failover + opt-in auto-failover watchdog; 5-step wizard at `/files/federated-buckets/new`; per-replica health table on the detail page; bucket-browser federation badge via a reverse-lookup endpoint. Builds directly on v1.5's sync engine, no driver changes. Substrate for the v2.0 S3 gateway (shipped — see [docs/release-notes/v1.6.0.md](docs/release-notes/v1.6.0.md), [ADR-0005](docs/adr/0005-federation.md))
 - v1.7 — service accounts (M2M bearer auth substrate for v1.8's MCP / Mobile PWA) + webhook subscriptions (HMAC-signed bucket events + auto-disable + Python verification snippet) + event-driven federation (in-process pub/sub flips v1.6's 10s polling to sub-second convergence; polling stays as fallback) + `/admin/*` auto-elevation guard + AdminUserModeBanner. No driver changes; no new env vars; bearer auth runs parallel to JWT cookie (shipped — see [docs/release-notes/v1.7.0.md](docs/release-notes/v1.7.0.md))
-- **v1.8 (current)** — MCP server (`cmd/basement-mcp/`, ten tools at launch — seven read + two write + one forward-compatible placeholder — over stdio JSON-RPC 2.0, authenticates via v1.7 service accounts) + service-account "Use with MCP" config UX (`<McpConfigSection>` shared component emits ready-to-paste `config.yaml` + Claude / Cursor JSON snippets; new `/admin/service-accounts/$id` detail page) + Mobile PWA (vite-plugin-pwa installable wrapper + offline-cached app shell + iOS standalone hooks + mobile bucket browser card layout below 640px + `<InstallToHomeScreenHint>` banner) + project rebrand (`basement-ui` → `basement`, `github.com/mattjackson/basement` module, `ghcr.io/mattjackson/basement` image) + relicense (MIT → AGPLv3, commercial-license escape hatch at matthew@pq.io). v1.8.0a CLI binary dropped in v1.8.0d (aws-cli + web UI + MCP cover the matrix). Shipped — see [docs/release-notes/v1.8.0.md](docs/release-notes/v1.8.0.md)
-- v1.9 — **WebDAV + SMB gateways**: network-drive surfaces for non-tech household users (the same audience who installed the PWA in v1.8) — mount a basement bucket as a Finder / Explorer / GVFS drive. WebDAV is the cross-platform default; SMB picks up Windows-shop + macOS-finder cases where WebDAV's latency is too high. Both gateways authenticate via v1.7 service accounts and route through v1.6 federation topology + v0.8 sync engine
-- **v2.0 — S3 gateway.** Major-version slot. Inbound S3 requests routed through basement's gateway, which dispatches via the v1.6 federation topology (read → nearest healthy replica; write → primary). Service-account-minted SigV4 keys gate ingress; webhooks emit inbound-write events that drive event-driven federation. Carry-over from the v1.x backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself
+- v1.8 — MCP server (`cmd/basement-mcp/`, ten tools at launch — seven read + two write + one forward-compatible placeholder — over stdio JSON-RPC 2.0, authenticates via v1.7 service accounts) + service-account "Use with MCP" config UX (`<McpConfigSection>` shared component emits ready-to-paste `config.yaml` + Claude / Cursor JSON snippets; new `/admin/service-accounts/$id` detail page) + Mobile PWA (vite-plugin-pwa installable wrapper + offline-cached app shell + iOS standalone hooks + mobile bucket browser card layout below 640px + `<InstallToHomeScreenHint>` banner) + project rebrand (`basement-ui` → `basement`, `github.com/mattjackson/basement` module, `ghcr.io/mattjackson/basement` image) + relicense (MIT → AGPLv3, commercial-license escape hatch at matthew@pq.io). v1.8.0a CLI binary dropped in v1.8.0d (aws-cli + web UI + MCP cover the matrix). Shipped — see [docs/release-notes/v1.8.0.md](docs/release-notes/v1.8.0.md)
+- **v1.9 (current)** — **WebDAV gateway + pluggable gateway architecture**. `/webdav/` tree on the same chi router as `/api/v1` surfaces basement to Finder / Explorer / Nautilus / iOS Files / rclone via HTTP Basic auth (username + password OR `BMNT...:secret` minted at `/admin/service-accounts`). New `internal/gateway/` package introduces `Gateway` + `Backend` + `Registry` interfaces so the gateway tier is as pluggable as the driver tier; SMB / NFS / FTP / S3 register as stubs at boot (`Implemented()=false`) so the `/admin/system` Gateways card + `GET /api/v1/admin/gateways` roster surface the full protocol matrix from day one. The Gateways card is registry-driven: capability chips, live status, mount URL with Copy + per-platform connect hints for implemented gateways, "Coming soon" badge in place of an enable toggle for stubs. Time Machine docs are honest about basement not shipping native SMB and document the recommended NAS + BACKUP-wizard pattern + the Samba+s3fs-fuse community sidecar workaround. New plugin doc `docs/integrations/adding-a-gateway.md`. Shipped — see [docs/release-notes/v1.9.0.md](docs/release-notes/v1.9.0.md)
+- v1.10 — **Versioning + Object-Lock + SSE.** Ransomware shield + compliance posture. Complements v1.6 federation by making replicas immutable: a compromised primary can't poison the chain if every replica honours WORM. Versioning + Object-Lock are the S3-API-level primitives; SSE-S3 / SSE-C / SSE-KMS are the at-rest encryption tiers. Each backend (Garage v2, AWS S3, MinIO / OpenMaxIO) exposes a different subset of these via capability flags; the UI + driver work tracks the v1.4-style "honest capability gating" pattern
+- **v2.0 — S3 gateway.** Major-version slot. Inbound S3 requests routed through basement's gateway, which dispatches via the v1.6 federation topology (read → nearest healthy replica; write → primary). Service-account-minted SigV4 keys gate ingress; webhooks emit inbound-write events that drive event-driven federation. v1.9's `Backend` interface is already S3-shaped (SigV4 slot, PutObject / GetObject / etc.) so the gateway implementation slots in alongside WebDAV without architecture churn. Carry-over from the v1.x backlog: async/long-running restore with poll-able progress; B2 / R2 / Wasabi as first-class drivers; multi-select move + copy in the bucket browser; `/v1/worker` feature-detection on the block-scrub UI; in-product surface for backing up `BASEMENT_DATA_DIR` itself
 
 ## Architecture
 

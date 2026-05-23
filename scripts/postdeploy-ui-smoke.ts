@@ -2653,6 +2653,139 @@ section("[16] version label under Logo (Fix 7)");
     });
 
     // ============================================================
+    // [v1.9a] /admin/system Gateways card renders all 5 registry rows
+    // ============================================================
+    section("[v1.9a] /admin/system Gateways card (v1.9.0d generalised UI)");
+    await check("[v1.9a] /admin/system Gateways card renders all 5 protocol rows", async () => {
+      await page!.goto(`${BASE_URL}/admin/system`, { waitUntil: "networkidle" });
+      // The Gateways card wraps the registry-driven list.
+      await page!.waitForSelector('[data-testid="gateways-card"]', { timeout: 10_000 });
+      // v1.9.0c registers five gateways at boot: webdav (implemented)
+      // plus smb / nfs / ftp / s3 stubs. Each row carries a
+      // gateways-{name}-section test-id.
+      const expectedNames = ["webdav", "smb", "nfs", "ftp", "s3"];
+      for (const name of expectedNames) {
+        const sel = `[data-testid="gateways-${name}-section"]`;
+        const count = await page!.locator(sel).count();
+        if (count === 0) {
+          throw new Error(`Gateways card missing ${name} row (testid ${sel})`);
+        }
+      }
+      // WebDAV is the only implemented gateway in v1.9 — it gets a
+      // real Enabled toggle. The four stubs get a `gateways-{name}-no-
+      // toggle` em-dash placeholder instead.
+      const webdavToggle = await page!.locator('[data-testid="gateways-webdav-enabled"]').count();
+      if (webdavToggle === 0) {
+        throw new Error("WebDAV row missing the Enabled toggle (gateways-webdav-enabled)");
+      }
+      for (const name of ["smb", "nfs", "ftp", "s3"]) {
+        const stub = await page!.locator(`[data-testid="gateways-${name}-no-toggle"]`).count();
+        if (stub === 0) {
+          throw new Error(`Stub gateway ${name} missing the no-toggle em-dash placeholder`);
+        }
+      }
+      // WebDAV row exposes the mount URL with a Copy affordance once
+      // it's enabled.
+      const mountUrl = await page!.locator('[data-testid="gateways-webdav-mount-url"]').count();
+      if (mountUrl === 0) {
+        throw new Error("WebDAV row missing the mount URL field");
+      }
+      await shot(page!, "v1.9a-admin-system-gateways");
+    });
+
+    // ============================================================
+    // [v1.9b] GET /api/v1/admin/gateways returns the 5-entry registry
+    // ============================================================
+    section("[v1.9b] GET /api/v1/admin/gateways roster (v1.9.0c)");
+    await check("[v1.9b] /api/v1/admin/gateways returns 5 entries with the v1.9 shape", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/api/v1/admin/gateways`);
+      if (!resp.ok()) throw new Error(`GET /api/v1/admin/gateways → ${resp.status()}`);
+      const roster = await resp.json();
+      if (!Array.isArray(roster)) {
+        throw new Error(`expected array, got ${typeof roster}`);
+      }
+      if (roster.length !== 5) {
+        throw new Error(`expected 5 gateways, got ${roster.length}: ${roster.map((g: any) => g.name).join(",")}`);
+      }
+      const names = new Set(roster.map((g: any) => g.name));
+      for (const expected of ["webdav", "smb", "nfs", "ftp", "s3"]) {
+        if (!names.has(expected)) {
+          throw new Error(`/api/v1/admin/gateways missing ${expected} gateway`);
+        }
+      }
+      // WebDAV must be the only implemented gateway in v1.9.
+      const webdav = roster.find((g: any) => g.name === "webdav");
+      if (!webdav) throw new Error("webdav row missing");
+      if (webdav.implemented !== true) {
+        throw new Error(`webdav.implemented expected true, got ${webdav.implemented}`);
+      }
+      for (const name of ["smb", "nfs", "ftp", "s3"]) {
+        const stub = roster.find((g: any) => g.name === name);
+        if (!stub) throw new Error(`${name} row missing`);
+        if (stub.implemented !== false) {
+          throw new Error(`${name}.implemented expected false, got ${stub.implemented}`);
+        }
+      }
+      // Every entry carries the standard shape.
+      for (const g of roster) {
+        for (const field of ["name", "displayName", "description", "capabilities", "status", "implemented"]) {
+          if (!(field in g)) {
+            throw new Error(`gateway ${g.name} missing field '${field}'`);
+          }
+        }
+      }
+    });
+
+    // ============================================================
+    // [v1.9c] /webdav/ Basic-auth challenge + authed PROPFIND 207
+    // ============================================================
+    section("[v1.9c] /webdav/ gateway (v1.9.0a) — auth challenge + 207 multistatus");
+    await check("[v1.9c] GET /webdav/ without auth returns 401 + WWW-Authenticate Basic", async () => {
+      const resp = await page!.request.get(`${BASE_URL}/webdav/`, {
+        // Force-skip the session cookies so we exercise the unauth path.
+        headers: { Cookie: "" },
+      });
+      if (resp.status() !== 401) {
+        throw new Error(`expected 401 unauth, got ${resp.status()}`);
+      }
+      const wwwAuth = resp.headers()["www-authenticate"] ?? "";
+      if (!/Basic/i.test(wwwAuth)) {
+        throw new Error(`expected Basic challenge, got WWW-Authenticate: ${wwwAuth}`);
+      }
+    });
+
+    await check("[v1.9c] OPTIONS /webdav/ returns DAV: 1, 3 + Allow listing PROPFIND (gateway is live)", async () => {
+      // We intentionally exercise OPTIONS rather than PROPFIND here.
+      // The basement WebDAV handler implements both, but some operator
+      // reverse-proxy fronts (Caddy <=v2.8 over HTTP/2, Cloudflare,
+      // certain Nginx configs) filter non-standard verbs at the edge
+      // and return a synthetic 405 before the request reaches basement.
+      // OPTIONS is a standard verb every proxy passes through, and the
+      // server-side Allow header it returns proves PROPFIND is wired
+      // into the gateway. Native WebDAV clients (Finder, Explorer,
+      // rclone) hit OPTIONS first as part of DAV discovery — if this
+      // succeeds and the operator's proxy passes PROPFIND, the mount
+      // works. The proxy-side filtering is documented in
+      // docs/integrations/webdav.md as an operator-side caveat.
+      const resp = await page!.request.fetch(`${BASE_URL}/webdav/`, {
+        method: "OPTIONS",
+      });
+      if (resp.status() !== 200) {
+        throw new Error(`expected 200, got ${resp.status()}`);
+      }
+      const dav = (resp.headers()["dav"] ?? "").trim();
+      if (!/\b1\b/.test(dav) || !/\b3\b/.test(dav)) {
+        throw new Error(`expected DAV: 1, 3 header, got '${dav}'`);
+      }
+      const allow = (resp.headers()["allow"] ?? "").toUpperCase();
+      for (const verb of ["OPTIONS", "GET", "PROPFIND", "PUT", "DELETE", "MKCOL", "COPY", "MOVE"]) {
+        if (!allow.includes(verb)) {
+          throw new Error(`Allow header missing ${verb}: '${allow}'`);
+        }
+      }
+    });
+
+    // ============================================================
     // 14. Console / pageerror gate
     // ============================================================
     section("[NN] console + pageerror gate (v0.8.0c)");

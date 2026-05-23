@@ -4,6 +4,28 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.9.0 — 2026-05-22
+
+WebDAV gateway + pluggable gateway architecture milestone. v1.9
+lights up basement's third client surface (native filesystem mount,
+on top of v1.8's mobile PWA and MCP) and lays the architecture for
+the rest. New `internal/gateway/` package with `Gateway` + `Backend`
++ `Registry` interfaces makes the gateway tier as pluggable as the
+driver tier. WebDAV ships as the first real implementation
+(`/webdav/` tree, Basic auth via password or `BMNT...:secret`,
+Finder / Explorer / Nautilus / iOS Files / rclone). Four stub
+gateways (SMB, NFS, FTP, S3) register at boot so the
+`/api/v1/admin/gateways` roster + the `/admin/system` Gateways card
+surface the full protocol matrix from day one, marked "coming soon"
+until their implementations land. The Gateways card is registry-
+driven — adding a new gateway in v1.10+ takes one file in
+`internal/gateway/{name}/` plus a `Register()` call in `main.go`,
+no UI changes. Time Machine integration docs are honest about
+basement not shipping native SMB (no production-grade pure-Go SMB
+server) and document the recommended NAS + BACKUP-wizard pattern
+plus the Samba + s3fs-fuse community sidecar workaround. Full
+write-up in [docs/release-notes/v1.9.0.md](docs/release-notes/v1.9.0.md).
+
 ## v1.9.0d — 2026-05-22
 
 Generalised Gateways UI + plugin doc. The WebDAV-hardcoded card on
