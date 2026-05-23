@@ -85,9 +85,37 @@ Shots ending in `-mocked.png` are Playwright-driven static-HTML renders for comp
 | v1.10 | Bucket versioning + Object Lock + SSE-S3 / SSE-KMS |
 | v1.11 | Launch readiness — first-run wizard, 5-min install, observability, deployment guide |
 
-**v2.0 — basement IS a backend (S3 gateway).** Inbound S3 requests terminated and SigV4-verified by basement, then routed through the v1.6 federation topology (read → nearest healthy replica; write → primary). v1.9's `Backend` interface is already S3-shaped, so the gateway implementation slots in alongside WebDAV without architecture churn. v1.10 versioning + object-lock + SSE primitives gate the per-object write path. See [ADR-0006](docs/adr/0006-v2-s3-gateway.md).
+What's next is open — file an issue or start a discussion if there's a direction you'd like to see basement go.
 
-**v2.x line** carries the long-haul roadmap: client-side end-to-end encryption for untrusted-backend federation replicas (v2.1); search + tags + smart collections (v2.2); SMB + NFS gateways alongside WebDAV (v2.3); cost engine + cross-backend lifecycle (v2.4); plugin SDK + multi-site mesh + IPFS / CDN + marketplace (v3.0). See [ADR-0004](docs/adr/0004-v2-scoping-proposal.md) and [ADR-0005](docs/adr/0005-federation.md) for design lineage.
+## Compared to other OSS admin UIs
+
+The self-hosted S3 admin-UI landscape shifted in 2026 — upstream MinIO archived its repo on 2026-04-25 and moved to a commercial AIStor product, leaving community forks (opens3/console, OpenMaxIO) to carry the AGPL Console forward. Garage v2 also landed in the same period, prompting new Garage-only UIs. Here's a factual feature comparison so you can pick the right tool for your situation.
+
+| Feature                              | basement                              | MinIO Console (opens3)  | OpenMaxIO Browser     | khairul169/garage-webui | Noooste/garage-ui |
+|--------------------------------------|---------------------------------------|-------------------------|-----------------------|-------------------------|-------------------|
+| Backends supported                   | Garage v1+v2, AWS S3, S3-compatible   | MinIO only              | MinIO only            | Garage v1 (v2 partial)  | Garage v2.1+ only |
+| OIDC SSO                             | yes (Authentik, Pocket-ID, Keycloak)  | yes (OAuth2 / Dex)      | yes                   | no                      | yes               |
+| Multi-user RBAC                      | three-axis (UI / cluster / bucket)    | yes (MinIO IAM)         | yes (MinIO IAM)       | no                      | basic             |
+| Bucket browser                       | yes (virtualized, batch actions)      | yes                     | yes                   | yes                     | yes               |
+| Federation / multi-cluster sync      | yes (per-bucket, event-driven)        | yes (Site Replication)  | yes (Site Replication)| no                      | no                |
+| Bucket versioning UI                 | yes                                   | yes                     | yes                   | n/a (backend)           | n/a (backend)     |
+| S3 Object Lock UI                    | yes (Governance + Compliance + Hold)  | yes                     | yes                   | n/a (backend)           | n/a (backend)     |
+| SSE-S3 / SSE-KMS UI                  | yes                                   | yes                     | yes                   | n/a (backend)           | n/a (backend)     |
+| WebDAV / SMB / NFS gateway           | yes (WebDAV; SMB/NFS/FTP registered)  | no                      | no                    | no                      | no                |
+| MCP server (AI agent integration)    | yes                                   | no                      | no                    | no                      | no                |
+| Service-account / M2M tokens         | yes                                   | yes                     | yes                   | partial (access keys)   | partial (access keys) |
+| Scheduled backups + restore wizard   | yes (mirror / snapshot, GFS, PIT)     | no                      | no                    | no                      | no                |
+| Webhooks / event notifications       | yes                                   | yes                     | yes                   | no                      | no                |
+| First-run install wizard             | yes (auto-bootstrap)                  | no                      | no                    | no                      | partial           |
+| Prometheus `/metrics` (UI-served)    | yes                                   | yes                     | yes                   | no                      | no                |
+| Audit log UI                         | yes                                   | partial                 | partial               | no                      | no                |
+| Mobile / installable PWA             | yes                                   | no                      | no                    | partial (manifest only) | no                |
+| License                              | AGPL-3.0                              | AGPL-3.0                | AGPL-3.0              | MIT                     | MIT               |
+| Latest release / activity            | v1.11 (2026-05)                       | last commit 2025-11     | last commit 2025-06   | v1.1.0 (2025-09)        | v0.6.2 (2026-05)  |
+
+"n/a (backend)" means the upstream object store doesn't expose the feature, so no admin UI can ship it — Garage core does not implement versioning, Object Lock, or SSE-S3/SSE-KMS, and this isn't a UI gap. Rows for MinIO Console reflect the AGPL fork (opens3/console), since github.com/minio/console itself was retired alongside minio/minio in April 2026.
+
+Verified against project READMEs, source code searches, and latest release notes on 2026-05-23. See [`docs/comparison-research.md`](docs/comparison-research.md) for per-row sourcing.
 
 ## Architecture
 
@@ -106,7 +134,7 @@ Shots ending in `-mocked.png` are Playwright-driven static-HTML renders for comp
 - [Observability](docs/observability/) — Prometheus alerts, Grafana dashboard, slog config
 - [Integrations](docs/integrations/) — WebDAV, Time Machine, SMB / NFS / FTP / S3 gateways
 - [Configuration reference](docs/configuration.md) — every env var, every flag
-- [Architecture decision records](docs/adr/) — design history (RBAC, region tier, sudo elevation, federation, S3 gateway)
+- [Architecture decision records](docs/adr/) — design history (RBAC, region tier, sudo elevation, federation, gateway architecture)
 - [Release notes](docs/release-notes/) — per-minor write-ups, v1.0 through v1.11
 - [Screenshots](docs/screenshots/) — gallery + capture scripts
 - [Security policy](SECURITY.md) — threat model, supported versions, disclosure
