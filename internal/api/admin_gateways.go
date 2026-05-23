@@ -79,16 +79,13 @@ func (s *Server) listGatewaysHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // gatewayEnabled bridges the gateway name → org capabilities Enabled
-// flag. Today only WebDAV has an Enabled toggle in OrgCapabilities;
-// every other gateway reports enabled=false until the v1.10+ cycle
-// teaches OrgCapabilities about it. Stub gateways always report
-// enabled=false regardless of caps — the UI uses Implemented to
-// decide whether to render an enable affordance.
+// flag. v1.9.0d generalized the lookup onto the GatewaySettings
+// Protocols map so any registered gateway (real or future) reads
+// through the same path. Stub gateways still report enabled=false by
+// default because their Protocols entry defaults missing — but the FE
+// uses Implemented() to decide whether to render the toggle at all,
+// so the data shape is forward-compatible with the v1.10+ "enable
+// SMB once it ships" cycle.
 func gatewayEnabled(name string, caps store.OrgCapabilities) bool {
-	switch name {
-	case "webdav":
-		return caps.Gateways.WebDAV.Enabled
-	default:
-		return false
-	}
+	return caps.Gateways.IsEnabled(name)
 }

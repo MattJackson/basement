@@ -2285,3 +2285,64 @@ export function useDisableWebhook() {
     },
   });
 }
+
+// v1.9.0d GATEWAYS — generalised /admin/gateways UI hook.
+//
+// Reads the gateway registry roster from GET /api/v1/admin/gateways
+// (v1.9.0c endpoint). One row per registered Gateway, sorted by name
+// server-side. Implemented() = false rows render as "coming soon" in
+// the admin Gateways card; Implemented() = true rows render with a
+// real Enable toggle wired into PATCH /admin/system.
+//
+// Auto-refresh every 30s while the card is mounted so status counters
+// (active connections, last activity, total requests) stay live.
+export interface GatewayCapabilities {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+  move: boolean;
+  lock: boolean;
+  basicAuth: boolean;
+  bearerAuth: boolean;
+  sigV4Auth: boolean;
+}
+
+export interface GatewayStatus {
+  running: boolean;
+  activeConnections?: number;
+  lastActivity?: string;
+  totalRequests?: number;
+  lastError?: string;
+}
+
+export interface GatewayInfo {
+  name: string;
+  displayName: string;
+  description: string;
+  capabilities: GatewayCapabilities;
+  status: GatewayStatus;
+  implemented: boolean;
+  enabled: boolean;
+  listenAddress?: string;
+}
+
+export function useGatewaysRegistry() {
+  return useQuery<GatewayInfo[]>({
+    queryKey: ["admin", "gateways"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/admin/gateways", {
+        credentials: "include",
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw apiError("admin/gateways", res.status, body);
+      // Backend hands back a JSON array of rows; defend against a
+      // null payload landing here when the server returns no body.
+      return (body as GatewayInfo[]) ?? [];
+    },
+    // Status counters drift in real-time; 30s tick keeps the card
+    // honest without hammering the registry on every render.
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    retry: 1,
+  });
+}

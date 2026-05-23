@@ -12,8 +12,12 @@ import {
   usePolicies,
   useOIDCGroupMappings,
   useUpdateOIDCGroupMappings,
+  useGatewaysRegistry,
   type OIDCGroupMapping,
   type PolicyRole,
+  type GatewayInfo,
+  type GatewayCapabilities,
+  type GatewayStatus,
 } from "@/shared/api/queries";
 
 export const Route = createFileRoute("/admin/system")({
@@ -25,8 +29,21 @@ type WebDAVSettings = {
   baseUrl?: string;
 };
 
+// v1.9.0d generic per-protocol config — keyed by Gateway.Name().
+// Mirrors store.GatewayConfig. Reads cross-mirror with the legacy
+// `webdav` field so v1.9.0b clients stay in sync; writes from this
+// card mutate BOTH shapes to satisfy the backend's "legacy wins on
+// divergence" tie-break (the only safe rule given a v1.9.0b client
+// could still be writing the legacy path concurrently).
+type GatewayConfig = {
+  enabled?: boolean;
+  baseUrl?: string;
+  options?: Record<string, string>;
+};
+
 type GatewaySettings = {
   webdav?: WebDAVSettings;
+  protocols?: Record<string, GatewayConfig>;
 };
 
 type OrgCapabilities = {
@@ -228,10 +245,11 @@ function OrgCapabilitiesPage() {
         <Button onClick={handleSave}>Save Changes</Button>
       </div>
 
-      {/* v1.9.0b GATEWAYS — operator-facing settings + status for the */}
-      {/* native-protocol gateways. WebDAV ships in v1.9.0a and is */}
-      {/* on by default; SMB is documented as not-supported-natively */}
-      {/* with a pointer to the Time Machine integration doc. */}
+      {/* v1.9.0d GATEWAYS — registry-driven, one row per registered */}
+      {/* Gateway. WebDAV ships in v1.9.0a/b and has a live Enable */}
+      {/* toggle; SMB / NFS / FTP / S3 register as stubs in v1.9.0c */}
+      {/* and render with a "coming soon" badge driven by the */}
+      {/* Implemented() flag in the registry response. */}
       <GatewaysCard
         gateways={data.gateways ?? { webdav: { enabled: true } }}
         onChange={(next) =>
@@ -493,21 +511,31 @@ function AdminSessionTTLCard({
   );
 }
 
-// v1.9.0b GATEWAYS card — WebDAV settings + SMB explainer.
+// v1.9.0d GATEWAYS card — registry-driven roster.
 //
-// WebDAV section:
-//   - Enabled toggle (default on). Off → /webdav/* returns 403
-//     GATEWAY_DISABLED at the backend.
-//   - Mount URL: window.location.origin + "/webdav" with a Copy
-//     button. Operators behind a reverse proxy with a different
-//     external host can pin via the BaseURL override field; when
-//     set, the display uses that instead of the auto-derived URL.
-//   - Per-platform connect hints (macOS / Windows / Linux / iOS).
+// Replaces the v1.9.0b WebDAV-hardcoded card with a generic one that
+// renders whatever GET /api/v1/admin/gateways returns. Each row:
 //
-// SMB section:
-//   - Not supported natively. Brief explanation + link to the
-//     Time Machine integration doc that explains the Samba-sidecar
-//     pattern for legacy SMB-only clients.
+//   - DisplayName + capability chips (read / write / delete / move /
+//     lock / basic-auth / bearer-auth / sigv4-auth)
+//   - Implementation badge (live "Implemented" or muted "Coming soon")
+//   - Live status (running, active connections, last activity, total
+//     requests) when implemented; "not implemented yet" when not
+//   - Mount URL or listen address when applicable
+//   - Per-platform connect hints (collapsed details)
+//   - Enable toggle when Implemented(); hidden otherwise — the FE
+//     never offers an enable affordance for a stub
+//
+// The card writes both the legacy `webdav` field AND the generic
+// `protocols.webdav` entry so the v1.9.0b kill-switch contract
+// continues to work (backend tie-breaks toward the legacy field on
+// divergence — keeping the two in sync from the FE is what makes the
+// "legacy wins" rule safe).
+//
+// While the network call is in flight the card renders a loading
+// row; if /admin/gateways 503s (registry not wired) we degrade to a
+// banner pointing at the operator log rather than rendering an empty
+// card that looks like a config error on the user's side.
 export function GatewaysCard({
   gateways,
   onChange,
@@ -517,44 +545,35 @@ export function GatewaysCard({
   onChange: (next: GatewaySettings) => void;
   onSave: () => Promise<void>;
 }) {
-  const webdav = gateways.webdav ?? { enabled: true };
-  const [saving, setSaving] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const registry = useGatewaysRegistry();
+  const [savingName, setSavingName] = useState<string | null>(null);
 
-  // Compute the mount URL: operator override wins, otherwise derive
-  // from the current page origin. typeof check keeps SSR / vitest
-  // happy when window isn't defined yet.
-  const autoOrigin =
-    typeof window !== "undefined" ? window.location.origin : "https://basement.example";
-  const displayURL =
-    (webdav.baseUrl && webdav.baseUrl.trim() !== "")
-      ? webdav.baseUrl.trim()
-      : `${autoOrigin}/webdav`;
-
-  async function handleCopy() {
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard) {
-        await navigator.clipboard.writeText(displayURL);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }
-    } catch {
-      // Clipboard write can fail under permissions; the user can
-      // still select-and-copy the URL manually from the field.
-    }
-  }
-
-  async function handleSave() {
-    setSaving(true);
+  async function handleSave(name: string) {
+    setSavingName(name);
     try {
       await onSave();
     } finally {
-      setSaving(false);
+      setSavingName(null);
     }
   }
 
-  function setWebDAV(next: WebDAVSettings) {
-    onChange({ ...gateways, webdav: { ...webdav, ...next } });
+  // setProtocolConfig writes both halves of the back-compat shape:
+  //   - protocols[name] for the v1.9.0d generic map (the new
+  //     canonical wire shape), AND
+  //   - the legacy `webdav` field when name === "webdav", because
+  //     the backend tie-breaks toward that field on divergence.
+  function setProtocolConfig(name: string, next: GatewayConfig) {
+    const protocols = { ...(gateways.protocols ?? {}) };
+    protocols[name] = { ...(protocols[name] ?? {}), ...next };
+    const merged: GatewaySettings = { ...gateways, protocols };
+    if (name === "webdav") {
+      merged.webdav = {
+        ...(gateways.webdav ?? {}),
+        ...(next.enabled !== undefined ? { enabled: next.enabled } : {}),
+        ...(next.baseUrl !== undefined ? { baseUrl: next.baseUrl } : {}),
+      };
+    }
+    onChange(merged);
   }
 
   return (
@@ -563,171 +582,480 @@ export function GatewaysCard({
         <CardTitle>Gateways</CardTitle>
         <CardDescription>
           Native-protocol mounts that let desktop and mobile clients talk
-          to basement without the web UI. WebDAV ships built-in; SMB
-          requires a sidecar &mdash; see the Time Machine doc below for
-          the supported pattern.
+          to basement without the web UI. WebDAV ships built-in; SMB / NFS
+          / FTP / S3 are registered as stubs in v1.9.0c and light up as
+          their implementations land &mdash; see the per-protocol docs
+          below for the implementation tracking.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* ----- WebDAV section ----- */}
-        <section
-          className="space-y-3"
-          data-testid="gateways-webdav-section"
-          aria-labelledby="gateways-webdav-heading"
-        >
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h3
-                id="gateways-webdav-heading"
-                className="text-base font-medium"
-              >
-                WebDAV
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Mount basement as a network drive from Finder, Explorer,
-                Nautilus, and the iOS Files app.
-              </p>
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                data-testid="gateways-webdav-enabled"
-                checked={webdav.enabled ?? true}
-                onChange={(e) => setWebDAV({ enabled: e.target.checked })}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              Enabled
-            </label>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-sm font-medium" htmlFor="webdav-mount-url">
-              Mount URL
-            </label>
-            <div className="flex items-center gap-2">
-              <Input
-                id="webdav-mount-url"
-                data-testid="gateways-webdav-mount-url"
-                readOnly
-                value={displayURL}
-                className="font-mono text-xs"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={handleCopy}
-                data-testid="gateways-webdav-copy"
-              >
-                {copied ? "Copied" : "Copy"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label
-              className="text-sm font-medium"
-              htmlFor="webdav-base-url-override"
-            >
-              Base URL override (optional)
-            </label>
-            <Input
-              id="webdav-base-url-override"
-              data-testid="gateways-webdav-base-url"
-              placeholder="https://files.example.com/webdav"
-              value={webdav.baseUrl ?? ""}
-              onChange={(e) => setWebDAV({ baseUrl: e.target.value })}
-            />
-            <p className="text-xs text-muted-foreground">
-              Use this when basement sits behind a reverse proxy that
-              exposes WebDAV on a different host. Leave blank to use the
-              current origin.
-            </p>
-          </div>
-
-          <details className="rounded-md border border-input bg-muted/30 p-3">
-            <summary className="cursor-pointer text-sm font-medium">
-              Connect from your platform
-            </summary>
-            <ul className="mt-3 space-y-2 text-sm">
-              <li>
-                <strong>macOS Finder:</strong> press &#8984;K, paste the
-                mount URL, then enter your basement username and password.
-              </li>
-              <li>
-                <strong>Windows Explorer:</strong> This PC &rarr; Map
-                network drive, paste the URL into the Folder field, and
-                authenticate with basement credentials.
-              </li>
-              <li>
-                <strong>Linux (Nautilus):</strong> Connect to Server,
-                paste the URL with the <code>davs://</code> scheme
-                (e.g. <code>davs://basement.example/webdav</code>).
-              </li>
-              <li>
-                <strong>iOS Files:</strong> Browse tab &rarr; &hellip;
-                menu &rarr; Connect to Server, paste the URL, choose
-                Registered User, enter credentials.
-              </li>
-            </ul>
-            <p className="mt-3 text-xs text-muted-foreground">
-              For automation, use a service account from{" "}
-              <Link to="/admin/service-accounts" className="underline">
-                /admin/service-accounts
-              </Link>{" "}
-              &mdash; the <code>BMNT&hellip;</code> key goes in the
-              username field, the shown-once secret in the password
-              field. See the{" "}
-              <a
-                href="/docs/integrations/webdav.md"
-                className="underline"
-                target="_blank"
-                rel="noreferrer"
-              >
-                WebDAV integration guide
-              </a>{" "}
-              for the full walkthrough.
-            </p>
-          </details>
-
-          <div className="flex justify-end">
-            <Button
-              onClick={handleSave}
-              disabled={saving}
-              data-testid="gateways-webdav-save"
-            >
-              {saving ? "Saving…" : "Save WebDAV settings"}
-            </Button>
-          </div>
-        </section>
-
-        {/* ----- SMB section ----- */}
-        <section
-          className="space-y-2 rounded-md border border-input bg-muted/20 p-4"
-          data-testid="gateways-smb-section"
-          aria-labelledby="gateways-smb-heading"
-        >
-          <h3 id="gateways-smb-heading" className="text-base font-medium">
-            SMB &mdash; not supported natively in basement
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Time Machine and legacy SMB-only apps can connect through a
-            Samba sidecar that reads basement&rsquo;s S3 backend. SMB-in-Go
-            isn&rsquo;t production-grade, so we don&rsquo;t ship one &mdash;
-            for Mac backups we recommend the basement BACKUP wizard
-            pointed at a NAS volume instead.
-          </p>
-          <a
-            href="/docs/integrations/time-machine.md"
-            className="text-sm font-medium text-primary underline-offset-4 hover:underline"
-            target="_blank"
-            rel="noreferrer"
+        {registry.isLoading ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="gateways-loading"
           >
-            Read the Time Machine integration notes &rarr;
-          </a>
-        </section>
+            Loading gateway registry&hellip;
+          </p>
+        ) : registry.isError ? (
+          <div
+            className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            data-testid="gateways-error"
+          >
+            Gateway registry unavailable: {registry.error.message}. Check
+            the basement server log; the registry wires up at boot.
+          </div>
+        ) : (
+          (registry.data ?? []).map((g, idx) => (
+            <div key={g.name}>
+              {idx > 0 && <hr className="my-4 border-input" />}
+              <GatewayRow
+                gateway={g}
+                config={
+                  gateways.protocols?.[g.name] ??
+                  (g.name === "webdav"
+                    ? {
+                        enabled: gateways.webdav?.enabled ?? true,
+                        baseUrl: gateways.webdav?.baseUrl,
+                      }
+                    : { enabled: g.enabled })
+                }
+                onChange={(next) => setProtocolConfig(g.name, next)}
+                onSave={() => handleSave(g.name)}
+                saving={savingName === g.name}
+              />
+            </div>
+          ))
+        )}
       </CardContent>
     </Card>
   );
+}
+
+// GatewayRow renders one gateway in the registry-driven card. The
+// shape is uniform across protocols — capability chips, status block,
+// optional mount URL, optional connect hints, optional enable toggle
+// — so adding a new gateway in v1.10+ requires no UI changes.
+//
+// Implementation status drives two affordances:
+//   - The badge color (Implemented = primary; not = muted "coming soon")
+//   - Whether the enable toggle renders at all (hidden for stubs; the
+//     spec is explicit that stubs show "—" in place of a toggle)
+function GatewayRow({
+  gateway,
+  config,
+  onChange,
+  onSave,
+  saving,
+}: {
+  gateway: GatewayInfo;
+  config: GatewayConfig;
+  onChange: (next: GatewayConfig) => void;
+  onSave: () => Promise<void>;
+  saving: boolean;
+}) {
+  const implemented = gateway.implemented;
+  const mountURL = mountURLFor(gateway, config);
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    if (!mountURL) return;
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(mountURL);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }
+    } catch {
+      // Clipboard write can fail under permissions; operators can
+      // still select-and-copy the URL from the read-only field.
+    }
+  }
+
+  return (
+    <section
+      className="space-y-3"
+      data-testid={`gateways-${gateway.name}-section`}
+      aria-labelledby={`gateways-${gateway.name}-heading`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <h3
+              id={`gateways-${gateway.name}-heading`}
+              className="text-base font-medium"
+            >
+              {gateway.displayName}
+            </h3>
+            <ImplementationBadge implemented={implemented} />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {gateway.description}
+          </p>
+        </div>
+        {implemented ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              data-testid={`gateways-${gateway.name}-enabled`}
+              checked={config.enabled ?? true}
+              onChange={(e) => onChange({ enabled: e.target.checked })}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            Enabled
+          </label>
+        ) : (
+          <span
+            className="text-sm text-muted-foreground"
+            data-testid={`gateways-${gateway.name}-no-toggle`}
+            aria-label="Enable toggle hidden for unimplemented gateway"
+          >
+            &mdash;
+          </span>
+        )}
+      </div>
+
+      <CapabilityChips
+        gatewayName={gateway.name}
+        capabilities={gateway.capabilities}
+      />
+
+      <StatusBlock
+        gatewayName={gateway.name}
+        implemented={implemented}
+        status={gateway.status}
+        listenAddress={gateway.listenAddress}
+      />
+
+      {implemented && mountURL && (
+        <div className="space-y-1">
+          <label
+            className="text-sm font-medium"
+            htmlFor={`gateway-${gateway.name}-mount-url`}
+          >
+            Mount URL
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              id={`gateway-${gateway.name}-mount-url`}
+              data-testid={`gateways-${gateway.name}-mount-url`}
+              readOnly
+              value={mountURL}
+              className="font-mono text-xs"
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={handleCopy}
+              data-testid={`gateways-${gateway.name}-copy`}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {implemented && (
+        <div className="space-y-1">
+          <label
+            className="text-sm font-medium"
+            htmlFor={`gateway-${gateway.name}-base-url`}
+          >
+            Base URL override (optional)
+          </label>
+          <Input
+            id={`gateway-${gateway.name}-base-url`}
+            data-testid={`gateways-${gateway.name}-base-url`}
+            placeholder={defaultMountURL(gateway.name)}
+            value={config.baseUrl ?? ""}
+            onChange={(e) => onChange({ baseUrl: e.target.value })}
+          />
+          <p className="text-xs text-muted-foreground">
+            Use when basement sits behind a reverse proxy that exposes
+            this gateway on a different host. Leave blank to use the
+            current origin.
+          </p>
+        </div>
+      )}
+
+      {implemented && <ConnectHints gatewayName={gateway.name} />}
+
+      <DocsLink gatewayName={gateway.name} implemented={implemented} />
+
+      {implemented && (
+        <div className="flex justify-end">
+          <Button
+            onClick={onSave}
+            disabled={saving}
+            data-testid={`gateways-${gateway.name}-save`}
+          >
+            {saving ? "Saving…" : `Save ${gateway.displayName} settings`}
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ImplementationBadge renders the per-row status pill. Two states:
+// "Implemented" (primary) and "Coming soon" (muted). The
+// distinction drives every conditional in GatewayRow above; the
+// badge is the visible marker that tells the operator at a glance
+// which gateways are real today.
+function ImplementationBadge({ implemented }: { implemented: boolean }) {
+  if (implemented) {
+    return (
+      <span
+        className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary"
+        data-testid="gateway-badge-implemented"
+      >
+        Implemented
+      </span>
+    );
+  }
+  return (
+    <span
+      className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground"
+      data-testid="gateway-badge-coming-soon"
+    >
+      Coming soon
+    </span>
+  );
+}
+
+// CapabilityChips renders the protocol's advertised surface (read /
+// write / delete / move / lock / per-auth methods). Each chip is
+// rendered only when the capability is set, so a protocol with no
+// auth methods gets no auth chips — keeps the row honest.
+function CapabilityChips({
+  gatewayName,
+  capabilities,
+}: {
+  gatewayName: string;
+  capabilities: GatewayCapabilities;
+}) {
+  const chips: string[] = [];
+  if (capabilities.read) chips.push("read");
+  if (capabilities.write) chips.push("write");
+  if (capabilities.delete) chips.push("delete");
+  if (capabilities.move) chips.push("move");
+  if (capabilities.lock) chips.push("lock");
+  if (capabilities.basicAuth) chips.push("basic-auth");
+  if (capabilities.bearerAuth) chips.push("bearer-auth");
+  if (capabilities.sigV4Auth) chips.push("sigv4-auth");
+
+  if (chips.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Capabilities: <span className="italic">unspecified</span>
+      </p>
+    );
+  }
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1.5 text-xs"
+      data-testid={`gateways-${gatewayName}-capabilities`}
+    >
+      <span className="text-muted-foreground">Capabilities:</span>
+      {chips.map((c) => (
+        <span
+          key={c}
+          className="rounded-md border border-input bg-muted/30 px-1.5 py-0.5 font-mono"
+        >
+          {c}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// StatusBlock surfaces the runtime stats /admin/gateways returns.
+// Stub gateways short-circuit to "not implemented yet"; live ones
+// render running + connection + activity + counters with em-dashes
+// for absent values so the operator sees "—" rather than "0" for
+// counters the gateway doesn't track.
+function StatusBlock({
+  gatewayName,
+  implemented,
+  status,
+  listenAddress,
+}: {
+  gatewayName: string;
+  implemented: boolean;
+  status: GatewayStatus;
+  listenAddress?: string;
+}) {
+  if (!implemented) {
+    return (
+      <p
+        className="text-xs text-muted-foreground"
+        data-testid={`gateways-${gatewayName}-status`}
+      >
+        Status: <span className="italic">not implemented yet</span>
+      </p>
+    );
+  }
+
+  const runningLabel = status.running ? "running" : "stopped";
+  const activeConnections = status.activeConnections;
+  const totalRequests = status.totalRequests;
+  const lastActivity = status.lastActivity
+    ? humanRelative(status.lastActivity)
+    : "—";
+
+  return (
+    <div
+      className="text-xs text-muted-foreground"
+      data-testid={`gateways-${gatewayName}-status`}
+    >
+      <p>
+        Status: <span className="font-mono">{runningLabel}</span>,{" "}
+        {activeConnections !== undefined
+          ? `${activeConnections} active connection${
+              activeConnections === 1 ? "" : "s"
+            }`
+          : "active connections —"}
+        , last activity:{" "}
+        <span className="font-mono">{lastActivity}</span>
+        {totalRequests !== undefined && (
+          <>
+            , total requests: <span className="font-mono">{totalRequests}</span>
+          </>
+        )}
+        {listenAddress && (
+          <>
+            , listen: <span className="font-mono">{listenAddress}</span>
+          </>
+        )}
+      </p>
+      {status.lastError && (
+        <p className="mt-1 text-destructive" data-testid={`gateways-${gatewayName}-last-error`}>
+          Last error: {status.lastError}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ConnectHints renders the collapsed per-platform mount instructions.
+// Today only WebDAV has bespoke per-platform copy; other implemented
+// gateways will gain their own clauses here as they land. Stubs
+// don't get connect hints (the DocsLink card carries the pointer
+// to the implementation tracking instead).
+function ConnectHints({ gatewayName }: { gatewayName: string }) {
+  if (gatewayName === "webdav") {
+    return (
+      <details className="rounded-md border border-input bg-muted/30 p-3">
+        <summary className="cursor-pointer text-sm font-medium">
+          Connect from your platform
+        </summary>
+        <ul className="mt-3 space-y-2 text-sm">
+          <li>
+            <strong>macOS Finder:</strong> press &#8984;K, paste the mount
+            URL, then enter your basement username and password.
+          </li>
+          <li>
+            <strong>Windows Explorer:</strong> This PC &rarr; Map network
+            drive, paste the URL into the Folder field, and authenticate
+            with basement credentials.
+          </li>
+          <li>
+            <strong>Linux (Nautilus):</strong> Connect to Server, paste
+            the URL with the <code>davs://</code> scheme (e.g.{" "}
+            <code>davs://basement.example/webdav</code>).
+          </li>
+          <li>
+            <strong>iOS Files:</strong> Browse tab &rarr; &hellip; menu
+            &rarr; Connect to Server, paste the URL, choose Registered
+            User, enter credentials.
+          </li>
+        </ul>
+        <p className="mt-3 text-xs text-muted-foreground">
+          For automation, use a service account from{" "}
+          <Link to="/admin/service-accounts" className="underline">
+            /admin/service-accounts
+          </Link>{" "}
+          &mdash; the <code>BMNT&hellip;</code> key goes in the username
+          field, the shown-once secret in the password field.
+        </p>
+      </details>
+    );
+  }
+  return null;
+}
+
+// DocsLink renders the per-protocol docs pointer. Live gateways link
+// at their full integration guide; stubs link at the implementation-
+// tracking placeholder doc so the operator has a single jump-off
+// point for "when's this going to ship".
+function DocsLink({
+  gatewayName,
+  implemented,
+}: {
+  gatewayName: string;
+  implemented: boolean;
+}) {
+  const href = `/docs/integrations/${gatewayName}.md`;
+  const label = implemented
+    ? `${gatewayName.toUpperCase()} integration guide`
+    : `${gatewayName.toUpperCase()} implementation tracking`;
+  return (
+    <p className="text-xs">
+      <a
+        href={href}
+        className="font-medium text-primary underline-offset-4 hover:underline"
+        target="_blank"
+        rel="noreferrer"
+        data-testid={`gateways-${gatewayName}-docs`}
+      >
+        {label} &rarr;
+      </a>
+    </p>
+  );
+}
+
+// mountURLFor returns the operator-facing URL the row's Copy button
+// hands to the clipboard. Operator override wins; otherwise the
+// defaultMountURL helper picks a sensible per-protocol shape. typeof
+// check keeps SSR / vitest happy when window isn't defined yet.
+function mountURLFor(
+  gateway: GatewayInfo,
+  config: GatewayConfig,
+): string {
+  if (config.baseUrl && config.baseUrl.trim() !== "") {
+    return config.baseUrl.trim();
+  }
+  return defaultMountURL(gateway.name);
+}
+
+function defaultMountURL(name: string): string {
+  const origin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : "https://basement.example";
+  // HTTP-mounted gateways live at /{name} on the same origin. The
+  // port-bound ones (SMB / NFS / FTP — none implemented today) won't
+  // call this helper because GatewayRow only shows the Mount URL
+  // field for implemented gateways.
+  return `${origin}/${name}`;
+}
+
+// humanRelative converts an ISO timestamp into a compact "Xm ago"
+// string. Kept inline because the codebase doesn't yet have a
+// shared helper and the formatting is one-shot for this card.
+function humanRelative(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const diff = Date.now() - t;
+  if (diff < 0) return "in the future";
+  const sec = Math.round(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.round(hr / 24);
+  return `${days}d ago`;
 }
 
 // v1.3.0a — OIDC Group -> Role mapping editor.
