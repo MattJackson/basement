@@ -31,13 +31,19 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   };
 });
 
+let userMockData = { username: "matthew", role: "user", uiAdmin: false, oidcUser: false };
+
 vi.mock("@/shared/auth/useUser", () => ({
   useUser: vi.fn(() => ({
-    data: { username: "matthew", role: "user", oidcUser: false },
+    data: userMockData,
     isLoading: false,
-    error: null,
+    isError: false,
   })),
 }));
+
+export const setUserMock = (userData: { username: string; role: "admin" | "user"; uiAdmin: boolean; oidcUser?: boolean }) => {
+  userMockData = { ...userData, oidcUser: userData.oidcUser ?? false };
+};
 
 vi.mock("@/shared/api/queries", () => ({
   useVersion: vi.fn(() => ({
@@ -333,6 +339,7 @@ describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
 
   beforeEach(() => {
     navigateMock.mockReset();
+    setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
     fetchSpy = vi.spyOn(window, "fetch").mockResolvedValue(
       new Response(null, { status: 200 }),
     );
@@ -340,18 +347,19 @@ describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
 
   afterEach(() => {
     fetchSpy.mockRestore();
+    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
+    navigateMock.mockClear();
   });
 
-  it("USER mode: navigates to /files without calling logout-elevation", async () => {
+  it("USER mode: sees 'Switch to admin view' button", async () => {
+    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
+
     render(<UserMenu />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByLabelText("Open admin menu"));
-    fireEvent.click(await screen.findByTestId("switch-to-user"));
-
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
-    });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    const switchToAdmin = await screen.findByTestId("switch-to-admin");
+    expect(switchToAdmin).toBeInTheDocument();
+    expect(switchToAdmin).toHaveTextContent("Switch to admin view");
   });
 
   it("ADMIN mode: POSTs logout-elevation, then navigates to /files", async () => {
@@ -398,5 +406,62 @@ describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
       expect(fetchSpy).toHaveBeenCalled();
     });
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("user role sees 'Switch to admin view', NOT 'Switch to user view'", async () => {
+    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByTestId("switch-to-admin")).toBeInTheDocument();
+    expect(screen.queryByTestId("switch-to-user")).not.toBeInTheDocument();
+  });
+
+  it("admin role sees 'Switch to user view', NOT 'Switch to admin view'", async () => {
+    setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByTestId("switch-to-user")).toBeInTheDocument();
+    expect(screen.queryByTestId("switch-to-admin")).not.toBeInTheDocument();
+  });
+
+  it("UI admin sees 'System settings' link", async () => {
+    setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByText("System settings")).toBeInTheDocument();
+  });
+
+  it("non-UI admin does NOT see 'System settings' link", async () => {
+    setUserMock({ username: "matthew", role: "admin", uiAdmin: false, oidcUser: false });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(screen.queryByText("System settings")).not.toBeInTheDocument();
+  });
+
+  it("user role does NOT see 'System settings' link", async () => {
+    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(screen.queryByText("System settings")).not.toBeInTheDocument();
   });
 });
