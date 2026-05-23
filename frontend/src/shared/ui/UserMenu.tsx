@@ -148,16 +148,24 @@ export function UserMenu() {
         {/* v1.3.0a.3: admin entry triggers elevation BEFORE navigating */}
         {/* so the first action under /admin doesn't 403; user entry */}
         {/* stays a plain link (no elevation needed for /files). */}
+        {/* v1.11.0.30: gate on auth MODE + uiAdmin, not the user's `role`
+            assignment. Per mode/view tight coupling (v1.9.0e.2):
+              - mode === "user" + uiAdmin → offer elevation to admin
+              - mode === "admin" | "elevated" → offer drop-to-user
+              - non-uiAdmin in user mode → show nothing (can't elevate)
+            The previous role-based check inverted both cases for admin
+            users: they saw "Switch to user view" while already in user
+            view and could not get back to admin without a manual URL. */}
         <DropdownMenuGroup>
-          {role === "user" ? (
-            <DropdownMenuItem onClick={handleSwitchToAdmin} data-testid="switch-to-admin">
-              Switch to admin view
-            </DropdownMenuItem>
-          ) : (
+          {(mode === "admin" || mode === "elevated") ? (
             <DropdownMenuItem onClick={handleSwitchToUser} data-testid="switch-to-user">
               Switch to user view
             </DropdownMenuItem>
-          )}
+          ) : uiAdmin ? (
+            <DropdownMenuItem onClick={handleSwitchToAdmin} data-testid="switch-to-admin">
+              Switch to admin view
+            </DropdownMenuItem>
+          ) : null}
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
