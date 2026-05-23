@@ -4,6 +4,68 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.11.0.17 — 2026-05-23
+
+Mobile UI audit + inline fixes for the obvious phone-viewport bugs.
+
+- **New `scripts/mobile-audit.ts`** — Playwright-driven mobile-quality
+  audit. Walks every route (35 today) across 4 viewports (iPhone SE
+  375×667, iPhone 14 390×844, iPad Mini 768×1024, Android narrow
+  360×640) and runs per-route checks: horizontal scroll, tap-target
+  size (44×44px floor on phones), sticky-header overlap, form labels,
+  modal dismissibility, table-overflow, primary-nav reachability, and
+  console errors. READ-ONLY — never POSTs/PUTs/DELETEs anything on the
+  target deploy. Output: per-viewport screenshots in
+  `/tmp/basement-mobile-{ts}/{viewport}/{route}.png` plus a markdown
+  summary at `docs/mobile-audit-{YYYY-MM-DD}.md`. Wrapper:
+  `scripts/mobile-audit.sh`.
+- **First audit, baseline findings** — `docs/mobile-audit-2026-05-23.md`
+  captures the v1.11.0.15 baseline against `basement.pq.io`. iPad Mini
+  passes every route. Phone viewports surfaced 51 MAJOR horizontal-
+  scroll findings (one per admin route, all the same root cause: the
+  AppShell header) plus 100 MINOR tap-target findings for default
+  shadcn Button + Input sizes (32px, below the 44×44 HIG floor).
+- **AppShell horizontal-scroll fix** — admin header's left cluster
+  (Logo + Buckets/Usage/Clusters nav) was pushing the right cluster
+  (PersonaPill + ThemeToggle + UserMenu) ~230px off the canvas on
+  every phone viewport. Mirrored the v1.8.0e UserShell pattern: nav is
+  now horizontally scrollable (`overflow-x-auto whitespace-nowrap`,
+  scrollbar hidden), left cluster gets `min-w-0 flex-1`, right cluster
+  gets `flex-shrink-0`. Desktop visuals unchanged. Same fix in
+  AppShell as `v1.10.0.1` already shipped in UserShell.
+- **AppShell admin nav tap targets** — `Buckets / Usage / Clusters`
+  links rendered at the bare text line-height (~20px), below the
+  WCAG/iOS HIG 44×44 floor. Added `inline-flex items-center
+  min-h-[44px]` to `NAV_LINK` (same fix shape as UserShell v1.10.0.1
+  — desktop visual identical because the text is what the eye reads).
+- **Button + Input default tap-target floor** — both base shadcn
+  components rendered at h-8 (32px), generating the bulk of the MINOR
+  tap-target findings. Added `min-h-[44px] sm:min-h-0` to the default
+  + lg button sizes and to the icon variants, and to the Input
+  component. Dense desktop UIs (table rows, toolbars) opt into the
+  smaller xs/sm button sizes explicitly so they're untouched.
+- **Service-account form labels** — `/admin/service-accounts/new` had
+  two unlabeled inputs (Name + capability search). Added `htmlFor`/
+  matching `id` on the Name label; added `aria-label="Search
+  capabilities"` to the search input. Fixes mobile autofill + screen
+  reader association.
+
+Touched: `scripts/mobile-audit.ts` (new), `scripts/mobile-audit.sh`
+(new), `docs/mobile-audit-2026-05-23.md` (new),
+`frontend/src/shared/layout/AppShell.tsx`,
+`frontend/src/components/ui/button.tsx`,
+`frontend/src/components/ui/input.tsx`,
+`frontend/src/routes/admin/service-accounts/new.tsx`, `CHANGELOG.md`.
+
+Follow-up cycles: re-audit against basement.pq.io after this tag rolls
+to confirm the AppShell + Button + Input fixes drop the MAJOR count
+to ~0 on phone viewports; table-as-cards layout below 640px for
+`/admin/audit`, `/admin/service-accounts`, `/admin/clusters/{cid}/layout`,
+`/admin/usage` (currently horizontally scrollable inside the table
+wrapper, but a card layout reads better on a phone); LoginForm-level
+tap-target audit (now inherits from Button/Input fixes but its own
+spacing could use a once-over).
+
 ## v1.11.0.15 — 2026-05-23
 
 Delete-key post-nav fix + orphan `/admin/keys` route removed.

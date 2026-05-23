@@ -15,8 +15,14 @@ interface AppShellProps {
   children?: ReactNode;
 }
 
+// v1.11.0.17 mobile audit — admin nav links rendered at the bare text
+// line-height (~20px) which is below the WCAG/iOS HIG 44×44 tap-target
+// floor on phone viewports. Matching the v1.10.0.1 UserShell fix:
+// inline-flex + items-center + min-h-[44px] pads the tap area to the
+// full 44px box on touch devices while keeping the visual identical
+// on desktop (the link text is what the eye registers).
 const NAV_LINK =
-  "text-sm text-muted-foreground hover:text-foreground transition-colors";
+  "text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center min-h-[44px]";
 const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function AppShell({ children }: AppShellProps): ReactNode {
@@ -115,9 +121,23 @@ export function AppShell({ children }: AppShellProps): ReactNode {
     <div className="min-h-screen bg-background flex flex-col">
       <header className="sticky top-0 z-30 h-16 w-full border-b bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="h-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-6">
+          {/* v1.11.0.17 mobile audit — left cluster needs min-w-0 +
+              flex-1 so the nav can shrink/scroll inside it instead of
+              shoving the right cluster (PersonaPill/ThemeToggle/UserMenu)
+              off-screen. Without this, every admin route's header
+              overflowed the viewport by 200-260px on phones. */}
+          <div className="flex items-center gap-3 sm:gap-6 min-w-0 flex-1">
             <Logo href={logoHref} />
-            <nav className="flex items-center gap-5" aria-label="Primary">
+            {/* v1.11.0.17 mobile audit — same scrollable-nav pattern as
+                UserShell (v1.8.0e): on narrow viewports the nav
+                scrolls horizontally rather than wrapping or pushing
+                neighbours off the canvas. Scrollbar hidden for
+                cleanliness; the partial-overflow cue at the edge
+                tells the operator more nav exists. */}
+            <nav
+              className="flex items-center gap-5 overflow-x-auto whitespace-nowrap -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              aria-label="Primary"
+            >
               {/* 'Buckets' previously pointed at '/' which the role */}
               {/* gate redirects to '/admin/clusters' for UIAdmins — */}
               {/* so it landed on the same page as the Clusters nav */}
@@ -161,7 +181,7 @@ export function AppShell({ children }: AppShellProps): ReactNode {
               )}
             </nav>
           </div>
-          <div className="flex items-center gap-1 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             {/* ADR-0003 v1.2.0b: persona pill carries the live sudo */}
             {/* state (USER / ADMIN / ELEVATED) + a countdown and a */}
             {/* drop-privileges button. Sits before the user avatar */}

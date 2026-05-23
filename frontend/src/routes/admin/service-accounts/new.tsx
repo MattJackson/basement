@@ -191,10 +191,17 @@ function NewServiceAccountPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">
+              {/* v1.11.0.17 mobile audit — explicit htmlFor + matching
+                  id so screen readers + mobile autofill associate the
+                  visible label with the input. */}
+              <label
+                htmlFor="sa-name"
+                className="text-xs font-medium text-muted-foreground"
+              >
                 Name
               </label>
               <Input
+                id="sa-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. backup-cron, ci-deploy"
@@ -262,6 +269,7 @@ function NewServiceAccountPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <Input
+              aria-label="Search capabilities"
               placeholder="Search capabilities..."
               value={capSearch}
               onChange={(e) => setCapSearch(e.target.value)}
