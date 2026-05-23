@@ -11,15 +11,21 @@
 // "dev" / "unknown" / empty values are treated as "don't compare" —
 // local dev builds have a "dev" baked commit and would otherwise flag
 // every response from a real server.
+//
+// Heartbeat: When at least one subscriber listens, starts polling
+// /api/v1/version every 60s to detect new deploys even when the user
+// is idle on a page with no fetch activity. Stops once mismatch detected.
 
 declare const __BUILD_COMMIT__: string;
 
+const HEARTBEAT_MS = 60_000;
 const SKIP_VALUES = new Set(["", "dev", "unknown"]);
 
 let mismatched = false;
 const listeners = new Set<(m: boolean) => void>();
+let heartbeatInterval: number | null = null;
 
-export function observeResponse(res: Response): void {
+function checkBuild(res: Response): void {
   if (mismatched) return;
   const serverBuild = res.headers.get("x-build");
   if (!serverBuild || SKIP_VALUES.has(serverBuild)) return;
@@ -29,12 +35,53 @@ export function observeResponse(res: Response): void {
   for (const l of listeners) l(true);
 }
 
+export function observeResponse(res: Response): void {
+  checkBuild(res);
+}
+
+function startHeartbeat(): void {
+  if (heartbeatInterval !== null || mismatched) return;
+  
+  const fetchVersion = async () => {
+    try {
+      const res = await fetch("/api/v1/version", { credentials: "include" });
+      checkBuild(res);
+    } catch {
+      // Silently swallow failures; retry on next tick
+    }
+  };
+
+  heartbeatInterval = setInterval(fetchVersion, HEARTBEAT_MS);
+}
+
+function stopHeartbeat(): void {
+  if (heartbeatInterval !== null) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
 export function subscribe(fn: (m: boolean) => void): () => void {
   listeners.add(fn);
   fn(mismatched);
-  return () => listeners.delete(fn);
+  
+  if (!mismatched && listeners.size === 1) {
+    startHeartbeat();
+  }
+  
+  return () => {
+    listeners.delete(fn);
+    if (listeners.size === 0) {
+      stopHeartbeat();
+    }
+  };
 }
 
 export function getBuildCommit(): string {
   return __BUILD_COMMIT__;
+}
+
+// Exposed for tests
+export function __stopHeartbeatForTests(): void {
+  stopHeartbeat();
 }
