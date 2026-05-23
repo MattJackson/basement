@@ -46,6 +46,43 @@ type OrgCapabilities struct {
 	// (legacyOnboardingMigration) so existing operators with a working
 	// deploy aren't bounced into the wizard on upgrade.
 	OnboardingCompleted bool `json:"onboardingCompleted,omitempty"`
+	// v1.13.0a (ADR-0008) — pluggable-skins foundation. ActiveSkin
+	// names the currently-rendered skin (basement-default ships with
+	// every deploy and is the fallback when the named skin isn't
+	// registered). SkinPolicy controls whether per-user overrides are
+	// permitted; v1.13.0a always renders ActiveSkin (the user-override
+	// path lands in v1.13.0c).
+	//
+	// Legacy files without these fields read as ActiveSkin =
+	// "basement-default", SkinPolicy = "default" — the load() path
+	// substitutes the defaults at read time without mutating the
+	// on-disk file (the next Update() persists the present fields).
+	ActiveSkin string `json:"activeSkin,omitempty"`
+	SkinPolicy string `json:"skinPolicy,omitempty"`
+}
+
+// Skin defaults + policy literals for ADR-0008. The string-typed
+// SkinPolicy keeps the JSON shape ergonomic for hand-edits; the
+// load() path normalizes any unknown literal back to
+// DefaultSkinPolicyDefault.
+const (
+	DefaultActiveSkin        = "basement-default"
+	DefaultSkinPolicyDefault = "default"
+	SkinPolicyLocked         = "locked"
+	SkinPolicyUserChoice     = "user-choice"
+)
+
+// IsValidSkinPolicy reports whether v is one of the three SkinPolicy
+// literals defined in ADR-0008. The load() path uses this to refuse
+// unknown values from the on-disk file (it falls back to the default
+// rather than persisting garbage). The Update() path uses it via the
+// PATCH handler in v1.13.0c when the operator changes the policy.
+func IsValidSkinPolicy(v string) bool {
+	switch v {
+	case DefaultSkinPolicyDefault, SkinPolicyLocked, SkinPolicyUserChoice:
+		return true
+	}
+	return false
 }
 
 // GatewaySettings groups the per-protocol gateway toggles. v1.9.0b
@@ -149,6 +186,11 @@ func (g GatewaySettings) BaseURL(name string) string {
 // the legacy WebDAV field and the v1.9.0d Protocols map start with
 // webdav.enabled=true so a downgrade to v1.9.0b would read the same
 // kill-switch state the v1.9.0d caller wrote.
+//
+// v1.13.0a (ADR-0008) adds ActiveSkin + SkinPolicy with the defaults
+// "basement-default" + "default". A fresh install renders the built-in
+// skin; the operator opts into "locked" or "user-choice" via the
+// /admin/system surface in v1.13.0c.
 func DefaultOrgCapabilities() OrgCapabilities {
 	return OrgCapabilities{
 		SignupMode:         "invite",
@@ -163,6 +205,8 @@ func DefaultOrgCapabilities() OrgCapabilities {
 				"webdav": {Enabled: true},
 			},
 		},
+		ActiveSkin: DefaultActiveSkin,
+		SkinPolicy: DefaultSkinPolicyDefault,
 	}
 }
 
@@ -321,6 +365,21 @@ func (s *OrgCapabilitiesStore) load() error {
 		s.data.EnabledDrivers = []string{"garage", "garage-v1", "aws-s3", "minio"}
 	}
 
+	// v1.13.0a (ADR-0008) — substitute skin defaults at read time so
+	// a file predating the fields renders basement-default + policy
+	// "default" without an on-disk mutation behind the operator's
+	// back. Unknown SkinPolicy literals (operator hand-edit gone
+	// wrong, downgrade-then-upgrade across an unrelated rename)
+	// fall back to the default rather than poison the FE — the
+	// /admin/system PATCH path in v1.13.0c will surface a
+	// "policy reset" warning if we ever need to track this.
+	if s.data.ActiveSkin == "" {
+		s.data.ActiveSkin = DefaultActiveSkin
+	}
+	if s.data.SkinPolicy == "" || !IsValidSkinPolicy(s.data.SkinPolicy) {
+		s.data.SkinPolicy = DefaultSkinPolicyDefault
+	}
+
 	return nil
 }
 
@@ -350,6 +409,18 @@ func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
 	if out.AdminSessionTTLSec <= 0 {
 		out.AdminSessionTTLSec = AdminSessionTTLDefaultSec
 	}
+	// v1.13.0a (ADR-0008) — defensive defaults. load() already
+	// substitutes these on the read-from-disk path, but a caller
+	// that constructed an OrgCapabilitiesStore without going through
+	// load() (or a future migration that resets the in-memory data)
+	// would otherwise hand the FE empty strings the renderer can't
+	// resolve to a registered skin.
+	if out.ActiveSkin == "" {
+		out.ActiveSkin = DefaultActiveSkin
+	}
+	if out.SkinPolicy == "" {
+		out.SkinPolicy = DefaultSkinPolicyDefault
+	}
 	return out
 }
 
@@ -368,6 +439,20 @@ func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
 func (s *OrgCapabilitiesStore) Update(capabilities OrgCapabilities) error {
 	capabilities.AdminSessionTTLSec = ClampAdminSessionTTL(capabilities.AdminSessionTTLSec)
 	capabilities.Gateways = syncGatewaySettings(capabilities.Gateways)
+
+	// v1.13.0a (ADR-0008) — clamp skin fields the same way as
+	// AdminSessionTTLSec: an empty string lands as the default; an
+	// unknown SkinPolicy literal lands as "default" rather than
+	// poisoning the on-disk file. The v1.13.0c PATCH handler will
+	// reject invalid input at the wire layer, but a clamp here keeps
+	// the store invariant ("Get() always returns a renderable skin")
+	// independent of caller discipline.
+	if capabilities.ActiveSkin == "" {
+		capabilities.ActiveSkin = DefaultActiveSkin
+	}
+	if capabilities.SkinPolicy == "" || !IsValidSkinPolicy(capabilities.SkinPolicy) {
+		capabilities.SkinPolicy = DefaultSkinPolicyDefault
+	}
 
 	s.mu.Lock()
 	s.data = capabilities

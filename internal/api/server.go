@@ -22,6 +22,7 @@ import (
 	"github.com/mattjackson/basement/internal/federation"
 	"github.com/mattjackson/basement/internal/gateway"
 	"github.com/mattjackson/basement/internal/metrics"
+	"github.com/mattjackson/basement/internal/skin"
 	"github.com/mattjackson/basement/internal/store"
 	"github.com/mattjackson/basement/internal/sync"
 	"github.com/mattjackson/basement/internal/web"
@@ -87,6 +88,13 @@ type Server struct {
 	// Nil in tests that don't care about the multi-gateway surface;
 	// the handler returns 503 GATEWAYS_NOT_WIRED in that case.
 	gateways    *gateway.Registry
+	// v1.13.0a (ADR-0008) skin registry. The /skins endpoint reads
+	// from this to enumerate every registered skin. Nil in tests
+	// that don't care about skins; the handler returns 503
+	// SKINS_NOT_WIRED in that case. Production main.go always
+	// supplies a populated registry (basement-default + any
+	// user-uploaded skins v1.13.0b+ adds).
+	skins       *skin.Registry
 	oidc        oidcProvider
 	policy     policy.Enforcer
 	audit      audit.Logger
@@ -257,6 +265,15 @@ func (s *Server) SetGatewayRegistry(r *gateway.Registry) {
 	s.gateways = r
 }
 
+// SetSkinRegistry wires the v1.13.0a (ADR-0008) skin registry. Read
+// by /api/v1/skins to enumerate every registered skin (built-in +
+// user-uploaded). Production main.go always supplies a registry
+// populated with at least basement-default; tests that don't care
+// leave it unset and the handler returns 503 SKINS_NOT_WIRED.
+func (s *Server) SetSkinRegistry(r *skin.Registry) {
+	s.skins = r
+}
+
 // SetMetricsRecorder wires the metrics-snapshot recorder into the
 // server (v1.0.0d). The recorder is consumed by /admin/usage/series
 // for the time-series view. Production wires a FileRecorder; tests
@@ -381,6 +398,13 @@ func (s *Server) routes() {
 			authG.Get("/auth/elevate/oidc/callback", s.elevateOIDCCallbackHandler)
 			authG.Get("/auth/org-capabilities", s.getCurrentOrgCapabilities)
 			authG.Get("/capabilities", s.capabilitiesHandler)
+			// v1.13.0a (ADR-0008): pluggable skins read endpoint.
+			// Authenticated, not admin-only: the user-side skin
+			// picker (v1.13.0c) needs the same payload as the
+			// /admin/system surface. v1.13.0a returns exactly one
+			// entry — basement-default; v1.13.0b widens this when
+			// the uploader lands.
+			authG.Get("/skins", s.listSkinsHandler)
 		})
 
 		// Admin routes — admin role required.

@@ -114,12 +114,19 @@ describe("UserShell", () => {
     expect(logo).toHaveAttribute("href", "/files");
   });
 
-  it("renders ThemeToggle and UserMenu on the right", async () => {
+  // v1.13.0a (ADR-0008): the standalone ThemeToggle button moved
+  // INTO UserMenu as a Theme submenu. The shell now renders only
+  // the UserMenu trigger on the right side of the header; the theme
+  // control is reachable via the dropdown.
+  it("renders UserMenu on the right (Theme moved into the menu per ADR-0008)", async () => {
     const { UserShell } = await import("@/shared/layout/UserShell");
     render(<UserShell><div data-testid="child">Content</div></UserShell>, { wrapper: Wrapper });
 
-    expect(screen.getByLabelText(/theme/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Open admin menu")).toBeInTheDocument();
+    // The page-chrome theme button is gone — the Theme/Theme: aria
+    // label only existed on the standalone ThemeToggle, which no
+    // longer mounts in the shells.
+    expect(screen.queryByLabelText(/^Theme:/i)).not.toBeInTheDocument();
   });
 
   it("renders NewVersionBanner", async () => {

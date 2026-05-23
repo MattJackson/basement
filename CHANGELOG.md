@@ -4,6 +4,65 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.13.0a — 2026-05-23
+
+Pluggable-skins foundation (ADR-0008). First of four sub-cycles for
+v1.13.0; lays the registry + the basement-default reference skin +
+the `--basement-*` CSS variable layer so v1.13.0b can ship the
+upload UI and v1.13.0c can ship the additional built-in skins +
+typography / density / borderRadius / footer / loginHero wiring.
+
+- **New package `internal/skin`** — `Skin` (8-element struct: name,
+  display name, version, product name, assets, palette light+dark,
+  typography, border radius, density, footer, login hero), `Registry`
+  (`Register / Get / All` mirroring `internal/gateway.Registry`),
+  `BuiltInDefault()` reference skin whose palette mirrors
+  `frontend/src/index.css` exactly so visual diff against v1.12.x is
+  zero.
+- **New endpoint `GET /api/v1/skins`** — authenticated, not admin-only
+  (the user-side skin picker landing in v1.13.0c needs the same
+  payload). Returns the registry roster sorted alphabetically. 503
+  `SKINS_NOT_WIRED` when the registry hasn't been wired (tests).
+- **`OrgCapabilities` extension** — `ActiveSkin string` (default
+  `"basement-default"`) + `SkinPolicy string` (one of `"default" |
+  "locked" | "user-choice"`, default `"default"`). Legacy files
+  without these fields read as the defaults; unknown policy literals
+  clamp to `"default"` on both the read and write paths.
+- **CSS variable wrapper layer** — `--basement-primary`, `--basement-bg`,
+  `--basement-fg`, `--basement-muted`, `--basement-accent`,
+  `--basement-destructive`, `--basement-warning`, `--basement-success`,
+  `--basement-info` × light/dark. Additive (the shadcn `--color-*`
+  layer is untouched) so a downgrade rolls back cleanly. Values
+  mirror the current shadcn tokens 1:1 for warning/success/info
+  defaults fill from sensible HSL tones.
+- **UserMenu Theme submenu** — `Theme ▸ System / Light / Dark` radio.
+  Replaces the standalone `ThemeToggle` button that used to sit in
+  `AppShell` / `UserShell` headers. Per-user always, regardless of
+  `skinPolicy` — brand identity doesn't dictate light/dark for an
+  individual user.
+- **Page-chrome ThemeToggle removed from shells** — both `AppShell`
+  and `UserShell` headers are now brand-clean (PersonaPill +
+  UserMenu only). `LoginForm` continues to mount the standalone
+  toggle since it's the pre-auth surface with no UserMenu to host
+  the submenu.
+- **Hard constraints honoured** — basement-default's palette mirrors
+  current Tailwind tokens exactly; UserMenu test extension verifies
+  the three radio options + cookie persistence; the upload UI and
+  additional skins are deliberately deferred to v1.13.0b.
+
+Touched: `docs/adr/0008-pluggable-skins.md` (new), `internal/skin/`
+(new package: `skin.go`, `registry.go`, `default.go`,
+`registry_test.go`), `internal/store/org_capabilities.go`,
+`internal/store/org_capabilities_test.go`, `internal/api/skins.go`
+(new), `internal/api/skins_test.go` (new), `internal/api/server.go`,
+`cmd/basement-server/main.go`, `frontend/src/index.css`,
+`frontend/src/shared/ui/UserMenu.tsx`,
+`frontend/src/shared/ui/__tests__/UserMenu.test.tsx`,
+`frontend/src/shared/layout/AppShell.tsx`,
+`frontend/src/shared/layout/UserShell.tsx`,
+`frontend/src/shared/layout/__tests__/UserShell.test.tsx`,
+`CHANGELOG.md`.
+
 ## v1.12.0a — 2026-05-23
 
 Per-cluster envelope encryption (ADR-0007). Cluster admins set a

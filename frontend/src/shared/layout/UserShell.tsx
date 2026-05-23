@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Outlet, Link } from "@tanstack/react-router";
 import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
-import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
 import { useAuthMode } from "@/shared/auth/mode";
@@ -113,8 +112,13 @@ export function UserShell({ children }: UserShellProps): ReactNode {
             {/* (operator stepping up to do an admin op without */}
             {/* leaving /files) renders the countdown wherever they */}
             {/* happen to be. */}
+            {/* v1.13.0a (ADR-0008): the standalone ThemeToggle button */}
+            {/* used to sit between PersonaPill and UserMenu. Moved */}
+            {/* into the UserMenu as a Theme submenu so the page */}
+            {/* chrome stays brand-clean for the pluggable-skins */}
+            {/* surface. Per-user theme persists regardless of */}
+            {/* skinPolicy. */}
             <PersonaPill />
-            <ThemeToggle />
             <UserMenu />
           </div>
         </div>
