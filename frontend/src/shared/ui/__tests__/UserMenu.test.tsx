@@ -149,6 +149,23 @@ describe("UserMenu — Switch to admin elevation", () => {
   });
 });
 
+// v1.10.0.2 — UserMenu trigger tap-target. Pre-fix the trigger
+// rendered at ~40px tall on mobile, below the WCAG/iOS HIG 44×44
+// threshold flagged in the v1.10.0.1 smoke audit. Class-based
+// assertion (jsdom doesn't run Tailwind's stylesheet).
+describe("UserMenu trigger tap-target (v1.10.0.2)", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+  });
+
+  it("trigger carries the 44px min-height + min-width tap-target utilities on mobile", () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    const trigger = screen.getByLabelText("Open admin menu");
+    expect(trigger.className).toMatch(/min-h-\[44px\]/);
+    expect(trigger.className).toMatch(/min-w-\[44px\]/);
+  });
+});
+
 describe("UserMenu — Switch to admin (v1.9.0e.2 routing)", () => {
   // v1.9.0e.2 pins the post-elevation landing target. Under the new
   // tight mode/view coupling, elevating always navigates to /admin

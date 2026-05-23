@@ -33,6 +33,12 @@ export function ThemeToggle() {
       aria-label={`Theme: ${LABELS[theme]}. Click to switch to ${LABELS[next]}.`}
       title={LABELS[theme]}
       onClick={cycleTheme}
+      // v1.10.0.2 — the icon size (`size-8` → 32px) was below the
+      // WCAG/iOS HIG 44×44 mobile tap-target threshold flagged by the
+      // v1.10.0.1 smoke audit. Force the tap area to >=44px on touch
+      // viewports and snap back to the visual 32px size on desktop
+      // where the smoke audit did not flag this control.
+      className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0"
     >
       <Icon className="size-4" />
     </Button>
