@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,27 @@ import {
   type GatewayCapabilities,
   type GatewayStatus,
 } from "@/shared/api/queries";
+
+// Skin-related types for v1.13.0b
+type Skin = {
+  name: string;
+  displayName: string;
+  version: string;
+  productName?: string;
+  borderRadius?: string;
+  density?: "compact" | "comfortable" | "spacious";
+};
+
+type SkinPolicy = {
+  public: boolean;
+  corsOrigin?: string;
+  description?: string;
+};
+
+type SkinWithPolicy = Skin & {
+  policy?: SkinPolicy;
+  active?: boolean;
+};
 
 export const Route = createFileRoute("/admin/system")({
   component: adminPage(OrgCapabilitiesPage),
@@ -280,6 +302,9 @@ function OrgCapabilitiesPage() {
 
       {/* OIDC group-claim -> role auto-mapping (v1.3.0a). */}
       <OIDCGroupMappingsSection />
+
+      {/* v1.13.0b: Skin management section. */}
+      <SkinsSection />
 
       {/* Usage overview link card — OBS.USAGE v0.9.0k surfaces the */}
       {/* storage snapshot from the System page so the operator's */}
@@ -1408,5 +1433,284 @@ function AddMappingDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// v1.13.0b: Skin management section with upload, activate, delete controls
+function SkinsSection() {
+  const [skins, setSkins] = useState<SkinWithPolicy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    fetchSkins();
+  }, []);
+
+  async function fetchSkins() {
+    try {
+      // @ts-ignore - API types not generated yet
+      const { data } = await client.GET("/admin/skins", {});
+      if (data) {
+        setSkins(data as SkinWithPolicy[]);
+      }
+    } catch (error) {
+      toast.error("Failed to load skins");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleUpload(file: File, policy?: Partial<SkinPolicy>) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    if (policy?.public !== undefined) {
+      formData.append("policy.public", String(policy.public));
+    }
+    if (policy?.corsOrigin) {
+      formData.append("policy.corsOrigin", policy.corsOrigin);
+    }
+    if (policy?.description) {
+      formData.append("policy.description", policy.description);
+    }
+
+    try {
+      setUploading(true);
+      // @ts-ignore - API types not generated yet
+      const response = await client.POST("/admin/skins/upload", {
+        body: formData,
+      });
+      if (!response.response.ok) {
+        throw new Error("Upload failed");
+      }
+      setUploadOpen(false);
+      toast.success("Skin uploaded successfully");
+      fetchSkins();
+    } catch (error) {
+      toast.error("Failed to upload skin");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleActivate(name: string) {
+    try {
+      // @ts-ignore - API types not generated yet
+      const response = await client.PUT("/admin/skins/{id}/activate", {
+        params: { path: { id: name } },
+      });
+      if (!response.response.ok) {
+        throw new Error("Activation failed");
+      }
+      toast.success(`Activated skin: ${name}`);
+      fetchSkins();
+    } catch (error) {
+      toast.error(`Failed to activate skin: ${name}`);
+    }
+  }
+
+  async function handleDelete(name: string) {
+    if (!confirm(`Delete skin "${name}"? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // @ts-ignore - API types not generated yet
+      const response = await client.DELETE("/admin/skins/{id}", {
+        params: { path: { id: name } },
+      });
+      if (!response.response.ok) {
+        throw new Error("Delete failed");
+      }
+      toast.success(`Deleted skin: ${name}`);
+      fetchSkins();
+    } catch (error) {
+      toast.error(`Failed to delete skin: ${name}`);
+    }
+  }
+
+  function handleDrag(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      if (!file.name.endsWith(".basement-skin.json")) {
+        toast.error("Please upload a .basement-skin.json file");
+        return;
+      }
+      handleUpload(file, { public: true });
+    }
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files[0]) {
+      handleUpload(e.target.files[0], { public: true });
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Skins</CardTitle>
+          <CardDescription>
+            Manage custom skins for your basement deployment. Upload new skins,
+            activate them, and configure visibility settings.
+          </CardDescription>
+        </div>
+        <Button onClick={() => setUploadOpen(true)} disabled={loading}>
+          Upload Skin
+        </Button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading skins...</p>
+        ) : skins.length === 0 ? (
+          <div className="rounded-md border border-dashed p-8 text-center">
+            <p className="text-sm text-muted-foreground mb-4">
+              No skins uploaded yet. Upload a .basement-skin.json file to get started.
+            </p>
+            <Button onClick={() => setUploadOpen(true)} variant="outline">
+              Upload Skin
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {skins.map((skin) => (
+              <div
+                key={skin.name}
+                className="flex items-center justify-between rounded-md border p-4"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium">{skin.displayName}</h4>
+                    {skin.active && (
+                      <Badge variant="default" className="text-xs">Active</Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {skin.name}@{skin.version}
+                  </p>
+                  {skin.policy?.description && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {skin.policy.description}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {!skin.active && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleActivate(skin.name)}
+                    >
+                      Activate
+                    </Button>
+                  )}
+                  {skin.name !== "basement-default" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => handleDelete(skin.name)}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Policy info */}
+        {skins.some((s) => s.policy?.corsOrigin || !s.policy?.public) && (
+          <div className="rounded-md bg-muted/50 p-3 text-xs">
+            <p className="font-medium mb-1">Policy Settings:</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {skins.map((s) => s.policy && (
+                <li key={s.name}>
+                  <strong>{s.displayName}:</strong>{" "}
+                  {s.policy.public ? "Public" : "Private"}
+                  {s.policy.corsOrigin && ` - CORS: ${s.policy.corsOrigin}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+
+      {/* Upload dialog */}
+      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Upload Skin</DialogTitle>
+            <DialogDescription>
+              Upload a .basement-skin.json file to add a custom skin. The file
+              must contain valid JSON with the required palette and typography fields.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div
+            className={`border-2 border-dashed rounded-md p-8 text-center transition-colors ${
+              dragActive ? "border-primary bg-muted/50" : "border-input"
+            }`}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+          >
+            <p className="text-sm text-muted-foreground mb-4">
+              Drag and drop your .basement-skin.json file here, or click to browse
+            </p>
+            <input
+              type="file"
+              accept=".basement-skin.json"
+              onChange={handleChange}
+              className="hidden"
+              id="skin-upload-input"
+            />
+            <input
+              type="file"
+              accept=".basement-skin.json"
+              onChange={handleChange}
+              className="hidden"
+              id="skin-upload-input"
+              disabled={uploading}
+            />
+            <label htmlFor="skin-upload-input">
+              <Button disabled={uploading}>
+                {uploading ? "Uploading..." : "Select File"}
+              </Button>
+            </label>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setUploadOpen(false)}
+              disabled={uploading}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
   );
 }
