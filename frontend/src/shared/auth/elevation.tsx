@@ -62,6 +62,8 @@ export function isElevationRequired(err: unknown): err is Error & {
 } {
   if (!err || typeof err !== "object") return false;
   const e = err as { code?: string };
+  // Must be an Error instance with the right code
+  if (!(e instanceof Error)) return false;
   return e.code === "ELEVATION_REQUIRED";
 }
 
