@@ -103,10 +103,14 @@ export function UserMenu() {
         await navigate({ to: "/admin/system" });
       }
     } catch (error: any) {
-      // Handle 423 LOCKED - elevation required
-      if (error?.status === 423 && error?.details?.requires_elevation) {
+      // v1.13.19: any 423 from PUT /auth/active-role means elevation is
+      // required for that role. The apiError helper attaches .status
+      // but NOT .details — the previous check `&& error?.details?.
+      // requires_elevation` always failed second clause, falling through
+      // to the bare-error toast. Simpler + correct: 423 → elevate.
+      if (error?.status === 423) {
         try {
-          const prompt = error.details.prompt || "Switching to this role requires admin re-authentication.";
+          const prompt = "Switching to this role requires admin re-authentication.";
           await promptElevationFromAnywhere("admin", prompt);
           
           // Retry the role switch after successful elevation
