@@ -30,6 +30,23 @@ export interface LoginHero {
   tagline?: string;
 }
 
+export interface PaletteVariant {
+  primary?: string;
+  background?: string;
+  foreground?: string;
+  muted?: string;
+  accent?: string;
+  destructive?: string;
+  warning?: string;
+  success?: string;
+  info?: string;
+}
+
+export interface Palette {
+  light?: PaletteVariant;
+  dark?: PaletteVariant;
+}
+
 export type Skin = {
   name: string;
   displayName: string;
@@ -38,6 +55,7 @@ export type Skin = {
   borderRadius?: string;
   density?: Density;
   typography?: Typography;
+  palette?: Palette;
   footer?: Footer;
   loginHero?: LoginHero;
 };

@@ -80,7 +80,7 @@ export function useSkin() {
     const variant = isDark ? skin.palette.dark : skin.palette.light;
     if (!variant) return;
     const root = document.documentElement;
-    const tokens: Array<keyof typeof variant> = [
+    const tokens = [
       "primary",
       "background",
       "foreground",
@@ -90,7 +90,7 @@ export function useSkin() {
       "warning",
       "success",
       "info",
-    ];
+    ] as const;
     for (const key of tokens) {
       const value = variant[key];
       if (typeof value === "string" && value) {
