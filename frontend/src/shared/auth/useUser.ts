@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
-import type { AuthMode } from "@/shared/auth/mode";
+import type { UserResponse as UserResponseType } from "@/shared/api/mutations";
 
-type UserResponse = {
+type AuthMode = "user" | "admin" | "elevated";
+
+type UserResponseData = {
   id?: string;
   username: string;
   role: "admin" | "user";
@@ -13,6 +15,16 @@ type UserResponse = {
   // "user" / 0 (which matches a default post-login state anyway).
   mode?: AuthMode;
   modeExpiresAt?: number; // unix SECONDS on the wire
+  // v1.13.18: active role selector — one active role at a time
+  activeRole?: {
+    kind: "user" | "cluster-admin" | "ui-admin";
+    cluster?: string;
+  };
+  availableRoles?: Array<{
+    kind: "user" | "cluster-admin" | "ui-admin";
+    label: string;
+    cluster?: string;
+  }>;
   // ADR-0003 v1.2.0c: true when this account was provisioned via OIDC
   // (no local password). The elevation modal branches on this — OIDC-
   // only users get an "Elevate via SSO" button that kicks off
@@ -21,7 +33,7 @@ type UserResponse = {
 };
 
 export function useUser() {
-  const result = useQuery<UserResponse | undefined>({
+  const result = useQuery<UserResponseData | undefined>({
     queryKey: ["auth", "me"],
     queryFn: async () => {
       const { data, response } = await client.GET("/auth/me");
@@ -32,13 +44,15 @@ export function useUser() {
       if (!response.ok || !data) {
         throw new Error(`Failed to fetch user (status ${response.status})`);
       }
-      // Cast from backend User type to frontend UserResponse with uiAdmin field
+      // Cast from backend User type to frontend UserResponseData with uiAdmin field
       const userData = data as unknown as {
         username: string;
         role: "admin" | "user";
         uiAdmin?: boolean;
         mode?: AuthMode;
         modeExpiresAt?: number;
+        activeRole?: { kind: string; cluster?: string };
+        availableRoles?: Array<{ kind: string; label: string; cluster?: string }>;
         oidcUser?: boolean;
       };
       return {
@@ -48,8 +62,10 @@ export function useUser() {
         uiAdmin: userData.uiAdmin ?? false,
         mode: userData.mode,
         modeExpiresAt: userData.modeExpiresAt,
+        activeRole: userData.activeRole,
+        availableRoles: userData.availableRoles,
         oidcUser: userData.oidcUser ?? false,
-      } as UserResponse;
+      } as UserResponseType;
     },
     staleTime: 5 * 60 * 1000,
     retry: (failureCount, error) => {

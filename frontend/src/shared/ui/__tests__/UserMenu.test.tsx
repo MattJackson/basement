@@ -31,7 +31,23 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   };
 });
 
-let userMockData = { username: "matthew", role: "user", uiAdmin: false, oidcUser: false };
+type MockUserData = {
+  username: string;
+  role: "admin" | "user";
+  uiAdmin: boolean;
+  oidcUser?: boolean;
+  activeRole: any | null;
+  availableRoles: Array<{ kind: string; label: string; cluster?: string }>;
+};
+
+let userMockData: MockUserData = { 
+  username: "matthew", 
+  role: "user", 
+  uiAdmin: false, 
+  oidcUser: false, 
+  activeRole: null, 
+  availableRoles: [] 
+};
 
 vi.mock("@/shared/auth/useUser", () => ({
   useUser: vi.fn(() => ({
@@ -41,11 +57,15 @@ vi.mock("@/shared/auth/useUser", () => ({
   })),
 }));
 
-export const setUserMock = (userData: { username: string; role: "admin" | "user"; uiAdmin: boolean; oidcUser?: boolean }) => {
+export const setUserMock = (userData: Partial<Omit<MockUserData, "availableRoles">> & { availableRoles?: Array<{ kind: string; label: string; cluster?: string }> }) => {
   userMockData = { 
-    ...userData, 
-    oidcUser: userData.oidcUser ?? false, 
-    role: userData.role,
+    ...userMockData,
+    username: userData.username ?? userMockData.username,
+    role: userData.role ?? userMockData.role,
+    uiAdmin: userData.uiAdmin ?? userMockData.uiAdmin,
+    oidcUser: userData.oidcUser ?? false,
+    activeRole: userData.activeRole !== undefined ? userData.activeRole : null,
+    availableRoles: userData.availableRoles ?? [],
   };
 };
 
@@ -505,3 +525,106 @@ it("user role does NOT see 'System settings' link", async () => {
     expect(screen.queryByText("System settings")).not.toBeInTheDocument();
   });
 });
+
+describe("UserMenu — Role selector (v1.13.18)", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows Role submenu with available roles", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "user", 
+      uiAdmin: true, 
+      oidcUser: false,
+      activeRole: { kind: "user" },
+      availableRoles: [
+        { kind: "user", label: "User" },
+        { kind: "cluster-admin", cluster: "classe", label: "Cluster Admin: classe" },
+        { kind: "ui-admin", label: "UI Admin" }
+      ]
+    });
+
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByTestId("role-submenu-trigger")).toBeInTheDocument();
+  });
+
+  it("Role submenu shows User, Cluster Admin options, and UI Admin when eligible", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "user", 
+      uiAdmin: true, 
+      oidcUser: false,
+      activeRole: { kind: "cluster-admin", cluster: "classe" },
+      availableRoles: [
+        { kind: "user", label: "User" },
+        { kind: "cluster-admin", cluster: "classe", label: "Cluster Admin: classe" },
+        { kind: "ui-admin", label: "UI Admin" }
+      ]
+    });
+
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    
+    // Open role submenu
+    const roleTrigger = await screen.findByTestId("role-submenu-trigger");
+    fireEvent.click(roleTrigger);
+
+    expect(await screen.findByText("User")).toBeInTheDocument();
+    expect(await screen.findByText("Cluster Admin: classe")).toBeInTheDocument();
+    expect(await screen.findByText("UI Admin")).toBeInTheDocument();
+  });
+
+  it("Role submenu shows only User when not eligible for admin roles", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "user", 
+      uiAdmin: false, 
+      oidcUser: false,
+      activeRole: { kind: "user" },
+      availableRoles: [
+        { kind: "user", label: "User" }
+      ]
+    });
+
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+    
+    // Open role submenu
+    const roleTrigger = await screen.findByTestId("role-submenu-trigger");
+    fireEvent.click(roleTrigger);
+
+    expect(await screen.findByText("User")).toBeInTheDocument();
+    expect(screen.queryByText("Cluster Admin")).not.toBeInTheDocument();
+    expect(screen.queryByText("UI Admin")).not.toBeInTheDocument();
+  });
+
+  it("Role selector displays current role in trigger", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "user", 
+      uiAdmin: true, 
+      oidcUser: false,
+      activeRole: { kind: "cluster-admin", cluster: "lsi" },
+      availableRoles: [
+        { kind: "user", label: "User" },
+        { kind: "cluster-admin", cluster: "classe", label: "Cluster Admin: classe" },
+        { kind: "cluster-admin", cluster: "lsi", label: "Cluster Admin: lsi" },
+        { kind: "ui-admin", label: "UI Admin" }
+      ]
+    });
+
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    const roleTrigger = await screen.findByTestId("role-submenu-trigger");
+    expect(roleTrigger).toHaveTextContent(/Role.*Cluster Admin: lsi/);
+  });
+});
+

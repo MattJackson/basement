@@ -116,6 +116,9 @@ func currentMode(r *http.Request) policy.Mode {
 // via SetPolicy() before Start(), so this never serves real traffic.
 type permissiveEnforcer struct{}
 
+// defaultActiveRole provides a fallback active role for tests and unconfigured servers.
+var defaultActiveRole = &auth.ActiveRole{Kind: "user"}
+
 func (permissiveEnforcer) Can(userID, capability, scope string) bool { return userID != "" }
 func (permissiveEnforcer) CanWithReason(userID, capability, scope string) (bool, []policy.RoleAssignment, []policy.ReasoningStep) {
 	// Mirrors Can: any non-empty user is allowed. The single reasoning

@@ -36,28 +36,9 @@ func FromContext(ctx context.Context) (*Claims, bool) {
 	return claims, true
 }
 
-// IsUIAdmin returns whether the current user is a UI Admin.
-func IsUIAdmin(ctx context.Context) bool {
-	val := ctx.Value(uiAdminKey)
-	if val == nil {
-		return false
-	}
-	b, ok := val.(bool)
-	return ok && b
-}
-
 // RequireUIAdmin returns an HTTP middleware that requires UI Admin status.
 func RequireUIAdmin() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !IsUIAdmin(r.Context()) {
-				writeError(w, http.StatusForbidden, "INSUFFICIENT_ROLE", "Insufficient permissions")
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
+	return ActiveRoleUIAdminMiddleware()
 }
 
 // RequireRole returns an HTTP middleware that requires a specific role.

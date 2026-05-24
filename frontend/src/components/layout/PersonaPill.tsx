@@ -35,6 +35,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 import { useElevationPrompt } from "@/shared/auth/elevation";
+import { useUser } from "@/shared/auth/useUser";
 
 /** formatRemaining renders a countdown as h:mm:ss when ≥1h, otherwise mm:ss. */
 export function formatRemaining(msRemaining: number): string {
@@ -85,6 +86,10 @@ export function PersonaPill() {
   const promptForElevation = useElevationPrompt();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { data: user } = useUser();
+
+  const username = user?.username ?? "";
+  const activeRole = user?.activeRole;
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
   // warnedRef tracks the latest expiresAt for which we've fired the
@@ -201,38 +206,77 @@ export function PersonaPill() {
   };
 
   const pillContent = useMemo(() => {
-    if (mode === "user") {
+    if (!activeRole) {
+      // No active role set yet — fall back to mode-based display
+      if (mode === "user") {
+        return (
+          <span
+            className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+            data-testid="persona-pill"
+            data-mode="user"
+          >
+            USER
+          </span>
+        );
+      }
+      const classes = inRedWindow
+        ? "bg-red-300 text-red-950 dark:bg-red-500/40 dark:text-red-50 animate-pulse"
+        : inAmberWindow
+          ? "bg-amber-300 text-amber-950 dark:bg-amber-500/30 dark:text-amber-100"
+          : "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200";
       return (
         <span
-          className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+          className={
+            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
+            classes +
+            (flashing && inRedWindow ? " ring-2 ring-red-400" : "")
+          }
           data-testid="persona-pill"
-          data-mode="user"
+          data-mode="admin"
+          data-warn={inRedWindow ? "red" : inAmberWindow ? "amber" : "none"}
         >
-          USER
+          ADMIN
         </span>
       );
     }
-    // admin (incl. legacy "elevated" alias)
+
+    // v1.13.18: Display active role dynamically
+    const roleLabel = activeRole.kind === "cluster-admin" && activeRole.cluster
+      ? `Cluster Admin: ${activeRole.cluster}`
+      : activeRole.kind === "ui-admin"
+        ? "UI Admin"
+        : "User";
+
+    // For UI Admin with elevated mode, show countdown + admin-session-TTL hint
+    const isElevated = mode === "admin" || mode === "elevated";
     const classes = inRedWindow
       ? "bg-red-300 text-red-950 dark:bg-red-500/40 dark:text-red-50 animate-pulse"
-      : inAmberWindow
+      : inAmberWindow && isElevated
         ? "bg-amber-300 text-amber-950 dark:bg-amber-500/30 dark:text-amber-100"
-        : "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200";
+        : inAmberWindow
+          ? "bg-blue-300 text-blue-950 dark:bg-blue-500/30 dark:text-blue-100"
+          : isElevated
+            ? "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200"
+            : "bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
+
     return (
       <span
         className={
           "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
-          classes +
-          (flashing && inRedWindow ? " ring-2 ring-red-400" : "")
+          classes
         }
         data-testid="persona-pill"
-        data-mode="admin"
-        data-warn={inRedWindow ? "red" : inAmberWindow ? "amber" : "none"}
+        data-mode={activeRole.kind}
+        data-role={roleLabel.toLowerCase().replace(/:/g, "")}
       >
-        ADMIN
+        {username && <span className="mr-1 font-medium">{username}</span>}
+        <span>{roleLabel}</span>
+        {isElevated && activeRole.kind === "ui-admin" && (
+          <span className="ml-2 text-xs opacity-75">(elevated)</span>
+        )}
       </span>
     );
-  }, [mode, flashing, inAmberWindow, inRedWindow]);
+  }, [mode, flashing, inAmberWindow, inRedWindow, activeRole, username]);
 
   return (
     <div className="flex items-center gap-1.5">
