@@ -13,11 +13,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/skin"
+	"github.com/mattjackson/basement/internal/store"
 )
 
 // withChiParam injects a chi URL param into the request context. The
@@ -496,7 +498,12 @@ func TestSkinUploadWithPolicy(t *testing.T) {
 
 // setupTestServerWithConfig creates a test server with given config.
 func setupTestServerWithConfig(cfg *config.Config, t *testing.T) *Server {
-	srv := New(cfg, nil, nil, nil, nil)
+	st, err := store.Open(cfg.DataDir, 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+	
+	srv := New(cfg, st, nil, nil, nil)
 	
 	// Register built-in skins for testing
 	skinRegistry := skin.New()
