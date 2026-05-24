@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { client } from "@/shared/api/client";
-import { useVersion } from "@/shared/api/queries";
+import { useVersion, useActiveSkin } from "@/shared/api/queries";
 import { useOIDCAvailable } from "@/shared/auth/useOIDCAvailable";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { LoginHeroDisplay } from "@/shared/components/SkinInjector";
 
 const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -38,6 +39,7 @@ export function LoginForm() {
   const queryClient = useQueryClient();
   const { data: version } = useVersion();
   const { data: oidcAvailable } = useOIDCAvailable();
+  const { data: skin, isLoading: skinLoading } = useActiveSkin();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -88,12 +90,19 @@ export function LoginForm() {
     window.location.href = oidcStartPath;
   };
 
+  const loginHero = skin?.loginHero;
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
       <Card className="w-full max-w-md">
+        {loginHero && !skinLoading && (
+          <CardHeader className="text-center pb-2">
+            <LoginHeroDisplay imageDataUri={loginHero.imageDataUri} tagline={loginHero.tagline} />
+          </CardHeader>
+        )}
         <CardHeader className="text-center">
           <h1 className="text-2xl font-bold tracking-tight leading-none">Sign in to Basement</h1>
           <CardDescription>Enter your credentials to access your account</CardDescription>

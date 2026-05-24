@@ -9,6 +9,7 @@ import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner
 import { useUser } from "@/shared/auth/useUser";
 import { useAuthMode } from "@/shared/auth/mode";
 import { useOnboardingState } from "@/shared/api/queries";
+import { SkinInjector, OperatorFooter } from "@/shared/components/SkinInjector";
 
 interface AppShellProps {
   children?: ReactNode;
@@ -207,9 +208,13 @@ if (location.pathname === "/login") return;
       {/* /files before the banner has a chance to matter. */}
       <ElevationExpiredBanner />
 
+      <SkinInjector />
+
       <main className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         {children ?? <Outlet />}
       </main>
+
+      <OperatorFooter />
     </div>
   );
 }

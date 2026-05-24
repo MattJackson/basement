@@ -5,6 +5,42 @@ import type { components } from "@/shared/api/types.gen";
 type Node = components["schemas"]["Node"];
 type Layout = components["schemas"]["Layout"];
 type Caps = components["schemas"]["Caps"];
+
+// v1.13.0c: Skin types for FE consumption hooks
+export type Density = "compact" | "comfortable" | "spacious";
+
+export interface Typography {
+  sans: string;
+  mono: string;
+  fontUrl?: string;
+}
+
+export interface FooterLink {
+  label: string;
+  url: string;
+}
+
+export interface Footer {
+  text?: string;
+  links?: FooterLink[];
+}
+
+export interface LoginHero {
+  imageDataUri?: string;
+  tagline?: string;
+}
+
+export type Skin = {
+  name: string;
+  displayName: string;
+  version: string;
+  productName?: string;
+  borderRadius?: string;
+  density?: Density;
+  typography?: Typography;
+  footer?: Footer;
+  loginHero?: LoginHero;
+};
 type Bucket = components["schemas"]["Bucket"];
 type Key = components["schemas"]["Key"];
 type Connection = components["schemas"]["Connection"];
@@ -721,6 +757,8 @@ export interface UserVisibleOrgCapabilities {
   allowUserBackends?: boolean;
   userBackendDrivers?: string[];
   oidcOnly?: boolean;
+  /** v1.13.0c: skin policy - when 'user-choice', users can select their own skin */
+  skinPolicy?: "locked" | "default" | "user-choice";
 }
 
 export function useOrgCapabilities() {
@@ -736,6 +774,34 @@ export function useOrgCapabilities() {
 
 export function isSignupEnabled(signupMode?: string): boolean {
   return signupMode === "open" || signupMode === "invite";
+}
+
+/** v1.13.0c: Check if per-user skin selection is permitted */
+export function canUserSelectSkin(skinPolicy?: string): boolean {
+  return skinPolicy === "user-choice";
+}
+
+// v1.13.0c: Mutation to set active skin for current user (when policy permits)
+export function useSetActiveSkin() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: async (skinName: string) => {
+      const res = await fetch("/api/v1/user/skin", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skin: skinName }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(`set active skin ${res.status}: ${body?.error?.message || "Failed"}`);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["skin", "active"] });
+      queryClient.invalidateQueries({ queryKey: ["org-capabilities"] });
+    },
+  });
 }
 
 // v1.11.0a — first-run onboarding wizard state. UIAdmin-gated on the
@@ -2525,6 +2591,36 @@ export function useDisableWebhook() {
       queryClient.invalidateQueries({ queryKey: ["user", "webhooks"] });
       queryClient.invalidateQueries({ queryKey: ["user", "webhooks", id] });
     },
+  });
+}
+
+// v1.13.0c: Skin consumption hooks — active skin + registry list
+
+export function useActiveSkin() {
+  return useQuery<Skin>({
+    queryKey: ["skin", "active"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/skins/active");
+      if (!res.ok) throw new Error(`active skin ${res.status}`);
+      const data = (await res.json()) as Skin;
+      return data;
+    },
+    staleTime: 60 * 1000,
+    retry: 1,
+  });
+}
+
+export function useSkinRegistry() {
+  return useQuery<Skin[]>({
+    queryKey: ["skin", "registry"],
+    queryFn: async () => {
+      const res = await fetch("/api/v1/skins");
+      if (!res.ok) throw new Error(`skin registry ${res.status}`);
+      const data = (await res.json()) as Skin[];
+      return data;
+    },
+    staleTime: 30 * 1000,
+    retry: 1,
   });
 }
 
