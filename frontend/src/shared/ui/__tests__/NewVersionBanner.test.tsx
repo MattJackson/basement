@@ -1,4 +1,4 @@
-// v1.11.0.28 — NewVersionBanner with version display.
+// v1.11.0.29 — NewVersionBanner with SW unregister + cache clear on refresh.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -51,6 +51,84 @@ describe("NewVersionBanner", () => {
       expect(screen.queryByText(/Basement/)).not.toBeInTheDocument();
       expect(screen.queryByText(/A new version of basement/)).not.toBeInTheDocument();
     }
+  });
+
+  it("unregisters SW + clears caches on refresh click", async () => {
+    const callback = subscribeMock.mock.calls[0]?.[0];
+    if (!callback) return;
+    
+    callback({ mismatched: true, serverVersion: "v1.11.0.29" });
+    
+    const button = screen.getByRole("button", { name: /Refresh/i });
+    expect(button).toBeInTheDocument();
+
+    const unregisterMock = vi.fn().mockResolvedValue(true);
+    const keysMock = vi.fn().mockResolvedValue(["basement"]);
+    const deleteMock = vi.fn().mockResolvedValue(true);
+
+    (navigator.serviceWorker as any) = {
+      getRegistrations: vi.fn().mockResolvedValue([
+        { unregister: unregisterMock },
+      ]),
+    };
+
+    (globalThis.caches as any) = {
+      keys: keysMock,
+      delete: deleteMock,
+    };
+
+    const originalLocationReload = window.location.reload;
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { reload: reloadMock },
+      writable: true,
+    });
+
+    await button.click();
+
+    expect(unregisterMock).toHaveBeenCalled();
+    expect(keysMock).toHaveBeenCalled();
+    expect(deleteMock).toHaveBeenCalledWith("basement");
+    expect(reloadMock).toHaveBeenCalled();
+
+    Object.defineProperty(window, "location", {
+      value: { reload: originalLocationReload },
+      writable: true,
+    });
+  });
+
+  it("reloads even if SW APIs throw", async () => {
+    const callback = subscribeMock.mock.calls[0]?.[0];
+    if (!callback) return;
+    
+    callback({ mismatched: true, serverVersion: "v1.11.0.29" });
+    
+    const button = screen.getByRole("button", { name: /Refresh/i });
+    expect(button).toBeInTheDocument();
+
+    (navigator.serviceWorker as any) = {
+      getRegistrations: vi.fn().mockRejectedValue(new Error("SW error")),
+    };
+
+    (globalThis.caches as any) = {
+      keys: vi.fn().mockRejectedValue(new Error("Cache error")),
+    };
+
+    const originalLocationReload = window.location.reload;
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: { reload: reloadMock },
+      writable: true,
+    });
+
+    await button.click();
+
+    expect(reloadMock).toHaveBeenCalled();
+
+    Object.defineProperty(window, "location", {
+      value: { reload: originalLocationReload },
+      writable: true,
+    });
   });
 
   afterEach(() => {
