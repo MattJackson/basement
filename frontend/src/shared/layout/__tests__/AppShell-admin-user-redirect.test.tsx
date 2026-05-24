@@ -51,18 +51,23 @@ vi.mock("@/shared/auth/useUser", () => ({
   }),
 }));
 
-vi.mock("@/shared/api/queries", () => ({
-  useVersion: () => ({
-    data: { version: "v1.9.0e.2", commit: "abc1234", builtAt: "" },
-    isLoading: false,
-    error: null,
-  }),
-  // v1.11.0a — AppShell now consults the onboarding state to decide
-  // whether to auto-route to /admin/first-run. Default to "no
-  // onboarding needed" so the existing redirect tests don't fight a
-  // second navigation.
-  useOnboardingState: () => ({ data: { needsOnboarding: false, completed: true } }),
-}));
+vi.mock("@/shared/api/queries", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useVersion: () => ({
+      data: { version: "v1.9.0e.2", commit: "abc1234", builtAt: "" },
+      isLoading: false,
+      error: null,
+    }),
+    // v1.11.0a — AppShell now consults the onboarding state to decide
+    // whether to auto-route to /admin/first-run. Default to "no
+    // onboarding needed" so the existing redirect tests don't fight a
+    // second navigation.
+    useOnboardingState: () => ({ data: { needsOnboarding: false, completed: true } }),
+    useOrgCapabilities: () => ({ data: {} }),
+  };
+});
 
 // Elevation prompt is touched indirectly via UserMenu; mock to a no-op
 // so we don't need an ElevationProvider in the harness.

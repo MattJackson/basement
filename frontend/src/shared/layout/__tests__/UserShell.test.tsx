@@ -4,17 +4,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthModeProvider } from "@/shared/auth/mode";
 import { ElevationProvider } from "@/shared/auth/elevation";
 
-vi.mock("@/shared/api/queries", () => ({
-  useVersion: vi.fn(() => ({
-    data: {
-      version: "v0.5.3",
-      commit: "def456ghi",
-      builtAt: new Date().toISOString(),
-    },
-    isLoading: false,
-    error: null,
-  })),
-}));
+vi.mock("@/shared/api/queries", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useVersion: vi.fn(() => ({
+      data: {
+        version: "v0.5.3",
+        commit: "def456ghi",
+        builtAt: new Date().toISOString(),
+      },
+      isLoading: false,
+      error: null,
+    })),
+    useActiveSkin: () => ({ data: null, isLoading: false }),
+  };
+});
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;

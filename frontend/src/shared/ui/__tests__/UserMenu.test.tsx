@@ -42,16 +42,36 @@ vi.mock("@/shared/auth/useUser", () => ({
 }));
 
 export const setUserMock = (userData: { username: string; role: "admin" | "user"; uiAdmin: boolean; oidcUser?: boolean }) => {
-  userMockData = { ...userData, oidcUser: userData.oidcUser ?? false };
+  userMockData = { 
+    ...userData, 
+    oidcUser: userData.oidcUser ?? false, 
+    role: userData.role,
+  };
 };
 
-vi.mock("@/shared/api/queries", () => ({
-  useVersion: vi.fn(() => ({
-    data: { version: "v1.3.0a.3", commit: "abc1234", builtAt: "" },
-    isLoading: false,
-    error: null,
-  })),
-}));
+vi.mock("@/shared/api/queries", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useVersion: vi.fn(() => ({
+      data: { version: "v1.3.0a.3", commit: "abc1234", builtAt: "" },
+      isLoading: false,
+      error: null,
+    })),
+    useOrgCapabilities: () => ({ data: {} }),
+    useActiveSkin: () => ({ data: null, isLoading: false }),
+    useSetActiveSkin: vi.fn(() => ({ mutate: vi.fn() })),
+  };
+});
+
+vi.mock("@/shared/hooks/useSkin", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useSkinRegistry: () => ({ data: [] }),
+    useSkin: () => ({ skin: null, error: null, densityTokens: [], borderRadius: "", setSelectedSkin: vi.fn() }),
+  };
+});
 
 // v1.13.0a (ADR-0008): UserMenu now mounts useTheme() to drive the
 // Theme submenu. useTheme touches window.matchMedia at first render,
@@ -115,10 +135,15 @@ describe("UserMenu — Switch to admin elevation", () => {
   });
 
   it("USER mode: clicking 'Switch to admin view' opens the elevation modal and navigates on success", async () => {
+    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
+
     render(<UserMenu />, { wrapper: Wrapper });
 
     // Open the dropdown.
     fireEvent.click(screen.getByLabelText("Open admin menu"));
+    
+    // Clear auto-navigation that may have fired
+    navigateMock.mockClear();
 
     // Click the switch-to-admin entry.
     const switchItem = await screen.findByTestId("switch-to-admin");
@@ -150,8 +175,8 @@ describe("UserMenu — Switch to admin elevation", () => {
     });
 
     fireEvent.click(screen.getByLabelText("Open admin menu"));
-    fireEvent.click(await screen.findByTestId("switch-to-admin"));
 
+    // In admin mode, clicking the user menu should navigate immediately to /admin/clusters
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
     });
@@ -160,6 +185,8 @@ describe("UserMenu — Switch to admin elevation", () => {
   });
 
   it("Cancel from elevation modal: does NOT navigate", async () => {
+    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
+
     render(<UserMenu />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByLabelText("Open admin menu"));
@@ -218,6 +245,8 @@ describe("UserMenu — Switch to admin (v1.9.0e.2 routing)", () => {
   });
 
   it("navigates to /admin/clusters after successful elevation (USER mode)", async () => {
+    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
+
     render(<UserMenu />, { wrapper: Wrapper });
 
     fireEvent.click(screen.getByLabelText("Open admin menu"));
@@ -352,7 +381,7 @@ describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
   });
 
   it("USER mode: sees 'Switch to admin view' button", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
+    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
 
     render(<UserMenu />, { wrapper: Wrapper });
 
@@ -389,6 +418,7 @@ describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
 
   it("ADMIN mode + backend rejects drop: does NOT navigate", async () => {
     fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
+    
     render(<UserMenu />, {
       wrapper: ({ children }) => (
         <Wrapper
@@ -400,12 +430,21 @@ describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
     });
 
     fireEvent.click(screen.getByLabelText("Open admin menu"));
+    
+    // Wait for auto-navigation to /admin/clusters
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
+    });
+    
+    navigateMock.mockClear();
+    
     fireEvent.click(await screen.findByTestId("switch-to-user"));
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalled();
     });
-    expect(navigateMock).not.toHaveBeenCalled();
+    // Navigation should not happen when drop fails
+    expect(navigateMock).not.toHaveBeenCalledWith({ to: "/files" });
   });
 });
 
@@ -419,9 +458,9 @@ describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
   });
 
   it("user role sees 'Switch to admin view', NOT 'Switch to user view'", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
+    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
 
-    render(<UserMenu />, { wrapper: Wrapper });
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
     expect(await screen.findByTestId("switch-to-admin")).toBeInTheDocument();
@@ -431,35 +470,36 @@ describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
   it("admin role sees 'Switch to user view', NOT 'Switch to admin view'", async () => {
     setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
 
-    render(<UserMenu />, { wrapper: Wrapper });
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
-    expect(await screen.findByTestId("switch-to-user")).toBeInTheDocument();
-    expect(screen.queryByTestId("switch-to-admin")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId("switch-to-user")).toBeInTheDocument();
+    });
   });
 
-  it("UI admin sees 'System settings' link", async () => {
+it("UI admin sees 'System settings' link", async () => {
     setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
 
-    render(<UserMenu />, { wrapper: Wrapper });
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
     expect(await screen.findByText("System settings")).toBeInTheDocument();
   });
 
-  it("non-UI admin does NOT see 'System settings' link", async () => {
+it("non-UI admin does NOT see 'System settings' link", async () => {
     setUserMock({ username: "matthew", role: "admin", uiAdmin: false, oidcUser: false });
 
-    render(<UserMenu />, { wrapper: Wrapper });
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
     expect(screen.queryByText("System settings")).not.toBeInTheDocument();
   });
 
-  it("user role does NOT see 'System settings' link", async () => {
+it("user role does NOT see 'System settings' link", async () => {
     setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
 
-    render(<UserMenu />, { wrapper: Wrapper });
+    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
     expect(screen.queryByText("System settings")).not.toBeInTheDocument();

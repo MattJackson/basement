@@ -260,7 +260,7 @@ describe("PersonaPill drop privileges (v1.7.0a.2)", () => {
 // v1.13.2 — duplicate toast prevention when multiple PersonaPill instances exist.
 describe("PersonaPill — admin session ended toast (v1.13.2)", () => {
   beforeEach(() => {
-    vi.useRealTimers();
+    vi.useFakeTimers();
     navigateSpy.mockReset();
   });
 
@@ -284,13 +284,23 @@ describe("PersonaPill — admin session ended toast (v1.13.2)", () => {
       </QueryClientProvider>,
     );
 
-    // Initially in admin mode, no toast should fire yet
-    expect(toast.info).not.toHaveBeenCalled();
-
     // The module-level guard (sessionEndedFiredRef) ensures that when mode changes
     // from admin to user, the "Admin session ended" toast fires exactly once even
     // though both PersonaPill instances subscribe to the same auth mode context.
     // This is verified by the implementation using a Set keyed on expiresAt.
+
+    // Trigger transition from admin -> user mode (simulates session expiry)
+    await client.setQueryData(
+      ["auth-me"],
+      { username: "matthew", role: "user", uiAdmin: false, oidcUser: false },
+    );
+    
+    // Wait for the effect to fire
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Should have fired exactly once despite two PersonaPill instances
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(toast.info).toHaveBeenCalledWith("Admin session ended");
   });
 });
 
