@@ -4,9 +4,9 @@
 //
 // Flow:
 //   1. Vite stamps __BUILD_COMMIT__ at build time (see vite.config.ts).
-//   2. Every API response carries X-Build: <server commit>.
+//   2. Every API response carries X-Build: <server commit> and X-Version: <tag>.
 //   3. observeResponse() compares the two; on mismatch it flips
-//      mismatched=true and notifies subscribers (the banner).
+//      mismatched=true and notifies subscribers (the banner) with version info.
 //
 // "dev" / "unknown" / empty values are treated as "don't compare" —
 // local dev builds have a "dev" baked commit and would otherwise flag
@@ -22,7 +22,8 @@ const HEARTBEAT_MS = 60_000;
 const SKIP_VALUES = new Set(["", "dev", "unknown"]);
 
 let mismatched = false;
-const listeners = new Set<(m: boolean) => void>();
+let serverVersion: string | undefined = undefined;
+const listeners = new Set<(state: { mismatched: boolean; serverVersion?: string }) => void>();
 let heartbeatInterval: number | null = null;
 
 function checkBuild(res: Response): void {
@@ -36,10 +37,15 @@ function checkBuild(res: Response): void {
   if (serverBuild === clientBuild) return;
   
   mismatched = true;
-  for (const l of listeners) l(true);
+  for (const l of listeners) l({ mismatched: true, serverVersion });
 }
 
 export function observeResponse(res: Response): void {
+  const versionHeader = res.headers.get("x-version");
+  if (versionHeader && !SKIP_VALUES.has(versionHeader)) {
+    serverVersion = versionHeader;
+    for (const l of listeners) l({ mismatched, serverVersion });
+  }
   checkBuild(res);
 }
 
@@ -65,9 +71,9 @@ function stopHeartbeat(): void {
   }
 }
 
-export function subscribe(fn: (m: boolean) => void): () => void {
+export function subscribe(fn: (state: { mismatched: boolean; serverVersion?: string }) => void): () => void {
   listeners.add(fn);
-  fn(mismatched);
+  fn({ mismatched, serverVersion });
   
   if (!mismatched && listeners.size === 1) {
     startHeartbeat();

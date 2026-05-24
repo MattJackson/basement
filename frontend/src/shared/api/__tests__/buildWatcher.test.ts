@@ -16,7 +16,7 @@ describe("buildWatcher", () => {
     const mockFn = vi.fn();
     subscribe(mockFn);
     
-    expect(mockFn).toHaveBeenCalledWith(false);
+    expect(mockFn).toHaveBeenCalledWith({ mismatched: false });
     
     __stopHeartbeatForTests();
   });
@@ -36,6 +36,59 @@ describe("buildWatcher", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     
     expect(clearIntervalSpy).toHaveBeenCalled();
+    
+    __stopHeartbeatForTests();
+  });
+
+  it("subscribe receives serverVersion from X-Version header", async () => {
+    const module = await import("@/shared/api/buildWatcher");
+    
+    const mockFn = vi.fn();
+    module.subscribe(mockFn);
+    
+    expect(mockFn).toHaveBeenCalledWith({ mismatched: false });
+    
+    // Simulate observeResponse with X-Version header
+    const fakeResponse = new Response(null, {
+      headers: { "X-Version": "v1.11.0.28" },
+    });
+    
+    module.observeResponse(fakeResponse);
+    
+    expect(mockFn).toHaveBeenNthCalledWith(2, { mismatched: false, serverVersion: "v1.11.0.28" });
+  });
+
+  it("observeResponse triggers mismatch on X-Build header", async () => {
+    const { subscribe, observeResponse, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
+    
+    const mockFn = vi.fn();
+    subscribe(mockFn);
+    
+    const fakeResponse = new Response(null, {
+      headers: { "X-Build": "newer-build" },
+    });
+    
+    observeResponse(fakeResponse);
+    
+    expect(mockFn).toHaveBeenCalledWith({ mismatched: true, serverVersion: undefined });
+    
+    __stopHeartbeatForTests();
+  });
+
+  it("subscribe returns cleanup function that removes listener", async () => {
+    const { subscribe, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
+    
+    const mockFn = vi.fn();
+    const unsub = subscribe(mockFn);
+    
+    expect(mockFn).toHaveBeenCalledTimes(1);
+    
+    unsub();
+    
+    const mockFn2 = vi.fn();
+    subscribe(mockFn2);
+    
+    expect(mockFn2).not.toHaveBeenCalledWith({ mismatched: true });
     
     __stopHeartbeatForTests();
   });
@@ -60,41 +113,6 @@ describe("buildWatcher", () => {
     
     __stopHeartbeatForTests();
     mockFetch.mockRestore();
-  });
-
-  it("observeResponse triggers mismatch on X-Build header", async () => {
-    const { subscribe, observeResponse, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
-    
-    const mockFn = vi.fn();
-    subscribe(mockFn);
-    
-    const fakeResponse = new Response(null, {
-      headers: { "X-Build": "newer-build" },
-    });
-    
-    observeResponse(fakeResponse);
-    
-    expect(mockFn).toHaveBeenCalledWith(true);
-    
-    __stopHeartbeatForTests();
-  });
-
-  it("subscribe returns cleanup function that removes listener", async () => {
-    const { subscribe, __stopHeartbeatForTests } = await import("@/shared/api/buildWatcher");
-    
-    const mockFn = vi.fn();
-    const unsub = subscribe(mockFn);
-    
-    expect(mockFn).toHaveBeenCalledTimes(1);
-    
-    unsub();
-    
-    const mockFn2 = vi.fn();
-    subscribe(mockFn2);
-    
-    expect(mockFn2).not.toHaveBeenCalledWith(true);
-    
-    __stopHeartbeatForTests();
   });
 
   afterEach(() => {

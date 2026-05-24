@@ -12,19 +12,25 @@ import { Button } from "@/components/ui/button";
  */
 export function NewVersionBanner() {
   const [show, setShow] = useState(false);
+  const [version, setVersion] = useState<string | undefined>(undefined);
 
   useEffect(() => {
-    return subscribe(setShow);
+    return subscribe((state) => {
+      setShow(state.mismatched);
+      setVersion(state.serverVersion);
+    });
   }, []);
 
   if (!show) return null;
 
+  const message = version 
+    ? `Basement ${version} now available — Refresh`
+    : "A new version of basement is available. Refresh to load it.";
+
   return (
     <div className="sticky top-16 z-40 w-full bg-amber-500/10 border-b border-amber-500/30 text-amber-900 dark:text-amber-200">
       <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-2 flex items-center justify-between gap-3 text-sm">
-        <span>
-          A new version of basement is available. Refresh to load it.
-        </span>
+        <span>{message}</span>
         <Button
           size="sm"
           variant="outline"
