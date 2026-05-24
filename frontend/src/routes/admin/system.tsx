@@ -1454,6 +1454,15 @@ function SkinsManager() {
   const [userOverridable, setUserOverridable] = useState(caps.data?.userOverridableSkin || false);
   const [allowedUserSkins, setAllowedUserSkins] = useState<string[]>(caps.data?.allowedUserSkins || []);
 
+  // Sync local state with query data when org-capabilities refetches after skin change
+  useEffect(() => {
+    if (caps.data) {
+      setDefaultSkin(caps.data.activeSkin || "basement-default");
+      setUserOverridable(caps.data.userOverridableSkin || false);
+      setAllowedUserSkins(caps.data.allowedUserSkins || []);
+    }
+  }, [caps.data]);
+
   // Debounced save on change
   useEffect(() => {
     const timer = setTimeout(async () => {

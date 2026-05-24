@@ -402,6 +402,8 @@ func (s *Server) routes() {
 			// Every logged-in user can enumerate all registered skins;
 			// the active skin is rendered at boot from registry tokens.
 			authG.Get("/skins", s.listSkinsHandler)
+			// v1.13.1: GET /api/v1/skins/active — fetch current active skin for live re-skinning
+			authG.Get("/skins/active", s.getActiveSkinHandler)
 			// v1.13.0c: user skin override — PUT /api/v1/user/skin allows
 			// authenticated users to pick their own skin if org policy permits.
 			authG.Put("/user/skin", s.setUserSkinHandler)

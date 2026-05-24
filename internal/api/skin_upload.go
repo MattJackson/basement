@@ -1,6 +1,7 @@
 // Package api: Skin upload and management endpoints (v1.13.0b).
 //
 // Endpoints:
+//   GET    /api/v1/skins/active                 — get current active skin (authenticated)
 //   POST   /api/v1/admin/skins/upload           — upload skin file with validation
 //   PUT    /api/v1/admin/skins/:id/activate     — activate a skin by ID
 //   DELETE /api/v1/admin/skins/:id              — delete a skin
@@ -373,6 +374,55 @@ func (s *Server) listAdminSkinsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// v1.13.1: GET /api/v1/skins/active — returns org-wide active skin for FE consumption.
+// This endpoint provides the current active skin without requiring full org capabilities fetch.
+// Used by useActiveSkin hook to apply skin styles live after admin changes default skin.
+
+// getActiveSkinHandler handles GET /api/v1/skins/active.
+func (s *Server) getActiveSkinHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
+		return
+	}
+
+	caps := s.store.OrgCapabilities().Get()
+	skinName := caps.ActiveSkin
+	if skinName == "" {
+		skinName = store.DefaultActiveSkin
+	}
+
+	// Get full skin details from registry for complete response
+	var skinObj *skin.Skin
+	if s.skins != nil {
+		s, exists := s.skins.Get(skinName)
+		if exists {
+			skinObj = &s
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if skinObj != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name":        skinObj.Name,
+			"displayName": skinObj.DisplayName,
+			"version":     skinObj.Version,
+			"productName": skinObj.ProductName,
+			"typography":  skinObj.Typography,
+			"borderRadius": skinObj.BorderRadius,
+			"density":     skinObj.Density,
+			"footer":      skinObj.Footer,
+			"loginHero":   skinObj.LoginHero,
+		})
+	} else {
+		// Fallback to minimal response if skin not in registry
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"name":        skinName,
+			"displayName": strings.Title(skinName),
+			"version":     "1.0.0",
+		})
+	}
 }
 
 // v1.13.0c: User skin override endpoint (PUT /api/v1/user/skin).
