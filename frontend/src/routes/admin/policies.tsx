@@ -610,11 +610,9 @@ function AssignmentsPane({
   // Inline add form state — three fields means a dialog would violate
   // popups-max-2-fields. Keeping it inline at the top of the table.
   const [newUser, setNewUser] = useState("");
-  // Default the role picker to the first non-deprecated role so the
-  // form doesn't open already-blocked. ADR-0002 (v1.1.0f): deprecated
-  // roles can still be SELECTED (so operators see what they're not
-  // doing) but the Assign action is gated below.
-  const defaultRole = roles.find((r) => !r.deprecated)?.id ?? roles[0]?.id ?? "";
+// Default the role picker to the first non-deprecated role so the
+	// form doesn't open already-blocked.
+	const defaultRole = roles.find((r) => !r.deprecated)?.id ?? roles[0]?.id ?? "";
   const [newRole, setNewRole] = useState(defaultRole);
   const [newScope, setNewScope] = useState("");
 
@@ -638,12 +636,12 @@ function AssignmentsPane({
       toast.error("All three fields are required");
       return;
     }
-    // ADR-0002 (v1.1.0f): belt-and-suspenders guard alongside the
-    // disabled button — keyboard-triggered submits or stale state
-    // shouldn't sneak a deprecated assignment through. The disabled
-    // <Button> above is the primary UI signal; this is the
-    // last-resort check.
-    if (selectedIsDeprecated) {
+// v2.0.0a: bucket_user removed entirely — no assignments possible.
+	// Belt-and-suspenders guard alongside the disabled button ensures
+	// keyboard-triggered submits or stale state can't sneak a deprecated
+	// assignment through. The disabled <Button> above is the primary UI signal;
+	// this is the last-resort check.
+	if (selectedIsDeprecated) {
       toast.error(
         `Role ${newRole} is deprecated — new assignments have no effect. Use /files/regions/new instead.`,
       );
@@ -731,9 +729,9 @@ function AssignmentsPane({
               />
             </div>
             {selectedIsDeprecated ? (
-              // ADR-0002 (v1.1.0f): can't create new assignments to a
-              // deprecated role. Tooltip explains why so the operator
-              // doesn't think the button is just broken.
+              // v2.0.0a: bucket_user removed entirely — can't create new
+              // assignments to deprecated roles. Tooltip explains why so the
+              // operator doesn't think the button is just broken.
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span>

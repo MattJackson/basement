@@ -4,6 +4,38 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v2.0.0a — 2026-05-24
+
+**BREAKING**: Complete removal of `bucket_user` role per [[v2_clean_break]].
+
+### BREAKING CHANGES
+
+- **Removed `bucket_user` role entirely** from the policy matrix (previously deprecated in v1.1.0)
+- **Silent data migration**: On first boot, all RoleAssignments with `role: "bucket_user"` are dropped from `{dataDir}/policy/policies.json`. A WARN log line reports how many assignments were removed.
+- **API validation**: POST `/admin/policies/assignments` with `roleId: "bucket_user"` returns HTTP 400 `ROLE_NOT_FOUND`
+- **Frontend picker**: Role dropdown at `/admin/policies` no longer shows `bucket_user` as an option
+
+### Migration Path
+
+There is no replacement role. Operators should use:
+
+- `cluster_admin@bucket:{cid}:{bid}` for specific bucket assignments
+- S3 key assignment via UserRegions (`/files/regions/new`) — the v1.1.x region-keychain model
+
+See [`docs/upgrading/v1-to-v2.md`](docs/upgrading/v1-to-v2.md) for full details.
+
+### Implementation Notes
+
+- No backward-compat shims or deprecation flags
+- One-shot migration in `Store.MigrateBucketUserAssignments()` at boot
+- Seed roles now: `host_admin`, `cluster_admin` (2 total, down from 3)
+
+Touched: `internal/auth/policy/types.go`, `internal/auth/policy/enforcer.go`,
+`internal/auth/policy/enforcer_test.go`, `internal/api/policy_gates_test.go`,
+`internal/api/admin_policies_test.go`, `internal/api/admin_policy_sim_test.go`,
+`frontend/src/routes/admin/policies.tsx`, `internal/store/store.go`,
+`docs/upgrading/v1-to-v2.md`, `CHANGELOG.md`.
+
 ## v1.13.0a — 2026-05-23
 
 Pluggable-skins foundation (ADR-0008). First of four sub-cycles for

@@ -117,9 +117,9 @@ func TestListPolicies_OK(t *testing.T) {
 		t.Errorf("expected >=%d capabilities, got %d",
 			len(policy.Registry), len(resp.Capabilities))
 	}
-	// Seed roles: host_admin, cluster_admin, bucket_user.
-	if len(resp.Roles) < 3 {
-		t.Errorf("expected >=3 seed roles, got %d", len(resp.Roles))
+	// Seed roles: host_admin, cluster_admin.
+	if len(resp.Roles) < 2 {
+		t.Errorf("expected >=2 seed roles, got %d", len(resp.Roles))
 	}
 }
 
@@ -239,7 +239,7 @@ func TestAssignAndUnassignRole(t *testing.T) {
 	defer cleanup()
 
 	body, _ := json.Marshal(policy.RoleAssignment{
-		UserID: "wife", RoleID: "bucket_user",
+		UserID: "wife", RoleID: "cluster_admin",
 		Scope: "bucket:cid-x:family-photos",
 	})
 	req := adminPolicyReq(http.MethodPost,
@@ -252,13 +252,13 @@ func TestAssignAndUnassignRole(t *testing.T) {
 	}
 
 	// Verify the enforcer agrees.
-	if !enf.Can("wife", "objects:list", "bucket:cid-x:family-photos") {
-		t.Error("Can(wife, objects:list, bucket:cid-x:family-photos) = false after assign")
+	if !enf.Can("wife", "bucket:view", "bucket:cid-x:family-photos") {
+		t.Error("Can(wife, bucket:view, bucket:cid-x:family-photos) = false after assign")
 	}
 
 	// Revoke it.
 	delReq := adminPolicyReq(http.MethodDelete,
-		"/api/v1/admin/policies/assignments?userId=wife&roleId=bucket_user&scope=bucket:cid-x:family-photos",
+		"/api/v1/admin/policies/assignments?userId=wife&roleId=cluster_admin&scope=bucket:cid-x:family-photos",
 		nil)
 	delRR := httptest.NewRecorder()
 	srv.router.ServeHTTP(delRR, delReq)

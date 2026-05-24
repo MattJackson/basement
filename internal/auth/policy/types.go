@@ -2,9 +2,9 @@ package policy
 
 // Role is a named bundle of capabilities. Per ADR-0001 "Flexibility:
 // role/permission matrix", roles + capabilities are data, not code.
-// The three tiers shipped at v0.9.x (host_admin / cluster_admin /
-// bucket_user) are seed presets — rows in the matrix the operator can
-// edit, not enum values in Go.
+// The two tiers shipped at v0.9.x (host_admin / cluster_admin) are seed
+// presets — rows in the matrix the operator can edit, not enum values in Go.
+// bucket_user was removed in v2.0.0a per [[v2_clean_break]].
 type Role struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
@@ -18,10 +18,6 @@ type Role struct {
 	Seed bool `json:"seed"`
 	// Deprecated marks roles that still exist for back-compat but whose
 	// capabilities no longer have effect at the gates they used to cover.
-	// ADR-0002 (v1.1.0f) introduces this for `bucket_user`: the
-	// `objects:*` capabilities on bucket-scoped assignments are inert
-	// post-v1.1.0e because user-tier bucket access now flows through the
-	// region keychain's S3 key, NOT through basement's policy gates.
 	// The UI uses this flag to render a badge + banner + assignment
 	// guardrail; the enforcer itself doesn't change behaviour based on
 	// it. Existing assignments stay valid + deletable.

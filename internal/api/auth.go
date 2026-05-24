@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -153,37 +154,74 @@ func (s *Server) computeAvailableRoles(claims *auth.Claims) []auth.AvailableRole
 	}
 
 	var roles []auth.AvailableRole
+	clusterAdminSet := make(map[string]bool)
 
 	// User is always available
 	roles = append(roles, auth.AvailableRole{Kind: "user", Label: "User"})
 
-	// Cluster Admin: iterate over cluster admin grants from policy assignments.
+	// Collect cluster admin grants (explicit and implicit via UIAdmin)
 	if s.policy != nil && claims.UserID != "" {
 		assignments := s.policy.AssignmentsFor(claims.UserID)
 		for _, a := range assignments {
-			// Check if this assignment grants cluster_admin on any scope matching cluster:* or cluster:{cid}
-			if strings.HasPrefix(a.RoleID, "cluster_admin") || a.RoleID == "cluster_admin" {
-				// Extract cluster ID from scope: cluster:* matches all, cluster:{cid} matches specific
+			if strings.HasPrefix(a.RoleID, "cluster_admin") {
 				if a.Scope == "cluster:*" {
-					// For wildcard cluster admin, we need to list actual clusters — for now, skip
-					continue
-				}
-				if strings.HasPrefix(a.Scope, "cluster:") {
+					// Wildcard: enumerate all clusters via connection list
+					conns, err := s.conns.List(context.Background())
+					if err == nil && conns != nil {
+						for _, conn := range conns {
+							label := conn.Label
+							if label == "" {
+								label = conn.ID
+							}
+							key := "cluster-admin:" + conn.ID
+							if !clusterAdminSet[key] {
+								roles = append(roles, auth.AvailableRole{
+									Kind:    "cluster-admin",
+									Cluster: conn.ID,
+									Label:   "Cluster Admin: " + label,
+								})
+								clusterAdminSet[key] = true
+							}
+						}
+					}
+				} else if strings.HasPrefix(a.Scope, "cluster:") {
 					cid := strings.TrimPrefix(a.Scope, "cluster:")
 					if cid != "" {
-						roles = append(roles, auth.AvailableRole{
-							Kind:    "cluster-admin",
-							Cluster: cid,
-							Label:   "Cluster Admin: " + cid,
-						})
+						key := "cluster-admin:" + cid
+						if !clusterAdminSet[key] {
+							roles = append(roles, auth.AvailableRole{
+								Kind:    "cluster-admin",
+								Cluster: cid,
+								Label:   "Cluster Admin: " + cid,
+							})
+							clusterAdminSet[key] = true
+						}
 					}
 				}
 			}
 		}
 	}
 
-	// UI Admin: only if user.uiAdmin == true
+	// UI Admin gets implicit cluster admin on all clusters (if not already explicit)
 	if claims.UIAdmin {
+		conns, err := s.conns.List(context.Background())
+		if err == nil && conns != nil {
+			for _, conn := range conns {
+				label := conn.Label
+				if label == "" {
+					label = conn.ID
+				}
+				key := "cluster-admin:" + conn.ID
+				if !clusterAdminSet[key] {
+					roles = append(roles, auth.AvailableRole{
+						Kind:    "cluster-admin",
+						Cluster: conn.ID,
+						Label:   "Cluster Admin: " + label,
+					})
+					clusterAdminSet[key] = true
+				}
+			}
+		}
 		roles = append(roles, auth.AvailableRole{Kind: "ui-admin", Label: "UI Admin"})
 	}
 
