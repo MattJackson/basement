@@ -479,14 +479,32 @@ func TestGarage_NewDriver_AdminOnly_S3EndpointButNoCreds(t *testing.T) {
 // call could be issued.
 func TestGarage_NewDriver_AdminOnly_ListBucketsWorks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/ListBuckets" || r.Method != "GET" {
-			t.Errorf("expected GET /v2/ListBuckets, got %s %s", r.Method, r.URL.Path)
+		if r.URL.Path == "/v2/ListBuckets" && r.Method == "GET" {
+			response := []listBucketsResponseItem{
+				{ID: "bucket-a", Created: time.Now(), GlobalAliases: []string{"docs"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+			return
 		}
-		response := []listBucketsResponseItem{
-			{ID: "bucket-a", Created: time.Now(), GlobalAliases: []string{"docs"}},
+
+		if r.URL.Path == "/v2/GetBucketInfo" && r.Method == "GET" {
+			query := r.URL.Query()
+			bucketID := query.Get("id")
+			resp := getBucketInfoResponse{
+				ID:                bucketID,
+				Created:           time.Now(),
+				GlobalAliases:     []string{"docs"},
+				Objects:           10,
+				Bytes:             5000,
+				UnfinishedUploads: 2,
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
+
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
 	}))
 	defer server.Close()
 
@@ -504,6 +522,9 @@ func TestGarage_NewDriver_AdminOnly_ListBucketsWorks(t *testing.T) {
 	}
 	if len(buckets) != 1 {
 		t.Fatalf("got %d buckets, want 1", len(buckets))
+	}
+	if buckets[0].Objects != 10 || buckets[0].Bytes != 5000 {
+		t.Errorf("expected stats populated: objects=%d bytes=%d", buckets[0].Objects, buckets[0].Bytes)
 	}
 }
 

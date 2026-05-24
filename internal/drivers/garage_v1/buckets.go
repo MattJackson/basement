@@ -2,9 +2,11 @@ package garage_v1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	driverpkg "github.com/mattjackson/basement/internal/driver"
@@ -25,6 +27,12 @@ import (
 // individually via GetBucket — but GetBucket via the v1 BucketInfo schema
 // (garage-admin-v1.yml:1277-1328) also doesn't include `created`, so this
 // field is currently always zero for the v1 driver.
+//
+// Performance note: This method fans out GetBucket calls via a bounded
+// worker pool (8 concurrent goroutines) to populate Objects, Bytes, and
+// UnfinishedUploads fields. At 200 buckets with ~50ms per call, fanout
+// adds ~1.5s total latency — acceptable for the admin list page. For
+// clusters >500 buckets, consider adding pagination support in a follow-up.
 func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 	// Region-tier fallback: no admin client wired -> use S3 ListBuckets.
 	//
@@ -94,6 +102,51 @@ func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 		}
 		buckets = append(buckets, bucket)
 	}
+
+	if len(buckets) == 0 {
+		return buckets, nil
+	}
+
+	const maxWorkers = 8
+	sem := make(chan struct{}, maxWorkers)
+	var mu sync.Mutex
+	var errs []error
+
+	var wg sync.WaitGroup
+	wg.Add(len(buckets))
+
+	for i := range buckets {
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			info, err := d.GetBucket(ctx, buckets[idx].ID)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("bucket %q: %w", buckets[idx].ID, err))
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			buckets[idx].Objects = info.Objects
+			buckets[idx].Bytes = info.Bytes
+			buckets[idx].UnfinishedUploads = info.UnfinishedUploads
+			mu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	if len(errs) > 0 {
+		var errMsgs []string
+		for _, e := range errs {
+			errMsgs = append(errMsgs, e.Error())
+		}
+		return buckets, fmt.Errorf("ListBuckets fanout: %v", errors.Join(errs...))
+	}
+
 	return buckets, nil
 }
 
