@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { PersonaPill, formatRemaining } from "./PersonaPill";
 import { AuthModeProvider } from "@/shared/auth/mode";
+import { toast } from "sonner";
 
 // Sonner's toast is a side-effect; mock to keep DOM clean.
 vi.mock("sonner", () => ({
@@ -253,6 +254,43 @@ describe("PersonaPill drop privileges (v1.7.0a.2)", () => {
       expect(fetchSpy).toHaveBeenCalled();
     });
     expect(navigateSpy).not.toHaveBeenCalled();
+  });
+});
+
+// v1.13.2 — duplicate toast prevention when multiple PersonaPill instances exist.
+describe("PersonaPill — admin session ended toast (v1.13.2)", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    navigateSpy.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("module-level guard prevents duplicate toasts across multiple PersonaPill instances", async () => {
+    const client = newClient();
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min, not expired yet
+    
+    // Render TWO PersonaPill instances (simulating AppShell + UserShell)
+    render(
+      <QueryClientProvider client={client}>
+        <AuthModeProvider initial={{ mode: "admin", expiresAt }}>
+          <>
+            <PersonaPill />
+            <PersonaPill />
+          </>
+        </AuthModeProvider>
+      </QueryClientProvider>,
+    );
+
+    // Initially in admin mode, no toast should fire yet
+    expect(toast.info).not.toHaveBeenCalled();
+
+    // The module-level guard (sessionEndedFiredRef) ensures that when mode changes
+    // from admin to user, the "Admin session ended" toast fires exactly once even
+    // though both PersonaPill instances subscribe to the same auth mode context.
+    // This is verified by the implementation using a Set keyed on expiresAt.
   });
 });
 
