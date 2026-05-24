@@ -1,6 +1,7 @@
 import { Outlet, createRootRoute } from "@tanstack/react-router";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ErrorComponent } from "@/components/ErrorComponent";
 
 export const Route = createRootRoute({
   component: () => (
@@ -11,4 +12,5 @@ export const Route = createRootRoute({
       </>
     </TooltipProvider>
   ),
+  errorComponent: ErrorComponent,
 });
