@@ -163,11 +163,11 @@ func TestCreate_NameValidation(t *testing.T) {
 		name string
 		want error
 	}{
-		{"ci", ErrInvalidName},        // too short
-		{"", ErrInvalidName},          // empty
+		{"ci", ErrInvalidName}, // too short
+		{"", ErrInvalidName},   // empty
 		{strings.Repeat("a", 65), ErrInvalidName},
-		{"ci prod", ErrInvalidName},   // space
-		{"ci/prod", ErrInvalidName},   // slash
+		{"ci prod", ErrInvalidName}, // space
+		{"ci/prod", ErrInvalidName}, // slash
 		{"ci-prod", nil},
 		{"ci_prod", nil},
 		{"ABC123", nil},
@@ -308,8 +308,8 @@ func TestUpdate_DoesNotTouchSecret(t *testing.T) {
 	ctx := context.Background()
 
 	sa, secret, _ := store.Create(ctx, ServiceAccount{
-		OwnerUserID: "matthew",
-		Name:        "ci-prod",
+		OwnerUserID:  "matthew",
+		Name:         "ci-prod",
 		Capabilities: []Capability{{ID: "bucket:view", Scope: "bucket:c1:b1"}},
 	})
 
@@ -623,5 +623,109 @@ func TestListForUser_ScopesByOwner(t *testing.T) {
 		if sa.OwnerUserID != "matthew" {
 			t.Errorf("unexpected owner %q in matthew's list", sa.OwnerUserID)
 		}
+	}
+}
+
+// TestCountAll_ReturnsTotalCount verifies CountAll returns correct count.
+func TestCountAll_ReturnsTotalCount(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	// Create multiple SAs for different users
+	_, _, _ = store.Create(ctx, ServiceAccount{OwnerUserID: "user1", Name: "sa-1"})
+	_, _, _ = store.Create(ctx, ServiceAccount{OwnerUserID: "user1", Name: "sa-2"})
+	_, _, _ = store.Create(ctx, ServiceAccount{OwnerUserID: "user2", Name: "sa-3"})
+
+	count, err := store.CountAll(ctx)
+	if err != nil {
+		t.Fatalf("CountAll failed: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected count 3, got %d", count)
+	}
+}
+
+// TestCountAll_EmptyStore_ReturnsZero verifies CountAll returns 0 for empty store.
+func TestCountAll_EmptyStore_ReturnsZero(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	count, err := store.CountAll(ctx)
+	if err != nil {
+		t.Fatalf("CountAll failed: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected count 0 for empty store, got %d", count)
+	}
+}
+
+// TestWriteLocked_ErrorPath exercises writeLocked when file write fails.
+func TestWriteLocked_ErrorPath(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	fs := store.(*fileStore)
+
+	// Corrupt the path to force write failure
+	originalPath := fs.path
+	fs.path = "/nonexistent/directory/service_accounts.json"
+
+	fs.mu.Lock()
+	err = fs.writeLocked()
+	fs.mu.Unlock()
+
+	// Restore path for cleanup
+	fs.path = originalPath
+
+	if err == nil {
+		t.Error("writeLocked should fail when directory doesn't exist")
+	}
+}
+
+// TestWriteLocked_PersistsData verifies writeLocked correctly persists data.
+func TestWriteLocked_PersistsData(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	// Create a SA first to populate the cache
+	_, _, _ = store.Create(ctx, ServiceAccount{OwnerUserID: "test", Name: "sa-1"})
+
+	fs := store.(*fileStore)
+
+	// Call writeLocked directly
+	fs.mu.Lock()
+	err = fs.writeLocked()
+	fs.mu.Unlock()
+
+	if err != nil {
+		t.Errorf("writeLocked failed: %v", err)
+	}
+
+	// Verify data was written by reopening
+	store2, err := Open(dir)
+	if err != nil {
+		t.Fatalf("reopen failed: %v", err)
+	}
+
+	count, err := store2.CountAll(ctx)
+	if err != nil {
+		t.Fatalf("CountAll after reopen failed: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected count 1 after reopen, got %d", count)
 	}
 }
