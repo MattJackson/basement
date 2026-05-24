@@ -123,9 +123,9 @@ func TestSimulatePolicy_DenyScopeMismatch(t *testing.T) {
 	srv, enf, cleanup := newPolicyTestEnv(t, true)
 	defer cleanup()
 
-	// wife has bucket_user but only on family-photos, not lsi.
+	// wife has cluster_admin but only on family-photos, not lsi.
 	if err := enf.AssignRole(policy.RoleAssignment{
-		UserID: "wife", RoleID: "bucket_user", Scope: "bucket:cid-x:family-photos",
+		UserID: "wife", RoleID: "cluster_admin", Scope: "bucket:cid-x:family-photos",
 	}); err != nil {
 		t.Fatalf("seed wife assignment: %v", err)
 	}
@@ -153,11 +153,11 @@ func TestSimulatePolicy_DenyCapabilityNotInRole(t *testing.T) {
 	srv, enf, cleanup := newPolicyTestEnv(t, true)
 	defer cleanup()
 
-	// bucket_user includes objects:list but NOT bucket:delete; assigning
-	// wife bucket_user @ bucket:cid-x:* should leave bucket:delete denied
+	// cluster_admin includes objects:list but NOT bucket:delete; assigning
+	// wife cluster_admin @ bucket:cid-x:* should leave bucket:delete denied
 	// at that scope.
 	if err := enf.AssignRole(policy.RoleAssignment{
-		UserID: "wife", RoleID: "bucket_user", Scope: "bucket:cid-x:photos",
+		UserID: "wife", RoleID: "cluster_admin", Scope: "bucket:cid-x:photos",
 	}); err != nil {
 		t.Fatalf("seed wife assignment: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestSimulatePolicy_DenyCapabilityNotInRole(t *testing.T) {
 	}
 	resp := decodeSimResponse(t, rr)
 	if resp.Allowed {
-		t.Errorf("expected allowed=false (bucket_user has no bucket:delete), got true")
+		t.Errorf("expected allowed=false (cluster_admin has no bucket:delete), got true")
 	}
 	joined := strings.ToLower(joinSteps(resp.Reasoning))
 	if !strings.Contains(joined, "capability") {
@@ -227,7 +227,7 @@ func TestSimulatePolicy_ObjectsBucketDeprecationNote(t *testing.T) {
 // TestSimulatePolicy_ObjectsBucketDeprecationNote_NotPrependedOnHostScope
 // is the negative case: a non-bucket / non-objects check (e.g.
 // host:manage_users @ host:*) must NOT get the deprecation note —
-// the helper only applies to the bucket_user surface that retired.
+// the helper applies to legacy objects:* at bucket scope which retired.
 func TestSimulatePolicy_ObjectsBucketDeprecationNote_NotPrependedOnHostScope(t *testing.T) {
 	srv, enf, cleanup := newPolicyTestEnv(t, true)
 	defer cleanup()

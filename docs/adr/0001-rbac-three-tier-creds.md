@@ -378,6 +378,20 @@ relevant prompt.
 - `[[v05_scope]]` — predates this ADR; some assumptions there
   about "all users see all clusters" supersede here.
 
+## Resolution (v2.0)
+
+The bucket_user role was completely removed in v2.0.0a per [[v2_clean_break]].
+No backward-compat shims were added; legacy assignments are dropped silently at boot.
+Bucket-level access now flows exclusively through:
+
+1. Region keychain S3 keys (UserRegions) — primary path for user-tier access
+2. cluster_admin role with bucket-scoped assignments — for operators who need
+   explicit policy-based grants
+
+This completes the architectural shift from basement-enforced per-bucket grants to
+backend-enforced access via S3 credentials.
+
 ## Tags
 
 `rbac`, `architecture`, `breaking-change`, `v0.9`, `creds-hygiene`
+

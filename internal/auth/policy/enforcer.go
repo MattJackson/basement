@@ -112,10 +112,9 @@ type Enforcer interface {
 	// runtime grants him the blanket roles up front. Operators
 	// can revoke or narrow these via /admin/policies later.
 	//
-	// ADR-0002 (v1.1.0f) note: the legacy `bucket_user @ bucket:*` seed
-	// is no longer created on fresh deployments — bucket-level user
-	// access flows through the region keychain's S3 key, not policy.
-	// Existing bucket_user assignments survive untouched (back-compat).
+	// v2.0.0a: bucket_user role completely removed per [[v2_clean_break]].
+	// No seed assignment created; existing assignments are dropped at boot
+	// by Store.MigrateBucketUserAssignments().
 	SeedEnvAdmin(username string) error
 }
 
@@ -464,10 +463,9 @@ func (e *fileEnforcer) UpsertRole(r Role) error {
 			// Preserve Seed flag from the existing record — caller can't
 			// promote nor demote seed status via UpsertRole.
 			r.Seed = existing.Seed
-			// Preserve Deprecated flag too — once a role is sunsetted
-			// (ADR-0002 bucket_user), an operator editing its label or
-			// capabilities can't accidentally un-deprecate it. Removing
-			// the deprecation is a code change, not a UI action.
+// Preserve Deprecated flag too — once a role is sunsetted, an operator
+		// editing its label or capabilities can't accidentally un-deprecate it.
+		// Removing the deprecation is a code change, not a UI action.
 			r.Deprecated = existing.Deprecated
 			e.roles[i] = r
 			return e.saveLocked()
@@ -707,14 +705,9 @@ func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 		return nil
 	}
 
-	// ADR-0002 (v1.1.0f): no longer seed bucket_user @ bucket:*. The
-	// role is deprecated — bucket-level user access flows through the
-	// region keychain's S3 key, not basement policy. Existing
-	// deployments that already have the assignment keep it (back-compat
-	// + cleanup-on-demand); new deployments get nothing for it. Removing
-	// the wants entry is the whole change: AssignRole was already
-	// idempotent, so existing matthew@bucket_user@bucket:* rows survive
-	// untouched.
+	// v2.0.0a: bucket_user role removed entirely per [[v2_clean_break]].
+	// No seed assignment created; legacy assignments are dropped at boot
+	// by Store.MigrateBucketUserAssignments().
 	wants := []RoleAssignment{
 		{UserID: username, RoleID: "host_admin", Scope: "host:*"},
 		// v0.9.0m.1: superuser scope. Covers every domain — key:*,
@@ -804,21 +797,6 @@ func seedDefaults() ([]Role, []RoleAssignment) {
 				"objects:list",
 			},
 			Seed: true,
-		},
-		{
-			ID:          "bucket_user",
-			Label:       "Bucket User",
-			Description: "Deprecated as of ADR-0002 (v1.1.0f): user-tier bucket access is now controlled by the S3 key attached to a UserRegion, not by basement policy. New assignments have no effect; existing assignments remain for back-compat and deletable for cleanup.",
-			Capabilities: []string{
-				"bucket:view",
-				"objects:list",
-				"objects:get",
-				"objects:put",
-				"objects:share_create",
-				"objects:share_revoke",
-			},
-			Seed:       true,
-			Deprecated: true,
 		},
 	}
 

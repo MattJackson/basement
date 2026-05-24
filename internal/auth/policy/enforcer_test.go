@@ -24,11 +24,11 @@ func TestEnforcer_SeedOnFirstLoad(t *testing.T) {
 	e, dir := newTestEnforcer(t)
 
 	roles := e.Roles()
-	if len(roles) != 3 {
-		t.Fatalf("expected 3 seed roles, got %d: %+v", len(roles), roles)
+	if len(roles) != 2 {
+		t.Fatalf("expected 2 seed roles, got %d: %+v", len(roles), roles)
 	}
 
-	wantIDs := map[string]bool{"host_admin": false, "cluster_admin": false, "bucket_user": false}
+	wantIDs := map[string]bool{"host_admin": false, "cluster_admin": false}
 	for _, r := range roles {
 		if _, ok := wantIDs[r.ID]; !ok {
 			t.Errorf("unexpected seed role %q", r.ID)
@@ -158,12 +158,9 @@ func TestEnforcer_DeleteRole_RefusesSeed(t *testing.T) {
 	if err := e.DeleteRole("cluster_admin"); err == nil {
 		t.Errorf("DeleteRole(cluster_admin) should return error (seed role)")
 	}
-	if err := e.DeleteRole("bucket_user"); err == nil {
-		t.Errorf("DeleteRole(bucket_user) should return error (seed role)")
-	}
 
 	// Seed roles still present.
-	if len(e.Roles()) != 3 {
+	if len(e.Roles()) != 2 {
 		t.Errorf("seed roles missing after DeleteRole attempts: %d", len(e.Roles()))
 	}
 
@@ -259,19 +256,19 @@ func TestEnforcer_UpsertRole_ValidatesCapabilities(t *testing.T) {
 
 	// Editing a seed role keeps Seed=true regardless of caller's intent.
 	if err := e.UpsertRole(Role{
-		ID:           "bucket_user",
-		Label:        "Bucket User Renamed",
+		ID:           "cluster_admin",
+		Label:        "Cluster Admin Renamed",
 		Capabilities: []string{"objects:list"},
 		Seed:         false, // try to demote
 	}); err != nil {
 		t.Fatalf("UpsertRole edit seed: %v", err)
 	}
 	for _, r := range e.Roles() {
-		if r.ID == "bucket_user" {
+		if r.ID == "cluster_admin" {
 			if !r.Seed {
-				t.Errorf("seed role bucket_user lost Seed=true after edit")
+				t.Errorf("seed role cluster_admin lost Seed=true after edit")
 			}
-			if r.Label != "Bucket User Renamed" {
+			if r.Label != "Cluster Admin Renamed" {
 				t.Errorf("seed role edit didn't persist label change")
 			}
 		}
@@ -281,7 +278,7 @@ func TestEnforcer_UpsertRole_ValidatesCapabilities(t *testing.T) {
 func TestEnforcer_Persists(t *testing.T) {
 	e, dir := newTestEnforcer(t)
 
-	if err := e.AssignRole(RoleAssignment{UserID: "wife", RoleID: "bucket_user", Scope: "bucket:abc:family-photos"}); err != nil {
+	if err := e.AssignRole(RoleAssignment{UserID: "wife", RoleID: "cluster_admin", Scope: "bucket:abc:family-photos"}); err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
 	if err := e.UpsertRole(Role{
@@ -300,7 +297,7 @@ func TestEnforcer_Persists(t *testing.T) {
 
 	// Wife's assignment survived.
 	got := e2.AssignmentsFor("wife")
-	if len(got) != 1 || got[0].RoleID != "bucket_user" || got[0].Scope != "bucket:abc:family-photos" {
+	if len(got) != 1 || got[0].RoleID != "cluster_admin" || got[0].Scope != "bucket:abc:family-photos" {
 		t.Errorf("wife assignment did not persist: %+v", got)
 	}
 
@@ -319,9 +316,9 @@ func TestEnforcer_Persists(t *testing.T) {
 		t.Errorf("custom viewer role did not persist")
 	}
 
-	// Total role count is 4 (3 seed + viewer).
-	if n := len(e2.Roles()); n != 4 {
-		t.Errorf("expected 4 roles after persist+reopen, got %d", n)
+	// Total role count is 3 (2 seed + viewer).
+	if n := len(e2.Roles()); n != 3 {
+		t.Errorf("expected 3 roles after persist+reopen, got %d", n)
 	}
 
 	// And the seed assignment is still present too.
@@ -334,7 +331,7 @@ func TestEnforcer_Persists(t *testing.T) {
 func TestEnforcer_UnassignRole(t *testing.T) {
 	e, _ := newTestEnforcer(t)
 
-	a := RoleAssignment{UserID: "bob", RoleID: "bucket_user", Scope: "bucket:abc:photos"}
+	a := RoleAssignment{UserID: "bob", RoleID: "cluster_admin", Scope: "bucket:abc:photos"}
 	if err := e.AssignRole(a); err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
@@ -348,7 +345,7 @@ func TestEnforcer_UnassignRole(t *testing.T) {
 	}
 
 	// Unassign.
-	if err := e.UnassignRole("bob", "bucket_user", "bucket:abc:photos"); err != nil {
+	if err := e.UnassignRole("bob", "cluster_admin", "bucket:abc:photos"); err != nil {
 		t.Fatalf("UnassignRole: %v", err)
 	}
 	got = e.AssignmentsFor("bob")
@@ -357,7 +354,7 @@ func TestEnforcer_UnassignRole(t *testing.T) {
 	}
 
 	// Unassigning an absent triple is a no-op.
-	if err := e.UnassignRole("bob", "bucket_user", "bucket:abc:photos"); err != nil {
+	if err := e.UnassignRole("bob", "cluster_admin", "bucket:abc:photos"); err != nil {
 		t.Errorf("UnassignRole absent should be no-op, got %v", err)
 	}
 }
@@ -372,18 +369,26 @@ func TestEnforcer_AssignRole_UnknownRole(t *testing.T) {
 func TestEnforcer_Capabilities(t *testing.T) {
 	e, _ := newTestEnforcer(t)
 
-	if err := e.AssignRole(RoleAssignment{UserID: "alice", RoleID: "bucket_user", Scope: "bucket:abc:lsi"}); err != nil {
+	if err := e.AssignRole(RoleAssignment{UserID: "alice", RoleID: "cluster_admin", Scope: "bucket:abc:lsi"}); err != nil {
 		t.Fatalf("AssignRole: %v", err)
 	}
 
 	caps := e.Capabilities("alice", "bucket:abc:lsi")
 	want := []string{
+		"bucket:create",
+		"bucket:delete",
+		"bucket:edit_alias",
+		"bucket:set_quota",
 		"bucket:view",
-		"objects:get",
+		"cluster:edit",
+		"cluster:edit_layout",
+		"cluster:test",
+		"cluster:view_layout",
+		"key:create",
+		"key:delete",
+		"key:edit_permissions",
+		"key:view",
 		"objects:list",
-		"objects:put",
-		"objects:share_create",
-		"objects:share_revoke",
 	}
 	if !reflect.DeepEqual(caps, want) {
 		t.Errorf("Capabilities(alice, bucket:abc:lsi) = %v, want %v", caps, want)
@@ -478,92 +483,9 @@ func TestScopeMatches(t *testing.T) {
 	}
 }
 
-// TestEnforcer_BucketUser_Deprecated asserts ADR-0002 (v1.1.0f)'s
-// marker: the seed bucket_user role carries Deprecated=true so the UI
-// can render a badge + banner + assignment guardrail. The flag is
-// data-only; the enforcer's Can() does NOT branch on it. Existing
-// bucket_user assignments continue to grant their listed capabilities
-// at their scopes — back-compat is preserved by leaving the role's
-// capability list and Can() logic untouched.
-func TestEnforcer_BucketUser_Deprecated(t *testing.T) {
-	e, _ := newTestEnforcer(t)
-
-	var found bool
-	for _, r := range e.Roles() {
-		if r.ID == "bucket_user" {
-			found = true
-			if !r.Deprecated {
-				t.Errorf("v1.1.0f expects bucket_user.Deprecated=true on the seed, got false")
-			}
-			if !r.Seed {
-				t.Errorf("v1.1.0f: bucket_user must remain a seed role (back-compat)")
-			}
-		}
-	}
-	if !found {
-		t.Fatal("bucket_user seed role missing from Roles()")
-	}
-
-	// Sanity: editing the role through UpsertRole keeps Deprecated=true
-	// even if the caller tries to toggle it. The flag is set in code,
-	// not by API callers.
-	if err := e.UpsertRole(Role{
-		ID:           "bucket_user",
-		Label:        "Re-labelled",
-		Capabilities: []string{"objects:list"},
-		Deprecated:   false, // try to un-deprecate
-	}); err != nil {
-		t.Fatalf("UpsertRole bucket_user: %v", err)
-	}
-	for _, r := range e.Roles() {
-		if r.ID == "bucket_user" && !r.Deprecated {
-			t.Errorf("UpsertRole erased Deprecated=true on bucket_user; expected preservation")
-		}
-	}
-
-	// And new roles can't be born deprecated via UpsertRole — same
-	// pattern as Seed=true. The Deprecated flag is reserved for code.
-	if err := e.UpsertRole(Role{
-		ID:           "fake_deprecated",
-		Capabilities: []string{"objects:list"},
-		Deprecated:   true,
-	}); err != nil {
-		t.Fatalf("UpsertRole fake_deprecated: %v", err)
-	}
-	for _, r := range e.Roles() {
-		if r.ID == "fake_deprecated" && r.Deprecated {
-			t.Errorf("UpsertRole should strip Deprecated=true on new roles")
-		}
-	}
-}
-
-// TestEnforcer_BucketUser_BackCompat: existing bucket_user assignments
-// still grant their listed capabilities at their scopes after v1.1.0f.
-// The role being "deprecated" is a UI signal, not an enforcement
-// change — operators with legacy assignments retain the capability
-// surface they had until they (or basement's housekeeping) revoke
-// the assignment.
-func TestEnforcer_BucketUser_BackCompat(t *testing.T) {
-	e, _ := newTestEnforcer(t)
-
-	if err := e.AssignRole(RoleAssignment{
-		UserID: "legacy_user",
-		RoleID: "bucket_user",
-		Scope:  "bucket:cid-x:family-photos",
-	}); err != nil {
-		t.Fatalf("AssignRole bucket_user: %v", err)
-	}
-
-	// Pre-v1.1.0f behaviour: bucket_user @ bucket:cid-x:family-photos
-	// grants the capabilities in its list at that scope. Capabilities
-	// are unchanged in v1.1.0f.
-	if !e.Can("legacy_user", "objects:list", "bucket:cid-x:family-photos") {
-		t.Errorf("v1.1.0f back-compat: existing bucket_user assignment must still grant objects:list")
-	}
-	if !e.Can("legacy_user", "bucket:view", "bucket:cid-x:family-photos") {
-		t.Errorf("v1.1.0f back-compat: existing bucket_user assignment must still grant bucket:view")
-	}
-}
+// v2.0.0a: bucket_user role removed entirely per [[v2_clean_break]].
+// No tests for deprecated/legacy behavior — all legacy assignments
+// are dropped at boot by Store.MigrateBucketUserAssignments().
 
 // TestEnforcer_FileShape sanity-checks the on-disk JSON is what we
 // claim — single object with "roles" + "assignments" arrays. Future
@@ -578,8 +500,8 @@ func TestEnforcer_FileShape(t *testing.T) {
 	if err := json.Unmarshal(data, &pf); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(pf.Roles) != 3 {
-		t.Errorf("expected 3 roles on disk, got %d", len(pf.Roles))
+	if len(pf.Roles) != 2 {
+		t.Errorf("expected 2 roles on disk, got %d", len(pf.Roles))
 	}
 	if len(pf.Assignments) != 1 {
 		t.Errorf("expected 1 assignment on disk, got %d", len(pf.Assignments))

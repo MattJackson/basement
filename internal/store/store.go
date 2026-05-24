@@ -2,12 +2,14 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/federation"
 	"github.com/mattjackson/basement/internal/serviceaccount"
 )
@@ -223,9 +225,87 @@ func (s *Store) MigrateLegacyUsers() error {
 	return saveJSON(s.usersPath, s.usersCache)
 }
 
+// MigrateBucketUserAssignments drops all RoleAssignments with roleID="bucket_user"
+	// from policies.json at boot (v2.0.0a per [[v2_clean_break]]). Silently removes
+	// them — no warning, no replacement. Logs a WARN line with the count removed so
+	// operators can see in startup logs how many legacy rows were dropped. Returns
+	// the number of assignments dropped. Idempotent: re-running is a no-op since
+	// all bucket_user rows are gone after first drop.
+func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
+	data, err := os.ReadFile(policyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil // no policies file yet — seed will create it
+		}
+		return 0, fmt.Errorf("reading policies: %w", err)
+	}
+
+	// Local policyFile shape for unmarshalling policies.json (mirrors internal/auth/policy)
+	type policyFile struct {
+		Roles       []policy.Role `json:"roles"`
+		Assignments []policy.RoleAssignment `json:"assignments"`
+	}
+
+	var pf policyFile
+	if err := json.Unmarshal(data, &pf); err != nil {
+		return 0, fmt.Errorf("parsing policies: %w", err)
+	}
+
+	dropped := 0
+	filtered := pf.Assignments[:0]
+	for _, a := range pf.Assignments {
+		if a.RoleID == "bucket_user" {
+			dropped++
+			continue // drop this assignment
+		}
+		filtered = append(filtered, a)
+	}
+
+	pf.Assignments = filtered
+
+	// Write back atomically.
+	data, err = json.MarshalIndent(pf, "", "  ")
+	if err != nil {
+		return 0, fmt.Errorf("marshaling policies: %w", err)
+	}
+	data = append(data, '\n')
+
+	tmp := policyPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return 0, fmt.Errorf("writing tmp file: %w", err)
+	}
+
+	f, err := os.OpenFile(tmp, os.O_RDONLY|os.O_SYNC, 0644)
+	if err != nil {
+		os.Remove(tmp)
+		return 0, fmt.Errorf("opening tmp for fsync: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		return 0, fmt.Errorf("fsyncing tmp: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return 0, fmt.Errorf("closing tmp: %w", err)
+	}
+
+	if err := os.Rename(tmp, policyPath); err != nil {
+		os.Remove(tmp)
+		return 0, fmt.Errorf("renaming policies: %w", err)
+	}
+
+	if dropped > 0 {
+		// Log at WARN level so operators see it in startup logs.
+		fmt.Printf("[WARN] MigrateBucketUserAssignments: dropped %d bucket_user assignment(s) per v2.0.0a [[v2_clean_break]]\n", dropped)
+	}
+
+	return dropped, nil
+}
+
 // ArchiveLegacyBucketGrants renames {dataDir}/bucket_grants.json to
-// bucket_grants.json.migrated-v1.1.0e if the legacy file still exists.
-// Idempotent: no-op if the file is already archived or never existed.
+	// bucket_grants.json.migrated-v1.1.0e if the legacy file still exists.
+	// Idempotent: no-op if the file is already archived or never existed.
 //
 // The per-user per-bucket BucketGrants table was the v0.9.0c–v1.1.0d
 // credential store; ADR-0002 replaced it with the per-user region

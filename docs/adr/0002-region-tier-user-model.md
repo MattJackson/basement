@@ -212,7 +212,19 @@ None. Existing rows already satisfy the new `(userId, endpoint,
 alias)` uniqueness (the v1.1.x constraint was strictly stronger).
 On-disk JSON shape unchanged.
 
+## Resolution (v2.0)
+
+The bucket_user role was completely removed in v2.0.0a per [[v2_clean_break]].
+This ADR's step 6 ("deprecate bucket_user") is now complete — the role no longer exists,
+and legacy assignments are dropped at boot without preservation.
+
+Bucket-level access is controlled exclusively by:
+
+1. Region keychain S3 keys (UserRegions) — the v1.1.x region-keychain model
+2. cluster_admin policy assignments with bucket-scoped capabilities — for operators who need explicit policy-based grants
+
 ## Tags
 
 `rbac`, `architecture`, `breaking-change`, `v1.1`, `v1.2`,
 `region-tier`, `key-first`, `supersedes-byo-cluster`
+
