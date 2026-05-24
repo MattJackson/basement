@@ -69,6 +69,11 @@ function CrossIcon({ className }: { className?: string }) {
 const WARN_AMBER_MS = 2 * 60 * 1000;
 const WARN_RED_MS = 30 * 1000;
 
+// Module-level guard to prevent duplicate "Admin session ended" toasts
+// when multiple PersonaPill instances exist (AppShell + UserShell).
+// Only fires once per admin→user transition, keyed on expiresAt.
+const sessionEndedFiredRef = useRef<Set<number>>(new Set());
+
 export function PersonaPill() {
   const { mode, expiresAt } = useAuthMode();
   const setAuthMode = useSetAuthMode();
@@ -102,15 +107,20 @@ export function PersonaPill() {
       prevModeRef.current === "admin" || prevModeRef.current === "elevated";
     if (elevated && !wasElevated) {
       warnedRef.current = null;
+      sessionEndedFiredRef.current.clear();
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFlashing(false);
     }
     if (!elevated && wasElevated) {
-      toast.info("Admin session ended");
-      warnedRef.current = "ended";
+      const expiresAtKey = expiresAt;
+      if (!sessionEndedFiredRef.current.has(expiresAtKey)) {
+        sessionEndedFiredRef.current.add(expiresAtKey);
+        toast.info("Admin session ended");
+        warnedRef.current = "ended";
+      }
     }
     prevModeRef.current = mode;
-  }, [mode]);
+  }, [mode, expiresAt]);
 
   const remainingMs = expiresAt > 0 ? expiresAt - now : 0;
   const elevated = mode === "admin" || mode === "elevated";
