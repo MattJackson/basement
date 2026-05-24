@@ -77,8 +77,30 @@ const WARN_RED_MS = 30 * 1000;
 // async, so keying on expiresAt let both fire.)
 // when multiple PersonaPill instances exist (AppShell + UserShell).
 // Only fires once per admin→user transition, keyed on expiresAt.
-let sessionEndedFiredAt = 0;
-const SESSION_ENDED_TOAST_WINDOW_MS = 2000;
+// v1.13.21: distinguish NATURAL expiry from USER-INITIATED drop.
+// - User-initiated (PersonaPill drop button OR UserMenu role switch
+//   to user OR active-role switch dropping privileges): the success
+//   toast "Privileges dropped" already tells the operator what happened;
+//   firing "Admin session ended" on top is noisy. SUPPRESS.
+// - Natural expiry (countdown hit 0, AuthModeProvider auto-downgrades):
+//   the operator didn't ask for it; tell them.
+//
+// Set sessionEndedSuppressed = true from any user-initiated drop path
+// BEFORE the mode flip propagates. The falling-edge effect checks the
+// flag, skips the toast, and resets the flag.
+//
+// Replaces the v1.13.14 time-window dedup (racy when two PersonaPill
+// mounts' useEffects fire in the same render commit — both read
+// sessionEndedFiredAt = 0 before either sets it, so both pass the gate
+// and both fire).
+export let sessionEndedSuppressed = false;
+export function suppressNextSessionEndedToast() {
+  sessionEndedSuppressed = true;
+}
+// Module-level handled-flag for natural-expiry case. Atomic across the
+// two PersonaPill mounts because JS is single-threaded: the first
+// effect run sets it true, the second sees true and skips.
+let sessionEndedHandledFor: number | null = null;
 
 export function PersonaPill() {
   const { mode, expiresAt } = useAuthMode();
@@ -117,14 +139,23 @@ export function PersonaPill() {
       prevModeRef.current === "admin" || prevModeRef.current === "elevated";
     if (elevated && !wasElevated) {
       warnedRef.current = null;
-      sessionEndedFiredAt = 0;
+      sessionEndedHandledFor = null;
+      sessionEndedSuppressed = false;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFlashing(false);
     }
     if (!elevated && wasElevated) {
-      const now = Date.now();
-      if (now - sessionEndedFiredAt > SESSION_ENDED_TOAST_WINDOW_MS) {
-        sessionEndedFiredAt = now;
+      // Per the comment block at module-top: user-initiated drops
+      // suppress this toast (the success toast covers it); natural
+      // expiry fires it exactly once across both PersonaPill mounts.
+      if (sessionEndedSuppressed) {
+        sessionEndedSuppressed = false;
+        warnedRef.current = "ended";
+      } else if (sessionEndedHandledFor !== prevModeRef.current.length) {
+        // Key the dedup on a sentinel that changes per transition (we
+        // don't have a stable per-transition ID, but the first mount
+        // to set it will block the second mount in the same tick).
+        sessionEndedHandledFor = prevModeRef.current.length;
         toast.info("Admin session ended");
         warnedRef.current = "ended";
       }
@@ -172,6 +203,9 @@ export function PersonaPill() {
   const handleDrop = async () => {
     if (dropping) return;
     setDropping(true);
+    // v1.13.21: suppress "Admin session ended" toast — the success
+    // toast below already tells the operator what happened.
+    suppressNextSessionEndedToast();
     try {
       const res = await fetch("/api/v1/auth/logout-elevation", {
         method: "POST",
