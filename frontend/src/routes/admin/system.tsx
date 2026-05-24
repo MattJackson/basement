@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
@@ -1450,9 +1450,9 @@ function SkinsManager() {
     }
   }
 
-  const [defaultSkin, setDefaultSkin] = useState(caps.data?.activeSkin || "basement-default");
-  const [userOverridable, setUserOverridable] = useState(caps.data?.userOverridableSkin || false);
-  const [allowedUserSkins, setAllowedUserSkins] = useState<string[]>(caps.data?.allowedUserSkins || []);
+  const [defaultSkin, setDefaultSkin] = useState<string>("basement-default");
+  const [userOverridable, setUserOverridable] = useState<boolean>(false);
+  const [allowedUserSkins, setAllowedUserSkins] = useState<string[]>([]);
 
   // Sync local state with query data when org-capabilities refetches after skin change
   useEffect(() => {
@@ -1463,8 +1463,15 @@ function SkinsManager() {
     }
   }, [caps.data]);
 
-  // Debounced save on change
+  // Debounced save on change - only trigger after initial mount to avoid race conditions
+  const mountedRef = useRef(false);
+  
   useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    
     const timer = setTimeout(async () => {
       try {
         // @ts-ignore - admin/system path not in generated types yet
