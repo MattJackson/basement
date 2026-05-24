@@ -1438,10 +1438,18 @@ function SkinsManager() {
 
   async function fetchSkins() {
     try {
-      // @ts-ignore - API types not generated yet
-      const { data } = await client.GET("/api/v1/skins", {});
-      if (data) {
-        setSkins(data as Array<{ name: string; displayName: string; swatch: string; builtIn: boolean }>);
+      // v1.13.14: was hitting /api/v1/skins (user endpoint), which is
+      // a different shape and doesn't include built-ins in the way the
+      // admin list expects — result was an empty installed list. Admin
+      // page must call /api/v1/admin/skins which returns the full set
+      // with policy info.
+      const res = await fetch("/api/v1/admin/skins", { credentials: "include" });
+      if (!res.ok) {
+        throw new Error(`/admin/skins ${res.status}`);
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setSkins(data as SkinWithPolicy[]);
       }
     } catch (error) {
       toast.error("Failed to load skins");
