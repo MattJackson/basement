@@ -107,6 +107,14 @@
   --basement-warning: hsl(38 92% 50%);
   --basement-success: hsl(142 71% 45%);
   --basement-info: hsl(217 91% 60%);
+
+  /* v1.13.0c: density tokens from skin.density enum */
+  --density-compact-padding: 4px;
+  --density-compact-gap: 8px;
+  --density-comfortable-padding: 8px;
+  --density-comfortable-gap: 12px;
+  --density-spacious-padding: 12px;
+  --density-spacious-gap: 16px;
 }
 
 .dark {
@@ -119,14 +127,40 @@
   --basement-warning: hsl(38 92% 55%);
   --basement-success: hsl(142 71% 50%);
   --basement-info: hsl(217 91% 65%);
+
+  /* v1.13.0c: density tokens for dark mode */
+  --density-compact-padding: 4px;
+  --density-compact-gap: 8px;
+  --density-comfortable-padding: 8px;
+  --density-comfortable-gap: 12px;
+  --density-spacious-padding: 12px;
+  --density-spacious-gap: 16px;
 }
 
 html,
 body {
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
-    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  font-family: var(--skin-sans-font, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");
+}
+
+/* v1.13.0c: monospace font for code surfaces */
+code, pre, .font-mono-skin {
+  font-family: var(--skin-mono-font, ui-monospace, SFMono-Regular, "SF Mono", "Menlo", "Monaco", "Inconsolata", "Fira Mono", monospace);
+}
+
+/* v1.13.0c: dynamic border radius from skin */
+*,
+*::before,
+*::after {
+  --skin-border-radius: var(--radius, 0.5rem);
+  border-radius: var(--skin-border-radius);
+}
+
+button, .btn,
+.card, dialog, .modal,
+.input, input, textarea, select {
+  border-radius: var(--skin-border-radius);
 }
 
 /* Smooth color transitions when toggling. */

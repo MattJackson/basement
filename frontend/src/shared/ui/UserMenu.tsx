@@ -17,11 +17,12 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { client } from "@/shared/api/client";
-import { useUser } from "@/shared/auth/useUser";
-import { useVersion } from "@/shared/api/queries";
+import { useVersion, useOrgCapabilities, canUserSelectSkin, type Skin, useSetActiveSkin } from "@/shared/api/queries";
 import { useElevationPrompt } from "@/shared/auth/elevation";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 import { useTheme, type Theme } from "@/shared/theme/useTheme";
+import { useSkinRegistry, useSkin } from "@/shared/hooks/useSkin";
+import { useUser } from "@/shared/auth/useUser";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -52,6 +53,10 @@ export function UserMenu() {
   // org's skinPolicy — brand identity doesn't dictate whether a user
   // sees light or dark mode.
   const { theme, setTheme } = useTheme();
+  const orgCaps = useOrgCapabilities();
+  const skinRegistry = useSkinRegistry();
+  const activeSkin = useSkin();
+  const setActiveSkinMutation = useSetActiveSkin();
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
@@ -225,7 +230,35 @@ export function UserMenu() {
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        <DropdownMenuSeparator />
+
+        {/* v1.13.0c: Skin selector — only shown when org policy permits user choice */}
+        {canUserSelectSkin(orgCaps.data?.skinPolicy) && skinRegistry.data && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger data-testid="skin-submenu-trigger">
+                Skin
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={activeSkin.skin?.name || ""}
+                  onValueChange={(selectedName) => {
+                    setActiveSkinMutation.mutate(selectedName);
+                  }}
+                >
+                  {skinRegistry.data.map((s: Skin) => (
+                    <DropdownMenuRadioItem key={s.name} value={s.name}>
+                      {s.displayName || s.name}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            <DropdownMenuSeparator />
+          </>
+        )}
+
         <DropdownMenuItem onClick={handleLogout}>Sign out</DropdownMenuItem>
         {version?.version && (
           <>
