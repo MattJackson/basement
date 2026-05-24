@@ -8,10 +8,10 @@ READ-ONLY audit. No mutations against the deployment.
 
 | Viewport | PASS | MINOR | MAJOR |
 | --- | ---: | ---: | ---: |
-| iPhone SE (375x667) | 4 | 31 | 0 |
-| iPhone 14 (390x844) | 4 | 31 | 0 |
-| iPad Mini (768x1024) | 4 | 31 | 0 |
-| Android narrow (360x640) | 4 | 31 | 0 |
+| iPhone SE (375x667) | 4 | 31 | 2 |
+| iPhone 14 (390x844) | 4 | 31 | 2 |
+| iPad Mini (768x1024) | 35 | 0 | 0 |
+| Android narrow (360x640) | 4 | 31 | 2 |
 
 Total routes audited per viewport: 35.
 
@@ -26,266 +26,211 @@ Total routes audited per viewport: 35.
 7. **table-overflow** — `<table>` on phone viewports either has a scrolling parent or fits the viewport (no naked overflow).
 8. **console-error** — page should produce zero console errors on load (excludes "Failed to load resource" noise).
 
-Screenshots: `/tmp/basement-mobile-2026-05-24T08-51-35-510Z/{viewport}/{route}.png`.
+Screenshots: `/tmp/basement-mobile-2026-05-24T10-01-47-637Z/{viewport}/{route}.png`.
 
 ## Findings
 
 ### iPhone SE (375x667)
 
 - **/** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/keys** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 3 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 86x18px "Add a key"
 - **/files/keys/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 10 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 139x17px "← Back to my regions"; <input[type=text]> 343x38px "<no-text>"; <input[type=url]> 343x38px "<no-text>" (+5 more)
 - **/files/regions/new** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 10 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 139x17px "← Back to my regions"; <input[type=text]> 343x38px "<no-text>"; <input[type=url]> 343x38px "<no-text>" (+5 more)
 - **/files/shares** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/syncs** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/syncs/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 5 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 108x20px "← Back to syncs"; <select> 293x37px "— pick a region —"; <select> 293x37px "— pick a region —"
 - **/files/backups** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/backups/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 126x20px "← Back to backups"; <select> 293x37px "— pick a region —"
 - **/files/federated-buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/federated-buckets/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 145x20px "← Back to federations"; <select> 293x37px "— pick a region —"
 - **/files/webhooks** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/webhooks/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 137x20px "← Back to webhooks"; <select> 293x37px "All my regions"
 - **/admin** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+18 more)
 - **/admin/system** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/users** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 13 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <select> 343x37px "Closed (admin only)Invite onlyOpen (anyo"; <button> 72x34px "garage"; <button> 93x34px "garage-v1"; <button> 74x34px "aws-s3" (+8 more)
+- **/admin/users** [MAJOR]
+  - `horizontal-scroll`: page width 409px > viewport 375px (overflow 34px). worst: <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"> right=408px
+  - `tap-target`: 3 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 43x20px "Delete"; <input[type=text]> 343x38px "<no-text>"
 - **/admin/users/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 106x20px "← Back to users"
 - **/admin/clusters** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+18 more)
 - **/admin/clusters/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 122x20px "← Back to clusters"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>" (+6 more)
 - **/admin/buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 21 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 90x28px "All clusters"; <button> 90x28px "All clusters"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+16 more)
 - **/admin/audit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 34 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <select> 309x37px "AnySuccessFailure"; <button> 17x24px "{}"; <button> 17x24px "{}"; <button> 17x24px "{}" (+29 more)
 - **/admin/policies** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 248x28px "▶Capability reference(29 verbs)"; <button> 133x28px "+ Add custom role"; <button> 46x28px "Edit"; <button> 46x28px "Edit" (+18 more)
 - **/admin/service-accounts** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 122 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+117 more)
 - **/admin/service-accounts/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 7 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 156x15px "← Back to service accounts"; <button> 67x32px "Never"; <button> 77x32px "1 month"; <button> 87x32px "6 months" (+2 more)
 - **/admin/migrate** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 109x20px "← Back to usage"; <select> 293x37px "— pick a source —classegarage-v2-test-1g"; <select> 293x37px "— pick a destination —classegarage-v2-te"
 - **/admin/usage** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 15 interactive element(s) < 44x44px. <a> 42x44px "Usage"; <button> 34x24px "7d"; <button> 43x24px "30d"; <button> 43x24px "90d"; <a> 44x35px "Migrate →" (+10 more)
+- **/admin/clusters/{cid}** [MAJOR]
+  - `horizontal-scroll`: page width 635px > viewport 375px (overflow 260px). worst: <button class="group/button inline-flex shrink-0 items-center justify-center border bg-clip-pad"> right=635px
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 124x20px "← Back to Clusters"; <button> 140x28px "Migrate this cluster"; <button> 91x28px "Edit cluster"; <button> 119x28px "Test connection" (+6 more)
 - **/admin/clusters/{cid}/edit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 115x20px "← Back to cluster"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>" (+6 more)
 - **/admin/clusters/{cid}/layout** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 58x20px "← classe"; <select> 112x29px "storagegatewayunassigned"; <button> 58x28px "Stage"
 - **/admin/clusters/{cid}/scrub** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 58x20px "← classe"
 
 ### iPhone 14 (390x844)
 
 - **/** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/keys** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 3 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 86x18px "Add a key"
 - **/files/keys/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 10 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 139x17px "← Back to my regions"; <input[type=text]> 358x38px "<no-text>"; <input[type=url]> 358x38px "<no-text>" (+5 more)
 - **/files/regions/new** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 10 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 139x17px "← Back to my regions"; <input[type=text]> 358x38px "<no-text>"; <input[type=url]> 358x38px "<no-text>" (+5 more)
 - **/files/shares** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/syncs** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/syncs/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 5 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 108x20px "← Back to syncs"; <select> 308x37px "— pick a region —"; <select> 308x37px "— pick a region —"
 - **/files/backups** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/backups/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 126x20px "← Back to backups"; <select> 308x37px "— pick a region —"
 - **/files/federated-buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/federated-buckets/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 145x20px "← Back to federations"; <select> 308x37px "— pick a region —"
 - **/files/webhooks** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/webhooks/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 137x20px "← Back to webhooks"; <select> 308x37px "All my regions"
 - **/admin** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+18 more)
 - **/admin/system** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/users** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 13 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <select> 358x37px "Closed (admin only)Invite onlyOpen (anyo"; <button> 72x34px "garage"; <button> 93x34px "garage-v1"; <button> 74x34px "aws-s3" (+8 more)
+- **/admin/users** [MAJOR]
+  - `horizontal-scroll`: page width 408px > viewport 390px (overflow 18px). worst: <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"> right=408px
+  - `tap-target`: 3 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 43x20px "Delete"; <input[type=text]> 358x38px "<no-text>"
 - **/admin/users/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 106x20px "← Back to users"
 - **/admin/clusters** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+18 more)
 - **/admin/clusters/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 122x20px "← Back to clusters"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>" (+6 more)
 - **/admin/buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 21 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 90x28px "All clusters"; <button> 90x28px "All clusters"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+16 more)
 - **/admin/audit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 53 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <select> 324x37px "AnySuccessFailure"; <button> 17x24px "{}"; <button> 17x24px "{}"; <button> 17x24px "{}" (+48 more)
 - **/admin/policies** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 248x28px "▶Capability reference(29 verbs)"; <button> 133x28px "+ Add custom role"; <button> 46x28px "Edit"; <button> 46x28px "Edit" (+18 more)
 - **/admin/service-accounts** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 122 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+117 more)
 - **/admin/service-accounts/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 7 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 156x15px "← Back to service accounts"; <button> 67x32px "Never"; <button> 77x32px "1 month"; <button> 87x32px "6 months" (+2 more)
 - **/admin/migrate** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 109x20px "← Back to usage"; <select> 308x37px "— pick a source —classegarage-v2-test-1g"; <select> 308x37px "— pick a destination —classegarage-v2-te"
 - **/admin/usage** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 15 interactive element(s) < 44x44px. <a> 42x44px "Usage"; <button> 34x24px "7d"; <button> 43x24px "30d"; <button> 43x24px "90d"; <a> 44x35px "Migrate →" (+10 more)
+- **/admin/clusters/{cid}** [MAJOR]
+  - `horizontal-scroll`: page width 635px > viewport 390px (overflow 245px). worst: <button class="group/button inline-flex shrink-0 items-center justify-center border bg-clip-pad"> right=635px
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 124x20px "← Back to Clusters"; <button> 140x28px "Migrate this cluster"; <button> 91x28px "Edit cluster"; <button> 119x28px "Test connection" (+6 more)
 - **/admin/clusters/{cid}/edit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 115x20px "← Back to cluster"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>" (+6 more)
 - **/admin/clusters/{cid}/layout** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 58x20px "← classe"; <select> 112x29px "storagegatewayunassigned"; <button> 58x28px "Stage"
 - **/admin/clusters/{cid}/scrub** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 58x20px "← classe"
 
 ### iPad Mini (768x1024)
 
-- **/** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/keys** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/keys/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/regions/new** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/shares** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/syncs** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/syncs/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/backups** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/backups/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/federated-buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/federated-buckets/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/webhooks** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/files/webhooks/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/system** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/users** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/users/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/audit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/policies** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/service-accounts** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/service-accounts/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/migrate** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/usage** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}/edit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}/layout** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}/scrub** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+No findings.
 
 ### Android narrow (360x640)
 
 - **/** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/keys** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 3 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 86x18px "Add a key"
 - **/files/keys/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 10 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 139x17px "← Back to my regions"; <input[type=text]> 328x38px "<no-text>"; <input[type=url]> 328x38px "<no-text>" (+5 more)
 - **/files/regions/new** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 10 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 139x17px "← Back to my regions"; <input[type=text]> 328x38px "<no-text>"; <input[type=url]> 328x38px "<no-text>" (+5 more)
 - **/files/shares** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/syncs** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/syncs/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 5 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 108x20px "← Back to syncs"; <select> 278x37px "— pick a region —"; <select> 278x37px "— pick a region —"
 - **/files/backups** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/backups/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 126x20px "← Back to backups"; <select> 278x37px "— pick a region —"
 - **/files/federated-buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/federated-buckets/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 145x20px "← Back to federations"; <select> 278x37px "— pick a region —"
 - **/files/webhooks** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"
 - **/files/webhooks/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 30x44px "Files"; <a> 31x44px "Keys"; <a> 137x20px "← Back to webhooks"; <select> 278x37px "All my regions"
 - **/admin** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+18 more)
 - **/admin/system** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/users** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 13 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <select> 328x37px "Closed (admin only)Invite onlyOpen (anyo"; <button> 72x34px "garage"; <button> 93x34px "garage-v1"; <button> 74x34px "aws-s3" (+8 more)
+- **/admin/users** [MAJOR]
+  - `horizontal-scroll`: page width 408px > viewport 360px (overflow 48px). worst: <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium"> right=408px
+  - `tap-target`: 3 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 43x20px "Delete"; <input[type=text]> 328x38px "<no-text>"
 - **/admin/users/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 106x20px "← Back to users"
 - **/admin/clusters** [MINOR]
-  - `console-error`: 2 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en | Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+18 more)
 - **/admin/clusters/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 122x20px "← Back to clusters"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>" (+6 more)
 - **/admin/buckets** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 21 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 90x28px "All clusters"; <button> 90x28px "All clusters"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+16 more)
 - **/admin/audit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 53 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <select> 294x37px "AnySuccessFailure"; <button> 17x24px "{}"; <button> 17x24px "{}"; <button> 17x24px "{}" (+48 more)
 - **/admin/policies** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 23 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 248x28px "▶Capability reference(29 verbs)"; <button> 133x28px "+ Add custom role"; <button> 46x28px "Edit"; <button> 46x28px "Edit" (+18 more)
 - **/admin/service-accounts** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 122 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu"; <button> 32x44px "Open menu" (+117 more)
 - **/admin/service-accounts/new** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 7 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 156x15px "← Back to service accounts"; <button> 67x32px "Never"; <button> 77x32px "1 month"; <button> 87x32px "6 months" (+2 more)
 - **/admin/migrate** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 109x20px "← Back to usage"; <select> 278x37px "— pick a source —classegarage-v2-test-1g"; <select> 278x37px "— pick a destination —classegarage-v2-te"
 - **/admin/usage** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
-- **/admin/clusters/{cid}** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 15 interactive element(s) < 44x44px. <a> 42x44px "Usage"; <button> 34x24px "7d"; <button> 43x24px "30d"; <button> 43x24px "90d"; <a> 44x35px "Migrate →" (+10 more)
+- **/admin/clusters/{cid}** [MAJOR]
+  - `horizontal-scroll`: page width 635px > viewport 360px (overflow 275px). worst: <button class="group/button inline-flex shrink-0 items-center justify-center border bg-clip-pad"> right=635px
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 124x20px "← Back to Clusters"; <button> 140x28px "Migrate this cluster"; <button> 91x28px "Edit cluster"; <button> 119x28px "Test connection" (+6 more)
 - **/admin/clusters/{cid}/edit** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 11 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 115x20px "← Back to cluster"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>"; <button> 32x32px "<no-text>" (+6 more)
 - **/admin/clusters/{cid}/layout** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 4 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 58x20px "← classe"; <select> 112x29px "storagegatewayunassigned"; <button> 58x28px "Stage"
 - **/admin/clusters/{cid}/scrub** [MINOR]
-  - `console-error`: 1 console error(s). Sample: Error: Minified React error #321; visit https://react.dev/errors/321 for the full message or use the non-minified dev en
+  - `tap-target`: 2 interactive element(s) < 44x44px. <a> 41x44px "Usage"; <a> 58x20px "← classe"

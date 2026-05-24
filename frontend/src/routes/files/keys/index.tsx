@@ -200,14 +200,16 @@ function RegionKeyCard({ region }: { region: UserRegion }) {
             >
               {region.accessKeyId}
             </code>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={onCopy}
-              data-testid="copy-region-key-button"
-            >
-              {copied ? "Copied" : "Copy"}
-            </Button>
+          <div className="min-h-[44px] flex items-center">
+             <Button
+               size="sm"
+               variant="secondary"
+               onClick={onCopy}
+               data-testid="copy-region-key-button"
+             >
+               {copied ? "Copied" : "Copy"}
+             </Button>
+           </div>
           </div>
         </div>
 
@@ -227,23 +229,27 @@ function RegionKeyCard({ region }: { region: UserRegion }) {
         )}
 
         <div className="pt-2 border-t flex justify-end gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setRotateOpen(true)}
-            data-testid="rotate-region-key-button"
-          >
-            Rotate key
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-destructive hover:text-destructive"
-            onClick={() => setConfirmOpen(true)}
-            data-testid="delete-region-key-button"
-          >
-            Delete
-          </Button>
+          <div className="min-h-[44px] flex items-center">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setRotateOpen(true)}
+              data-testid="rotate-region-key-button"
+            >
+              Rotate key
+            </Button>
+          </div>
+          <div className="min-h-[44px] flex items-center">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-destructive hover:text-destructive"
+              onClick={() => setConfirmOpen(true)}
+              data-testid="delete-region-key-button"
+            >
+              Delete
+            </Button>
+          </div>
         </div>
       </CardContent>
 
