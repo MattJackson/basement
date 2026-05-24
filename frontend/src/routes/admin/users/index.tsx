@@ -112,36 +112,38 @@ function UsersPage() {
         <Button onClick={() => navigate({ to: "/admin/users/new" })}>+ New User</Button>
       </div>
 
-      <table className="min-w-full divide-y divide-border">
-        <thead className="bg-muted/50">
-          <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Username</th>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Role</th>
-            <th className="px-6 py-3 text-left text-xs font-medium uppercase text-muted-foreground">UI Admin</th>
-            <th className="px-6 py-3 text-right text-xs font-medium uppercase text-muted-foreground">Actions</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border bg-background">
-          {users.map((user) => (
-            <tr key={user.username}>
-              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{user.username}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">{user.role}</td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm">
-                {user.uiAdmin ? (
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary">Yes</span>
-                ) : (
-                  <span className="text-muted-foreground">No</span>
-                )}
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                <button onClick={() => handleDeleteUser(user.username)} className="text-destructive hover:text-destructive/80">
-                  Delete
-                </button>
-              </td>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-border">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase text-muted-foreground">Username</th>
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase text-muted-foreground sm:hidden">Role</th>
+              <th className="px-6 py-3 text-left text-xs font-medium uppercase text-muted-foreground sm:hidden">UI Admin</th>
+              <th className="px-6 py-3 text-right text-xs font-medium uppercase text-muted-foreground sm:hidden">Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-border bg-background">
+            {users.map((user) => (
+              <tr key={user.username}>
+                <td className="px-6 py-4 text-sm font-medium">{user.username}</td>
+                <td className="px-6 py-4 text-sm text-muted-foreground sm:hidden">{user.role}</td>
+                <td className="px-6 py-4 sm:hidden">
+                  {user.uiAdmin ? (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs bg-primary/10 text-primary">Yes</span>
+                  ) : (
+                    <span className="text-muted-foreground">No</span>
+                  )}
+                </td>
+                <td className="px-6 py-4 text-right sm:hidden">
+                  <button onClick={() => handleDeleteUser(user.username)} className="text-destructive hover:text-destructive/80">
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <PendingInvitesSection />
     </div>
@@ -256,63 +258,65 @@ function PendingInvitesSection() {
           No pending invites. Create one above to onboard a new user.
         </div>
       ) : (
-        <table className="min-w-full divide-y divide-border" data-testid="invites-table">
-          <thead className="bg-muted/50">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Label</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Token</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Created</th>
-              <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Expires</th>
-              <th className="px-4 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border bg-background">
-            {invites.map((inv: InvitePublic) => (
-              <tr key={inv.id} data-testid={`invite-row-${inv.id}`}>
-                <td className="px-4 py-3 text-sm font-medium">{inv.label || "—"}</td>
-                <td className="px-4 py-3 text-sm font-mono">
-                  …{inv.tokenLast4}
-                  {freshTokens[inv.id] && (
-                    <button
-                      type="button"
-                      onClick={() => handleCopyFresh(inv.id)}
-                      className="ml-2 rounded border px-2 py-0.5 text-xs hover:bg-muted/40"
-                      data-testid={`copy-full-${inv.id}`}
-                    >
-                      Copy full URL
-                    </button>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-sm text-muted-foreground">
-                  {new Date(inv.createdAt).toLocaleDateString()}
-                </td>
-                <td className="px-4 py-3 text-sm">
-                  {inv.expired ? (
-                    <span className="text-destructive">expired</span>
-                  ) : (
-                    <span className="text-muted-foreground">{new Date(inv.expiresAt).toLocaleDateString()}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-right text-sm whitespace-nowrap">
-                  <button
-                    onClick={() => handleRotate(inv.id)}
-                    className="text-primary hover:underline mr-3"
-                    data-testid={`rotate-${inv.id}`}
-                  >
-                    Rotate
-                  </button>
-                  <button
-                    onClick={() => handleRevoke(inv.id)}
-                    className="text-destructive hover:underline"
-                    data-testid={`revoke-${inv.id}`}
-                  >
-                    Revoke
-                  </button>
-                </td>
+        <div className="overflow-x-auto" data-testid="invites-table-wrapper">
+          <table className="min-w-full divide-y divide-border" data-testid="invites-table">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Label</th>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground sm:hidden">Token</th>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground sm:hidden">Created</th>
+                <th className="px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground sm:hidden">Expires</th>
+                <th className="px-4 py-2 text-right text-xs font-medium uppercase text-muted-foreground sm:hidden">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-border bg-background">
+              {invites.map((inv: InvitePublic) => (
+                <tr key={inv.id} data-testid={`invite-row-${inv.id}`}>
+                  <td className="px-4 py-3 text-sm font-medium">{inv.label || "—"}</td>
+                  <td className="px-4 py-3 text-sm font-mono sm:hidden">
+                    …{inv.tokenLast4}
+                    {freshTokens[inv.id] && (
+                      <button
+                        type="button"
+                        onClick={() => handleCopyFresh(inv.id)}
+                        className="ml-2 rounded border px-2 py-0.5 text-xs hover:bg-muted/40"
+                        data-testid={`copy-full-${inv.id}`}
+                      >
+                        Copy full URL
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-muted-foreground sm:hidden">
+                    {new Date(inv.createdAt).toLocaleDateString()}
+                  </td>
+                  <td className="px-4 py-3 text-sm sm:hidden">
+                    {inv.expired ? (
+                      <span className="text-destructive">expired</span>
+                    ) : (
+                      <span className="text-muted-foreground">{new Date(inv.expiresAt).toLocaleDateString()}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm whitespace-nowrap sm:hidden">
+                    <button
+                      onClick={() => handleRotate(inv.id)}
+                      className="text-primary hover:underline mr-3"
+                      data-testid={`rotate-${inv.id}`}
+                    >
+                      Rotate
+                    </button>
+                    <button
+                      onClick={() => handleRevoke(inv.id)}
+                      className="text-destructive hover:underline"
+                      data-testid={`revoke-${inv.id}`}
+                    >
+                      Revoke
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );

@@ -121,7 +121,7 @@ function ClusterDetailScreen() {
 
       {/* Header */}
       <div className="space-y-2">
-        <div className="flex items-center gap-3">
+        <div className="min-w-0 flex flex-wrap items-center gap-3">
           {colorDot(cluster.color)}
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{cluster.label}</h1>
           <DriverBadge driver={cluster.driver} />
@@ -133,23 +133,25 @@ function ClusterDetailScreen() {
               requiresMigration={lockStatus.requiresMigration}
             />
           ) : null}
-          <div className="flex-1" />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
-            title="Bulk-copy every bucket from this cluster to another cluster"
-          >
-            Migrate this cluster
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
-            title="Edit label, color, admin token, S3 endpoint…"
-          >
-            Edit cluster
-          </Button>
+          <div className="flex-1 min-w-0" />
+          <div className="flex flex-wrap gap-2 flex-shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
+              title="Bulk-copy every bucket from this cluster to another cluster"
+            >
+              Migrate this cluster
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
+              title="Edit label, color, admin token, S3 endpoint…"
+            >
+              Edit cluster
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -234,20 +236,22 @@ function ClusterDetailScreen() {
           </div>
         ) : (
           <div className="rounded-lg border bg-card overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="text-right w-[140px]">Size</TableHead>
-                  <TableHead className="text-right w-[120px]">Objects</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {buckets.slice(0, 8).map((b) => (
-                  <ClusterBucketRow key={b.id} cid={cid} bucketId={b.id} fallbackAlias={b.aliases?.[0]} />
-                ))}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="text-right w-[140px] sm:hidden">Size</TableHead>
+                    <TableHead className="text-right w-[120px] sm:hidden">Objects</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {buckets.slice(0, 8).map((b) => (
+                    <ClusterBucketRow key={b.id} cid={cid} bucketId={b.id} fallbackAlias={b.aliases?.[0]} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             {buckets.length > 8 && (
               <div className="px-4 py-2 text-xs text-muted-foreground border-t">
                 + {buckets.length - 8} more in this cluster
@@ -282,19 +286,21 @@ function ClusterDetailScreen() {
           </div>
         ) : (
           <div className="rounded-lg border bg-card overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Access Key ID</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {keys.slice(0, 8).map((k) => (
-                  <ClusterKeyRow key={k.id} cid={cid} keyId={k.id} fallbackName={k.name} />
-                ))}
-              </TableBody>
-            </Table>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead className="sm:hidden">Access Key ID</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {keys.slice(0, 8).map((k) => (
+                    <ClusterKeyRow key={k.id} cid={cid} keyId={k.id} fallbackName={k.name} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
             {keys.length > 8 && (
               <div className="px-4 py-2 text-xs text-muted-foreground border-t">
                 {/* v1.11.0.15: no link target — the global aggregate
@@ -319,28 +325,30 @@ function ClusterDetailScreen() {
                 description="Add nodes via the Layout editor."
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-1/4">ID</TableHead>
-                    <TableHead>Hostname</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Zone</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {nodes.map((node) => (
-                    <TableRow key={node.id}>
-                      <TableCell className="font-mono text-xs">{node.id.slice(0, 12)}</TableCell>
-                      <TableCell>{node.hostname ?? "—"}</TableCell>
-                      <TableCell>{node.role ?? "unassigned"}</TableCell>
-                      <TableCell>{node.zone ?? "—"}</TableCell>
-                      <TableCell><NodeStatus status={node.status} /></TableCell>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-1/4 sm:hidden">ID</TableHead>
+                      <TableHead className="sm:hidden">Hostname</TableHead>
+                      <TableHead className="sm:hidden">Role</TableHead>
+                      <TableHead className="sm:hidden">Zone</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {nodes.map((node) => (
+                      <TableRow key={node.id}>
+                        <TableCell className="font-mono text-xs sm:hidden">{node.id.slice(0, 12)}</TableCell>
+                        <TableCell className="sm:hidden">{node.hostname ?? "—"}</TableCell>
+                        <TableCell className="sm:hidden">{node.role ?? "unassigned"}</TableCell>
+                        <TableCell className="sm:hidden">{node.zone ?? "—"}</TableCell>
+                        <TableCell><NodeStatus status={node.status} /></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -633,25 +641,27 @@ function ClusterAdminsSection({ cid }: { cid: string }) {
         </div>
       ) : (
         <div className="rounded-lg border bg-card overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead className="w-[140px]">Role</TableHead>
-                <TableHead className="w-[180px]">Source</TableHead>
-                <TableHead className="w-[120px] text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.assignments.map((a, i) => (
-                <ClusterAdminRow
-                  key={`${a.userId}|${a.roleId}|${a.scope}|${i}`}
-                  cid={cid}
-                  assignment={a}
-                />
-              ))}
-            </TableBody>
-          </Table>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead className="w-[140px] sm:hidden">Role</TableHead>
+                  <TableHead className="w-[180px] sm:hidden">Source</TableHead>
+                  <TableHead className="w-[120px] text-right sm:hidden">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.assignments.map((a, i) => (
+                  <ClusterAdminRow
+                    key={`${a.userId}|${a.roleId}|${a.scope}|${i}`}
+                    cid={cid}
+                    assignment={a}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 
