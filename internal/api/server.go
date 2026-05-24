@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -27,6 +28,8 @@ import (
 	"github.com/mattjackson/basement/internal/sync"
 	"github.com/mattjackson/basement/internal/web"
 	"github.com/mattjackson/basement/internal/webhook"
+
+	"github.com/mattjackson/basement/internal/api/docs"
 )
 
 // oidcProvider is the subset of *auth.OIDCProvider the API server needs.
@@ -762,6 +765,9 @@ func (s *Server) routes() {
 	// collector isn't wired so misconfigurations surface clearly.
 	r.Handle("/metrics", s.metricsHandler())
 
+	// v1.13.23: public docs at /docs/*.md rendered as HTML with basement chrome.
+	r.Handle("/docs/", s.docsHandler())
+
 	r.Handle("/*", web.Handler())
 }
 
@@ -823,8 +829,40 @@ func (s *Server) webdavRouter() http.Handler {
 				"WebDAV gateway is not configured on this deployment.")
 			return
 		}
+
+		// Browser navigation to /webdav returns a helpful message instead of 404.
+		if r.Method == http.MethodGet && (r.URL.Path == "/webdav" || r.URL.Path == "/webdav/") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Basement WebDAV Gateway</title>
+<style>body{font-family:system-ui,sans-serif;margin:4rem max(2rem,5vw);line-height:1.6}h1{margin:0 0 1rem}.code{background:#f4f4f4;padding:.2em .4rem;border-radius:3px;font-family:monospace}</style>
+</head>
+<body>
+<h1>Basement WebDAV Gateway</h1>
+<p>This endpoint is for <strong>WebDAV clients</strong>, not browsers.</p>
+<p>To mount this location:</p>
+<ul>
+<li><span class="code">macOS Finder</span>: Go → Connect to Server… → <span class="code">dav://basement.pq.io/webdav</span></li>
+<li><span class="code">Linux</span>: Use <span class="code">davfs2</span> or GNOME Files with <span class="code">dav://basement.pq.io/webdav</span></li>
+<li><span class="code">Cyberduck</span>: Protocol WebDAV, Server <span class="code">basement.pq.io</span>, Path <span class="code">/webdav</span></li>
+</ul>
+<p>See <a href="/docs/integrations/webdav">/docs/integrations/webdav</a> for setup instructions.</p>
+</body>
+</html>`)
+			return
+		}
+
 		s.webdav.ServeHTTP(w, r)
 	})
+}
+
+// docsHandler returns the /docs/* handler that renders markdown files as HTML.
+func (s *Server) docsHandler() http.Handler {
+	return http.HandlerFunc(docs.HandleDocs)
 }
 
 // logHandler is a middleware equivalent to chi.Logger using slog.
