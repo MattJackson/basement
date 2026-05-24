@@ -210,6 +210,33 @@ After capturing:
 
 ---
 
+## v1.13 skins shot list — Admin System page
+
+**Shot 01**: `01-admin-system-skins.png` (HERO for v1.13)
+
+**Where used**: Release notes v1.13.0, blog post "pluggable skins"
+
+**Setup**:
+- Log in as admin user with elevate to admin mode
+- Navigate to `/admin/system` page
+- Scroll to "Skins" card (appears below Gateways + Admin Session TTL cards)
+- Page should show:
+  - Card header: "Skins" title + "Upload Skin" button
+  - List of registered skins (basement-default by default, plus any custom uploads)
+  - Each skin row shows: displayName, version badge, Active badge if selected, Activate/Delete buttons
+
+**Composition**:
+- Window: 1440 × 900, full browser chrome shown for context
+- Crop: full window OR tight to page content (operator decides; pick whichever frames best)
+- Dark mode (project default per `tailwind.config.js` + `App.tsx`)
+
+**Sample data hints**:
+- basement-default should show as "Basement Default" with version 1.0.0
+- Active badge appears on currently selected skin
+- Delete button hidden for basement-default (protected), visible for custom uploads
+
+---
+
 ## Feature verification checklist (v0.5.0 shipped)
 
 Before capturing, verify these features are live on `https://basement.pq.io`:

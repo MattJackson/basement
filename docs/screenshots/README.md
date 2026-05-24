@@ -7,6 +7,29 @@ Capture script: `scripts/capture-v1.10-screenshots.ts` (Playwright,
 runs against a live deploy + falls back to mocked component renders
 where features aren't exercisable on the target deploy).
 
+## v1.13 gallery — Skins Release (1 shot)
+
+Last updated: 2026-05-23 against `https://basement.pq.io` (Garage v1
+single-region deploy). Re-shoot with:
+
+```bash
+node scripts/capture-v1.13-screenshots.ts
+# or against another deploy:
+BASE_URL=https://basement.example.com \
+  BUI_USERNAME=alice BUI_PASSWORD=hunter2 \
+  node scripts/capture-v1.13-screenshots.ts
+```
+
+Files live under `v1.13/`. Shots ending in `-mocked.png` are
+Playwright-driven static-HTML renders that approximate components
+which cannot render against the target deploy (e.g. features requiring
+backend capabilities). Mocked shots embed an explicit disclaimer below
+the content so they're transparent in documentation use.
+
+| #  | File                                       | What it shows                                          | Source       |
+|----|--------------------------------------------|--------------------------------------------------------|--------------|
+| 01 | `01-admin-system-skins.png`                | `/admin/system` Skins management card with registry    | live         |
+
 ## v1.10 gallery (15 shots)
 
 Last updated: 2026-05-23 against `https://basement.pq.io` (Garage v1
