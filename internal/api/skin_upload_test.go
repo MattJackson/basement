@@ -4,6 +4,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -13,9 +14,21 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/skin"
 )
+
+// withChiParam injects a chi URL param into the request context. The
+// skin handlers call chi.URLParam(r, "id") and the tests bypass the
+// router, so without this they all 400 on missing-id. Helper added
+// v1.11.0.33 (test infra fix).
+func withChiParam(req *http.Request, key, value string) *http.Request {
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add(key, value)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
 
 // TestUploadSkinHandler_ValidFile tests successful skin upload.
 func TestUploadSkinHandler_ValidFile(t *testing.T) {
@@ -23,7 +36,9 @@ func TestUploadSkinHandler_ValidFile(t *testing.T) {
 	cfg := &config.Config{DataDir: tmpDir}
 	srv := setupTestServerWithConfig(cfg, t)
 
-	skinData, err := json.Marshal(skin.BuiltInHighContrast())
+	testSkin := skin.BuiltInHighContrast()
+	testSkin.Name = "test-valid-file-upload"
+	skinData, err := json.Marshal(testSkin)
 	if err != nil {
 		t.Fatalf("Failed to marshal test skin: %v", err)
 	}
@@ -35,6 +50,8 @@ func TestUploadSkinHandler_ValidFile(t *testing.T) {
 	writer.Close()
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/skins/upload")
+	req.Body = io.NopCloser(body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	rw := httptest.NewRecorder()
 
@@ -67,6 +84,8 @@ func TestUploadSkinHandler_InvalidExtension(t *testing.T) {
 	writer.Close()
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/skins/upload")
+	req.Body = io.NopCloser(body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rw := httptest.NewRecorder()
 
 	srv.uploadSkinHandler(rw, req)
@@ -88,6 +107,8 @@ func TestUploadSkinHandler_InvalidJSON(t *testing.T) {
 	writer.Close()
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/skins/upload")
+	req.Body = io.NopCloser(body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rw := httptest.NewRecorder()
 
 	srv.uploadSkinHandler(rw, req)
@@ -104,7 +125,9 @@ func TestUploadSkinHandler_DuplicateName(t *testing.T) {
 	srv := setupTestServerWithConfig(&config.Config{DataDir: tmpDir}, t)
 
 	// First upload succeeds
-	skinData, _ := json.Marshal(skin.BuiltInHighContrast())
+	testSkin := skin.BuiltInHighContrast()
+	testSkin.Name = "test-duplicate-name-check"
+	skinData, _ := json.Marshal(testSkin)
 	body1 := &bytes.Buffer{}
 	writer1 := multipart.NewWriter(body1)
 	part1, _ := writer1.CreateFormFile("file", "test-skin.basement-skin.json")
@@ -112,6 +135,8 @@ func TestUploadSkinHandler_DuplicateName(t *testing.T) {
 	writer1.Close()
 
 	req1 := createAuthRequest(http.MethodPost, "/api/v1/admin/skins/upload")
+	req1.Body = io.NopCloser(body1)
+	req1.Header.Set("Content-Type", writer1.FormDataContentType())
 	rw1 := httptest.NewRecorder()
 	srv.uploadSkinHandler(rw1, req1)
 
@@ -127,6 +152,8 @@ func TestUploadSkinHandler_DuplicateName(t *testing.T) {
 	writer2.Close()
 
 	req2 := createAuthRequest(http.MethodPost, "/api/v1/admin/skins/upload")
+	req2.Body = io.NopCloser(body2)
+	req2.Header.Set("Content-Type", writer2.FormDataContentType())
 	rw2 := httptest.NewRecorder()
 	srv.uploadSkinHandler(rw2, req2)
 
@@ -151,7 +178,7 @@ func TestGetSkinPolicyHandler(t *testing.T) {
 	jsonBytes, _ := json.MarshalIndent(policy, "", "  ")
 	os.WriteFile(policyPath, jsonBytes, 0644)
 
-	req := createAuthRequest(http.MethodGet, "/api/v1/admin/skins/test-skin/policy")
+	req := withChiParam(createAuthRequest(http.MethodGet, "/api/v1/admin/skins/test-skin/policy"), "id", "test-skin")
 	rw := httptest.NewRecorder()
 
 	srv.getSkinPolicyHandler(rw, req)
@@ -185,7 +212,10 @@ func TestUpdateSkinPolicyHandler(t *testing.T) {
 	newPolicy := SkinPolicy{Public: true, CORSOrigin: "https://new.com"}
 	policyJSON, _ := json.Marshal(newPolicy)
 
-	req := createAuthRequest(http.MethodPut, "/api/v1/admin/skins/test-skin/policy")
+	body := bytes.NewReader(policyJSON)
+	req := withChiParam(createAuthRequest(http.MethodPut, "/api/v1/admin/skins/test-skin/policy"), "id", "test-skin")
+	req.Body = io.NopCloser(body)
+	req.Header.Set("Content-Type", "application/json")
 	rw := httptest.NewRecorder()
 
 	srv.updateSkinPolicyHandler(rw, req)
@@ -207,13 +237,13 @@ func TestUpdateSkinPolicyHandler(t *testing.T) {
 func TestActivateSkinHandler(t *testing.T) {
 	srv := setupTestServerWithConfig(&config.Config{DataDir: t.TempDir()}, t)
 
-	req := createAuthRequest(http.MethodPut, "/api/v1/admin/skins/basement-default/activate")
+	req := withChiParam(createAuthRequest(http.MethodPut, "/api/v1/admin/skins/basement-default/activate"), "id", "basement-default")
 	rw := httptest.NewRecorder()
 
 	srv.activateSkinHandler(rw, req)
 
 	if rw.Code != http.StatusOK {
-		t.Errorf("Expected status %d, got %d", http.StatusOK, rw.Code)
+		t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, rw.Code, rw.Body.String())
 	}
 
 	var resp map[string]interface{}
@@ -236,7 +266,7 @@ func TestDeleteSkinHandler(t *testing.T) {
 	skinData, _ := json.Marshal(skin.BuiltInMinimal())
 	os.WriteFile(skinPath, skinData, 0644)
 
-	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/skins/test-skin")
+	req := withChiParam(createAuthRequest(http.MethodDelete, "/api/v1/admin/skins/test-skin"), "id", "test-skin")
 	rw := httptest.NewRecorder()
 
 	srv.deleteSkinHandler(rw, req)
@@ -326,7 +356,7 @@ func TestValidateSkinJSON(t *testing.T) {
 func TestActivateSkinHandler_NotFound(t *testing.T) {
 	srv := setupTestServerWithConfig(&config.Config{DataDir: t.TempDir()}, t)
 
-	req := createAuthRequest(http.MethodPut, "/api/v1/admin/skins/nonexistent/activate")
+	req := withChiParam(createAuthRequest(http.MethodPut, "/api/v1/admin/skins/nonexistent/activate"), "id", "nonexistent")
 	rw := httptest.NewRecorder()
 
 	srv.activateSkinHandler(rw, req)
@@ -341,7 +371,7 @@ func TestActivateSkinHandler_NotFound(t *testing.T) {
 func TestDeleteSkinHandler_NotFound(t *testing.T) {
 	srv := setupTestServerWithConfig(&config.Config{DataDir: t.TempDir()}, t)
 
-	req := createAuthRequest(http.MethodDelete, "/api/v1/admin/skins/nonexistent")
+	req := withChiParam(createAuthRequest(http.MethodDelete, "/api/v1/admin/skins/nonexistent"), "id", "nonexistent")
 	rw := httptest.NewRecorder()
 
 	srv.deleteSkinHandler(rw, req)
@@ -424,7 +454,9 @@ func TestSkinUploadWithPolicy(t *testing.T) {
 	tmpDir := t.TempDir()
 	srv := setupTestServerWithConfig(&config.Config{DataDir: tmpDir}, t)
 
-	skinData, _ := json.Marshal(skin.BuiltInMinimal())
+	testSkin := skin.BuiltInMinimal()
+	testSkin.Name = "test-skin-with-policy"
+	skinData, _ := json.Marshal(testSkin)
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -435,6 +467,8 @@ func TestSkinUploadWithPolicy(t *testing.T) {
 	writer.Close()
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/skins/upload")
+	req.Body = io.NopCloser(body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rw := httptest.NewRecorder()
 
 	srv.uploadSkinHandler(rw, req)
@@ -444,9 +478,10 @@ func TestSkinUploadWithPolicy(t *testing.T) {
 			http.StatusCreated, rw.Code, rw.Body.String())
 	}
 
-	// Verify policy was saved
+	// Verify policy was saved — filename keyed by the skin's Name field,
+	// not the form-upload filename
 	dataDir := filepath.Join(tmpDir, "skins")
-	policyPath := filepath.Join(dataDir, "policy-test.policy.json")
+	policyPath := filepath.Join(dataDir, testSkin.Name+".policy.json")
 	
 	var policy SkinPolicy
 	if data, err := os.ReadFile(policyPath); err == nil {
