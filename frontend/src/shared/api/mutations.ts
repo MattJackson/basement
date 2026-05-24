@@ -5,6 +5,26 @@ import { useNavigate } from "@tanstack/react-router";
 
 type Bucket = components["schemas"]["Bucket"];
 
+// v1.13.18: User response with active role selector fields
+export interface UserResponse {
+  id?: string;
+  username: string;
+  role: "admin" | "user";
+  uiAdmin: boolean;
+  mode?: "user" | "admin" | "elevated";
+  modeExpiresAt?: number;
+  activeRole?: {
+    kind: "user" | "cluster-admin" | "ui-admin";
+    cluster?: string;
+  };
+  availableRoles?: Array<{
+    kind: "user" | "cluster-admin" | "ui-admin";
+    label: string;
+    cluster?: string;
+  }>;
+  oidcUser?: boolean;
+}
+
 /**
  * apiError builds a user-presentable Error from a non-2xx response.
  * Uses the uniform error shape from design.md (`{error:{code,message,details}}`)
@@ -341,16 +361,48 @@ export function useApplyLayout(cid: string) {
 
 export function useRevertLayout(cid: string) {
   const queryClient = useQueryClient();
-  return useMutation<void, Error, void>({
+  return useMutation({
     mutationFn: async () => {
-      const { response, error } = await client.POST("/admin/clusters/{cid}/layout/revert", {
+      const { data, error, response } = await client.POST("/admin/clusters/{cid}/layout/revert", {
         params: { path: { cid } },
       });
-      if (!response.ok) throw apiError(`revertLayout/${cid}`, response.status, error);
+      if (!response.ok || !data) throw apiError(`revertLayout/${cid}`, response.status, error);
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "layout"] });
     },
   });
 }
+
+// v1.13.18: Active role switching mutation
+export interface SwitchActiveRoleRequest {
+  kind: "user" | "cluster-admin" | "ui-admin";
+  cluster?: string; // only required for cluster-admin
+}
+
+export function useSwitchActiveRole() {
+  const queryClient = useQueryClient();
+  return useMutation<UserResponse, Error, SwitchActiveRoleRequest>({
+    mutationFn: async (req) => {
+      const res = await fetch("/api/v1/auth/active-role", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(req),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw apiError("active-role/switch", res.status, body);
+      }
+      return (await res.json()) as UserResponse;
+    },
+    onSuccess: () => {
+      // Invalidate /auth/me so the next fetch picks up the new active role
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+    },
+  });
+}
+
+
 

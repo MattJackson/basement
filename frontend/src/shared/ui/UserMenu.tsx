@@ -18,11 +18,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { client } from "@/shared/api/client";
 import { useVersion, useOrgCapabilities, useSetActiveSkin } from "@/shared/api/queries";
-import { useElevationPrompt } from "@/shared/auth/elevation";
-import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
+import { promptElevationFromAnywhere } from "@/shared/auth/elevation";
+import { useAuthMode } from "@/shared/auth/mode";
 import { useTheme, type Theme } from "@/shared/theme/useTheme";
 import { useSkinRegistry, useSkin } from "@/shared/hooks/useSkin";
 import { useUser } from "@/shared/auth/useUser";
+import { useSwitchActiveRole } from "@/shared/api/mutations";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -44,9 +45,7 @@ export function UserMenu() {
   // 403'd and required a re-click after the elevate modal. We now pop
   // the modal up front and only navigate on successful elevation —
   // already-elevated users skip the prompt and go straight to /admin.
-  const promptForElevation = useElevationPrompt();
   const { mode } = useAuthMode();
-  const setAuthMode = useSetAuthMode();
   // v1.13.0a (ADR-0008) — the light/dark/system toggle moved out of
   // the page chrome (formerly the standalone ThemeToggle button) and
   // into a Theme submenu here. Per-user always, regardless of the
@@ -61,8 +60,14 @@ export function UserMenu() {
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
   const uiAdmin = user?.uiAdmin ?? false;
+  const activeRole = user?.activeRole;
+  const availableRoles = user?.availableRoles ?? [];
   const initial = (user?.username ?? "?").charAt(0).toUpperCase();
 
+  const switchActiveRoleMutation = useSwitchActiveRole();
+
+  // handleSwitchToUser removed — role switching now handled via Role selector submenu
+  
   const handleLogout = async () => {
     try {
       await client.POST("/auth/logout");
@@ -75,48 +80,56 @@ export function UserMenu() {
     await navigate({ to: "/login" });
   };
 
-  const handleSwitchToAdmin = async () => {
-    if (mode === "admin" || mode === "elevated") {
-      await navigate({ to: "/admin/clusters" });
-      return;
-    }
-    try {
-      await promptForElevation(
-        "admin",
-        "Switching to the admin console requires admin re-authentication.",
-      );
-      await navigate({ to: "/admin/clusters" });
-    } catch {
-      // ELEVATION_CANCELLED — user dismissed the modal. Stay where we
-      // are; the UserMenu remains open visually only briefly because
-      // Radix closes on item click anyway.
-    }
-  };
+  // v1.13.18: Role selector handler
+  const handleRoleChange = async (roleKey: string) => {
+    if (!user?.activeRole || !availableRoles.length) return;
 
-  // v1.9.0e.2: "Switch to user view" drops privileges before navigating
-  // under the tight coupling. Mirror of handleDrop in PersonaPill —
-  // POST /auth/logout-elevation, snap local mode to USER, invalidate
-  // the cached /auth/me, then navigate. USER-mode clicks just navigate
-  // (no privileges to drop).
-  const handleSwitchToUser = async () => {
-    if (mode === "user") {
-      await navigate({ to: "/files" });
-      return;
-    }
+    // Find the selected role from available roles
+    const selectedRole = availableRoles.find(r => r.kind === roleKey.split(":")[0] && (!r.cluster || r.cluster === roleKey.split(":")[1]));
+    if (!selectedRole) return;
+
     try {
-      const res = await fetch("/api/v1/auth/logout-elevation", {
-        method: "POST",
-        credentials: "include",
+      await switchActiveRoleMutation.mutateAsync({
+        kind: selectedRole.kind,
+        cluster: selectedRole.cluster,
       });
-      if (!res.ok) {
-        toast.error(`Failed to drop privileges (HTTP ${res.status})`);
-        return;
+      
+      // Navigate to role-specific landing page after successful switch
+      if (selectedRole.kind === "user") {
+        await navigate({ to: "/files" });
+      } else if (selectedRole.kind === "cluster-admin" && selectedRole.cluster) {
+        await navigate({ to: `/admin/clusters/${selectedRole.cluster}` });
+      } else if (selectedRole.kind === "ui-admin") {
+        await navigate({ to: "/admin/system" });
       }
-      setAuthMode({ mode: "user", expiresAt: 0 });
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      await navigate({ to: "/files" });
-    } catch {
-      toast.error("Failed to drop privileges — network error");
+    } catch (error: any) {
+      // Handle 423 LOCKED - elevation required
+      if (error?.status === 423 && error?.details?.requires_elevation) {
+        try {
+          const prompt = error.details.prompt || "Switching to this role requires admin re-authentication.";
+          await promptElevationFromAnywhere("admin", prompt);
+          
+          // Retry the role switch after successful elevation
+          await switchActiveRoleMutation.mutateAsync({
+            kind: selectedRole.kind,
+            cluster: selectedRole.cluster,
+          });
+          
+          // Navigate to role-specific landing page
+          if (selectedRole.kind === "user") {
+            await navigate({ to: "/files" });
+          } else if (selectedRole.kind === "cluster-admin" && selectedRole.cluster) {
+            await navigate({ to: `/admin/clusters/${selectedRole.cluster}` });
+          } else if (selectedRole.kind === "ui-admin") {
+            await navigate({ to: "/admin/system" });
+          }
+        } catch (elevationError) {
+          // Elevation cancelled or failed - show error but don't switch roles
+          toast.error("Elevation required for this role and was cancelled");
+        }
+      } else {
+        toast.error(error?.message || "Failed to switch role");
+      }
     }
   };
 
@@ -152,31 +165,23 @@ export function UserMenu() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        {/* Persona switcher — admin ⇄ user. The role gate at `/` */}
-        {/* routes UIAdmins to /admin and others to /files; this lets */}
-        {/* an admin manually visit the user view + back. */}
-        {/* v1.3.0a.3: admin entry triggers elevation BEFORE navigating */}
-        {/* so the first action under /admin doesn't 403; user entry */}
-        {/* stays a plain link (no elevation needed for /files). */}
-        {/* v1.11.0.30: gate on auth MODE + uiAdmin, not the user's `role`
-            assignment. Per mode/view tight coupling (v1.9.0e.2):
-              - mode === "user" + uiAdmin → offer elevation to admin
-              - mode === "admin" | "elevated" → offer drop-to-user
-              - non-uiAdmin in user mode → show nothing (can't elevate)
-            The previous role-based check inverted both cases for admin
-            users: they saw "Switch to user view" while already in user
-            view and could not get back to admin without a manual URL. */}
-        <DropdownMenuGroup>
-          {(mode === "admin" || mode === "elevated") ? (
-            <DropdownMenuItem onClick={handleSwitchToUser} data-testid="switch-to-user">
-              Switch to user view
-            </DropdownMenuItem>
-          ) : uiAdmin ? (
-            <DropdownMenuItem onClick={handleSwitchToAdmin} data-testid="switch-to-admin">
-              Switch to admin view
-            </DropdownMenuItem>
-          ) : null}
-        </DropdownMenuGroup>
+        {/* v1.13.18: Active role selector — replaces binary "Switch to admin/user view" */}
+        {/* Dynamic, one active role at a time. User always available; cluster admins listed per grant; */}
+        {/* UI Admin only if user.uiAdmin === true. Switching to admin roles triggers elevation prompt on 423 LOCKED. */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger data-testid="role-submenu-trigger">
+            Role {activeRole && `(${availableRoles.find(r => r.kind === activeRole.kind + (activeRole.cluster ? ":" + activeRole.cluster : ""))?.label || activeRole.kind})`}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={activeRole ? activeRole.kind + (activeRole.cluster ? ":" + activeRole.cluster : "") : "user"} onValueChange={handleRoleChange}>
+              {availableRoles.map((r) => (
+                <DropdownMenuRadioItem value={r.kind === "cluster-admin" && r.cluster ? `cluster-admin:${r.cluster}` : r.kind} key={r.kind + (r.cluster || "")} disabled={switchActiveRoleMutation.isPending}>
+                  {r.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
         {/* v1.13.16: admin-only nav items — Clusters, Policies, Service
             accounts, Audit log, System settings — ONLY render when the
             user is currently in admin/elevated mode AND is a uiAdmin.

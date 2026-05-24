@@ -35,14 +35,54 @@ var ErrInvalidAlgorithm = errors.New("unsupported algorithm")
 // alice") from machine bearer-auth ("UserID alice via SA xyz"). Empty
 // for every JWT-cookie request — the field is never serialized into
 // nor read from a JWT, only constructed in-memory by the bearer path.
+//
+// ActiveRole (v1.13.18): per-cycle active role selector state. One of:
+//   - {"kind":"user"}              — every authenticated user
+//   - {"kind":"cluster-admin","cluster":"<cid>"} — cluster admin grant
+//   - {"kind":"ui-admin"}          — only if user.uiAdmin==true
+// Persisted in session cookie + returned on /auth/me alongside availableRoles.
 type Claims struct {
-	UserID           string `json:"userId"`
-	Role             string `json:"role"`
-	UIAdmin          bool   `json:"uiAdmin"`
-	Mode             string `json:"mode,omitempty"`
-	ModeExpiresAt    int64  `json:"mext,omitempty"`
-	ServiceAccountID string `json:"-"`
+	UserID           string    `json:"userId"`
+	Role             string    `json:"role"`
+	UIAdmin          bool      `json:"uiAdmin"`
+	Mode             string    `json:"mode,omitempty"`
+	ModeExpiresAt    int64     `json:"mext,omitempty"`
+	ServiceAccountID string    `json:"-"`
+	ActiveRole       *ActiveRole `json:"activeRole,omitempty"`
 	*jwt.RegisteredClaims
+}
+
+// ActiveRole represents the user's currently active role.
+// One of three kinds: "user" (always available), "cluster-admin" (per cluster grant), or "ui-admin" (if uiAdmin==true).
+type ActiveRole struct {
+	Kind     string `json:"kind"`
+	Cluster  string `json:"cluster,omitempty"` // only populated when Kind=="cluster-admin"
+}
+
+// RoleKey returns a stable string key for the active role, used in FE radio buttons.
+func (ar *ActiveRole) RoleKey() string {
+	if ar == nil {
+		return "user"
+	}
+	if ar.Kind == "cluster-admin" && ar.Cluster != "" {
+		return "cluster-admin:" + ar.Cluster
+	}
+	return ar.Kind
+}
+
+// AvailableRole represents a role the user is eligible for.
+type AvailableRole struct {
+	Kind    string `json:"kind"`
+	Label   string `json:"label"`
+	Cluster string `json:"cluster,omitempty"` // only populated when Kind=="cluster-admin"
+}
+
+// RoleKey returns a stable string key for an available role, used in FE radio buttons.
+func (ar *AvailableRole) RoleKey() string {
+	if ar.Kind == "cluster-admin" && ar.Cluster != "" {
+		return "cluster-admin:" + ar.Cluster
+	}
+	return ar.Kind
 }
 
 // nowFunc allows tests to inject time for deterministic expiry testing.
@@ -52,27 +92,40 @@ var nowFunc = time.Now
 // claims. Mode defaults to "user" and ModeExpiresAt to 0 (never expires
 // at this layer — the session JWT's own ExpiresAt still bounds it).
 // Callers that need a different mode (sudo-style elevation per ADR-0003)
-// use IssueTokenWithMode.
+// use IssueTokenWithMode. Default activeRole is {"kind":"user"}.
 func IssueToken(secret []byte, userID, role string, uiAdmin bool, ttl time.Duration) (string, error) {
 	return IssueTokenWithMode(secret, userID, role, uiAdmin, "user", 0, ttl)
 }
 
 // IssueTokenWithMode mints a JWT with explicit mode + mode-expiry
 // claims. Used by the elevation endpoint after a successful re-auth to
-// bump the session into ADMIN or ELEVATED state.
+// bump the session into ADMIN or ELEVATED state. Default activeRole is
+// {"kind":"user"} unless explicitly overridden.
 //
 // modeExpiresAtUnix is in unix seconds; pass 0 for "never expires at the
 // mode layer" (the JWT's own ExpiresAt still bounds the session).
 func IssueTokenWithMode(secret []byte, userID, role string, uiAdmin bool, mode string, modeExpiresAtUnix int64, ttl time.Duration) (string, error) {
+	return IssueTokenWithActiveRole(secret, userID, role, uiAdmin, mode, modeExpiresAtUnix, ttl, nil)
+}
+
+// IssueTokenWithActiveRole mints a JWT with explicit mode + mode-expiry
+// and activeRole claims. Used when creating a session with a specific
+// active role (e.g., after role switch via PUT /auth/active-role).
+// If activeRole is nil, defaults to {"kind":"user"}.
+func IssueTokenWithActiveRole(secret []byte, userID, role string, uiAdmin bool, mode string, modeExpiresAtUnix int64, ttl time.Duration, activeRole *ActiveRole) (string, error) {
 	if mode == "" {
 		mode = "user"
 	}
+	if activeRole == nil {
+		activeRole = &ActiveRole{Kind: "user"}
+	}
 	claims := &Claims{
-		UserID:        userID,
-		Role:          role,
-		UIAdmin:       uiAdmin,
-		Mode:          mode,
+		UserID:       userID,
+		Role:         role,
+		UIAdmin:      uiAdmin,
+		Mode:         mode,
 		ModeExpiresAt: modeExpiresAtUnix,
+		ActiveRole:   activeRole,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(nowFunc().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(nowFunc()),

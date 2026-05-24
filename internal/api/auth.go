@@ -29,11 +29,13 @@ type LoginRequest struct {
 // the one place that needs the live values because the gate's grace-
 // window logic can downgrade a pre-v1.2 cookie to ADMIN on the wire.
 type UserResponse struct {
-	Username      string `json:"username"`
-	Role          string `json:"role"`
-	UIAdmin       bool   `json:"uiAdmin,omitempty"`
-	Mode          string `json:"mode,omitempty"`
-	ModeExpiresAt int64  `json:"modeExpiresAt,omitempty"`
+	Username       string        `json:"username"`
+	Role           string        `json:"role"`
+	UIAdmin        bool          `json:"uiAdmin,omitempty"`
+	Mode           string        `json:"mode,omitempty"`
+	ModeExpiresAt  int64         `json:"modeExpiresAt,omitempty"`
+	ActiveRole     *auth.ActiveRole `json:"activeRole,omitempty"`
+	AvailableRoles []auth.AvailableRole `json:"availableRoles,omitempty"`
 	// OIDCUser is true when this account was provisioned via OIDC
 	// (no local password). The FE branches its elevation modal on
 	// this — OIDC-only users see an "Elevate via SSO" button that
@@ -142,6 +144,52 @@ func (s *Server) logoutHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// computeAvailableRoles computes the list of roles a user is eligible for.
+// Returns []AvailableRole with labels in display order: User first, then
+// Cluster Admin options (one per cluster grant), then UI Admin if applicable.
+func (s *Server) computeAvailableRoles(claims *auth.Claims) []auth.AvailableRole {
+	if claims == nil || claims.UserID == "" {
+		return nil
+	}
+
+	var roles []auth.AvailableRole
+
+	// User is always available
+	roles = append(roles, auth.AvailableRole{Kind: "user", Label: "User"})
+
+	// Cluster Admin: iterate over cluster admin grants from policy assignments.
+	if s.policy != nil && claims.UserID != "" {
+		assignments := s.policy.AssignmentsFor(claims.UserID)
+		for _, a := range assignments {
+			// Check if this assignment grants cluster_admin on any scope matching cluster:* or cluster:{cid}
+			if strings.HasPrefix(a.RoleID, "cluster_admin") || a.RoleID == "cluster_admin" {
+				// Extract cluster ID from scope: cluster:* matches all, cluster:{cid} matches specific
+				if a.Scope == "cluster:*" {
+					// For wildcard cluster admin, we need to list actual clusters — for now, skip
+					continue
+				}
+				if strings.HasPrefix(a.Scope, "cluster:") {
+					cid := strings.TrimPrefix(a.Scope, "cluster:")
+					if cid != "" {
+						roles = append(roles, auth.AvailableRole{
+							Kind:    "cluster-admin",
+							Cluster: cid,
+							Label:   "Cluster Admin: " + cid,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// UI Admin: only if user.uiAdmin == true
+	if claims.UIAdmin {
+		roles = append(roles, auth.AvailableRole{Kind: "ui-admin", Label: "UI Admin"})
+	}
+
+	return roles
+}
+
 // meHandler handles GET /api/v1/auth/me.
 // Returns current claims as {username, role, uiAdmin} from auth.FromContext.
 // 401 if no claims (middleware should have caught this — meHandler treats
@@ -165,12 +213,21 @@ func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
 	// while the backend honoured ADMIN, and the operator would see
 	// admin pages they couldn't access via the UI.
 	mode := currentMode(r)
+
+	// Provide default active role if nil (for tests and unconfigured servers)
+	activeRole := claims.ActiveRole
+	if activeRole == nil {
+		activeRole = &auth.ActiveRole{Kind: "user"}
+	}
+
 	resp := UserResponse{
-		Username:      claims.UserID,
-		Role:          claims.Role,
-		UIAdmin:       claims.UIAdmin,
-		Mode:          string(mode),
-		ModeExpiresAt: claims.ModeExpiresAt,
+		Username:       claims.UserID,
+		Role:           claims.Role,
+		UIAdmin:        claims.UIAdmin,
+		Mode:           string(mode),
+		ModeExpiresAt:  claims.ModeExpiresAt,
+		ActiveRole:     activeRole,
+		AvailableRoles: s.computeAvailableRoles(claims),
 	}
 
 	// OIDCUser flag: a user with an empty PasswordHash + non-empty
@@ -315,4 +372,163 @@ func (s *Server) getCurrentOrgCapabilities(w http.ResponseWriter, r *http.Reques
 		"allowUserBackends":  caps.AllowUserBackends,
 		"userBackendDrivers": caps.UserBackendDrivers,
 	})
+}
+
+// ActiveRoleRequest represents the payload for PUT /api/v1/auth/active-role.
+type ActiveRoleRequest struct {
+	Kind    string `json:"kind"`
+	Cluster string `json:"cluster,omitempty"` // only required when Kind=="cluster-admin"
+}
+
+// activeRoleHandler handles PUT /api/v1/auth/active-role.
+// Validates user is eligible for the requested role, returns 423 LOCKED if elevation needed,
+// persists activeRole in session cookie on success.
+func (s *Server) activeRoleHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PUT required")
+		return
+	}
+
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil || claims.UserID == "" {
+		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
+		return
+	}
+
+	var req ActiveRoleRequest
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&req); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+
+	// Validate kind is one of the three supported roles
+	validKinds := map[string]bool{"user": true, "cluster-admin": true, "ui-admin": true}
+	if !validKinds[req.Kind] {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_ROLE_KIND", "Invalid role kind")
+		return
+	}
+
+	// Determine if elevation is required for this role switch
+	requiresElevation := false
+	elevationPrompt := ""
+
+	switch req.Kind {
+	case "user":
+		// Dropping to user mode is always free - no elevation needed
+		requiresElevation = false
+
+	case "cluster-admin":
+		// Cluster admin requires elevation if not already elevated
+		if claims.Mode != "admin" && claims.Mode != "elevated" {
+			requiresElevation = true
+			elevationPrompt = "Switching to cluster admin requires admin re-authentication."
+		}
+
+		// Validate cluster parameter is provided for cluster-admin kind
+		if req.Cluster == "" {
+			writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "Cluster ID required for cluster-admin role")
+			return
+		}
+
+		// Verify user has cluster_admin capability on this specific cluster
+		if s.policy != nil {
+			hasGrant := false
+			assignments := s.policy.AssignmentsFor(claims.UserID)
+			for _, a := range assignments {
+				// Check for exact cluster match or wildcard
+				if (strings.HasPrefix(a.RoleID, "cluster_admin") || a.RoleID == "cluster_admin") &&
+					(a.Scope == "cluster:*" || a.Scope == "cluster:"+req.Cluster) {
+					hasGrant = true
+					break
+				}
+			}
+			if !hasGrant {
+				writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "User not eligible for cluster admin role on this cluster")
+				return
+			}
+		}
+
+	case "ui-admin":
+		// UI Admin requires elevation if not already elevated AND user is uiAdmin
+		if !claims.UIAdmin {
+			writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "User is not a UI admin")
+			return
+		}
+		if claims.Mode != "admin" && claims.Mode != "elevated" {
+			requiresElevation = true
+			elevationPrompt = "Switching to UI admin requires admin re-authentication."
+		}
+	}
+
+	// If elevation required but user not elevated, return 423 LOCKED
+	if requiresElevation && claims.Mode != "admin" && claims.Mode != "elevated" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusLocked)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"requires_elevation": true,
+			"prompt":             elevationPrompt,
+		})
+		return
+	}
+
+	// Build the new active role
+	newActiveRole := &auth.ActiveRole{Kind: req.Kind}
+	if req.Kind == "cluster-admin" {
+		newActiveRole.Cluster = req.Cluster
+	}
+
+	// Issue a new session cookie with updated activeRole
+	sessionTTL := s.cfg.SessionTTL
+	if sessionTTL <= 0 {
+		sessionTTL = 24 * time.Hour
+	}
+
+	token, err := auth.IssueTokenWithActiveRole(
+		s.cfg.JWT.Secret,
+		claims.UserID,
+		claims.Role,
+		claims.UIAdmin,
+		claims.Mode,
+		claims.ModeExpiresAt,
+		sessionTTL,
+		newActiveRole,
+	)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "TOKEN_ISSUE", "Failed to issue session token")
+		return
+	}
+
+	auth.SetSessionCookie(w, token, sessionTTL)
+
+	s.audit.Log(audit.Event{
+		Time:      time.Now().UTC(),
+		Actor:     claims.UserID,
+		ActorRole: "user",
+		Action:    "auth:switch_role",
+		Resource:  "active-role:" + req.Kind,
+		Detail: func() string {
+			detail := "Switched active role to " + req.Kind
+			if newActiveRole.Cluster != "" {
+				detail += " cluster=" + newActiveRole.Cluster
+			}
+			return detail
+		}(),
+		Result:    audit.ResultSuccess,
+		IP:        clientIP(r),
+		UserAgent: r.UserAgent(),
+	})
+
+	resp := UserResponse{
+		Username:       claims.UserID,
+		Role:           claims.Role,
+		UIAdmin:        claims.UIAdmin,
+		Mode:           string(currentMode(r)),
+		ModeExpiresAt:  claims.ModeExpiresAt,
+		ActiveRole:     newActiveRole,
+		AvailableRoles: s.computeAvailableRoles(claims),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	writeJSON(w, http.StatusOK, resp)
 }

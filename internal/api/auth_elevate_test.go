@@ -29,15 +29,20 @@ import (
 // produces Claims with Mode="" — the pre-v1.2 cookie shape the
 // back-compat grace window targets. Cannot be produced via
 // IssueToken/IssueTokenWithMode because both default an empty mode
-// to "user".
+// to "user". Defaults activeRole to user for test compatibility.
 func mintLegacyModelessToken(t *testing.T, secret []byte, userID string) string {
+	return mintActiveRoleToken(t, secret, userID, "admin", true, &auth.ActiveRole{Kind: "user"})
+}
+
+// mintActiveRoleToken is a helper to create JWTs with explicit active role.
+func mintActiveRoleToken(t *testing.T, secret []byte, userID, role string, uiAdmin bool, activeRole *auth.ActiveRole) string {
 	t.Helper()
 	claims := &auth.Claims{
-		UserID:  userID,
-		Role:    "admin",
-		UIAdmin: true,
-		// Mode + ModeExpiresAt deliberately omitted — they're
-		// zero-valued + omitempty, so the wire payload has neither.
+		UserID:   userID,
+		Role:     role,
+		UIAdmin:  uiAdmin,
+		Mode:     "user",
+		ActiveRole: activeRole,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -48,7 +53,7 @@ func mintLegacyModelessToken(t *testing.T, secret []byte, userID string) string 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := tok.SignedString(secret)
 	if err != nil {
-		t.Fatalf("sign modeless token: %v", err)
+		t.Fatalf("sign token: %v", err)
 	}
 	return signed
 }

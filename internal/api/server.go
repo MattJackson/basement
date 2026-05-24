@@ -387,6 +387,7 @@ func (s *Server) routes() {
 
 			authG.Post("/auth/logout", s.logoutHandler)
 			authG.Get("/auth/me", s.meHandler)
+			authG.Put("/auth/active-role", s.activeRoleHandler)
 			authG.Post("/auth/elevate", s.elevateHandler)
 			authG.Post("/auth/logout-elevation", s.logoutElevationHandler)
 			// ADR-0003 v1.2.0c: OIDC step-up elevation. Start mints
@@ -414,7 +415,10 @@ func (s *Server) routes() {
 			adminG.Use(s.authMiddleware())
 			adminG.Use(auth.RequireRole("admin"))
 
-			adminG.Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
+			// Cluster admin routes — require activeRole.kind == "cluster-admin" && activeRole.cluster == cid
+			adminG.Group(func(clusterG chi.Router) {
+				clusterG.Use(auth.ActiveRoleClusterMiddleware("{cid}"))
+				clusterG.Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
 			adminG.Get("/admin/clusters/{cid}/layout", s.getLayoutHandler)
 			adminG.Post("/admin/clusters/{cid}/layout/stage", s.stageLayoutHandler)
 			adminG.Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
@@ -477,6 +481,7 @@ func (s *Server) routes() {
 			adminG.Patch("/admin/clusters/{cid}/keys/{id}", s.updateKeyHandler)
 			adminG.Delete("/admin/clusters/{cid}/keys/{id}", s.deleteKeyHandler)
 			adminG.Post("/admin/clusters/{cid}/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
+			}) // end cluster admin group with active role middleware
 
 			// Cross-cluster aggregated reads (legacy paths, now return wrapped responses)
 			adminG.Get("/admin/buckets", s.listAllBucketsHandler)
@@ -490,10 +495,10 @@ func (s *Server) routes() {
 			// /admin/clusters/{cid}/keys.
 		})
 
-		// UI Admin routes — require uiAdmin=true.
+		// UI Admin routes — require activeRole.kind == "ui-admin"
 		apiR.Group(func(uiAdminG chi.Router) {
 			uiAdminG.Use(s.authMiddleware())
-			uiAdminG.Use(auth.RequireUIAdmin())
+			uiAdminG.Use(auth.ActiveRoleUIAdminMiddleware())
 
 			// Org capabilities management
 			uiAdminG.Get("/admin/system", s.getOrgCapabilitiesHandler)
