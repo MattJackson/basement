@@ -70,9 +70,14 @@ const WARN_AMBER_MS = 2 * 60 * 1000;
 const WARN_RED_MS = 30 * 1000;
 
 // Module-level guard to prevent duplicate "Admin session ended" toasts
+// (v1.13.14: keyed on a time-window, not expiresAt — the two PersonaPill
+// mounts in AppShell + UserShell can see slightly different expiresAt
+// during the admin→user transition because auth-mode propagation is
+// async, so keying on expiresAt let both fire.)
 // when multiple PersonaPill instances exist (AppShell + UserShell).
 // Only fires once per admin→user transition, keyed on expiresAt.
-const sessionEndedFired = new Set<number>();
+let sessionEndedFiredAt = 0;
+const SESSION_ENDED_TOAST_WINDOW_MS = 2000;
 
 export function PersonaPill() {
   const { mode, expiresAt } = useAuthMode();
@@ -107,14 +112,14 @@ export function PersonaPill() {
       prevModeRef.current === "admin" || prevModeRef.current === "elevated";
     if (elevated && !wasElevated) {
       warnedRef.current = null;
-      sessionEndedFired.clear();
+      sessionEndedFiredAt = 0;
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFlashing(false);
     }
     if (!elevated && wasElevated) {
-      const expiresAtKey = expiresAt;
-      if (!sessionEndedFired.has(expiresAtKey)) {
-        sessionEndedFired.add(expiresAtKey);
+      const now = Date.now();
+      if (now - sessionEndedFiredAt > SESSION_ENDED_TOAST_WINDOW_MS) {
+        sessionEndedFiredAt = now;
         toast.info("Admin session ended");
         warnedRef.current = "ended";
       }
