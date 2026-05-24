@@ -114,35 +114,22 @@ test.describe('React Error #321 Reproduction', () => {
 
   // Test each route for React errors
   for (const route of ROUTES) {
-    test.should not display React error #321 on ${route}, async () => {
-      try {
-        const initialErrorCount = errors.length;
-        
-        await page.goto(route, { waitUntil: 'networkidle', timeout: 30000 });
-        
-        // Wait for any potential lazy-loaded components to render
-        await page.waitForTimeout(2000);
-        
-        // Check console for React errors
-        const consoleErrors: string[] = [];
-        page.on('console', (msg) => {
-          if (msg.type() === 'error' && msg.text().includes('321')) {
-            consoleErrors.push(msg.text());
-          }
-        });
+    test(`should not display React error #321 on ${route}`, async () => {
+      const initialErrorCount = errors.length;
+      
+      await page.goto(route, { waitUntil: 'networkidle', timeout: 30000 });
+      
+      // Wait for any potential lazy-loaded components to render
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Look for React error patterns in the collected errors
+      const errorsOnPage = errors.filter(e => 
+        e.url.includes(route) && e.message.includes('321')
+      );
 
-        // Look for React error patterns in the DOM or console
-        const errorsOnPage = errors.filter(e => 
-          e.url.includes(route) && e.message.includes('321')
-        );
-
-        expect(errorsOnPage.length, `No React error #321 on ${route}`).toBe(0);
-        
-      } catch (error) {
-        // Log navigation failures separately from React errors
-        console.log(`Navigation issue on ${route}: ${(error as Error).message}`);
-      }
-    };
+      expect(errorsOnPage.length, `No React error #321 on ${route}`).toBe(0);
+      
+    }).timeout(60000);
   }
 
   // Test specific interactive elements that might trigger React errors
