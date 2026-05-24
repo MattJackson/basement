@@ -121,7 +121,12 @@ export function UserMenu() {
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={(open) => {
+      // Auto-navigate admin users to /admin/clusters when opening menu.
+      if (open && mode === "admin") {
+        void navigate({ to: "/admin/clusters" });
+      }
+    }}>
       <DropdownMenuTrigger
         // v1.10.0.2 — pre-fix the trigger rendered at ~40px tall on
         // mobile (the inner 32px avatar + 1px×2 padding), below the

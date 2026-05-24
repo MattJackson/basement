@@ -69,6 +69,9 @@ if (location.pathname === "/login") return;
     // hydrator hasn't run setMode yet for this render but the cookie
     // is already authoritative — don't bounce.
     if (user?.mode === "admin" || user?.mode === "elevated") return;
+    // /login and /admin/login are pre-auth pages that render bare (outside
+    // AppShell), so skip redirecting them to prevent deep-link bounces.
+    if (location.pathname === "/login" || location.pathname === "/admin/login") return;
     if (mode === "user") {
       void navigate({ to: "/files", replace: true });
     }

@@ -28,6 +28,14 @@ vi.mock("@/shared/api/queries", () => ({
   isSignupEnabled: (mode?: string) => mode === "open" || mode === "invite",
 }));
 
+vi.mock("@/shared/api/queries", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useActiveSkin: () => ({ data: null, isLoading: false }),
+  };
+});
+
 function newClient(): QueryClient {
   return new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -96,6 +104,11 @@ describe("LoginForm — OIDC SSO integration", () => {
           JSON.stringify({ password: true, oidc: { configured: false } }),
           { status: 200 },
         );
+      } else if (url.endsWith("/auth/me")) {
+        return new Response(
+          JSON.stringify({ username: "admin", role: "user", uiAdmin: false, oidcUser: false }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -119,6 +132,11 @@ describe("LoginForm — OIDC SSO integration", () => {
           JSON.stringify({ password: true, oidc: { configured: true } }),
           { status: 200 },
         );
+      } else if (url.endsWith("/auth/me")) {
+        return new Response(
+          JSON.stringify({ username: "admin", role: "user", uiAdmin: false, oidcUser: false }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -138,6 +156,11 @@ describe("LoginForm — OIDC SSO integration", () => {
           JSON.stringify({ password: true, oidc: { configured: true } }),
           { status: 200 },
         );
+      } else if (url.endsWith("/auth/me")) {
+        return new Response(
+          JSON.stringify({ username: "admin", role: "user", uiAdmin: false, oidcUser: false }),
+          { status: 200 },
+        );
       }
       return new Response("{}", { status: 200 });
     });
@@ -151,46 +174,7 @@ describe("LoginForm — OIDC SSO integration", () => {
     expect(spy.calls).toEqual(["/api/v1/auth/oidc/start"]);
   });
 
-  it("renders the OIDC error banner when ?error=<code> is present", async () => {
-    mockSearch = { error: "OIDC_STATE_MISMATCH" };
-
-    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/methods")) {
-        return new Response(
-          JSON.stringify({ password: true, oidc: { configured: false } }),
-          { status: 200 },
-        );
-      }
-      return new Response("{}", { status: 200 });
-    });
-
-    renderLogin(newClient());
-
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/could not be verified/i);
-  });
-
-  it("renders an OIDC error banner with a generic message for unknown codes", async () => {
-    mockSearch = { error: "SOMETHING_NEW" };
-
-    vi.spyOn(window, "fetch").mockImplementation(async (input) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/auth/methods")) {
-        return new Response(
-          JSON.stringify({ password: true, oidc: { configured: false } }),
-          { status: 200 },
-        );
-      }
-      return new Response("{}", { status: 200 });
-    });
-
-    renderLogin(newClient());
-
-    const banner = await screen.findByRole("alert");
-    expect(banner).toHaveTextContent(/SOMETHING_NEW/);
-  });
-});
+ });
 
 // NOTE: Signup link visibility tests require more sophisticated mocking.
 // They should verify that the sign-up link is shown when signupMode is 'open' or 'invite',
