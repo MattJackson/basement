@@ -62,16 +62,18 @@ export function ObjectRow({ object, isFolder = false, onFolderClick, onDownload 
         {object.last_modified ? humanizeTime(object.last_modified) : "—"}
       </TableCell>
       <TableCell>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDownload?.(object.key);
-          }}
-        >
-          Download
-        </Button>
+        <div className="min-h-[44px] flex items-center justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDownload?.(object.key);
+            }}
+          >
+            Download
+          </Button>
+        </div>
       </TableCell>
     </tr>
   );
