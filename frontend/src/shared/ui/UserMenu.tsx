@@ -24,6 +24,7 @@ import { useTheme, type Theme } from "@/shared/theme/useTheme";
 import { useSkinRegistry, useSkin } from "@/shared/hooks/useSkin";
 import { useUser } from "@/shared/auth/useUser";
 import { useSwitchActiveRole } from "@/shared/api/mutations";
+import { suppressNextSessionEndedToast } from "@/components/layout/PersonaPill";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -88,6 +89,12 @@ export function UserMenu() {
     const selectedRole = availableRoles.find(r => r.kind === roleKey.split(":")[0] && (!r.cluster || r.cluster === roleKey.split(":")[1]));
     if (!selectedRole) return;
 
+    // v1.13.21: if switching DOWN to user role, suppress the
+    // "Admin session ended" toast — the user explicitly chose to drop,
+    // they don't need to be told their session ended.
+    if (selectedRole.kind === "user") {
+      suppressNextSessionEndedToast();
+    }
     try {
       await switchActiveRoleMutation.mutateAsync({
         kind: selectedRole.kind,
