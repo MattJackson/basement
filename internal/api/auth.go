@@ -165,22 +165,24 @@ func (s *Server) computeAvailableRoles(claims *auth.Claims) []auth.AvailableRole
 		for _, a := range assignments {
 			if strings.HasPrefix(a.RoleID, "cluster_admin") {
 				if a.Scope == "cluster:*" {
-					// Wildcard: enumerate all clusters via connection list
-					conns, err := s.conns.List(context.Background())
-					if err == nil && conns != nil {
-						for _, conn := range conns {
-							label := conn.Label
-							if label == "" {
-								label = conn.ID
-							}
-							key := "cluster-admin:" + conn.ID
-							if !clusterAdminSet[key] {
-								roles = append(roles, auth.AvailableRole{
-									Kind:    "cluster-admin",
-									Cluster: conn.ID,
-									Label:   "Cluster Admin: " + label,
-								})
-								clusterAdminSet[key] = true
+					// Wildcard: enumerate all clusters via connection list if available
+					if s.conns != nil {
+						conns, err := s.conns.List(context.Background())
+						if err == nil && conns != nil {
+							for _, conn := range conns {
+								label := conn.Label
+								if label == "" {
+									label = conn.ID
+								}
+								key := "cluster-admin:" + conn.ID
+								if !clusterAdminSet[key] {
+									roles = append(roles, auth.AvailableRole{
+										Kind:    "cluster-admin",
+										Cluster: conn.ID,
+										Label:   "Cluster Admin: " + label,
+									})
+									clusterAdminSet[key] = true
+								}
 							}
 						}
 					}
@@ -203,7 +205,7 @@ func (s *Server) computeAvailableRoles(claims *auth.Claims) []auth.AvailableRole
 	}
 
 	// UI Admin gets implicit cluster admin on all clusters (if not already explicit)
-	if claims.UIAdmin {
+	if claims.UIAdmin && s.conns != nil {
 		conns, err := s.conns.List(context.Background())
 		if err == nil && conns != nil {
 			for _, conn := range conns {
@@ -222,6 +224,10 @@ func (s *Server) computeAvailableRoles(claims *auth.Claims) []auth.AvailableRole
 				}
 			}
 		}
+	}
+
+	// UI Admin role is always available if claims.UIAdmin == true
+	if claims.UIAdmin {
 		roles = append(roles, auth.AvailableRole{Kind: "ui-admin", Label: "UI Admin"})
 	}
 
