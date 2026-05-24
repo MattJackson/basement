@@ -495,8 +495,14 @@ func newTestConfig() *config.Config {
 
 // createAuthRequest creates an HTTP request with a valid admin session cookie.
 func createAuthRequest(method, url string) *http.Request {
-	token := generateAdminToken()
 	req := httptest.NewRequest(method, url, nil)
+	addAdminCookie(req)
+	return req
+}
+
+// addAdminCookie adds an admin session cookie to the request.
+func addAdminCookie(req *http.Request) {
+	token := generateAdminToken()
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
 		Value:    token,
@@ -505,7 +511,6 @@ func createAuthRequest(method, url string) *http.Request {
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	return req
 }
 
 // createNonAdminRequest creates an HTTP request with a non-admin session cookie.

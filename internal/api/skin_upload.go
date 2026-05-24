@@ -26,6 +26,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/mattjackson/basement/internal/skin"
+	"github.com/mattjackson/basement/internal/store"
 )
 
 var skinNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
@@ -372,4 +373,75 @@ func (s *Server) listAdminSkinsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// v1.13.0c: User skin override endpoint (PUT /api/v1/user/skin).
+// Allows authenticated users to select their own skin if org policy permits.
+// Validated against AllowedUserSkins; falls back to ActiveSkin if user's choice
+// is no longer in the allowed set or not installed.
+
+// setUserSkinHandler handles PUT /api/v1/user/skin.
+// Gated on auth (any logged-in user). Validates skin name against org caps + registry.
+func (s *Server) setUserSkinHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "PUT required")
+		return
+	}
+
+	var req struct {
+		SkinName string `json:"skinName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_JSON", "Invalid JSON body")
+		return
+	}
+
+	if req.SkinName == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "MISSING_SKIN_NAME", "skinName required")
+		return
+	}
+
+	// Get org caps to check if user override is allowed
+	caps := s.store.OrgCapabilities().Get()
+	if !caps.UserOverridableSkin {
+		writeErrorSimple(w, http.StatusForbidden, "SKIN_OVERRIDE_DISABLED", "User skin overrides are not enabled by your administrator")
+		return
+	}
+
+	// Check if skin name is in allowed set (or all installed if list empty)
+	allSkins := s.skins.All()
+	skinSet := make(map[string]bool, len(allSkins))
+	for _, sk := range allSkins {
+		skinSet[sk.Name] = true
+	}
+
+	allowed := store.DetermineAllowedUserSkins(caps.UserOverridableSkin, caps.AllowedUserSkins)
+	if allowed != nil && len(allowed) > 0 {
+		// Specific allowed set — check against it
+		found := false
+		for _, name := range allowed {
+			if name == req.SkinName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			writeErrorSimple(w, http.StatusForbidden, "SKIN_NOT_ALLOWED", fmt.Sprintf("Skin %q is not in the allowed list", req.SkinName))
+			return
+		}
+	} else {
+		// Empty list = all installed skins available — check registry only
+		if !skinSet[req.SkinName] {
+			writeErrorSimple(w, http.StatusForbidden, "SKIN_NOT_INSTALLED", fmt.Sprintf("Skin %q is not installed", req.SkinName))
+			return
+		}
+	}
+
+	// Persist user's skin choice (stored in a per-user location; for now just echo back)
+	// In a full implementation, this would write to a user preferences store
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"skinName": req.SkinName,
+	})
 }

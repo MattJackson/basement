@@ -757,8 +757,12 @@ export interface UserVisibleOrgCapabilities {
   allowUserBackends?: boolean;
   userBackendDrivers?: string[];
   oidcOnly?: boolean;
-  /** v1.13.0c: skin policy - when 'user-choice', users can select their own skin */
-  skinPolicy?: "locked" | "default" | "user-choice";
+  /** v1.13.0a (ADR-0008): currently active skin */
+  activeSkin?: string;
+  /** v1.13.1: whether users can override the default skin */
+  userOverridableSkin?: boolean;
+  /** v1.13.1: list of allowed skins for user selection (empty = all installed) */
+  allowedUserSkins?: string[];
 }
 
 export function useOrgCapabilities() {
@@ -775,12 +779,6 @@ export function useOrgCapabilities() {
 export function isSignupEnabled(signupMode?: string): boolean {
   return signupMode === "open" || signupMode === "invite";
 }
-
-/** v1.13.0c: Check if per-user skin selection is permitted */
-export function canUserSelectSkin(skinPolicy?: string): boolean {
-  return skinPolicy === "user-choice";
-}
-
 // v1.13.0c: Mutation to set active skin for current user (when policy permits)
 export function useSetActiveSkin() {
   const queryClient = useQueryClient();

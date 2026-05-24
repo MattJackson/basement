@@ -49,40 +49,39 @@ type OrgCapabilities struct {
 	// v1.13.0a (ADR-0008) — pluggable-skins foundation. ActiveSkin
 	// names the currently-rendered skin (basement-default ships with
 	// every deploy and is the fallback when the named skin isn't
-	// registered). SkinPolicy controls whether per-user overrides are
-	// permitted; v1.13.0a always renders ActiveSkin (the user-override
-	// path lands in v1.13.0c).
+	// registered). 
 	//
-	// Legacy files without these fields read as ActiveSkin =
-	// "basement-default", SkinPolicy = "default" — the load() path
-	// substitutes the defaults at read time without mutating the
-	// on-disk file (the next Update() persists the present fields).
+	// v1.13.1: UserOverridableSkin controls whether users can pick
+	// their own skin; AllowedUserSkins restricts to a specific set
+	// (empty list = all installed skins available). SkinPolicy is
+	// deprecated — legacy values migrate on read per the loader logic below.
 	ActiveSkin string `json:"activeSkin,omitempty"`
-	SkinPolicy string `json:"skinPolicy,omitempty"`
+	// Deprecated: SkinPolicy kept for backwards-compat reads only;
+	// ignored on writes. Migrate to UserOverridableSkin + AllowedUserSkins instead.
+	SkinPolicy string `json:"skinPolicy,omitempty" jsonschema:"-"`
+	UserOverridableSkin bool `json:"userOverridableSkin"`
+	AllowedUserSkins []string `json:"allowedUserSkins,omitempty"`
 }
 
-// Skin defaults + policy literals for ADR-0008. The string-typed
-// SkinPolicy keeps the JSON shape ergonomic for hand-edits; the
-// load() path normalizes any unknown literal back to
-// DefaultSkinPolicyDefault.
+// Skin defaults for ADR-0008. DefaultActiveSkin is the built-in fallback;
+// DefaultUserOverridableSkin controls whether users can pick their own skin.
 const (
 	DefaultActiveSkin        = "basement-default"
-	DefaultSkinPolicyDefault = "default"
-	SkinPolicyLocked         = "locked"
-	SkinPolicyUserChoice     = "user-choice"
+	DefaultUserOverridableSkin = false
 )
 
-// IsValidSkinPolicy reports whether v is one of the three SkinPolicy
-// literals defined in ADR-0008. The load() path uses this to refuse
-// unknown values from the on-disk file (it falls back to the default
-// rather than persisting garbage). The Update() path uses it via the
-// PATCH handler in v1.13.0c when the operator changes the policy.
-func IsValidSkinPolicy(v string) bool {
-	switch v {
-	case DefaultSkinPolicyDefault, SkinPolicyLocked, SkinPolicyUserChoice:
-		return true
+// DetermineAllowedUserSkins returns the effective set of user-visible skins:
+	// - If AllowedUserSkins is non-empty, return it as-is
+	// - If UserOverridableSkin=true and AllowedUserSkins empty, return all installed skins (empty slice signals "all")
+	// This helper centralizes the fallback semantics so callers don't duplicate logic.
+	func DetermineAllowedUserSkins(userOverridable bool, allowed []string) []string {
+	if !userOverridable {
+		return nil // no user override allowed
 	}
-	return false
+	if len(allowed) == 0 {
+		return nil // empty slice = "all installed" signal to FE
+	}
+	return allowed
 }
 
 // GatewaySettings groups the per-protocol gateway toggles. v1.9.0b
@@ -183,32 +182,33 @@ func (g GatewaySettings) BaseURL(name string) string {
 }
 
 // DefaultOrgCapabilities returns the default org capabilities. Both
-// the legacy WebDAV field and the v1.9.0d Protocols map start with
-// webdav.enabled=true so a downgrade to v1.9.0b would read the same
-// kill-switch state the v1.9.0d caller wrote.
-//
-// v1.13.0a (ADR-0008) adds ActiveSkin + SkinPolicy with the defaults
-// "basement-default" + "default". A fresh install renders the built-in
-// skin; the operator opts into "locked" or "user-choice" via the
-// /admin/system surface in v1.13.0c.
-func DefaultOrgCapabilities() OrgCapabilities {
-	return OrgCapabilities{
-		SignupMode:         "invite",
-		EnabledDrivers:     []string{"garage", "garage-v1", "aws-s3", "minio"},
-		AllowUserBackends:  false,
-		UserBackendDrivers: []string{},
-		OIDCOnly:           false,
-		AdminSessionTTLSec: AdminSessionTTLDefaultSec,
-		Gateways: GatewaySettings{
-			WebDAV: WebDAVSettings{Enabled: true},
-			Protocols: map[string]GatewayConfig{
-				"webdav": {Enabled: true},
+	// the legacy WebDAV field and the v1.9.0d Protocols map start with
+	// webdav.enabled=true so a downgrade to v1.9.0b would read the same
+	// kill-switch state the v1.9.0d caller wrote.
+	//
+	// v1.13.0a (ADR-0008) adds ActiveSkin + SkinPolicy with defaults;
+	// v1.13.1 migrates to UserOverridableSkin + AllowedUserSkins. A fresh
+	// install renders basement-default; operator opts into user overrides
+	// via /admin/system surface.
+	func DefaultOrgCapabilities() OrgCapabilities {
+		return OrgCapabilities{
+			SignupMode:            "invite",
+			EnabledDrivers:        []string{"garage", "garage-v1", "aws-s3", "minio"},
+			AllowUserBackends:     false,
+			UserBackendDrivers:    []string{},
+			OIDCOnly:              false,
+			AdminSessionTTLSec:    AdminSessionTTLDefaultSec,
+			Gateways: GatewaySettings{
+				WebDAV: WebDAVSettings{Enabled: true},
+				Protocols: map[string]GatewayConfig{
+					"webdav": {Enabled: true},
+				},
 			},
-		},
-		ActiveSkin: DefaultActiveSkin,
-		SkinPolicy: DefaultSkinPolicyDefault,
+			ActiveSkin:          DefaultActiveSkin,
+			UserOverridableSkin: DefaultUserOverridableSkin,
+			AllowedUserSkins:    []string{},
+		}
 	}
-}
 
 // normalizeGateways migrates a legacy on-disk file into the v1.9.0d
 // generic Protocols map shape. Three legacy shapes can hit this:
@@ -368,16 +368,37 @@ func (s *OrgCapabilitiesStore) load() error {
 	// v1.13.0a (ADR-0008) — substitute skin defaults at read time so
 	// a file predating the fields renders basement-default + policy
 	// "default" without an on-disk mutation behind the operator's
-	// back. Unknown SkinPolicy literals (operator hand-edit gone
-	// wrong, downgrade-then-upgrade across an unrelated rename)
-	// fall back to the default rather than poison the FE — the
-	// /admin/system PATCH path in v1.13.0c will surface a
-	// "policy reset" warning if we ever need to track this.
+	// back. Unknown SkinPolicy literals fall back to default rather than
+	// poison the FE.
 	if s.data.ActiveSkin == "" {
 		s.data.ActiveSkin = DefaultActiveSkin
 	}
-	if s.data.SkinPolicy == "" || !IsValidSkinPolicy(s.data.SkinPolicy) {
-		s.data.SkinPolicy = DefaultSkinPolicyDefault
+
+	// v1.13.1: migrate legacy SkinPolicy → UserOverridableSkin + AllowedUserSkins
+	// Legacy files without these fields read as UserOverridableSkin=false, AllowedUserSkins=[]
+	// Migration rules:
+	//   - SkinPolicy == "default" or "locked" → UserOverridableSkin = false; AllowedUserSkins = []
+	//   - SkinPolicy == "user-choice" → UserOverridableSkin = true; AllowedUserSkins = [] (all)
+	//   - Drop SkinPolicy field on write; ignore if present when reading new shape
+	if s.data.SkinPolicy != "" {
+		switch s.data.SkinPolicy {
+		case "default", "locked":
+			s.data.UserOverridableSkin = false
+			s.data.AllowedUserSkins = []string{}
+		case "user-choice":
+			s.data.UserOverridableSkin = true
+			s.data.AllowedUserSkins = []string{} // empty = all installed skins
+		default:
+			// Unknown policy value — fall back to locked (no user override)
+			s.data.UserOverridableSkin = false
+			s.data.AllowedUserSkins = []string{}
+		}
+	} else {
+		// Legacy file without SkinPolicy field either — use defaults
+		if s.data.UserOverridableSkin == false && len(s.data.AllowedUserSkins) == 0 {
+			s.data.UserOverridableSkin = DefaultUserOverridableSkin
+			s.data.AllowedUserSkins = []string{}
+		}
 	}
 
 	return nil
@@ -397,32 +418,34 @@ func (s *OrgCapabilitiesStore) Save() error {
 }
 
 // Get returns a copy of the current capabilities. Legacy
-// org_capabilities.json files predating v1.3.0a.4 lack the
-// AdminSessionTTLSec field; we substitute the default at read time
-// rather than mutating the on-disk file behind the operator's back —
-// they'll see the default reflected in /admin/system and can persist
-// a deliberate choice from there.
-func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := s.data
-	if out.AdminSessionTTLSec <= 0 {
-		out.AdminSessionTTLSec = AdminSessionTTLDefaultSec
+	// org_capabilities.json files predating v1.3.0a.4 lack the
+	// AdminSessionTTLSec field; we substitute the default at read time
+	// rather than mutating the on-disk file behind the operator's back —
+	// they'll see the default reflected in /admin/system and can persist
+	// a deliberate choice from there.
+	func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		out := s.data
+		if out.AdminSessionTTLSec <= 0 {
+			out.AdminSessionTTLSec = AdminSessionTTLDefaultSec
+		}
+		// v1.13.0a (ADR-0008) — defensive defaults. load() already
+		// substitutes these on the read-from-disk path, but a caller
+		// that constructed an OrgCapabilitiesStore without going through
+		// load() (or a future migration that resets the in-memory data)
+		// would otherwise hand the FE empty strings the renderer can't
+		// resolve to a registered skin.
+		if out.ActiveSkin == "" {
+			out.ActiveSkin = DefaultActiveSkin
+		}
+		// v1.13.1 — ensure new fields have defaults if not set by load()
+		if !out.UserOverridableSkin && len(out.AllowedUserSkins) == 0 {
+			out.UserOverridableSkin = DefaultUserOverridableSkin
+			out.AllowedUserSkins = []string{}
+		}
+		return out
 	}
-	// v1.13.0a (ADR-0008) — defensive defaults. load() already
-	// substitutes these on the read-from-disk path, but a caller
-	// that constructed an OrgCapabilitiesStore without going through
-	// load() (or a future migration that resets the in-memory data)
-	// would otherwise hand the FE empty strings the renderer can't
-	// resolve to a registered skin.
-	if out.ActiveSkin == "" {
-		out.ActiveSkin = DefaultActiveSkin
-	}
-	if out.SkinPolicy == "" {
-		out.SkinPolicy = DefaultSkinPolicyDefault
-	}
-	return out
-}
 
 // Update replaces all capabilities and persists. Per v1.3.0a.4 the
 // admin session TTL is clamped into the supported range on the way in
@@ -449,9 +472,6 @@ func (s *OrgCapabilitiesStore) Update(capabilities OrgCapabilities) error {
 	// independent of caller discipline.
 	if capabilities.ActiveSkin == "" {
 		capabilities.ActiveSkin = DefaultActiveSkin
-	}
-	if capabilities.SkinPolicy == "" || !IsValidSkinPolicy(capabilities.SkinPolicy) {
-		capabilities.SkinPolicy = DefaultSkinPolicyDefault
 	}
 
 	s.mu.Lock()

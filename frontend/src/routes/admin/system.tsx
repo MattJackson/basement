@@ -7,6 +7,15 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { adminPage } from "@/shared/layout/adminPage";
 import {
@@ -14,33 +23,13 @@ import {
   useOIDCGroupMappings,
   useUpdateOIDCGroupMappings,
   useGatewaysRegistry,
+  useOrgCapabilities,
   type OIDCGroupMapping,
   type PolicyRole,
   type GatewayInfo,
   type GatewayCapabilities,
   type GatewayStatus,
 } from "@/shared/api/queries";
-
-// Skin-related types for v1.13.0b
-type Skin = {
-  name: string;
-  displayName: string;
-  version: string;
-  productName?: string;
-  borderRadius?: string;
-  density?: "compact" | "comfortable" | "spacious";
-};
-
-type SkinPolicy = {
-  public: boolean;
-  corsOrigin?: string;
-  description?: string;
-};
-
-type SkinWithPolicy = Skin & {
-  policy?: SkinPolicy;
-  active?: boolean;
-};
 
 export const Route = createFileRoute("/admin/system")({
   component: adminPage(OrgCapabilitiesPage),
@@ -130,7 +119,7 @@ function OrgCapabilitiesPage() {
     if (!data) return;
 
     try {
-      // @ts-ignore - API types not generated yet
+      // @ts-ignore - path not in generated API types
       await client.PATCH("/admin/system", {
         body: data,
       });
@@ -303,8 +292,8 @@ function OrgCapabilitiesPage() {
       {/* OIDC group-claim -> role auto-mapping (v1.3.0a). */}
       <OIDCGroupMappingsSection />
 
-      {/* v1.13.0b: Skin management section. */}
-      <SkinsSection />
+      {/* v1.13.1: Skin manager with three-control layout */}
+      <SkinsManager />
 
       {/* Usage overview link card — OBS.USAGE v0.9.0k surfaces the */}
       {/* storage snapshot from the System page so the operator's */}
@@ -1436,13 +1425,12 @@ function AddMappingDialog({
   );
 }
 
-// v1.13.0b: Skin management section with upload, activate, delete controls
-function SkinsSection() {
-  const [skins, setSkins] = useState<SkinWithPolicy[]>([]);
+// v1.13.1: Skin manager with three-control layout (default skin, user overridable toggle, available skins list)
+function SkinsManager() {
+  const queryClient = useQueryClient();
+  const [skins, setSkins] = useState<Array<{ name: string; displayName: string; swatch: string; builtIn: boolean }>>([]);
   const [loading, setLoading] = useState(true);
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const caps = useOrgCapabilities();
 
   useEffect(() => {
     fetchSkins();
@@ -1451,9 +1439,9 @@ function SkinsSection() {
   async function fetchSkins() {
     try {
       // @ts-ignore - API types not generated yet
-      const { data } = await client.GET("/admin/skins", {});
+      const { data } = await client.GET("/api/v1/skins", {});
       if (data) {
-        setSkins(data as SkinWithPolicy[]);
+        setSkins(data as Array<{ name: string; displayName: string; swatch: string; builtIn: boolean }>);
       }
     } catch (error) {
       toast.error("Failed to load skins");
@@ -1462,255 +1450,156 @@ function SkinsSection() {
     }
   }
 
-  async function handleUpload(file: File, policy?: Partial<SkinPolicy>) {
-    const formData = new FormData();
-    formData.append("file", file);
+  const [defaultSkin, setDefaultSkin] = useState(caps.data?.activeSkin || "basement-default");
+  const [userOverridable, setUserOverridable] = useState(caps.data?.userOverridableSkin || false);
+  const [allowedUserSkins, setAllowedUserSkins] = useState<string[]>(caps.data?.allowedUserSkins || []);
 
-    if (policy?.public !== undefined) {
-      formData.append("policy.public", String(policy.public));
-    }
-    if (policy?.corsOrigin) {
-      formData.append("policy.corsOrigin", policy.corsOrigin);
-    }
-    if (policy?.description) {
-      formData.append("policy.description", policy.description);
-    }
-
-    try {
-      setUploading(true);
-      // @ts-ignore - API types not generated yet
-      const response = await client.POST("/admin/skins/upload", {
-        body: formData,
-      });
-      if (!response.response.ok) {
-        throw new Error("Upload failed");
+  // Debounced save on change
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        // @ts-ignore - admin/system path not in generated types yet
+        await client.PATCH("/admin/system", {
+          body: {
+            activeSkin: defaultSkin,
+            userOverridableSkin: userOverridable,
+            allowedUserSkins: allowedUserSkins,
+          },
+        });
+        toast.success("Saved");
+        queryClient.invalidateQueries({ queryKey: ["org-capabilities"] });
+        queryClient.invalidateQueries({ queryKey: ["skin", "active"] });
+      } catch (error) {
+        toast.error("Failed to save skin settings");
       }
-      setUploadOpen(false);
-      toast.success("Skin uploaded successfully");
-      fetchSkins();
-    } catch (error) {
-      toast.error("Failed to upload skin");
-    } finally {
-      setUploading(false);
-    }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [defaultSkin, userOverridable, allowedUserSkins, queryClient]);
+
+  if (loading) {
+    return <Card><CardContent className="text-sm text-muted-foreground">Loading skins...</CardContent></Card>;
   }
 
-  async function handleActivate(name: string) {
-    try {
-      // @ts-ignore - API types not generated yet
-      const response = await client.PUT("/admin/skins/{id}/activate", {
-        params: { path: { id: name } },
-      });
-      if (!response.response.ok) {
-        throw new Error("Activation failed");
-      }
-      toast.success(`Activated skin: ${name}`);
-      fetchSkins();
-    } catch (error) {
-      toast.error(`Failed to activate skin: ${name}`);
-    }
-  }
-
-  async function handleDelete(name: string) {
-    if (!confirm(`Delete skin "${name}"? This cannot be undone.`)) {
-      return;
-    }
-
-    try {
-      // @ts-ignore - API types not generated yet
-      const response = await client.DELETE("/admin/skins/{id}", {
-        params: { path: { id: name } },
-      });
-      if (!response.response.ok) {
-        throw new Error("Delete failed");
-      }
-      toast.success(`Deleted skin: ${name}`);
-      fetchSkins();
-    } catch (error) {
-      toast.error(`Failed to delete skin: ${name}`);
-    }
-  }
-
-  function handleDrag(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      if (!file.name.endsWith(".basement-skin.json")) {
-        toast.error("Please upload a .basement-skin.json file");
-        return;
-      }
-      handleUpload(file, { public: true });
-    }
-  }
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      handleUpload(e.target.files[0], { public: true });
-    }
-  }
+  const availableForSelection = userOverridable && allowedUserSkins.length > 0 ? allowedUserSkins : skins.map(s => s.name);
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>Skins</CardTitle>
-          <CardDescription>
-            Manage custom skins for your basement deployment. Upload new skins,
-            activate them, and configure visibility settings.
-          </CardDescription>
-        </div>
-        <Button onClick={() => setUploadOpen(true)} disabled={loading}>
-          Upload Skin
-        </Button>
+      <CardHeader>
+        <CardTitle>Skins</CardTitle>
+        <CardDescription>
+          Configure the default skin and user override settings. Changes apply immediately.
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <p className="text-sm text-muted-foreground">Loading skins...</p>
-        ) : skins.length === 0 ? (
-          <div className="rounded-md border border-dashed p-8 text-center">
-            <p className="text-sm text-muted-foreground mb-4">
-              No skins uploaded yet. Upload a .basement-skin.json file to get started.
-            </p>
-            <Button onClick={() => setUploadOpen(true)} variant="outline">
-              Upload Skin
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {skins.map((skin) => (
-              <div
-                key={skin.name}
-                className="flex items-center justify-between rounded-md border p-4"
-              >
-                <div className="flex-1 min-w-0">
+      <CardContent className="space-y-6">
+        {/* Default Skin */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium" htmlFor="default-skin-select">Default Skin</label>
+          <Select value={defaultSkin} onValueChange={setDefaultSkin}>
+            <SelectTrigger id="default-skin-select">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {skins.map((skin) => (
+                <SelectItem key={skin.name} value={skin.name}>
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium">{skin.displayName}</h4>
-                    {skin.active && (
-                      <Badge variant="default" className="text-xs">Active</Badge>
+                    <div 
+                      className="w-4 h-4 rounded-full" 
+                      style={{ backgroundColor: skin.swatch || "#000" }} 
+                    />
+                    {skin.displayName}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* User Overridable */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium flex items-center gap-2">
+            <Switch 
+              checked={userOverridable} 
+              onCheckedChange={setUserOverridable}
+            />
+            User Overridable
+          </label>
+        </div>
+
+        {/* Available Skins (hidden when overridable=false) */}
+        {userOverridable && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Available Skins</label>
+            <div className="grid grid-cols-2 gap-2">
+              {skins.map((skin) => (
+                <label key={skin.name} className="flex items-center gap-2 text-sm p-2 rounded-md border hover:bg-muted/50 cursor-pointer">
+                  <Checkbox 
+                    checked={availableForSelection.includes(skin.name)}
+                    onCheckedChange={(checked) => {
+                      if (checked && userOverridable) {
+                        setAllowedUserSkins([...allowedUserSkins, skin.name]);
+                      } else if (!checked) {
+                        setAllowedUserSkins(allowedUserSkins.filter(n => n !== skin.name));
+                      }
+                    }}
+                  />
+                  <div 
+                    className="w-4 h-4 rounded-full" 
+                    style={{ backgroundColor: skin.swatch || "#000" }} 
+                  />
+                  {skin.displayName}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Installed Skins List */}
+        <div className="space-y-3 pt-4 border-t">
+          <h4 className="text-sm font-medium">Installed Skins</h4>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {skins.map((skin) => (
+              <div key={skin.name} className="rounded-lg border p-3 flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div 
+                    className="w-6 h-6 rounded-full shrink-0" 
+                    style={{ backgroundColor: skin.swatch || "#000" }} 
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{skin.displayName}</p>
+                    {skin.builtIn ? (
+                      <Badge variant="secondary" className="text-[10px]">Built-in</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px]">Custom</Badge>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    {skin.name}@{skin.version}
-                  </p>
-                  {skin.policy?.description && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {skin.policy.description}
-                    </p>
-                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  {!skin.active && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleActivate(skin.name)}
-                    >
-                      Activate
-                    </Button>
-                  )}
-                  {skin.name !== "basement-default" && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(skin.name)}
-                    >
-                      Delete
-                    </Button>
-                  )}
-                </div>
+                {!skin.builtIn && (
+                  <Button 
+                    size="sm" 
+                    variant="ghost" 
+                    className="text-destructive hover:text-destructive h-8 px-2"
+                    onClick={() => {
+                      if (confirm(`Delete skin "${skin.displayName}"? This cannot be undone.`)) {
+                        // @ts-ignore - API types not generated yet
+                        client.DELETE("/admin/skins/{id}", { params: { path: { id: skin.name } } })
+                          .then(() => {
+                            toast.success(`Deleted ${skin.displayName}`);
+                            fetchSkins();
+                          })
+                          .catch(() => toast.error("Failed to delete skin"));
+                      }
+                    }}
+                  >
+                    Delete
+                  </Button>
+                )}
               </div>
             ))}
           </div>
-        )}
-
-        {/* Policy info */}
-        {skins.some((s) => s.policy?.corsOrigin || !s.policy?.public) && (
-          <div className="rounded-md bg-muted/50 p-3 text-xs">
-            <p className="font-medium mb-1">Policy Settings:</p>
-            <ul className="list-disc list-inside space-y-0.5">
-              {skins.map((s) => s.policy && (
-                <li key={s.name}>
-                  <strong>{s.displayName}:</strong>{" "}
-                  {s.policy.public ? "Public" : "Private"}
-                  {s.policy.corsOrigin && ` - CORS: ${s.policy.corsOrigin}`}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        </div>
       </CardContent>
-
-      {/* Upload dialog */}
-      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Upload Skin</DialogTitle>
-            <DialogDescription>
-              Upload a .basement-skin.json file to add a custom skin. The file
-              must contain valid JSON with the required palette and typography fields.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div
-            className={`border-2 border-dashed rounded-md p-8 text-center transition-colors ${
-              dragActive ? "border-primary bg-muted/50" : "border-input"
-            }`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
-          >
-            <p className="text-sm text-muted-foreground mb-4">
-              Drag and drop your .basement-skin.json file here, or click to browse
-            </p>
-            <input
-              type="file"
-              accept=".basement-skin.json"
-              onChange={handleChange}
-              className="hidden"
-              id="skin-upload-input"
-            />
-            <input
-              type="file"
-              accept=".basement-skin.json"
-              onChange={handleChange}
-              className="hidden"
-              id="skin-upload-input"
-              disabled={uploading}
-            />
-            <label htmlFor="skin-upload-input">
-              <Button disabled={uploading}>
-                {uploading ? "Uploading..." : "Select File"}
-              </Button>
-            </label>
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setUploadOpen(false)}
-              disabled={uploading}
-            >
-              Cancel
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }
+ 
