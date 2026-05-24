@@ -276,13 +276,24 @@ func (s *Server) activateSkinHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In a real implementation, this would update OrgCapabilities.ActiveSkin
-	// For now, we just confirm the skin exists and is activeable
+	// v1.11.0.32: actually persist the activation. The v1.13.0b shipping
+	// version stubbed this out with a comment promising "in a real
+	// implementation"; operator caught it not working.
+	caps := s.store.OrgCapabilities().Get()
+	caps.ActiveSkin = skinObj.Name
+	if err := s.store.OrgCapabilities().Update(caps); err != nil {
+		s.auditFailure(r, "host:skin_activate", resourceHost, err)
+		writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to persist active skin")
+		return
+	}
+	s.auditSuccess(r, "host:skin_activate", resourceHost)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success":     true,
 		"name":        skinObj.Name,
 		"displayName": skinObj.DisplayName,
+		"activeSkin":  caps.ActiveSkin,
 	})
 }
 
