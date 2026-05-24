@@ -29,6 +29,7 @@ import {
   type GatewayInfo,
   type GatewayCapabilities,
   type GatewayStatus,
+  type Skin,
 } from "@/shared/api/queries";
 
 export const Route = createFileRoute("/admin/system")({
@@ -1428,7 +1429,7 @@ function AddMappingDialog({
 // v1.13.1: Skin manager with three-control layout (default skin, user overridable toggle, available skins list)
 function SkinsManager() {
   const queryClient = useQueryClient();
-  const [skins, setSkins] = useState<Array<{ name: string; displayName: string; swatch: string; builtIn: boolean }>>([]);
+  const [skins, setSkins] = useState<Array<{ name: string; displayName: string; swatch?: string; builtIn?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const caps = useOrgCapabilities();
 
@@ -1449,7 +1450,7 @@ function SkinsManager() {
       }
       const data = await res.json();
       if (Array.isArray(data)) {
-        setSkins(data as SkinWithPolicy[]);
+        setSkins(data as Skin[]);
       }
     } catch (error) {
       toast.error("Failed to load skins");

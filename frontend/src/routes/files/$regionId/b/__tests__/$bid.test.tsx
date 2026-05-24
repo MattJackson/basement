@@ -123,6 +123,7 @@ beforeEach(() => {
     },
     isLoading: false,
     error: null,
+    refetch: vi.fn(),
   } as any);
   vi.mocked(useUserRegionPresignGet).mockReturnValue({
     mutateAsync: vi.fn(),
@@ -394,7 +395,12 @@ describe("/files/$regionId/b/$bid — batch operations (v1.4.0b)", () => {
     await userEvent.click(screen.getByTestId("batch-action-bar-cancel"));
 
     expect(screen.queryByTestId("batch-action-bar")).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    // Cancel should not fire DELETE requests, but other queries (object-lock, encryption) may run.
+    const deleteCalls = fetchMock.mock.calls.filter((call) => {
+      const url = call[0] as string;
+      return url.includes("/objects/") && call[1]?.method === "DELETE";
+    });
+    expect(deleteCalls).toHaveLength(0);
 
     restoreFetch();
   });

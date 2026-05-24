@@ -21,17 +21,14 @@ vi.mock("@/shared/theme/ThemeToggle", () => ({
 }));
 
 // Stub the version query — it calls fetch("/api/v1/version") which we'd
-// otherwise have to mock per-test.
-vi.mock("@/shared/api/queries", () => ({
-  useVersion: () => ({ data: undefined }),
-  useOrgCapabilities: () => ({ data: { signupMode: "invite" } as any }),
-  isSignupEnabled: (mode?: string) => mode === "open" || mode === "invite",
-}));
-
+// otherwise have to mock per-test. Merge with partial mock below.
 vi.mock("@/shared/api/queries", async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...(actual as object),
+    useVersion: () => ({ data: undefined }),
+    useOrgCapabilities: () => ({ data: { signupMode: "invite" } as any }),
+    isSignupEnabled: (mode?: string) => mode === "open" || mode === "invite",
     useActiveSkin: () => ({ data: null, isLoading: false }),
   };
 });

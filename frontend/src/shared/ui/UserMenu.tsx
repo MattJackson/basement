@@ -177,29 +177,39 @@ export function UserMenu() {
             </DropdownMenuItem>
           ) : null}
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuLinkItem href="/admin/clusters">
-            Clusters
-          </DropdownMenuLinkItem>
-          {/* v1.11.0.15: "Access keys" item removed — keys are
-              per-cluster and live on the cluster detail page; the
-              global /admin/keys route was retired in the same cycle. */}
-          <DropdownMenuLinkItem href="/admin/policies">
-            Policies
-          </DropdownMenuLinkItem>
-          <DropdownMenuLinkItem href="/admin/service-accounts">
-            Service accounts
-          </DropdownMenuLinkItem>
-          <DropdownMenuLinkItem href="/admin/audit">
-            Audit log
-          </DropdownMenuLinkItem>
-          {uiAdmin && (
-            <DropdownMenuLinkItem href="/admin/system">
-              System settings
-            </DropdownMenuLinkItem>
-          )}
-        </DropdownMenuGroup>
+        {/* v1.13.16: admin-only nav items — Clusters, Policies, Service
+            accounts, Audit log, System settings — ONLY render when the
+            user is currently in admin/elevated mode AND is a uiAdmin.
+            Previous code rendered Clusters/Policies/SAs/Audit
+            unconditionally, exposing admin routes in the dropdown for
+            users sitting in /files (user view) who could click and hit
+            403 / elevation prompt. Operator-confirmed: user-view dropdown
+            should not show admin nav at all. */}
+        {uiAdmin && (mode === "admin" || mode === "elevated") && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLinkItem href="/admin/clusters">
+                Clusters
+              </DropdownMenuLinkItem>
+              {/* v1.11.0.15: "Access keys" item removed — keys are
+                  per-cluster and live on the cluster detail page; the
+                  global /admin/keys route was retired in the same cycle. */}
+              <DropdownMenuLinkItem href="/admin/policies">
+                Policies
+              </DropdownMenuLinkItem>
+              <DropdownMenuLinkItem href="/admin/service-accounts">
+                Service accounts
+              </DropdownMenuLinkItem>
+              <DropdownMenuLinkItem href="/admin/audit">
+                Audit log
+              </DropdownMenuLinkItem>
+              <DropdownMenuLinkItem href="/admin/system">
+                System settings
+              </DropdownMenuLinkItem>
+            </DropdownMenuGroup>
+          </>
+        )}
         <DropdownMenuSeparator />
         {/* v1.13.0a (ADR-0008): Theme submenu — System / Light / Dark.
             Replaces the standalone ThemeToggle button that used to sit

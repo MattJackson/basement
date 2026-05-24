@@ -13,5 +13,9 @@ export default defineConfig({
     injectMockGlobals: [
       "__BUILD_COMMIT__ = 'test-build-123'",
     ],
+    coverage: {
+      include: ["src/**/*.{ts,tsx}"],
+      reporter: ["text", "html"],
+    },
   },
 });
