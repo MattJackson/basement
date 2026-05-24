@@ -14,15 +14,29 @@ import (
 
 func TestListBuckets(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// httptest will split the path before "?". The full RequestURI is
-		// what the client sends; check that ?list is present.
-		if r.URL.Path != "/v1/bucket" || r.URL.RawQuery != "list" || r.Method != "GET" {
-			t.Errorf("expected GET /v1/bucket?list, got %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		if r.URL.Path == "/v1/bucket" && r.URL.RawQuery == "list" && r.Method == "GET" {
+			_ = json.NewEncoder(w).Encode([]listBucketsItemV1{
+				{ID: "bucket-a", GlobalAliases: []string{"docs"}},
+				{ID: "bucket-b", GlobalAliases: []string{"site.com", "www.site.com"}},
+			})
+			return
 		}
-		_ = json.NewEncoder(w).Encode([]listBucketsItemV1{
-			{ID: "bucket-a", GlobalAliases: []string{"docs"}},
-			{ID: "bucket-b", GlobalAliases: []string{"site.com", "www.site.com"}},
-		})
+
+		if r.URL.Path == "/v1/bucket" && r.Method == "GET" {
+			query := r.URL.Query()
+			bucketID := query.Get("id")
+			resp := bucketInfoV1{
+				ID:                bucketID,
+				GlobalAliases:     []string{"docs"},
+				Objects:           42,
+				Bytes:             1024 * 1024,
+				UnfinishedUploads: 3,
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		t.Errorf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
 	}))
 	defer ts.Close()
 
@@ -39,6 +53,9 @@ func TestListBuckets(t *testing.T) {
 	}
 	if len(buckets[1].Aliases) != 2 {
 		t.Errorf("buckets[1].Aliases = %v, want 2 entries", buckets[1].Aliases)
+	}
+	if buckets[0].Objects != 42 || buckets[0].Bytes != 1024*1024 {
+		t.Errorf("stats not populated: objects=%d bytes=%d", buckets[0].Objects, buckets[0].Bytes)
 	}
 }
 
@@ -254,15 +271,49 @@ func TestGetBucket_Fields(t *testing.T) {
 	}
 }
 
-func TestListBuckets_NoStatsOnList(t *testing.T) {
+func TestListBuckets_PopulatesStats(t *testing.T) {
+	callCount := 0
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/bucket" || r.URL.RawQuery != "list" || r.Method != "GET" {
-			t.Errorf("expected GET /v1/bucket?list, got %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		if r.URL.Path == "/v1/bucket" && r.URL.RawQuery == "list" && r.Method == "GET" {
+			_ = json.NewEncoder(w).Encode([]listBucketsItemV1{
+				{ID: "bucket-a", GlobalAliases: []string{"docs"}},
+				{ID: "bucket-b", GlobalAliases: []string{"site.com"}},
+			})
+			return
 		}
-		_ = json.NewEncoder(w).Encode([]listBucketsItemV1{
-			{ID: "bucket-a", GlobalAliases: []string{"docs"}},
-			{ID: "bucket-b", GlobalAliases: []string{"site.com"}},
-		})
+
+		if r.URL.Path == "/v1/bucket" && r.Method == "GET" {
+			callCount++
+			query := r.URL.Query()
+			bucketID := query.Get("id")
+			var resp bucketInfoV1
+			switch bucketID {
+			case "bucket-a":
+				resp = bucketInfoV1{
+					ID:                "bucket-a",
+					GlobalAliases:     []string{"docs"},
+					Objects:           42,
+					Bytes:             1024 * 1024,
+					UnfinishedUploads: 3,
+				}
+			case "bucket-b":
+				resp = bucketInfoV1{
+					ID:                "bucket-b",
+					GlobalAliases:     []string{"site.com"},
+					Objects:           100,
+					Bytes:             2 * 1024 * 1024,
+					UnfinishedUploads: 5,
+				}
+			default:
+				t.Errorf("unexpected bucket ID: %s", bucketID)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+
+		t.Errorf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
 	}))
 	defer ts.Close()
 
@@ -274,18 +325,91 @@ func TestListBuckets_NoStatsOnList(t *testing.T) {
 	if len(buckets) != 2 {
 		t.Fatalf("got %d buckets, want 2", len(buckets))
 	}
+	if callCount != 2 {
+		t.Errorf("expected 2 GetBucket calls, got %d", callCount)
+	}
 	for i, b := range buckets {
-		if b.Objects != 0 {
-			t.Errorf("buckets[%d].Objects = %d, want 0 (list endpoint omits stats)", i, b.Objects)
+		switch b.ID {
+		case "bucket-a":
+			if b.Objects != 42 {
+				t.Errorf("buckets[%d].Objects = %d, want 42", i, b.Objects)
+			}
+			if b.Bytes != 1024*1024 {
+				t.Errorf("buckets[%d].Bytes = %d, want %d", i, b.Bytes, 1024*1024)
+			}
+			if b.UnfinishedUploads != 3 {
+				t.Errorf("buckets[%d].UnfinishedUploads = %d, want 3", i, b.UnfinishedUploads)
+			}
+		case "bucket-b":
+			if b.Objects != 100 {
+				t.Errorf("buckets[%d].Objects = %d, want 100", i, b.Objects)
+			}
+			if b.Bytes != 2*1024*1024 {
+				t.Errorf("buckets[%d].Bytes = %d, want %d", i, b.Bytes, 2*1024*1024)
+			}
+			if b.UnfinishedUploads != 5 {
+				t.Errorf("buckets[%d].UnfinishedUploads = %d, want 5", i, b.UnfinishedUploads)
+			}
+		default:
+			t.Errorf("unexpected bucket ID: %s", b.ID)
 		}
-		if b.Bytes != 0 {
-			t.Errorf("buckets[%d].Bytes = %d, want 0 (list endpoint omits stats)", i, b.Bytes)
+	}
+}
+
+func TestListBuckets_PartialFailure(t *testing.T) {
+	callCount := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/bucket" && r.URL.RawQuery == "list" && r.Method == "GET" {
+			_ = json.NewEncoder(w).Encode([]listBucketsItemV1{
+				{ID: "bucket-ok", GlobalAliases: []string{"ok"}},
+				{ID: "bucket-fail", GlobalAliases: []string{"fail"}},
+			})
+			return
 		}
-		if b.UnfinishedUploads != 0 {
-			t.Errorf("buckets[%d].UnfinishedUploads = %d, want 0", i, b.UnfinishedUploads)
+
+		if r.URL.Path == "/v1/bucket" && r.Method == "GET" {
+			callCount++
+			query := r.URL.Query()
+			bucketID := query.Get("id")
+			if bucketID == "bucket-ok" {
+				resp := bucketInfoV1{
+					ID:                "bucket-ok",
+					GlobalAliases:     []string{"ok"},
+					Objects:           10,
+					Bytes:             5000,
+					UnfinishedUploads: 1,
+				}
+				_ = json.NewEncoder(w).Encode(resp)
+			} else if bucketID == "bucket-fail" {
+				w.WriteHeader(http.StatusNotFound)
+			}
+			return
 		}
-		if len(b.Keys) != 0 {
-			t.Errorf("buckets[%d].Keys length = %d, want 0 (list endpoint omits keys)", i, len(b.Keys))
+
+		t.Errorf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+	}))
+	defer ts.Close()
+
+	d := newTestDriver(ts.URL)
+
+	buckets, err := d.ListBuckets(context.Background())
+	if err == nil {
+		t.Error("expected error on partial failure, got nil")
+	}
+
+	if len(buckets) != 2 {
+		t.Fatalf("got %d buckets, want 2", len(buckets))
+	}
+
+	for _, b := range buckets {
+		if b.ID == "bucket-ok" {
+			if b.Objects != 10 || b.Bytes != 5000 {
+				t.Errorf("bucket-ok should have stats: objects=%d bytes=%d", b.Objects, b.Bytes)
+			}
+		} else if b.ID == "bucket-fail" {
+			if b.Objects != 0 || b.Bytes != 0 {
+				t.Errorf("bucket-fail should have zero stats on failure: objects=%d bytes=%d", b.Objects, b.Bytes)
+			}
 		}
 	}
 }

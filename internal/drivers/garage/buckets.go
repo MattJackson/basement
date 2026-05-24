@@ -2,8 +2,10 @@ package garage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"sync"
 	"time"
 
 	driverpkg "github.com/mattjackson/basement/internal/driver"
@@ -11,6 +13,12 @@ import (
 
 // ListBuckets returns all buckets in the cluster.
 // Endpoint: GET /v2/ListBuckets (garage-admin-v2.json:1239-1262).
+//
+// Performance note: This method fans out GetBucketInfo calls via a bounded
+// worker pool (8 concurrent goroutines) to populate Objects, Bytes, and
+// CreatedAt fields. At 200 buckets with ~50ms per call, fanout adds ~1.5s
+// total latency — acceptable for the admin list page. For clusters >500
+// buckets, consider adding pagination support in a follow-up.
 func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 	var resp []listBucketsResponseItem
 	if err := d.client.do(ctx, "GET", "/v2/ListBuckets", nil, &resp); err != nil {
@@ -22,9 +30,58 @@ func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 		bucket := driverpkg.Bucket{
 			ID:      b.ID,
 			Aliases: b.GlobalAliases,
+			Created: b.Created,
 		}
 		buckets = append(buckets, bucket)
 	}
+
+	if len(buckets) == 0 {
+		return buckets, nil
+	}
+
+	const maxWorkers = 8
+	sem := make(chan struct{}, maxWorkers)
+	var mu sync.Mutex
+	var errs []error
+
+	var wg sync.WaitGroup
+	wg.Add(len(buckets))
+
+	for i := range buckets {
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			info, err := d.GetBucket(ctx, buckets[idx].ID)
+			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("bucket %q: %w", buckets[idx].ID, err))
+				mu.Unlock()
+				return
+			}
+
+			mu.Lock()
+			buckets[idx].Objects = info.Objects
+			buckets[idx].Bytes = info.Bytes
+			buckets[idx].UnfinishedUploads = info.UnfinishedUploads
+			if buckets[idx].Created.IsZero() {
+				buckets[idx].Created = info.Created
+			}
+			mu.Unlock()
+		}(i)
+	}
+
+	wg.Wait()
+
+	if len(errs) > 0 {
+		var errMsgs []string
+		for _, e := range errs {
+			errMsgs = append(errMsgs, e.Error())
+		}
+		return buckets, fmt.Errorf("ListBuckets fanout: %v", errors.Join(errs...))
+	}
+
 	return buckets, nil
 }
 

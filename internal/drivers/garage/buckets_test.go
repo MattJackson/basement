@@ -151,20 +151,55 @@ w.Header().Set("Content-Type", "application/json")
 	}
 }
 
-func TestListBuckets_NoStatsOnList(t *testing.T) {
+func TestListBuckets_PopulatesStats(t *testing.T) {
+	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/ListBuckets" || r.Method != "GET" {
-			t.Errorf("expected GET /v2/ListBuckets, got %s %s", r.Method, r.URL.Path)
+		if r.URL.Path == "/v2/ListBuckets" && r.Method == "GET" {
+			response := []listBucketsResponseItem{
+				{ID: "bucket-a", Created: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), GlobalAliases: []string{"docs"}},
+				{ID: "bucket-b", Created: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), GlobalAliases: []string{"site.com"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+			return
 		}
 
-		response := []listBucketsResponseItem{
-			{ID: "bucket-a", Created: time.Now(), GlobalAliases: []string{"docs"}},
-			{ID: "bucket-b", Created: time.Now(), GlobalAliases: []string{"site.com"}},
+		if r.URL.Path == "/v2/GetBucketInfo" && r.Method == "GET" {
+			callCount++
+			query := r.URL.Query()
+			bucketID := query.Get("id")
+			var resp getBucketInfoResponse
+			switch bucketID {
+			case "bucket-a":
+				resp = getBucketInfoResponse{
+					ID:                "bucket-a",
+					Created:           time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+					GlobalAliases:     []string{"docs"},
+					Objects:           42,
+					Bytes:             1024 * 1024,
+					UnfinishedUploads: 3,
+				}
+			case "bucket-b":
+				resp = getBucketInfoResponse{
+					ID:                "bucket-b",
+					Created:           time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+					GlobalAliases:     []string{"site.com"},
+					Objects:           100,
+					Bytes:             2 * 1024 * 1024,
+					UnfinishedUploads: 5,
+				}
+			default:
+				t.Errorf("unexpected bucket ID: %s", bucketID)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
 		}
 
-w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
-}))
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
 	defer server.Close()
 
 	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
@@ -178,18 +213,103 @@ w.Header().Set("Content-Type", "application/json")
 		t.Fatalf("got %d buckets, want 2", len(buckets))
 	}
 
+	if callCount != 2 {
+		t.Errorf("expected 2 GetBucketInfo calls, got %d", callCount)
+	}
+
 	for i, b := range buckets {
-		if b.Objects != 0 {
-			t.Errorf("buckets[%d].Objects = %d, want 0 (list endpoint omits stats)", i, b.Objects)
+		switch b.ID {
+		case "bucket-a":
+			if b.Objects != 42 {
+				t.Errorf("buckets[%d].Objects = %d, want 42", i, b.Objects)
+			}
+			if b.Bytes != 1024*1024 {
+				t.Errorf("buckets[%d].Bytes = %d, want %d", i, b.Bytes, 1024*1024)
+			}
+			if b.UnfinishedUploads != 3 {
+				t.Errorf("buckets[%d].UnfinishedUploads = %d, want 3", i, b.UnfinishedUploads)
+			}
+			if !b.Created.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+				t.Errorf("buckets[%d].Created = %v, want 2026-01-01", i, b.Created)
+			}
+		case "bucket-b":
+			if b.Objects != 100 {
+				t.Errorf("buckets[%d].Objects = %d, want 100", i, b.Objects)
+			}
+			if b.Bytes != 2*1024*1024 {
+				t.Errorf("buckets[%d].Bytes = %d, want %d", i, b.Bytes, 2*1024*1024)
+			}
+			if b.UnfinishedUploads != 5 {
+				t.Errorf("buckets[%d].UnfinishedUploads = %d, want 5", i, b.UnfinishedUploads)
+			}
+			if !b.Created.Equal(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)) {
+				t.Errorf("buckets[%d].Created = %v, want 2026-02-01", i, b.Created)
+			}
+		default:
+			t.Errorf("unexpected bucket ID: %s", b.ID)
 		}
-		if b.Bytes != 0 {
-			t.Errorf("buckets[%d].Bytes = %d, want 0 (list endpoint omits stats)", i, b.Bytes)
+	}
+}
+
+func TestListBuckets_PartialFailure(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v2/ListBuckets" && r.Method == "GET" {
+			response := []listBucketsResponseItem{
+				{ID: "bucket-ok", Created: time.Now(), GlobalAliases: []string{"ok"}},
+				{ID: "bucket-fail", Created: time.Now(), GlobalAliases: []string{"fail"}},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(response)
+			return
 		}
-		if b.UnfinishedUploads != 0 {
-			t.Errorf("buckets[%d].UnfinishedUploads = %d, want 0", i, b.UnfinishedUploads)
+
+		if r.URL.Path == "/v2/GetBucketInfo" && r.Method == "GET" {
+			callCount++
+			query := r.URL.Query()
+			bucketID := query.Get("id")
+			if bucketID == "bucket-ok" {
+				resp := getBucketInfoResponse{
+					ID:                "bucket-ok",
+					Created:           time.Now(),
+					GlobalAliases:     []string{"ok"},
+					Objects:           10,
+					Bytes:             5000,
+					UnfinishedUploads: 1,
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(resp)
+			} else if bucketID == "bucket-fail" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error": "not found"}`))
+			}
+			return
 		}
-		if len(b.Keys) != 0 {
-			t.Errorf("buckets[%d].Keys length = %d, want 0 (list endpoint omits keys)", i, len(b.Keys))
+
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	d := &driver{client: &client{baseURL: server.URL, token: "test-token", http: &http.Client{}}}
+
+	buckets, err := d.ListBuckets(context.Background())
+	if err == nil {
+		t.Error("expected error on partial failure, got nil")
+	}
+
+	if len(buckets) != 2 {
+		t.Fatalf("got %d buckets, want 2", len(buckets))
+	}
+
+	for _, b := range buckets {
+		if b.ID == "bucket-ok" {
+			if b.Objects != 10 || b.Bytes != 5000 {
+				t.Errorf("bucket-ok should have stats: objects=%d bytes=%d", b.Objects, b.Bytes)
+			}
+		} else if b.ID == "bucket-fail" {
+			if b.Objects != 0 || b.Bytes != 0 {
+				t.Errorf("bucket-fail should have zero stats on failure: objects=%d bytes=%d", b.Objects, b.Bytes)
+			}
 		}
 	}
 }
