@@ -17,7 +17,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { client } from "@/shared/api/client";
-import { useVersion, useOrgCapabilities, canUserSelectSkin, type Skin, useSetActiveSkin } from "@/shared/api/queries";
+import { useVersion, useOrgCapabilities, useSetActiveSkin } from "@/shared/api/queries";
 import { useElevationPrompt } from "@/shared/auth/elevation";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 import { useTheme, type Theme } from "@/shared/theme/useTheme";
@@ -232,7 +232,7 @@ export function UserMenu() {
         </DropdownMenuSub>
 
         {/* v1.13.0c: Skin selector — only shown when org policy permits user choice */}
-        {canUserSelectSkin(orgCaps.data?.skinPolicy) && skinRegistry.data && (
+        {orgCaps.data?.userOverridableSkin && skinRegistry.data && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuSub>
@@ -243,14 +243,27 @@ export function UserMenu() {
                 <DropdownMenuRadioGroup
                   value={activeSkin.skin?.name || ""}
                   onValueChange={(selectedName) => {
-                    setActiveSkinMutation.mutate(selectedName);
+                    const allowed = orgCaps.data?.allowedUserSkins || [];
+                    // Only allow selection if skin is in allowed set or list is empty (all skins available)
+                    if (allowed.length === 0 || allowed.includes(selectedName)) {
+                      setActiveSkinMutation.mutate(selectedName);
+                    } else {
+                      toast.error(`Skin "${selectedName}" is not available`);
+                    }
                   }}
                 >
-                  {skinRegistry.data.map((s: Skin) => (
-                    <DropdownMenuRadioItem key={s.name} value={s.name}>
-                      {s.displayName || s.name}
-                    </DropdownMenuRadioItem>
-                  ))}
+                  {(orgCaps.data?.allowedUserSkins && orgCaps.data.allowedUserSkins.length > 0 
+                    ? orgCaps.data.allowedUserSkins 
+                    : skinRegistry.data.map(s => s.name)
+                  ).map((name: string) => {
+                    const skin = skinRegistry.data.find(s => s.name === name);
+                    if (!skin) return null;
+                    return (
+                      <DropdownMenuRadioItem key={name} value={name}>
+                        {skin.displayName || name}
+                      </DropdownMenuRadioItem>
+                    );
+                  })}
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>

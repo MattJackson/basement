@@ -398,13 +398,13 @@ func (s *Server) routes() {
 			authG.Get("/auth/elevate/oidc/callback", s.elevateOIDCCallbackHandler)
 			authG.Get("/auth/org-capabilities", s.getCurrentOrgCapabilities)
 			authG.Get("/capabilities", s.capabilitiesHandler)
-			// v1.13.0a (ADR-0008): pluggable skins read endpoint.
-			// Authenticated, not admin-only: the user-side skin
-			// picker (v1.13.0c) needs the same payload as the
-			// /admin/system surface. v1.13.0a returns exactly one
-			// entry — basement-default; v1.13.0b widens this when
-			// the uploader lands.
+// v1.13.0a (ADR-0008): pluggable skins read endpoint.
+			// Every logged-in user can enumerate all registered skins;
+			// the active skin is rendered at boot from registry tokens.
 			authG.Get("/skins", s.listSkinsHandler)
+			// v1.13.0c: user skin override — PUT /api/v1/user/skin allows
+			// authenticated users to pick their own skin if org policy permits.
+			authG.Put("/user/skin", s.setUserSkinHandler)
 		})
 
 		// Admin routes — admin role required.

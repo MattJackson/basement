@@ -9,6 +9,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,14 @@ func TestListSkinsHandler_ReturnsBuiltInDefault(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	var out []skin.Skin
+	type skinListItem struct {
+		Name        string `json:"name"`
+		DisplayName string `json:"displayName"`
+		Version     string `json:"version"`
+		Swatch      string `json:"swatch"`
+		BuiltIn     bool   `json:"builtIn"`
+	}
+	var out []skinListItem
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
 	}
@@ -49,12 +57,11 @@ func TestListSkinsHandler_ReturnsBuiltInDefault(t *testing.T) {
 	if out[0].Name != skin.BuiltInDefaultName {
 		t.Errorf("Name: got %q, want %q", out[0].Name, skin.BuiltInDefaultName)
 	}
-	if out[0].ProductName != "Basement" {
-		t.Errorf("ProductName: got %q, want %q", out[0].ProductName, "Basement")
+	if out[0].DisplayName == "" {
+		t.Errorf("DisplayName: empty after round-trip")
 	}
-	// Sanity: palette tokens round-trip through the JSON wire.
-	if out[0].Palette.Light.Background == "" {
-		t.Errorf("Palette.Light.Background: empty after round-trip")
+	if out[0].Swatch == "" {
+		t.Errorf("Swatch (primary color): empty after round-trip")
 	}
 }
 
@@ -70,8 +77,6 @@ func TestListSkinsHandler_MultipleSkins_AlphabeticalOrder(t *testing.T) {
 	for _, name := range []string{"zeta", "basement-default", "acme"} {
 		s := skin.BuiltInDefault()
 		s.Name = name
-		// v1.13.0a-only path: the duplicate-name guard wouldn't fire
-		// because each iteration mints a fresh value.
 		if err := reg.Register(s); err != nil {
 			t.Fatalf("register %s: %v", name, err)
 		}
@@ -85,7 +90,14 @@ func TestListSkinsHandler_MultipleSkins_AlphabeticalOrder(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
-	var out []skin.Skin
+	type skinListItem struct {
+		Name        string `json:"name"`
+		DisplayName string `json:"displayName"`
+		Version     string `json:"version"`
+		Swatch      string `json:"swatch"`
+		BuiltIn     bool   `json:"builtIn"`
+	}
+	var out []skinListItem
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v body=%s", err, rr.Body.String())
 	}
@@ -142,5 +154,69 @@ func TestListSkinsHandler_RequiresAuth(t *testing.T) {
 
 	if rr.Code == http.StatusOK {
 		t.Errorf("unauthenticated status=%d body=%s; want non-200", rr.Code, rr.Body.String())
+	}
+}
+
+// v1.13.1: Test admin PATCH validation for AllowedUserSkins against installed skins
+
+func TestUpdateOrgCapabilities_AllowedUserSkins_UnknownSkin_Rejected(t *testing.T) {
+	st, err := store.Open(t.TempDir(), 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	srv := New(newTestConfig(), st, nil, nil, nil)
+
+	reg := skin.New()
+	if err := reg.Register(skin.BuiltInDefault()); err != nil {
+		t.Fatalf("register basement-default: %v", err)
+	}
+	srv.SetSkinRegistry(reg)
+
+	reqBody, _ := json.Marshal(store.OrgCapabilities{
+		UserOverridableSkin: true,
+		AllowedUserSkins:    []string{"nonexistent-skin"},
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/system", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	addAdminCookie(req)
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status=%d body=%s; want 400 for unknown skin in AllowedUserSkins", rr.Code, rr.Body.String())
+	}
+}
+
+func TestUpdateOrgCapabilities_AllowedUserSkins_ValidSkins_Accepted(t *testing.T) {
+	st, err := store.Open(t.TempDir(), 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	srv := New(newTestConfig(), st, nil, nil, nil)
+
+	reg := skin.New()
+	defaultSkin := skin.BuiltInDefault()
+	customSkin := defaultSkin
+	customSkin.Name = "custom-skin"
+	if err := reg.Register(defaultSkin); err != nil {
+		t.Fatalf("register basement-default: %v", err)
+	}
+	if err := reg.Register(customSkin); err != nil {
+		t.Fatalf("register custom-skin: %v", err)
+	}
+	srv.SetSkinRegistry(reg)
+
+	reqBody, _ := json.Marshal(store.OrgCapabilities{
+		UserOverridableSkin: true,
+		AllowedUserSkins:    []string{"basement-default", "custom-skin"},
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/system", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	addAdminCookie(req)
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("status=%d body=%s; want 200 for valid AllowedUserSkins", rr.Code, rr.Body.String())
 	}
 }

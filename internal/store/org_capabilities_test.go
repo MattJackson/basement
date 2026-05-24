@@ -233,8 +233,8 @@ func TestOrgCapabilities_MarkOnboardingCompletedPersists(t *testing.T) {
 }
 
 // v1.13.0a (ADR-0008) — a legacy file without ActiveSkin / SkinPolicy
-// reads as the basement-default + "default" pair on Get(). Substitutes
-// at read time without mutating the on-disk file behind the operator.
+// reads as the basement-default pair on Get(). Substitutes at read time
+// without mutating the on-disk file behind the operator.
 func TestOrgCapabilities_LegacyFile_SkinDefaults(t *testing.T) {
 	dir := t.TempDir()
 	legacy := map[string]any{
@@ -253,15 +253,11 @@ func TestOrgCapabilities_LegacyFile_SkinDefaults(t *testing.T) {
 	if caps.ActiveSkin != DefaultActiveSkin {
 		t.Errorf("ActiveSkin: got %q, want %q", caps.ActiveSkin, DefaultActiveSkin)
 	}
-	if caps.SkinPolicy != DefaultSkinPolicyDefault {
-		t.Errorf("SkinPolicy: got %q, want %q", caps.SkinPolicy, DefaultSkinPolicyDefault)
-	}
 }
 
-// v1.13.0a (ADR-0008) — operator-set values round-trip through
-// Update → re-open. Both the name (string) and the policy literal
-// (one of three) survive the JSON serialisation.
-func TestOrgCapabilities_SkinFieldsRoundTrip(t *testing.T) {
+// v1.13.0a (ADR-0008) — operator-set ActiveSkin value round-trips through
+// Update → re-open. The field survives the JSON serialisation.
+func TestOrgCapabilities_ActiveSkinRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	s, err := OpenOrgCapabilities(dir)
 	if err != nil {
@@ -270,12 +266,11 @@ func TestOrgCapabilities_SkinFieldsRoundTrip(t *testing.T) {
 
 	caps := s.Get()
 	caps.ActiveSkin = "acme-corp"
-	caps.SkinPolicy = SkinPolicyLocked
 	if err := s.Update(caps); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
-	// Re-open from disk — both values survive.
+	// Re-open from disk — value survives.
 	s2, err := OpenOrgCapabilities(dir)
 	if err != nil {
 		t.Fatalf("re-open: %v", err)
@@ -283,66 +278,6 @@ func TestOrgCapabilities_SkinFieldsRoundTrip(t *testing.T) {
 	got := s2.Get()
 	if got.ActiveSkin != "acme-corp" {
 		t.Errorf("ActiveSkin round-trip: got %q, want %q", got.ActiveSkin, "acme-corp")
-	}
-	if got.SkinPolicy != SkinPolicyLocked {
-		t.Errorf("SkinPolicy round-trip: got %q, want %q", got.SkinPolicy, SkinPolicyLocked)
-	}
-}
-
-// v1.13.0a (ADR-0008) — an unknown SkinPolicy literal hand-edited
-// into the JSON (or smuggled through a downgrade-then-upgrade)
-// falls back to "default" rather than poisoning the FE renderer.
-// The store invariant is "Get() always returns a renderable
-// policy"; the clamp inside Update() enforces the symmetric
-// invariant on the write side.
-func TestOrgCapabilities_UnknownSkinPolicy_FallsBackToDefault(t *testing.T) {
-	dir := t.TempDir()
-	withGarbage := map[string]any{
-		"signupMode": "invite",
-		"activeSkin": "basement-default",
-		"skinPolicy": "WHATEVER_NEW",
-	}
-	data, _ := json.Marshal(withGarbage)
-	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-
-	s, err := OpenOrgCapabilities(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	if got := s.Get().SkinPolicy; got != DefaultSkinPolicyDefault {
-		t.Errorf("unknown policy clamps to default: got %q, want %q",
-			got, DefaultSkinPolicyDefault)
-	}
-
-	// Now write a known-bad value through Update() — same clamp on
-	// the write side.
-	caps := s.Get()
-	caps.SkinPolicy = "ALSO_INVALID"
-	if err := s.Update(caps); err != nil {
-		t.Fatalf("update with invalid policy: %v", err)
-	}
-	if got := s.Get().SkinPolicy; got != DefaultSkinPolicyDefault {
-		t.Errorf("Update(invalid) clamp: got %q, want %q",
-			got, DefaultSkinPolicyDefault)
-	}
-}
-
-// v1.13.0a (ADR-0008) — IsValidSkinPolicy covers exactly the three
-// literals defined in ADR-0008. Pinned as a separate test so a
-// future cycle that adds a fourth policy literal trips this and
-// remembers to update the doctrine alongside the code.
-func TestIsValidSkinPolicy(t *testing.T) {
-	for _, p := range []string{DefaultSkinPolicyDefault, SkinPolicyLocked, SkinPolicyUserChoice} {
-		if !IsValidSkinPolicy(p) {
-			t.Errorf("IsValidSkinPolicy(%q) = false, want true", p)
-		}
-	}
-	for _, p := range []string{"", "USER_CHOICE", "default ", "anything"} {
-		if IsValidSkinPolicy(p) {
-			t.Errorf("IsValidSkinPolicy(%q) = true, want false", p)
-		}
 	}
 }
 
@@ -381,3 +316,159 @@ func TestOrgCapabilities_V190b_PatchSyncsToProtocols(t *testing.T) {
 		t.Errorf("Protocols[webdav].BaseURL: got %q", cfg.BaseURL)
 	}
 }
+
+// v1.13.1: SkinPolicy → UserOverridableSkin + AllowedUserSkins migration tests
+
+func TestOrgCapabilities_SkinPolicyMigration_Default(t *testing.T) {
+	dir := t.TempDir()
+	legacy := map[string]any{
+		"signupMode": "invite",
+		"activeSkin": "basement-default",
+		"skinPolicy": "default",
+	}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+
+	// "default" → UserOverridableSkin = false, AllowedUserSkins = []
+	if caps.UserOverridableSkin {
+		t.Errorf("UserOverridableSkin: want false for skinPolicy=default, got true")
+	}
+	if len(caps.AllowedUserSkins) != 0 {
+		t.Errorf("AllowedUserSkins: want empty slice, got %v", caps.AllowedUserSkins)
+	}
+}
+
+func TestOrgCapabilities_SkinPolicyMigration_Locked(t *testing.T) {
+	dir := t.TempDir()
+	legacy := map[string]any{
+		"signupMode": "invite",
+		"activeSkin": "basement-default",
+		"skinPolicy": "locked",
+	}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+
+	// "locked" → UserOverridableSkin = false, AllowedUserSkins = []
+	if caps.UserOverridableSkin {
+		t.Errorf("UserOverridableSkin: want false for skinPolicy=locked, got true")
+	}
+	if len(caps.AllowedUserSkins) != 0 {
+		t.Errorf("AllowedUserSkins: want empty slice, got %v", caps.AllowedUserSkins)
+	}
+}
+
+func TestOrgCapabilities_SkinPolicyMigration_UserChoice(t *testing.T) {
+	dir := t.TempDir()
+	legacy := map[string]any{
+		"signupMode": "invite",
+		"activeSkin": "basement-default",
+		"skinPolicy": "user-choice",
+	}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+
+	// "user-choice" → UserOverridableSkin = true, AllowedUserSkins = [] (all)
+	if !caps.UserOverridableSkin {
+		t.Errorf("UserOverridableSkin: want true for skinPolicy=user-choice, got false")
+	}
+	if len(caps.AllowedUserSkins) != 0 {
+		t.Errorf("AllowedUserSkins: want empty slice (all), got %v", caps.AllowedUserSkins)
+	}
+}
+
+func TestOrgCapabilities_SkinPolicyMigration_UnknownValue(t *testing.T) {
+	dir := t.TempDir()
+	legacy := map[string]any{
+		"signupMode": "invite",
+		"activeSkin": "basement-default",
+		"skinPolicy": "UNKNOWN_POLICY",
+	}
+	data, _ := json.Marshal(legacy)
+	if err := os.WriteFile(filepath.Join(dir, "org_capabilities.json"), data, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+
+	// Unknown → falls back to locked (UserOverridableSkin = false)
+	if caps.UserOverridableSkin {
+		t.Errorf("UserOverridableSkin: want false for unknown policy, got true")
+	}
+	if len(caps.AllowedUserSkins) != 0 {
+		t.Errorf("AllowedUserSkins: want empty slice, got %v", caps.AllowedUserSkins)
+	}
+}
+
+func TestOrgCapabilities_FreshInstall_NewFields(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	caps := s.Get()
+
+	// Fresh install → defaults
+	if caps.UserOverridableSkin {
+		t.Errorf("UserOverridableSkin: want false (default), got true")
+	}
+	if len(caps.AllowedUserSkins) != 0 {
+		t.Errorf("AllowedUserSkins: want empty slice, got %v", caps.AllowedUserSkins)
+	}
+}
+
+func TestOrgCapabilities_UserOverridableTrue_AllowedList(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	caps := s.Get()
+	caps.UserOverridableSkin = true
+	caps.AllowedUserSkins = []string{"basement-default", "basement-95"}
+	if err := s.Update(caps); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	s2, err := OpenOrgCapabilities(dir)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	got := s2.Get()
+
+	if !got.UserOverridableSkin {
+		t.Errorf("UserOverridableSkin: want true, got false")
+	}
+	if len(got.AllowedUserSkins) != 2 {
+		t.Errorf("AllowedUserSkins length: want 2, got %d", len(got.AllowedUserSkins))
+	}
+}
+
