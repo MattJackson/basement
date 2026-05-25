@@ -1,0 +1,44 @@
+{
+  "navigation": {
+    "files": "Archivos",
+    "admin": "Administración",
+    "clusters": "Clústeres",
+    "policies": "Políticas",
+    "serviceAccounts": "Cuentas de servicio",
+    "audit": "Registro de auditoría",
+    "system": "Configuración del sistema"
+  },
+  "buttons": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "refresh": "Actualizar",
+    "create": "Crear",
+    "edit": "Editar",
+    "confirm": "Confirmar",
+    "ok": "Aceptar",
+    "submit": "Enviar",
+    "add": "Agregar"
+  },
+  "roles": {
+    "user": "Usuario",
+    "uiAdmin": "Administrador de la interfaz",
+    "clusterAdmin": "Administrador del clúster"
+  },
+  "auth": {
+    "signIn": "Iniciar sesión",
+    "signOut": "Cerrar sesión",
+    "login": "Acceder",
+    "password": "Contraseña",
+    "username": "Nombre de usuario"
+  },
+  "states": {
+    "loading": "Cargando…",
+    "noResults": "Sin resultados",
+    "error": "Error"
+  },
+  "confirmations": {
+    "areYouSure": "¿Está seguro?",
+    "thisCannotBeUndone": "Esta acción no se puede deshacer"
+  }
+}

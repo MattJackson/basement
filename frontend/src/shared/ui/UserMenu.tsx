@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useNavigate } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { client } from "@/shared/api/client";
@@ -24,6 +25,7 @@ import { useTheme, type Theme } from "@/shared/theme/useTheme";
 import { useSkinRegistry, useSkin } from "@/shared/hooks/useSkin";
 import { useUser } from "@/shared/auth/useUser";
 import { useSwitchActiveRole } from "@/shared/api/mutations";
+import { SUPPORTED_LANGUAGES } from "@/shared/i18n";
 
 /**
  * UserMenu is the admin menu in the top bar — avatar trigger,
@@ -56,6 +58,7 @@ export function UserMenu() {
   const skinRegistry = useSkinRegistry();
   const activeSkin = useSkin();
   const setActiveSkinMutation = useSetActiveSkin();
+  const { t, i18n } = useTranslation("common");
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
@@ -197,7 +200,7 @@ export function UserMenu() {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLinkItem href="/admin/clusters">
-                Clusters
+                {t("navigation.clusters")}
               </DropdownMenuLinkItem>
             </DropdownMenuGroup>
           </>
@@ -207,16 +210,16 @@ export function UserMenu() {
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLinkItem href="/admin/policies">
-                Policies
+                {t("navigation.policies")}
               </DropdownMenuLinkItem>
               <DropdownMenuLinkItem href="/admin/service-accounts">
-                Service accounts
+                {t("navigation.serviceAccounts")}
               </DropdownMenuLinkItem>
               <DropdownMenuLinkItem href="/admin/audit">
-                Audit log
+                {t("navigation.audit")}
               </DropdownMenuLinkItem>
               <DropdownMenuLinkItem href="/admin/system">
-                System settings
+                {t("navigation.system")}
               </DropdownMenuLinkItem>
             </DropdownMenuGroup>
           </>
@@ -298,7 +301,23 @@ export function UserMenu() {
           </>
         )}
 
-        <DropdownMenuItem onClick={handleLogout}>Sign out</DropdownMenuItem>
+        {/* Language switcher */}
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger data-testid="language-submenu-trigger">
+            Language
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={i18n.language} onValueChange={(lang) => i18n.changeLanguage(lang)}>
+              {(SUPPORTED_LANGUAGES as readonly string[]).map((lang: string) => (
+                <DropdownMenuRadioItem key={lang} value={lang}>
+                  {lang === "en" ? "English" : lang === "es" ? "Español" : lang}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuItem onClick={handleLogout}>{t("auth.signOut")}</DropdownMenuItem>
         {version?.version && (
           <>
             <DropdownMenuSeparator />

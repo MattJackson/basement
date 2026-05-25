@@ -4,6 +4,41 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v2.0.0-beta.3 — 2026-05-25
+
+**Added**: Multilingual UI scaffolding with react-i18next integration.
+
+### Added
+
+- **Multilingual UI scaffolding (react-i18next)**
+  - Core i18n configuration in `frontend/src/shared/i18n/index.ts`
+  - Browser language detector with localStorage persistence
+  - Support for English and Spanish anchor languages
+  - Typed `SUPPORTED_LANGUAGES` array designed to scale to ~20-30 LTR locales
+
+- **English + Spanish translations**
+  - `common.json`: navigation, buttons, roles, auth text, states, confirmations (50+ strings)
+  - `pages.json`: /files page title, subtitle, empty-state copy, action buttons
+  - Spanish uses formal "usted" verb forms for buttons; product name "basement" stays untranslated
+
+- **Language switcher in the user menu**
+  - Dropdown submenu with English and Español options
+  - Persists choice to localStorage via `i18next-browser-languagedetector`
+  - Auto-navigates based on language preference on page load
+
+### Implementation Details
+
+- Representative string extraction from UserMenu (navigation links) and /files route to prove plumbing end-to-end
+- Unit tests for i18n config (asserts en + es load, fallback works, localStorage persistence)
+- Render tests for language switcher (changes language → re-renders text)
+- Documentation: `docs/development/i18n.md` covers architecture, file structure, workflow
+
+See [`docs/development/i18n.md`](docs/development/i18n.md) for full i18n development guide.
+
+### Next Steps (beta.4)
+
+Full app string extraction — every UI string moves to `t()` / English master JSON complete. Beta.5 will mass pour all LTR languages against the frozen en master.
+
 ## v2.0.0a — 2026-05-24
 
 **BREAKING**: Complete removal of `bucket_user` role per [[v2_clean_break]].

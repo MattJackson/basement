@@ -1,0 +1,44 @@
+{
+  "navigation": {
+    "files": "Files",
+    "admin": "Admin",
+    "clusters": "Clusters",
+    "policies": "Policies",
+    "serviceAccounts": "Service accounts",
+    "audit": "Audit log",
+    "system": "System settings"
+  },
+  "buttons": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "refresh": "Refresh",
+    "create": "Create",
+    "edit": "Edit",
+    "confirm": "Confirm",
+    "ok": "OK",
+    "submit": "Submit",
+    "add": "Add"
+  },
+  "roles": {
+    "user": "User",
+    "uiAdmin": "UI Admin",
+    "clusterAdmin": "Cluster Admin"
+  },
+  "auth": {
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "login": "Login",
+    "password": "Password",
+    "username": "Username"
+  },
+  "states": {
+    "loading": "Loading…",
+    "noResults": "No results",
+    "error": "Error"
+  },
+  "confirmations": {
+    "areYouSure": "Are you sure?",
+    "thisCannotBeUndone": "This cannot be undone"
+  }
+}
