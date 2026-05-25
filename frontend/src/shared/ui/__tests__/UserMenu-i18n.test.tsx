@@ -53,7 +53,7 @@ vi.mock("@/shared/hooks/useSkin", async (importOriginal) => {
 
 beforeEach(() => {
   navigateMock.mockReset();
-  localStorage.clear();
+  window.localStorage.clear();
   Object.defineProperty(globalThis.window, "matchMedia", {
     writable: true,
     configurable: true,
@@ -118,7 +118,7 @@ describe("Language switcher in UserMenu", () => {
     const espanolOption = await screen.findByText("Español");
     fireEvent.click(espanolOption);
     
-    expect(localStorage.getItem("basement_language")).toBe("es");
+    expect(window.localStorage.getItem("basement_language")).toBe("es");
   });
 
   it("shows both English and Spanish options", async () => {

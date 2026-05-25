@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 describe("i18n configuration", () => {
   beforeEach(() => {
     vi.resetModules();
-    localStorage.clear();
+    window.localStorage.clear();
   });
 
   it("loads English and Spanish translations successfully", async () => {
@@ -21,12 +21,12 @@ describe("i18n configuration", () => {
     expect(i18nModule.default.exists("common:buttons.save")).toBe(true);
   });
 
-  it("persists language choice to localStorage", async () => {
+  it("persists language choice to window.localStorage", async () => {
     const i18nModule = await import("@/shared/i18n");
     
     await i18nModule.default.changeLanguage("es");
     
-    expect(localStorage.getItem("basement_language")).toBe("es");
+    expect(window.localStorage.getItem("basement_language")).toBe("es");
   });
 
   it("loads pages namespace translations for /files page", async () => {
@@ -37,8 +37,8 @@ describe("i18n configuration", () => {
     expect(i18nModule.default.exists("pages:filesHome.pageTitle")).toBe(true);
   });
 
-  it("handles language detection from localStorage", async () => {
-    localStorage.setItem("basement_language", "es");
+  it("handles language detection from window.localStorage", async () => {
+    window.localStorage.setItem("basement_language", "es");
     
     const i18nModule = await import("@/shared/i18n");
     
