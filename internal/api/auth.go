@@ -415,7 +415,18 @@ func (s *Server) capabilitiesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // getOrgCapabilitiesHandler handles GET /api/v1/auth/org-capabilities.
-// Returns user-visible subset of OrgCapabilities: allowUserBackends, userBackendDrivers.
+// Returns the user-visible subset of OrgCapabilities — the fields the
+// FE needs to gate user-facing affordances without leaking
+// admin-only settings (audit retention, admin session TTL, etc.).
+//
+// v1.13.38: added userOverridableSkin + allowedUserSkins + activeSkin
+// so the UserMenu's Skin submenu can actually gate on the policy a UI
+// Admin sets in /admin/system. Previously the endpoint only returned
+// allowUserBackends + userBackendDrivers, so the Skin submenu's
+// `orgCaps.data?.userOverridableSkin && ...` gate was undefined &&
+// anything → false, and toggling User Overridable in /admin/system
+// silently never surfaced the user-side picker. Operator caught this:
+// "i changed it so its a bug that its not showing."
 func (s *Server) getCurrentOrgCapabilities(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -426,8 +437,11 @@ func (s *Server) getCurrentOrgCapabilities(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"allowUserBackends":  caps.AllowUserBackends,
-		"userBackendDrivers": caps.UserBackendDrivers,
+		"allowUserBackends":   caps.AllowUserBackends,
+		"userBackendDrivers":  caps.UserBackendDrivers,
+		"activeSkin":          caps.ActiveSkin,
+		"userOverridableSkin": caps.UserOverridableSkin,
+		"allowedUserSkins":    caps.AllowedUserSkins,
 	})
 }
 
