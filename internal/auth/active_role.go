@@ -2,6 +2,8 @@ package auth
 
 import (
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
 	"strings"
 )
 
@@ -48,6 +50,40 @@ func ActiveRoleMiddleware(requiredKinds []string, requiredCluster string) func(h
 // Requires activeRole.kind == "cluster-admin" AND activeRole.cluster == cid.
 func ActiveRoleClusterMiddleware(cid string) func(http.Handler) http.Handler {
 	return ActiveRoleMiddleware([]string{"cluster-admin"}, cid)
+}
+
+// ActiveRoleClusterMiddlewareFromPath reads the cluster ID from the chi
+// URL param "cid" at request time and checks activeRole.Kind == "cluster-admin"
+// AND activeRole.Cluster == cid. UI Admin active role also passes (super-admin).
+func ActiveRoleClusterMiddlewareFromPath() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := FromContext(r.Context())
+			if !ok || claims == nil || claims.ActiveRole == nil {
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"No active role in session"}}`, http.StatusUnauthorized)
+				return
+			}
+			ar := claims.ActiveRole
+
+			// UI Admin is super-admin — passes any cluster route
+			if ar.Kind == "ui-admin" {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if ar.Kind != "cluster-admin" {
+				http.Error(w, `{"error":{"code":"FORBIDDEN","message":"Active role not permitted for this route"}}`, http.StatusForbidden)
+				return
+			}
+
+			cid := chi.URLParam(r, "cid")
+			if cid == "" || ar.Cluster != cid {
+				http.Error(w, `{"error":{"code":"FORBIDDEN","message":"Cluster admin scope mismatch"}}`, http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // ActiveRoleUIAdminMiddleware is a convenience wrapper for UI admin routes.

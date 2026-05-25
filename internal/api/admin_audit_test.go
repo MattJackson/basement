@@ -81,7 +81,14 @@ func TestAuditHandler_HappyPath(t *testing.T) {
 	logger.Log(audit.Event{Actor: "matthew", Action: "bucket:delete", Resource: "bucket:abc:foo", Result: audit.ResultFailure, Detail: "still has objects"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit?limit=10", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -115,7 +122,14 @@ func TestAuditHandler_FilterByActor(t *testing.T) {
 	logger.Log(audit.Event{Actor: "alice", Action: "test", Resource: "r", Result: audit.ResultSuccess})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit?actor=alice", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -142,7 +156,14 @@ func TestAuditHandler_CapabilityGate(t *testing.T) {
 	defer logger.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -159,7 +180,14 @@ func TestAuditHandler_InvalidTime(t *testing.T) {
 	defer logger.Close()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit?from=not-a-date", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -191,7 +219,14 @@ func TestAuditHandler_Pagination_v1_4_0a(t *testing.T) {
 
 	// Page 1: default limit 50, offset 0.
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -217,7 +252,14 @@ func TestAuditHandler_Pagination_v1_4_0a(t *testing.T) {
 
 	// Page 2: offset=50.
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit?offset=50", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr = httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -266,7 +308,14 @@ func TestAuditHandler_WiringEndToEnd(t *testing.T) {
 	body := `{"label":"test-cluster","driver":"garage","config":{"admin_url":"http://x","admin_token":"y"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusCreated {
@@ -275,7 +324,14 @@ func TestAuditHandler_WiringEndToEnd(t *testing.T) {
 
 	// Read it back via /admin/audit.
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/audit?action=cluster", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr = httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

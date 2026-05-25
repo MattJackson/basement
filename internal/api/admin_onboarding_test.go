@@ -29,7 +29,7 @@ func TestOnboardingStateHandler_NeedsOnboardingOnFreshDeploy(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/onboarding/state", nil)
 	req.AddCookie(&http.Cookie{
-		Name: "__Host-basement_session", Value: generateAdminToken(),
+		Name: "__Host-basement_session", Value: generateUIAdminToken(),
 		Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 	})
 	rr := httptest.NewRecorder()
@@ -72,7 +72,7 @@ func TestOnboardingStateHandler_NoNeedAfterClusterAdded(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/onboarding/state", nil)
 	req.AddCookie(&http.Cookie{
-		Name: "__Host-basement_session", Value: generateAdminToken(),
+		Name: "__Host-basement_session", Value: generateUIAdminToken(),
 		Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 	})
 	rr := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestOnboardingDismissHandler_FlipsCompleted(t *testing.T) {
 	{
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/onboarding/state", nil)
 		req.AddCookie(&http.Cookie{
-			Name: "__Host-basement_session", Value: generateAdminToken(),
+			Name: "__Host-basement_session", Value: generateUIAdminToken(),
 			Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 		})
 		rr := httptest.NewRecorder()
@@ -125,7 +125,7 @@ func TestOnboardingDismissHandler_FlipsCompleted(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/onboarding/dismiss", nil)
 		req.Header.Set("Content-Type", "application/json")
 		req.AddCookie(&http.Cookie{
-			Name: "__Host-basement_session", Value: generateAdminToken(),
+			Name: "__Host-basement_session", Value: generateUIAdminToken(),
 			Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 		})
 		rr := httptest.NewRecorder()
@@ -139,7 +139,7 @@ func TestOnboardingDismissHandler_FlipsCompleted(t *testing.T) {
 	{
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/onboarding/state", nil)
 		req.AddCookie(&http.Cookie{
-			Name: "__Host-basement_session", Value: generateAdminToken(),
+			Name: "__Host-basement_session", Value: generateUIAdminToken(),
 			Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 		})
 		rr := httptest.NewRecorder()
@@ -155,7 +155,7 @@ func TestOnboardingDismissHandler_FlipsCompleted(t *testing.T) {
 	{
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/onboarding/dismiss", nil)
 		req.AddCookie(&http.Cookie{
-			Name: "__Host-basement_session", Value: generateAdminToken(),
+			Name: "__Host-basement_session", Value: generateUIAdminToken(),
 			Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
 		})
 		rr := httptest.NewRecorder()

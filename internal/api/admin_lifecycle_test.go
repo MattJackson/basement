@@ -337,7 +337,7 @@ func TestPutLifecycle_RejectsUnsupportedFields(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req.AddCookie(&http.Cookie{
 				Name:     "__Host-basement_session",
-				Value:    generateAdminToken(),
+				Value:    generateUIAdminToken(),
 				Path:     "/",
 				Secure:   true,
 				HttpOnly: true,
@@ -383,7 +383,7 @@ func TestPutLifecycle_ClearWithEmptyRules(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateAdminToken(),
+		Value:    generateUIAdminToken(),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
@@ -421,7 +421,7 @@ func TestPutLifecycle_OnUnsupportedDriver_Returns409(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateAdminToken(),
+		Value:    generateUIAdminToken(),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,

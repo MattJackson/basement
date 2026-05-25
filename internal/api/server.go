@@ -413,81 +413,83 @@ func (s *Server) routes() {
 			authG.Put("/user/skin", s.setUserSkinHandler)
 		})
 
-		// Admin routes — admin role required.
+		// Admin routes — admin role required + active role gating.
 		apiR.Group(func(adminG chi.Router) {
 			adminG.Use(s.authMiddleware())
 			adminG.Use(auth.RequireRole("admin"))
+			adminG.Use(auth.ActiveRoleAnyAdminMiddleware())
 
-			// Cluster admin routes — require activeRole.kind == "cluster-admin" && activeRole.cluster == cid
+			// Per-cluster routes: require cluster-admin for THIS cluster OR ui-admin (super-admin).
 			adminG.Group(func(clusterG chi.Router) {
-				clusterG.Use(auth.ActiveRoleClusterMiddleware("{cid}"))
+				clusterG.Use(auth.ActiveRoleClusterMiddlewareFromPath())
+				clusterG.Get("/admin/clusters/{cid}", s.getClusterHandler)
+				clusterG.Patch("/admin/clusters/{cid}", s.updateClusterHandler)
+				clusterG.Delete("/admin/clusters/{cid}", s.deleteClusterHandler)
+				clusterG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
+				clusterG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
 				clusterG.Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
-			adminG.Get("/admin/clusters/{cid}/layout", s.getLayoutHandler)
-			adminG.Post("/admin/clusters/{cid}/layout/stage", s.stageLayoutHandler)
-			adminG.Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
-			adminG.Post("/admin/clusters/{cid}/layout/revert", s.revertLayoutHandler)
+				clusterG.Get("/admin/clusters/{cid}/layout", s.getLayoutHandler)
+				clusterG.Post("/admin/clusters/{cid}/layout/stage", s.stageLayoutHandler)
+				clusterG.Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
+				clusterG.Post("/admin/clusters/{cid}/layout/revert", s.revertLayoutHandler)
 
-			// v1.4.0c SCRUB.MAINT — block-scrub maintenance surface.
-			// Both reads + writes gated on cluster:edit (per-handler)
-			// so admin-role users without cluster:edit on this cluster
-			// can't probe scrub state on a cluster they don't own.
-			adminG.Get("/admin/clusters/{cid}/scrub", s.getClusterScrubHandler)
-			adminG.Post("/admin/clusters/{cid}/scrub", s.postClusterScrubHandler)
+				// v1.4.0c SCRUB.MAINT — block-scrub maintenance surface.
+				// Both reads + writes gated on cluster:edit (per-handler)
+				// so admin-role users without cluster:edit on this cluster
+				// can't probe scrub state on a cluster they don't own.
+				clusterG.Get("/admin/clusters/{cid}/scrub", s.getClusterScrubHandler)
+				clusterG.Post("/admin/clusters/{cid}/scrub", s.postClusterScrubHandler)
 
-			// Connection CRUD
-			adminG.Get("/admin/clusters", s.listClustersHandler)
-			adminG.Post("/admin/clusters", s.createClusterHandler)
-			adminG.Get("/admin/clusters/{cid}", s.getClusterHandler)
-			adminG.Patch("/admin/clusters/{cid}", s.updateClusterHandler)
-			adminG.Delete("/admin/clusters/{cid}", s.deleteClusterHandler)
-			adminG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
-			adminG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
+				// v1.12.0a (ADR-0007) per-cluster envelope encryption.
+				// Five endpoints power the unlock-modal + multi-admin
+				// password management flow. Other handlers that touch
+				// CSK-protected secrets gate on s.requireUnlocked(w, cid)
+				// to return 423 LOCKED with a structured hint.
+				clusterG.Post("/admin/clusters/{cid}/unlock", s.unlockClusterHandler)
+				clusterG.Post("/admin/clusters/{cid}/lock", s.lockClusterHandler)
+				clusterG.Get("/admin/clusters/{cid}/lock-status", s.lockStatusHandler)
+				clusterG.Post("/admin/clusters/{cid}/admins", s.addAdminHandler)
+				clusterG.Delete("/admin/clusters/{cid}/admins/{adminUserId}", s.removeAdminHandler)
 
-			// v1.12.0a (ADR-0007) per-cluster envelope encryption.
-			// Five endpoints power the unlock-modal + multi-admin
-			// password management flow. Other handlers that touch
-			// CSK-protected secrets gate on s.requireUnlocked(w, cid)
-			// to return 423 LOCKED with a structured hint.
-			adminG.Post("/admin/clusters/{cid}/unlock", s.unlockClusterHandler)
-			adminG.Post("/admin/clusters/{cid}/lock", s.lockClusterHandler)
-			adminG.Get("/admin/clusters/{cid}/lock-status", s.lockStatusHandler)
-			adminG.Post("/admin/clusters/{cid}/admins", s.addAdminHandler)
-			adminG.Delete("/admin/clusters/{cid}/admins/{adminUserId}", s.removeAdminHandler)
+				// v1.11.0.6 — per-cluster capability matrix. The global
+				// /api/v1/capabilities endpoint reads from s.drv (default
+				// driver) only; this per-cluster variant runs the active
+				// driver for {cid} so a deploy with mixed drivers can
+				// render the right UI per cluster. Routes through
+				// driverForRouteCluster per the v1.11.0.2 dispatch fix.
+				clusterG.Get("/admin/clusters/{cid}/driver-info", s.driverInfoHandler)
 
-			// v1.11.0.6 — per-cluster capability matrix. The global
-			// /api/v1/capabilities endpoint reads from s.drv (default
-			// driver) only; this per-cluster variant runs the active
-			// driver for {cid} so a deploy with mixed drivers can
-			// render the right UI per cluster. Routes through
-			// driverForRouteCluster per the v1.11.0.2 dispatch fix.
-			adminG.Get("/admin/clusters/{cid}/driver-info", s.driverInfoHandler)
+				// v1.3.0e CLUSTER.ADMINS — convenience read for the
+				// cluster detail page that filters the global assignment
+				// list down to this cluster (including wildcard
+				// inheritance). Writes still go through the global
+				// /admin/policies/assignments endpoints.
+				clusterG.Get("/admin/clusters/{cid}/admins", s.listClusterAdminsHandler)
 
-			// v1.3.0e CLUSTER.ADMINS — convenience read for the
-			// cluster detail page that filters the global assignment
-			// list down to this cluster (including wildcard
-			// inheritance). Writes still go through the global
-			// /admin/policies/assignments endpoints.
-			adminG.Get("/admin/clusters/{cid}/admins", s.listClusterAdminsHandler)
+				// Connection-scoped bucket operations
+				clusterG.Get("/admin/clusters/{cid}/buckets", s.listBucketsByClusterHandler)
+				clusterG.Post("/admin/clusters/{cid}/buckets", s.createBucketHandler)
+				clusterG.Get("/admin/clusters/{cid}/buckets/{id}", s.getBucketHandler)
+				clusterG.Patch("/admin/clusters/{cid}/buckets/{id}", s.updateBucketHandler)
+				clusterG.Delete("/admin/clusters/{cid}/buckets/{id}", s.deleteBucketHandler)
+				clusterG.Post("/admin/clusters/{cid}/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
 
-			// Connection-scoped bucket operations
-			adminG.Get("/admin/clusters/{cid}/buckets", s.listBucketsByClusterHandler)
-			adminG.Post("/admin/clusters/{cid}/buckets", s.createBucketHandler)
-			adminG.Get("/admin/clusters/{cid}/buckets/{id}", s.getBucketHandler)
-			adminG.Patch("/admin/clusters/{cid}/buckets/{id}", s.updateBucketHandler)
-			adminG.Delete("/admin/clusters/{cid}/buckets/{id}", s.deleteBucketHandler)
-			adminG.Post("/admin/clusters/{cid}/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
+				// Connection-scoped key operations
+				clusterG.Get("/admin/clusters/{cid}/keys", s.listKeysByClusterHandler)
+				clusterG.Post("/admin/clusters/{cid}/keys", s.createKeyHandler)
+				clusterG.Get("/admin/clusters/{cid}/keys/{id}", s.getKeyHandler)
+				clusterG.Patch("/admin/clusters/{cid}/keys/{id}", s.updateKeyHandler)
+				clusterG.Delete("/admin/clusters/{cid}/keys/{id}", s.deleteKeyHandler)
+				clusterG.Post("/admin/clusters/{cid}/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
+			})
 
-			// Connection-scoped key operations
-			adminG.Get("/admin/clusters/{cid}/keys", s.listKeysByClusterHandler)
-			adminG.Post("/admin/clusters/{cid}/keys", s.createKeyHandler)
-			adminG.Get("/admin/clusters/{cid}/keys/{id}", s.getKeyHandler)
-			adminG.Patch("/admin/clusters/{cid}/keys/{id}", s.updateKeyHandler)
-			adminG.Delete("/admin/clusters/{cid}/keys/{id}", s.deleteKeyHandler)
-			adminG.Post("/admin/clusters/{cid}/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
-			}) // end cluster admin group with active role middleware
-
-			// Cross-cluster aggregated reads (legacy paths, now return wrapped responses)
-			adminG.Get("/admin/buckets", s.listAllBucketsHandler)
+			// Cross-cluster routes: require UI-admin (super-admin scope).
+			adminG.Group(func(crossG chi.Router) {
+				crossG.Use(auth.ActiveRoleUIAdminMiddleware())
+				crossG.Get("/admin/clusters", s.listClustersHandler)
+				crossG.Post("/admin/clusters", s.createClusterHandler)
+				crossG.Get("/admin/buckets", s.listAllBucketsHandler)
+			})
 
 			// v1.11.0.15: /admin/keys removed. Keys are inherently
 			// per-cluster (Garage admin model); a flat global list

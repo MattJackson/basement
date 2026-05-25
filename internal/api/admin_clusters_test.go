@@ -152,7 +152,7 @@ func TestListClustersHandler_HappyPath(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -202,7 +202,7 @@ func TestListClustersHandler_RedactsSecrets(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -236,7 +236,7 @@ func TestListClustersHandler_Empty(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -302,7 +302,7 @@ func TestCreateClusterHandler_HappyPath(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters", bytes.NewReader(jsonBody))
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -336,7 +336,7 @@ func TestCreateClusterHandler_DuplicateLabel(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters", bytes.NewReader(jsonBody))
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -362,7 +362,7 @@ func TestCreateClusterHandler_BadDriver(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters", bytes.NewReader(jsonBody))
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -383,7 +383,7 @@ func TestGetClusterHandler_HappyPath(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/conn-1", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -411,7 +411,14 @@ func TestDriverInfoHandler_HappyPath(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/c1/driver-info", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -443,7 +450,14 @@ func TestDriverInfoHandler_NotFound(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/nope/driver-info", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -470,7 +484,7 @@ func TestGetClusterHandler_NotFound(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/non-existent", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -496,7 +510,7 @@ func TestUpdateClusterHandler_HappyPath(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/clusters/conn-1", bytes.NewReader(jsonBody))
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -523,7 +537,7 @@ func TestArmDeleteClusterHandler_HappyPath(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/conn-1/_arm-delete", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -552,7 +566,7 @@ func TestDeleteClusterHandler_NoHeader(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/clusters/conn-1", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	rr := httptest.NewRecorder()
 
 	srv.router.ServeHTTP(rr, req)
@@ -572,7 +586,7 @@ func TestDeleteClusterHandler_BadToken(t *testing.T) {
 	srv := New(cfg, nil, connsStore, nil, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/clusters/conn-1", nil)
-	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	req.Header.Set("X-Confirm-Delete", "invalid-token-here")
 	rr := httptest.NewRecorder()
 
@@ -594,7 +608,7 @@ func TestDeleteClusterHandler_HappyPath(t *testing.T) {
 
 	// First arm the delete
 	armReq := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/conn-1/_arm-delete", nil)
-	armReq.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	armReq.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	armRR := httptest.NewRecorder()
 	srv.router.ServeHTTP(armRR, armReq)
 
@@ -604,7 +618,7 @@ func TestDeleteClusterHandler_HappyPath(t *testing.T) {
 
 	// Now delete with token
 	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/clusters/conn-1", nil)
-	delReq.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	delReq.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateUIAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	delReq.Header.Set("X-Confirm-Delete", token)
 	rr := httptest.NewRecorder()
 

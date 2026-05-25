@@ -421,7 +421,7 @@ func TestListBucketsByClusterHandler_HappyPath(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/single/buckets", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("single"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -445,7 +445,7 @@ func TestListBucketsByClusterHandler_NotFound(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/missing/buckets", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("missing"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -463,7 +463,7 @@ func TestListBucketsByClusterHandler_DriverError(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/err/buckets", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("err"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -493,7 +493,7 @@ func TestListBucketsByClusterHandler_EmptyNotNil(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/empty/buckets", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("empty"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -516,7 +516,7 @@ func TestListKeysByClusterHandler_HappyPath(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/kc/keys", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("kc"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -540,7 +540,7 @@ func TestListKeysByClusterHandler_NotFound(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/missing/keys", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("missing"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -557,7 +557,7 @@ func TestListKeysByClusterHandler_DriverError(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/e/keys", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("e"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -582,10 +582,10 @@ func TestCreateKeyHandler_ReturnsSecretAccessKey(t *testing.T) {
 	reg := driver.NewRegistry(connsStore)
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
-	body := bytes.NewBufferString(`{"name":"bootstrap"}`)
+body := bytes.NewBufferString(`{"name":"bootstrap"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/cc/keys", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("cc"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -635,7 +635,7 @@ func TestCreateKeyHandler_UnknownCluster(t *testing.T) {
 	body := bytes.NewBufferString(`{"name":"k"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/missing/keys", body)
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(generateClusterAdminCookie("missing"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -1080,7 +1080,19 @@ func (r *stringReader) Read(p []byte) (int, error) {
 func adminCookie() *http.Cookie {
 	return &http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateAdminToken(),
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	}
+}
+
+// generateClusterAdminCookie creates a cookie with activeRole.kind="cluster-admin" for the given cluster.
+func generateClusterAdminCookie(cid string) *http.Cookie {
+	return &http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken(cid),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
