@@ -771,6 +771,18 @@ func (s *Server) routes() {
 	r.Handle("/docs/*", s.docsHandler())
 	r.Handle("/docs/", s.docsHandler())
 
+	// v1.13.31: /healthz for load balancers, container orchestrators, and
+	// uptime monitors. Returns plain "ok" + 200 — no auth, no JSON, no
+	// dependencies probed. Anything richer goes via /metrics (Prometheus)
+	// or /api/v1/version. Registered BEFORE the SPA fallback so a monitor
+	// hitting /healthz doesn't get the 2.5 KB index.html and incorrectly
+	// conclude the app is up when the API may be down.
+	r.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte("ok\n"))
+	})
+
 	r.Handle("/*", web.Handler())
 }
 

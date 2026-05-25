@@ -536,7 +536,10 @@ func (b webdavOrgCapsBridge) IsEnabled() bool {
 	if b.caps == nil {
 		return true
 	}
-	return b.caps.Get().Gateways.WebDAV.Enabled
+	// v2.0.0-beta.2 dropped the WebDAV hand-typed field on GatewaySettings;
+	// the Protocols map is now the source of truth (and IsEnabled handles
+	// the per-name default — webdav defaults to true for v1.9.0a parity).
+	return b.caps.Get().Gateways.IsEnabled("webdav")
 }
 
 // runPromGaugeRefresher ticks every 30s and refreshes the Prometheus

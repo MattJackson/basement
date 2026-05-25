@@ -97,7 +97,6 @@ export function PersonaPill() {
   const navigate = useNavigate();
   const { data: user } = useUser();
 
-  const username = user?.username ?? "";
   const activeRole = user?.activeRole;
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
@@ -281,14 +280,18 @@ export function PersonaPill() {
         data-mode={activeRole.kind}
         data-role={roleLabel.toLowerCase().replace(/:/g, "")}
       >
-        {username && <span className="mr-1 font-medium">{username}</span>}
+        {/* v1.13.31: dropped username from the pill — UserMenu trigger
+            already shows [M] matthew immediately to the right, so the pill
+            previously rendered "matthew USER" right next to "[M] matthew"
+            for a "matthew USER [M] matthew" cascade. Pill is now role-only;
+            UserMenu is the canonical identity surface. */}
         <span>{roleLabel}</span>
         {isElevated && activeRole.kind === "ui-admin" && (
           <span className="ml-2 text-xs opacity-75">(elevated)</span>
         )}
       </span>
     );
-  }, [mode, flashing, inAmberWindow, inRedWindow, activeRole, username]);
+  }, [mode, flashing, inAmberWindow, inRedWindow, activeRole]);
 
   return (
     <div className="flex items-center gap-1.5">

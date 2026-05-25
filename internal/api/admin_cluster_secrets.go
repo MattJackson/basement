@@ -36,17 +36,14 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/go-chi/chi/v5"
 
-	"github.com/mattjackson/basement/internal/auth/policy"
+	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/clustersecret"
-	"github.com/mattjackson/basement/internal/store"
 )
 
 // SetClusterSecrets wires the clustersecret manager into the server.
