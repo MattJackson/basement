@@ -56,6 +56,18 @@ func ActiveRoleUIAdminMiddleware() func(http.Handler) http.Handler {
 	return ActiveRoleMiddleware([]string{"ui-admin"}, "")
 }
 
+// ActiveRoleAnyAdminMiddleware allows cluster-admin OR ui-admin. Used as a
+// coarse "you're not in user mode" gate on the /admin/* surface — defense
+// in depth for routes that were missing per-route active-role gating.
+//
+// v1.13.28: introduced after a live smoke caught /api/v1/admin/clusters
+// returning the cluster list (with admin_token leaked) to user-mode
+// callers because the per-route gating was applied to the wrong chi
+// group inside server.go.
+func ActiveRoleAnyAdminMiddleware() func(http.Handler) http.Handler {
+	return ActiveRoleMiddleware([]string{"cluster-admin", "ui-admin"}, "")
+}
+
 // RequireActiveRole checks if the user has an active role that matches at least one of the required kinds.
 // Returns true if allowed, false otherwise. Used inline in handlers.
 func RequireActiveRole(r *http.Request, requiredKinds []string) bool {

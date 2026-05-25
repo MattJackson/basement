@@ -126,6 +126,37 @@ type connectionDisk struct {
 	CreatedAt    time.Time         `json:"createdAt"`
 }
 
+// Redacted returns a copy of c with every sensitive Config key removed.
+// Use this for any wire response — listClustersHandler, getClusterHandler,
+// any handler that hands a Connection back to a caller. The unredacted
+// Config (with admin_token etc) stays in memory for driver dispatch only.
+//
+// v1.13.28: introduced after a live smoke caught admin_token leaking
+// through GET /api/v1/admin/clusters to user-mode callers.
+func (c Connection) Redacted() Connection {
+	if c.Config == nil {
+		return c
+	}
+	cfg := make(map[string]string, len(c.Config))
+	for k, v := range c.Config {
+		if sensitiveConfigKeys[k] {
+			continue
+		}
+		cfg[k] = v
+	}
+	c.Config = cfg
+	return c
+}
+
+// RedactConnections is a slice variant of Redacted for List responses.
+func RedactConnections(in []Connection) []Connection {
+	out := make([]Connection, len(in))
+	for i, c := range in {
+		out[i] = c.Redacted()
+	}
+	return out
+}
+
 // Connections interface defines the CRUD operations for connection records.
 type Connections interface {
 	List(ctx context.Context) ([]Connection, error)
