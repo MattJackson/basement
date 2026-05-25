@@ -296,67 +296,11 @@ function OrgCapabilitiesPage() {
       {/* v1.13.1: Skin manager with three-control layout */}
       <SkinsManager />
 
-      {/* Usage overview link card — OBS.USAGE v0.9.0k surfaces the */}
-      {/* storage snapshot from the System page so the operator's */}
-      {/* "configure the deployment" landing pad also points at the */}
-      {/* "what is the deployment doing right now" view. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Usage Overview</CardTitle>
-          <CardDescription>
-            Snapshot of storage usage across every cluster: totals, per-cluster
-            breakdown, and the top buckets by size and object count.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link
-            to="/admin/usage"
-            className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Open the usage overview &rarr;
-          </Link>
-        </CardContent>
-      </Card>
-
-      {/* Policies link card — ADR-0001 v0.9.0g surfaces the matrix */}
-      {/* editor from the System page too, not just the persona menu. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Policies</CardTitle>
-          <CardDescription>
-            Roles, capabilities, and per-user assignments. The matrix editor
-            controls who can do what, at which scope.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link
-            to="/admin/policies"
-            className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Open the policy matrix editor &rarr;
-          </Link>
-        </CardContent>
-      </Card>
-
-      {/* Audit log link card — v1.0.0c surfaces the append-only event */}
-      {/* log so incident response has one click from the system page. */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Audit log</CardTitle>
-          <CardDescription>
-            Append-only record of every mutating action across basement.
-            Who did what, when, against which resource, success or failure.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link
-            to="/admin/audit"
-            className="inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Open the audit log &rarr;
-          </Link>
-        </CardContent>
-      </Card>
+      {/* v1.13.33: removed the trailing Usage Overview / Policies /
+          Audit log "shortcut" cards. They duplicate the UserMenu
+          admin-nav entries (also Usage / Policies / Audit) and the
+          operator flagged the duplication as muddying the System
+          Settings page. Nav for those pages lives in the dropdown. */}
     </div>
   );
 }

@@ -130,18 +130,26 @@ export function PersonaPill() {
       setFlashing(false);
     }
     if (!elevated && wasElevated) {
-      // expiresAt is captured at the moment of the falling edge — a
-      // stable sentinel that both PersonaPill mounts agree on within
-      // the same render commit. First mount fires + claims it; second
-      // mount sees it's already claimed + skips.
-      if (sessionEndedHandledFor !== expiresAt) {
+      // v1.13.33: suppress the toast when the user is moving INTO an
+      // admin role (User → UI Admin or User → Cluster Admin). The
+      // active-role switch flow re-mints the session token, which can
+      // cause mode to briefly transit admin→user→admin within a single
+      // render commit — the falling edge here is a transient flicker,
+      // not a real session end. Only fire when the operator is
+      // genuinely back in user-mode (activeRole missing or "user").
+      const goingToUserRole = !activeRole || activeRole.kind === "user";
+      if (goingToUserRole && sessionEndedHandledFor !== expiresAt) {
+        // expiresAt is captured at the moment of the falling edge — a
+        // stable sentinel that both PersonaPill mounts agree on within
+        // the same render commit. First mount fires + claims it; second
+        // mount sees it's already claimed + skips.
         sessionEndedHandledFor = expiresAt;
         toast.info("Admin session ended");
         warnedRef.current = "ended";
       }
     }
     prevModeRef.current = mode;
-  }, [mode, expiresAt]);
+  }, [mode, expiresAt, activeRole]);
 
   const remainingMs = expiresAt > 0 ? expiresAt - now : 0;
   const elevated = mode === "admin" || mode === "elevated";

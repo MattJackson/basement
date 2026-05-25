@@ -34,7 +34,7 @@ func New() *Gateway { return &Gateway{} }
 func (g *Gateway) Name() string        { return "s3" }
 func (g *Gateway) DisplayName() string { return "S3 API" }
 func (g *Gateway) Description() string {
-	return "Native S3 endpoint with SigV4 — every S3 SDK becomes a first-class basement client. Lands in v2.0."
+	return "Native S3 endpoint with SigV4 — every S3 SDK becomes a first-class basement client."
 }
 
 // Capabilities advertises the S3 surface. SigV4 is the headline

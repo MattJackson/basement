@@ -125,16 +125,13 @@ function DeprecationBanner() {
   return (
     <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">
       <strong className="font-semibold">
-        Bucket-level access is now controlled by S3 key assignment on the
+        Bucket-level access is controlled by S3 key assignment on the
         cluster admin side, not by basement roles.
       </strong>{" "}
       When a user connects a region (
       <code className="font-mono text-xs">/files/regions/new</code>), they
       bring an S3 key that already has the backend's bucket grants attached.
       basement no longer enforces per-bucket access — the backend does.
-      The <code className="font-mono text-xs">bucket_user</code> role
-      remains for backward compatibility but new assignments will have no
-      effect.
     </div>
   );
 }

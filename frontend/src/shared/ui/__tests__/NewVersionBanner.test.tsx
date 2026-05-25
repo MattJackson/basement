@@ -1,8 +1,22 @@
 // v1.11.0.29 — NewVersionBanner with SW unregister + cache clear on refresh.
+// v1.13.33 — banner now consults useVersion() to suppress same-version
+// mismatches; mock the hook so tests don't need a QueryClientProvider.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
 import { render, screen } from "@testing-library/react";
+
+// useVersion returns the locally-built version. Default mock returns
+// undefined data so the "sameVersion" gate is inert and the banner
+// shows whenever buildWatcher reports mismatched. Specific tests can
+// override.
+vi.mock("@/shared/api/queries", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...(actual as object),
+    useVersion: () => ({ data: undefined, isLoading: false, error: null }),
+  };
+});
 
 describe("NewVersionBanner", () => {
   let subscribeMock: ReturnType<typeof vi.fn>;

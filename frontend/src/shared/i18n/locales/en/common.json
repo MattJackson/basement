@@ -8,6 +8,14 @@
     "audit": "Audit log",
     "system": "System settings"
   },
+  "userNav": {
+    "files": "Files",
+    "keys": "Keys",
+    "shares": "Shares",
+    "backups": "Backups",
+    "federations": "Federations",
+    "webhooks": "Webhooks"
+  },
   "buttons": {
     "save": "Save",
     "cancel": "Cancel",
