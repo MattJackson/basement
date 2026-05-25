@@ -68,7 +68,14 @@ func TestInvites_CreatePersistsAndReturnsPlaintext(t *testing.T) {
 	data, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/invites", bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
@@ -182,7 +189,14 @@ func TestInvites_Revoke_RemovesAndBlocksRedeem(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/invites/"+inv.ID, nil)
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
@@ -212,7 +226,14 @@ func TestInvites_Rotate_ReplacesToken(t *testing.T) {
 	rotateBody, _ := json.Marshal(map[string]interface{}{"ttlHours": 48})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/invites/"+inv.ID+"/rotate", bytes.NewReader(rotateBody))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -279,7 +300,14 @@ func TestInvites_List_ShowsPending(t *testing.T) {
 	_, _, _ = st.Invites().Create("b", "matthew", 24*time.Hour)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/invites", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -309,7 +337,14 @@ func TestInvites_RequiresHostAdmin(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"label": "x"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/invites", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 

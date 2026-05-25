@@ -65,7 +65,14 @@ func TestOIDCGroupMappings_GET_EmptyByDefault(t *testing.T) {
 	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/oidc-group-mappings", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -97,7 +104,14 @@ func TestOIDCGroupMappings_PUT_RoundTrip(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/oidc-group-mappings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -142,7 +156,14 @@ func TestOIDCGroupMappings_PUT_RejectsMissingFields(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/oidc-group-mappings", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -159,7 +180,14 @@ func TestOIDCGroupMappings_GET_ForbiddenWithoutCapability(t *testing.T) {
 	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/oidc-group-mappings", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 

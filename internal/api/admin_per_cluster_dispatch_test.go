@@ -131,7 +131,14 @@ func TestPerClusterDispatch_Buckets(t *testing.T) {
 	for _, cid := range []string{"bktA", "bktB"} {
 		req := httptest.NewRequest(http.MethodGet,
 			"/api/v1/admin/clusters/"+cid+"/buckets/some-bucket-id", nil)
-		req.AddCookie(adminCookie())
+		req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 		rr := httptest.NewRecorder()
 		srv.router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -162,7 +169,14 @@ func TestPerClusterDispatch_Keys(t *testing.T) {
 	for _, cid := range []string{"keyA", "keyB"} {
 		req := httptest.NewRequest(http.MethodGet,
 			"/api/v1/admin/clusters/"+cid+"/keys/some-key-id", nil)
-		req.AddCookie(adminCookie())
+		req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 		rr := httptest.NewRecorder()
 		srv.router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {

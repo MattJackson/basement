@@ -72,7 +72,14 @@ func newUsageSeriesTestEnv(t *testing.T, grantHostAdmin bool) (*Server, *metrics
 func usageSeriesReq(t *testing.T, query string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/usage/series?"+query, nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	return req
 }
 
@@ -234,7 +241,14 @@ func TestUsageSeries_MethodNotAllowed(t *testing.T) {
 	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/usage/series?cid=ca&bid=b1", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 

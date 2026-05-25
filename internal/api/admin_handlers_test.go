@@ -479,6 +479,39 @@ func generateAdminToken() string {
 	return token
 }
 
+// generateUIAdminToken creates a valid admin JWT token with activeRole.kind="ui-admin" for cross-cluster routes.
+func generateUIAdminToken() string {
+	modeExpiresAt := time.Now().Add(1 * time.Hour).Unix()
+	token, err := auth.IssueTokenWithActiveRole(testSecret, "admin", "admin", true,
+		"admin", modeExpiresAt, 24*time.Hour, &auth.ActiveRole{Kind: "ui-admin"})
+	if err != nil {
+		panic(err)
+	}
+	return token
+}
+
+// generateClusterAdminToken creates a valid admin JWT token with activeRole.kind="cluster-admin" for the given cluster.
+func generateClusterAdminToken(cid string) string {
+	modeExpiresAt := time.Now().Add(1 * time.Hour).Unix()
+	token, err := auth.IssueTokenWithActiveRole(testSecret, "admin", "admin", true,
+		"admin", modeExpiresAt, 24*time.Hour, &auth.ActiveRole{Kind: "cluster-admin", Cluster: cid})
+	if err != nil {
+		panic(err)
+	}
+	return token
+}
+
+// generateUserModeAdminToken creates a valid admin JWT token with activeRole.kind="user" for negative tests.
+func generateUserModeAdminToken() string {
+	modeExpiresAt := time.Now().Add(1 * time.Hour).Unix()
+	token, err := auth.IssueTokenWithActiveRole(testSecret, "admin", "admin", true,
+		"admin", modeExpiresAt, 24*time.Hour, &auth.ActiveRole{Kind: "user"})
+	if err != nil {
+		panic(err)
+	}
+	return token
+}
+
 // generateUserToken creates a valid non-admin user JWT token for testing.
 func generateUserToken() string {
 	token, err := auth.IssueToken(testSecret, "user", "user", false, 24*time.Hour)

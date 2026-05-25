@@ -77,7 +77,7 @@ func adminReq(t *testing.T, method, url string, body any) *http.Request {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateAdminToken(),
+		Value:    generateUIAdminToken(),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,

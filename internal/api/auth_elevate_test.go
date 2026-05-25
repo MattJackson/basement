@@ -58,6 +58,24 @@ func mintActiveRoleToken(t *testing.T, secret []byte, userID, role string, uiAdm
 	return signed
 }
 
+// mintUIAdminToken creates a JWT with activeRole.kind="ui-admin" for admin route tests.
+func mintUIAdminToken(t *testing.T, secret []byte, userID string) string {
+	t.Helper()
+	return mintActiveRoleToken(t, secret, userID, "admin", true, &auth.ActiveRole{Kind: "ui-admin"})
+}
+
+// mintClusterAdminToken creates a JWT with activeRole.kind="cluster-admin" and the given cluster ID.
+func mintClusterAdminToken(t *testing.T, secret []byte, userID, cid string) string {
+	t.Helper()
+	return mintActiveRoleToken(t, secret, userID, "admin", true, &auth.ActiveRole{Kind: "cluster-admin", Cluster: cid})
+}
+
+// mintUserModeToken creates a JWT with activeRole.kind="user" for negative tests.
+func mintUserModeToken(t *testing.T, secret []byte, userID string) string {
+	t.Helper()
+	return mintActiveRoleToken(t, secret, userID, "admin", true, &auth.ActiveRole{Kind: "user"})
+}
+
 // elevateTestPasswordHash is bcrypt("test", cost=12). Same hash as
 // TestAuthEndpoints uses — the sync.Once means whichever test runs
 // first writes the global, and reusing the same creds keeps them in

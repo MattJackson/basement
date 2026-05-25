@@ -129,7 +129,14 @@ func TestListNodesHandler_HappyPathFromRegistry(t *testing.T) {
 	srv := layoutTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/cl/nodes", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken("cl"),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -153,7 +160,14 @@ func TestListNodesHandler_NotFound(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/missing/nodes", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -167,7 +181,14 @@ func TestGetLayoutHandler_HappyPathFromRegistry(t *testing.T) {
 	srv := layoutTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/cl/layout", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken("cl"),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -191,7 +212,14 @@ func TestGetLayoutHandler_NotFound(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/missing/layout", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -206,7 +234,14 @@ func TestStageLayoutHandler_HappyPath(t *testing.T) {
 
 	body := `{"nodeId":"n1","capacity":1000}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/cl/layout/stage", strings.NewReader(body))
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken("cl"),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
@@ -221,7 +256,14 @@ func TestStageLayoutHandler_BadJSON(t *testing.T) {
 	srv := layoutTestServer(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/cl/layout/stage", strings.NewReader("{not-json"))
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken("cl"),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
@@ -236,7 +278,14 @@ func TestApplyLayoutHandler_HappyPath(t *testing.T) {
 	srv := layoutTestServer(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/cl/layout/apply", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken("cl"),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
@@ -251,7 +300,14 @@ func TestRevertLayoutHandler_HappyPath(t *testing.T) {
 	srv := layoutTestServer(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/cl/layout/revert", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateClusterAdminToken("cl"),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
@@ -270,7 +326,14 @@ func TestApplyLayoutHandler_ClusterNotFound(t *testing.T) {
 	srv := New(newTestConfig(), nil, connsStore, nil, reg)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/missing/layout/apply", nil)
-	req.AddCookie(adminCookie())
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)

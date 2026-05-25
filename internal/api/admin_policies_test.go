@@ -86,7 +86,7 @@ func adminPolicyReq(method, url string, body []byte) *http.Request {
 	}
 	r.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateAdminToken(),
+		Value:    generateUIAdminToken(),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
