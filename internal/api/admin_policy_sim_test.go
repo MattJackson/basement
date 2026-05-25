@@ -153,9 +153,10 @@ func TestSimulatePolicy_DenyCapabilityNotInRole(t *testing.T) {
 	srv, enf, cleanup := newPolicyTestEnv(t, true)
 	defer cleanup()
 
-	// cluster_admin includes objects:list but NOT bucket:delete; assigning
-	// wife cluster_admin @ bucket:cid-x:* should leave bucket:delete denied
-	// at that scope.
+	// cluster_admin's capabilities are cluster:* + bucket:* + key:* +
+	// objects:list — it does NOT include any host:* capability.
+	// Assigning wife cluster_admin @ bucket:cid-x:* should leave
+	// host:manage_users denied at any scope.
 	if err := enf.AssignRole(policy.RoleAssignment{
 		UserID: "wife", RoleID: "cluster_admin", Scope: "bucket:cid-x:photos",
 	}); err != nil {
@@ -164,8 +165,8 @@ func TestSimulatePolicy_DenyCapabilityNotInRole(t *testing.T) {
 
 	rr := postSim(t, srv, simulateRequest{
 		UserID:     "wife",
-		Capability: "bucket:delete",
-		Scope:      "bucket:cid-x:photos",
+		Capability: "host:manage_users",
+		Scope:      "host:*",
 	})
 
 	if rr.Code != http.StatusOK {
@@ -173,7 +174,7 @@ func TestSimulatePolicy_DenyCapabilityNotInRole(t *testing.T) {
 	}
 	resp := decodeSimResponse(t, rr)
 	if resp.Allowed {
-		t.Errorf("expected allowed=false (cluster_admin has no bucket:delete), got true")
+		t.Errorf("expected allowed=false (cluster_admin has no host:manage_users), got true")
 	}
 	joined := strings.ToLower(joinSteps(resp.Reasoning))
 	if !strings.Contains(joined, "capability") {

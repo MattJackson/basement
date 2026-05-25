@@ -201,8 +201,11 @@ func TestSeedEnvAdmin_GrantsTwoBlankets(t *testing.T) {
 		t.Errorf("re-SeedEnvAdmin: %v", err)
 	}
 	assignments := enf.AssignmentsFor("matthew")
-	if len(assignments) != 2 {
-		t.Errorf("expected 2 assignments after idempotent re-seed, got %d: %#v",
+	// v0.9.0m.1 added the host_admin@* superuser scope.
+	// v2.0.0a removed bucket_user role entirely. Net: 3 seeded
+	// assignments — host_admin@host:*, host_admin@*, cluster_admin@cluster:*.
+	if len(assignments) != 3 {
+		t.Errorf("expected 3 assignments after idempotent re-seed, got %d: %#v",
 			len(assignments), assignments)
 	}
 

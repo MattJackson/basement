@@ -23,15 +23,39 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 )
 
-// mintLegacyModelessToken hand-builds a JWT with Mode="" so the
-// resulting claim is omitted from the serialized payload (thanks to
-// `json:"mode,omitempty"`). Round-tripping through ParseToken then
-// produces Claims with Mode="" — the pre-v1.2 cookie shape the
-// back-compat grace window targets. Cannot be produced via
-// IssueToken/IssueTokenWithMode because both default an empty mode
-// to "user". Defaults activeRole to user for test compatibility.
+// mintLegacyModelessToken hand-builds a JWT with Mode="" AND no
+// ActiveRole, the literal shape a pre-v1.2.0 / pre-v1.13.18 client
+// would send. Used to exercise the pre-v1.2 grace-window code path
+// in currentMode + /auth/me. Cannot be produced via IssueToken or
+// IssueTokenWithActiveRole — both default the empty mode to "user"
+// and default a nil activeRole to {kind:"user"}.
+//
+// v1.13.29.1: restored to truly-modeless behavior after the v1.13.29
+// freshman accidentally routed it through mintActiveRoleToken, which
+// forced Mode="user" + activeRole={kind:"user"} and silently broke
+// the grace-window tests (TestMeHandler_IncludesModeAndExpiry,
+// TestCurrentMode_PreV12Cookie_TreatedAsAdmin).
 func mintLegacyModelessToken(t *testing.T, secret []byte, userID string) string {
-	return mintActiveRoleToken(t, secret, userID, "admin", true, &auth.ActiveRole{Kind: "user"})
+	t.Helper()
+	claims := &auth.Claims{
+		UserID:  userID,
+		Role:    "admin",
+		UIAdmin: true,
+		// Mode + ModeExpiresAt + ActiveRole intentionally zero/nil to
+		// reproduce the pre-v1.2 cookie shape.
+		RegisteredClaims: &jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			NotBefore: jwt.NewNumericDate(time.Now()),
+			Subject:   userID,
+		},
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := tok.SignedString(secret)
+	if err != nil {
+		t.Fatalf("sign modeless token: %v", err)
+	}
+	return signed
 }
 
 // mintActiveRoleToken is a helper to create JWTs with explicit active role.
