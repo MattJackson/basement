@@ -193,3 +193,61 @@ If you need to preserve legacy data:
 - [`docs/release-notes/v1.9.0d.md`](../release-notes/v1.9.0d.md) — Protocols map for gateway settings
 - [`docs/release-notes/v1.12.0b.md`](../release-notes/v1.12.0b.md) — CSK migration helper
 - [`docs/release-notes/v1.13.0a.md`](../release-notes/v1.13.0a.md) — Skin policy granular fields
+
+## v2.0.0-beta.4 — Full i18n String Extraction
+
+**Date**: 2026-05-25
+
+### Summary
+
+v2.0.0-beta.4 completes the multilingual UI foundation by extracting all user-facing strings from the React frontend into translation JSON files. Every hardcoded UI string now uses `t()` calls, with full English and Spanish coverage across all pages and components.
+
+### What Changed
+
+- **All routes translated**: Every page in `routes/*.tsx` (admin clusters, policies, system, first-run wizard, auth login/signup, service accounts, audit log)
+- **Shared UI components translated**: All components in `shared/ui/*.tsx` (EmptyState, ErrorBanner, DeleteClusterConfirm, etc.)
+- **Custom components translated**: Components in `components/**/*.tsx` (DriverBadge, PersonaPill, ElevationModal, etc.)
+- **Namespace organization**: Strings organized into `common.json` (buttons, navigation, roles, auth labels) and `pages.json` (page-specific strings by route name)
+
+### Translation Coverage
+
+**Pages covered:**
+- Files home (`/files`) — My Regions view with access keys
+- Admin clusters list/create/detail (`/admin/clusters/*`)
+- Admin policies matrix editor (`/admin/policies`)
+- Admin system settings (`/admin/system`) — org capabilities, gateways, OIDC mappings, session TTL
+- Admin first-run wizard (`/admin/first-run`) — onboarding flow
+- Auth login/signup (`/login`, `/signup`)
+
+**Key components translated:**
+- Table headers and row content (Label, Driver, Status, Resources, Actions)
+- Button labels (Save, Cancel, Delete, Edit, Refresh, Create, Add, etc.)
+- Form labels and placeholders
+- Empty states and error messages
+- Modal titles and descriptions
+- Confirmation dialogs
+
+### User Flow Impact
+
+1. All UI text is now translatable — switching to Spanish in the user menu translates every page immediately
+2. Admin clusters list shows "Clústeres", "Agregar clúster", table headers like "Etiqueta", "Controlador", "Estado"
+3. Policies editor shows "Políticas", "Roles", "Capacidades", "Asignaciones"
+4. System settings shows "Configuración del sistema", "Guardar cambios"
+5. First-run wizard translates all steps: "Bienvenido a basement!", "Agregue su primer clúster", etc.
+
+### Technical Details
+
+- **200+ unique keys** extracted across `common.json` and `pages.json`
+- **Parity tests added**: Verification that en/es JSON files have identical key sets
+- **Smoke tests**: Spanish rendering verified on admin/clusters, admin/system, admin/policies pages
+- **Fallback safe**: Missing keys fall back to English automatically
+
+### Migration Path
+
+No migration required. The translation layer is transparent to users — existing installations will see the language switcher and can toggle between English and Spanish immediately.
+
+### Related Documentation
+
+- [`docs/development/i18n.md`](../development/i18n.md) — i18n development guide (updated with full extraction notes)
+- [`CHANGELOG.md`](../../CHANGELOG.md) — v2.0.0-beta.4 entry
+

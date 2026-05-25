@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Table,
   TableBody,
@@ -38,6 +39,8 @@ export const Route = createFileRoute("/admin/clusters/")({
 
 function ClustersScreen() {
   const navigate = useNavigate();
+  const { t } = useTranslation("pages");
+  const { tp } = useTranslation("pages");
   const { data: clustersData, isLoading, error } = useListClusters();
   const deleteCluster = useDeleteCluster();
   // ADR-0003 v1.2.0b: cluster:delete is an ELEVATED-min capability,
@@ -80,13 +83,13 @@ function ClustersScreen() {
 const header = (
     <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Clusters</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{tp("adminClustersList.pageTitle")}</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Garage and S3-compatible storage backends.
+          {tp("adminClustersList.pageSubtitle")}
         </p>
       </div>
       <Button onClick={() => navigate({ to: "/admin/clusters/new" })}>
-        + Add cluster
+        {tp("adminClustersList.addClusterButton")}
       </Button>
     </header>
   );
@@ -95,7 +98,7 @@ if (error) {
     return (
       <div className="space-y-6">
         {header}
-        <ErrorBanner message="Couldn&apos;t connect to backend. Retrying automatically..." />
+        <ErrorBanner message={tp("errors.connectionFailed")} />
       </div>
     );
   }
@@ -110,11 +113,11 @@ if (error) {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12"></TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Driver</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Resources</TableHead>
-                <TableHead className="w-16">Actions</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnLabel")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnDriver")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnStatus")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnResources")}</TableHead>
+                <TableHead className="w-16">{tp("adminClustersList.addColumnActions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -135,11 +138,11 @@ if (error) {
         <div className="rounded-lg border bg-card p-8 sm:p-12">
           <EmptyState
             icon="server"
-            title="Welcome to basement"
-            description="One pane of glass for Garage, MinIO, OpenMaxIO, and AWS S3. Add your first cluster to get started — basement talks to its admin API and surfaces buckets, keys, and layout from here."
+            title={tp("adminClustersList.emptyStateTitle")}
+            description={tp("adminClustersList.emptyStateDescription")}
             action={
               <Button onClick={() => navigate({ to: "/admin/clusters/new" })} size="lg">
-                + Add your first cluster
+                {tp("adminClustersList.firstClusterButton")}
               </Button>
             }
           />
@@ -150,11 +153,11 @@ if (error) {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12"></TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Driver</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Resources</TableHead>
-                <TableHead className="w-16">Actions</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnLabel")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnDriver")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnStatus")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnResources")}</TableHead>
+                <TableHead className="w-16">{tp("adminClustersList.addColumnActions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -210,7 +213,7 @@ function ClusterCounts({ cid }: { cid: string }) {
   const k = keys?.length ?? 0;
   return (
     <span className="text-xs text-muted-foreground">
-      <strong className="text-foreground tabular-nums">{b}</strong> buckets · <strong className="text-foreground tabular-nums">{k}</strong> keys
+      <strong className="text-foreground tabular-nums">{b}</strong> {tp("adminClustersList.bucketCount")} · <strong className="text-foreground tabular-nums">{k}</strong> {tp("adminClustersList.keyCount")}
     </span>
   );
 }
@@ -278,13 +281,13 @@ function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>
-              Edit
+              {tp("buttons.edit")}
             </DropdownMenuItem>
             <DropdownMenuItem 
               variant="destructive" 
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
             >
-              Delete
+              {tp("buttons.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -315,10 +318,10 @@ function HealthPill({ status }: { status: "healthy" | "degraded" | "unavailable"
   } as const;
 
   const labels = {
-    healthy: "Healthy",
-    degraded: "Degraded",
-    unavailable: "Unavailable",
-    checking: "Checking…",
+    healthy: tp("adminClustersList.healthy"),
+    degraded: tp("adminClustersList.degraded"),
+    unavailable: tp("adminClustersList.unavailable"),
+    checking: tp("adminClustersList.checking"),
   } as const;
 
   return (
