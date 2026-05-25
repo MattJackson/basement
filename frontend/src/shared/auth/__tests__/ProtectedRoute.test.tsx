@@ -91,6 +91,13 @@ it("does not redirect when user is authenticated with /files path", async () => 
   });
 
   it("does not redirect when already on /login", async () => {
+    // v1.13.32: this test was previously passing for the wrong reason —
+    // the redirect path was unreachable (guarded behind `!data` early
+    // return) so navigateMock was never called for ANY unauth case,
+    // making the assertion vacuously true. After fixing the unreachable
+    // guard, this test must actually be on /login to validate the
+    // "don't recurse" check.
+    mockedPathname = "/login";
     mockUserState = { data: undefined, isLoading: false, isError: false };
 
     render(<ProtectedRoute><div>Child</div></ProtectedRoute>);

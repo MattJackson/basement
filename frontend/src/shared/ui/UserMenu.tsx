@@ -176,7 +176,7 @@ export function UserMenu() {
         {/* UI Admin only if user.uiAdmin === true. Switching to admin roles triggers elevation prompt on 423 LOCKED. */}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger data-testid="role-submenu-trigger">
-            Role {activeRole && `(${availableRoles.find(r => r.kind === activeRole.kind + (activeRole.cluster ? ":" + activeRole.cluster : ""))?.label || activeRole.kind})`}
+            Role {activeRole && `(${availableRoles.find(r => r.kind === activeRole.kind && (activeRole.cluster ? r.cluster === activeRole.cluster : true))?.label || activeRole.kind})`}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             <DropdownMenuRadioGroup value={activeRole ? activeRole.kind + (activeRole.cluster ? ":" + activeRole.cluster : "") : "user"} onValueChange={handleRoleChange}>
