@@ -2,18 +2,16 @@ package docs
 
 import (
 	"embed"
-	"errors"
 	"fmt"
-	"io/fs"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/renderer/html"
-	"github.com/yuin/goldmark/extension"
 )
 
 //go:embed integrations/*.md
@@ -69,15 +67,16 @@ func RenderMarkdown(filename string) (string, error) {
 func HandleDocs(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/docs/")
 	if path == "" || path == "/" {
-		http.Redirect(w, r, "/docs/integrations", http.StatusSeeOther)
+		http.Redirect(w, r, "/docs/integrations/webdav", http.StatusSeeOther)
 		return
 	}
 
-	basePath := strings.TrimSuffix(path, "/")
+	// RenderMarkdown appends .md; pass the bare path. Both /docs/integrations/webdav
+	// and /docs/integrations/webdav.md must resolve to integrations/webdav.md.
+	basePath := strings.TrimSuffix(strings.TrimSuffix(path, "/"), ".md")
 	possiblePaths := []string{
-		basePath + ".md",
-		strings.TrimSuffix(basePath, ".md") + ".md",
-		filepath.Join(basePath, "index.md"),
+		basePath,
+		filepath.Join(basePath, "index"),
 	}
 
 	var rendered string
@@ -90,11 +89,7 @@ func HandleDocs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) || strings.Contains(err.Error(), "reading") {
-			http.NotFound(w, r)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.NotFound(w, r)
 		return
 	}
 
