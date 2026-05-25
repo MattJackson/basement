@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mattjackson/basement/internal/driver"
@@ -167,6 +168,63 @@ func TestListClustersHandler_HappyPath(t *testing.T) {
 
 	if len(conns) != 2 {
 		t.Errorf("expected 2 connections, got %d", len(conns))
+	}
+}
+
+// TestListClustersHandler_RedactsSecrets — regression for v1.13.28.
+// Live smoke caught admin_token + secret_key leaking through the wire
+// to user-mode callers. Connection.Redacted strips sensitive keys
+// before serialization; assert the secret strings never appear in the
+// rendered response body.
+func TestListClustersHandler_RedactsSecrets(t *testing.T) {
+	cfg := newTestConfig()
+	connsStore := &testMockConnectionStore{
+		conns: []store.Connection{
+			{
+				ID: "c-1", Label: "garage", Driver: "garage", Owner: "org",
+				Config: map[string]string{
+					"admin_url":   "http://10.1.7.10:3903",
+					"admin_token": "SENSITIVE-ADMIN-TOKEN-MUST-NOT-LEAK",
+					"s3_endpoint": "http://10.1.7.10:3902",
+				},
+			},
+			{
+				ID: "c-2", Label: "aws", Driver: "aws-s3", Owner: "org",
+				Config: map[string]string{
+					"region":        "us-east-1",
+					"access_key_id": "AKIA-public-half",
+					"secret_key":    "SENSITIVE-SECRET-MUST-NOT-LEAK",
+				},
+			},
+		},
+	}
+
+	srv := New(cfg, nil, connsStore, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters", nil)
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: generateAdminToken(), Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, secret := range []string{
+		"SENSITIVE-ADMIN-TOKEN-MUST-NOT-LEAK",
+		"SENSITIVE-SECRET-MUST-NOT-LEAK",
+		"admin_token",
+		"secret_key",
+	} {
+		if strings.Contains(body, secret) {
+			t.Errorf("response leaked %q in body: %s", secret, body)
+		}
+	}
+	// Non-sensitive fields should still be present.
+	for _, public := range []string{"garage", "aws", "admin_url", "s3_endpoint", "region", "access_key_id"} {
+		if !strings.Contains(body, public) {
+			t.Errorf("response missing public field %q; body=%s", public, body)
+		}
 	}
 }
 

@@ -41,7 +41,7 @@ func (s *Server) listClustersHandler(w http.ResponseWriter, r *http.Request) {
 		conns = []store.Connection{}
 	}
 
-	writeJSON(w, http.StatusOK, conns)
+	writeJSON(w, http.StatusOK, store.RedactConnections(conns))
 }
 
 // createClusterHandler handles POST /api/v1/admin/clusters.
@@ -106,7 +106,7 @@ func (s *Server) createClusterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.auditSuccess(r, "cluster:create", resourceCluster(conn.ID))
-	writeJSON(w, http.StatusCreated, conn)
+	writeJSON(w, http.StatusCreated, conn.Redacted())
 }
 
 // getClusterHandler handles GET /api/v1/admin/clusters/{cid}.
@@ -128,7 +128,7 @@ func (s *Server) getClusterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, conn)
+	writeJSON(w, http.StatusOK, conn.Redacted())
 }
 
 // driverInfoResponse is the GET /admin/clusters/{cid}/driver-info shape.
@@ -299,7 +299,7 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.auditSuccess(r, "cluster:edit", resourceCluster(cid))
-	writeJSON(w, http.StatusOK, conn)
+	writeJSON(w, http.StatusOK, conn.Redacted())
 }
 
 // armDeleteClusterHandler handles POST /api/v1/admin/clusters/{cid}/_arm-delete.
