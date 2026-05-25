@@ -59,7 +59,6 @@ export function UserMenu() {
 
   const username = user?.username ?? "—";
   const role = user?.role ?? "—";
-  const uiAdmin = user?.uiAdmin ?? false;
   const activeRole = user?.activeRole;
   const availableRoles = user?.availableRoles ?? [];
   const initial = (user?.username ?? "?").charAt(0).toUpperCase();
@@ -186,24 +185,27 @@ export function UserMenu() {
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
-        {/* v1.13.16: admin-only nav items — Clusters, Policies, Service
-            accounts, Audit log, System settings — ONLY render when the
-            user is currently in admin/elevated mode AND is a uiAdmin.
-            Previous code rendered Clusters/Policies/SAs/Audit
-            unconditionally, exposing admin routes in the dropdown for
-            users sitting in /files (user view) who could click and hit
-            403 / elevation prompt. Operator-confirmed: user-view dropdown
-            should not show admin nav at all. */}
-        {uiAdmin && (mode === "admin" || mode === "elevated") && (
+        {/* v1.13.31: admin nav split by active role per operator UX —
+            "one owns clusters and access/modifications to clusters" (Cluster Admin)
+            "one owns the ui and its settings/access/etc" (UI Admin).
+            Previous v1.13.17 gate used legacy `mode === "admin" || "elevated"` which
+            stayed true after switching activeRole back to "user" — auto-elevated UI
+            admins saw the admin nav even after dropping. Now each item is gated to
+            its OWN active role; nothing renders when activeRole.kind === "user". */}
+        {activeRole?.kind === "cluster-admin" && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLinkItem href="/admin/clusters">
                 Clusters
               </DropdownMenuLinkItem>
-              {/* v1.11.0.15: "Access keys" item removed — keys are
-                  per-cluster and live on the cluster detail page; the
-                  global /admin/keys route was retired in the same cycle. */}
+            </DropdownMenuGroup>
+          </>
+        )}
+        {activeRole?.kind === "ui-admin" && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
               <DropdownMenuLinkItem href="/admin/policies">
                 Policies
               </DropdownMenuLinkItem>

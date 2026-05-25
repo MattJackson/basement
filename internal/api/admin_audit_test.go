@@ -210,8 +210,9 @@ func TestAuditHandler_Pagination_v1_4_0a(t *testing.T) {
 	if page1.Offset != 0 || page1.Limit != 50 {
 		t.Errorf("page 1 offset/limit=%d/%d, want 0/50", page1.Offset, page1.Limit)
 	}
-	if !page1.Truncated {
-		t.Errorf("page 1 Truncated=false, want true (75>50)")
+	// v2.0.0-beta.2 dropped Truncated; derive from offset+len < total.
+	if !(page1.Offset+len(page1.Events) < page1.Total) {
+		t.Errorf("page 1 expected more pages (offset=%d len=%d total=%d)", page1.Offset, len(page1.Events), page1.Total)
 	}
 
 	// Page 2: offset=50.
@@ -236,8 +237,9 @@ func TestAuditHandler_Pagination_v1_4_0a(t *testing.T) {
 	if page2.Offset != 50 {
 		t.Errorf("page 2 Offset=%d, want 50", page2.Offset)
 	}
-	if page2.Truncated {
-		t.Errorf("page 2 Truncated=true, want false (offset+len >= total)")
+	// v2.0.0-beta.2 dropped Truncated; derive from offset+len < total.
+	if page2.Offset+len(page2.Events) < page2.Total {
+		t.Errorf("page 2 expected no more pages (offset=%d len=%d total=%d)", page2.Offset, len(page2.Events), page2.Total)
 	}
 
 	// Sanity: page 1's last event differs from page 2's first.
