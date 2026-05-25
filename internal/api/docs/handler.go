@@ -16,7 +16,7 @@ import (
 	"github.com/yuin/goldmark/extension"
 )
 
-//go:embed *.md
+//go:embed integrations/*.md
 var docsFS embed.FS
 
 var md = goldmark.New(

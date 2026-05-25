@@ -766,6 +766,9 @@ func (s *Server) routes() {
 	r.Handle("/metrics", s.metricsHandler())
 
 	// v1.13.23: public docs at /docs/*.md rendered as HTML with basement chrome.
+	// v1.13.25: chi requires "/docs/*" (wildcard) to match subpaths; bare
+	// "/docs/" only matches the exact path and falls through to the SPA fallback.
+	r.Handle("/docs/*", s.docsHandler())
 	r.Handle("/docs/", s.docsHandler())
 
 	r.Handle("/*", web.Handler())
