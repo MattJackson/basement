@@ -248,90 +248,102 @@ func openConnections(dataDir string, jwtSecret []byte) (Connections, error) {
 }
 
 // load reads connections.json into the cache, decrypts ConfigEnc into
-// the in-memory Config map, and (one-shot per record) migrates any
-// plaintext sensitive keys to ConfigEnc by rewriting the file.
-//
-// Encryption-off mode (jwtSecret == nil) skips both decrypt and
-// migration; on-disk shape stays as Connection JSON, plaintext.
-func (s *store) load() error {
-	disk, err := loadJSON[[]connectionDisk](s.connPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("loading connections: %w", err)
-	}
+	// the in-memory Config map, and (one-shot per record) migrates any
+	// plaintext sensitive keys to ConfigEnc by rewriting the file.
+	//
+	// Encryption-off mode (jwtSecret == nil) skips both decrypt and
+	// migration; on-disk shape stays as Connection JSON, plaintext.
+	func (s *store) load() error {
+		disk, err := loadJSON[[]connectionDisk](s.connPath)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("loading connections: %w", err)
+		}
 
-	if err != nil { // file missing
+		if err != nil { // file missing
+			s.connsMu.Lock()
+			s.connsCache = make([]Connection, 0)
+			s.connsMu.Unlock()
+			return nil
+		}
+
+		cache := make([]Connection, 0, len(disk))
+		migrated := false
+		droppedLegacyCSK := 0
+		for _, d := range disk {
+			c := Connection{
+				ID:           d.ID,
+				Label:        d.Label,
+				Driver:       d.Driver,
+				Color:        d.Color,
+				Owner:        d.Owner,
+				CreatedAt:    d.CreatedAt,
+				Config:       cloneStringMap(d.Config),
+				ConfigEnc:    d.ConfigEnc,
+				ConfigEncCSK: d.ConfigEncCSK,
+			}
+			if c.Config == nil {
+				c.Config = map[string]string{}
+			}
+
+			if s.jwtSecret != nil {
+				// v2.0.0-beta.2: Check for legacy JWT-encrypted credentials
+				// with no CSK parallel — these clusters are dropped per [[v2_clean_break]].
+				if len(c.ConfigEnc) > 0 && len(c.ConfigEncCSK) == 0 {
+					droppedLegacyCSK++
+					continue
+				}
+
+				// Decrypt any existing ConfigEnc into the in-memory Config so
+				// callers see a unified view.
+				if len(c.ConfigEnc) > 0 {
+					dec, derr := decryptSensitiveMap(c.ConfigEnc, s.jwtSecret)
+					if derr != nil {
+						return fmt.Errorf("decrypting ConfigEnc for connection %q: %w", c.ID, derr)
+					}
+					for k, v := range dec {
+						c.Config[k] = v
+					}
+				}
+
+				// Migration: if the on-disk Config (d.Config — BEFORE we
+				// merged decrypted ConfigEnc in) carries plaintext sensitive
+				// keys, flag a rewrite. save() will split them out.
+				//
+				// We use d.Config rather than c.Config so post-merge keys
+				// (which always look "plaintext" in c.Config because
+				// decryption put them there) don't trigger a needless
+				// re-save on every boot. Result: idempotent — second boot
+				// with already-encrypted records is a no-op.
+				for k := range d.Config {
+					if sensitiveConfigKeys[k] {
+						migrated = true
+						break
+					}
+				}
+			}
+
+			cache = append(cache, c)
+		}
+
 		s.connsMu.Lock()
-		s.connsCache = make([]Connection, 0)
+		s.connsCache = cache
 		s.connsMu.Unlock()
+
+		if droppedLegacyCSK > 0 {
+			fmt.Fprintf(os.Stderr, "[WARN] Dropped %d connection(s) with legacy JWT-encrypted credentials (ConfigEnc but no ConfigEncCSK); re-add via /admin/connections per v2.0.0-beta.2 [[v2_clean_break]]\n", droppedLegacyCSK)
+		}
+
+		if migrated {
+			s.connsMu.Lock()
+			err := s.saveLocked()
+			s.connsMu.Unlock()
+			if err != nil {
+				return fmt.Errorf("re-saving connections after at-rest migration: %w", err)
+			}
+		}
+
 		return nil
 	}
-
-	cache := make([]Connection, 0, len(disk))
-	migrated := false
-	for _, d := range disk {
-		c := Connection{
-			ID:           d.ID,
-			Label:        d.Label,
-			Driver:       d.Driver,
-			Color:        d.Color,
-			Owner:        d.Owner,
-			CreatedAt:    d.CreatedAt,
-			Config:       cloneStringMap(d.Config),
-			ConfigEnc:    d.ConfigEnc,
-			ConfigEncCSK: d.ConfigEncCSK,
-		}
-		if c.Config == nil {
-			c.Config = map[string]string{}
-		}
-
-		if s.jwtSecret != nil {
-			// Decrypt any existing ConfigEnc into the in-memory Config so
-			// callers see a unified view.
-			if len(c.ConfigEnc) > 0 {
-				dec, derr := decryptSensitiveMap(c.ConfigEnc, s.jwtSecret)
-				if derr != nil {
-					return fmt.Errorf("decrypting ConfigEnc for connection %q: %w", c.ID, derr)
-				}
-				for k, v := range dec {
-					c.Config[k] = v
-				}
-			}
-
-			// Migration: if the on-disk Config (d.Config — BEFORE we
-			// merged decrypted ConfigEnc in) carries plaintext sensitive
-			// keys, flag a rewrite. save() will split them out.
-			//
-			// We use d.Config rather than c.Config so post-merge keys
-			// (which always look "plaintext" in c.Config because
-			// decryption put them there) don't trigger a needless
-			// re-save on every boot. Result: idempotent — second boot
-			// with already-encrypted records is a no-op.
-			for k := range d.Config {
-				if sensitiveConfigKeys[k] {
-					migrated = true
-					break
-				}
-			}
-		}
-
-		cache = append(cache, c)
-	}
-
-	s.connsMu.Lock()
-	s.connsCache = cache
-	s.connsMu.Unlock()
-
-	if migrated {
-		s.connsMu.Lock()
-		err := s.saveLocked()
-		s.connsMu.Unlock()
-		if err != nil {
-			return fmt.Errorf("re-saving connections after at-rest migration: %w", err)
-		}
-	}
-
-	return nil
-}
 
 // save writes the connections cache to disk atomically, encrypting
 // sensitive keys on the way out. Caller must hold connsMu (write).

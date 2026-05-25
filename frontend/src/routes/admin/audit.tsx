@@ -155,7 +155,7 @@ function AuditPage() {
             <EventsTable
               events={events}
               total={total}
-              truncated={data?.truncated ?? false}
+              
             />
             <PaginationBar
               offset={currentOffset}
@@ -351,11 +351,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function EventsTable({
   events,
   total,
-  truncated,
 }: {
   events: AuditEvent[];
   total: number;
-  truncated: boolean;
 }) {
   if (events.length === 0) {
     return (
@@ -366,13 +364,10 @@ function EventsTable({
     );
   }
 
-  // v1.4.0a: total + truncated footer moved into PaginationBar; the
-  // EventsTable now only carries the table itself. Keeping the props
-  // signature stable so future cycles can re-introduce per-table
-  // summary chrome without refactoring callers.
-  void total;
-  void truncated;
-  return (
+ // v1.4.0a: pagination footer moved into PaginationBar; the
+	// EventsTable now only carries the table itself.
+	void total;
+	return (
     <section className="space-y-2">
       <div className="rounded-lg border bg-card overflow-x-auto">
         <Table>

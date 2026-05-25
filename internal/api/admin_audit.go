@@ -25,16 +25,12 @@ import (
 //
 // v1.4.0a: pagination. `total` is now the FULL count of matches over
 // the filter window (across all pages), and `offset` + `limit` echo
-// the page the caller saw. `truncated` stays for one release as a
-// deprecated hint so older FE builds don't break — it now mirrors
-// (offset + len(events) < total). Newer FE renders the page footer
-// + Prev/Next purely from total + offset + limit.
+// the page the caller saw. FE derives truncated state from total + offset + limit.
 type auditResponse struct {
-	Events    []audit.Event `json:"events"`
-	Total     int           `json:"total"`
-	Offset    int           `json:"offset"`
-	Limit     int           `json:"limit"`
-	Truncated bool          `json:"truncated"`
+	Events  []audit.Event `json:"events"`
+	Total   int           `json:"total"`
+	Offset  int           `json:"offset"`
+	Limit   int           `json:"limit"`
 }
 
 // listAuditHandler handles GET /api/v1/admin/audit.
@@ -137,17 +133,12 @@ func (s *Server) listAuditHandler(w http.ResponseWriter, r *http.Request) {
 	if effectiveOffset < 0 {
 		effectiveOffset = 0
 	}
-	// Deprecated `truncated` hint: there are more rows past this
-	// page's window. The new FE drives Prev/Next from total alone;
-	// the field stays one release for in-flight clients.
-	truncated := effectiveOffset+len(events) < total
 
 	writeJSON(w, http.StatusOK, auditResponse{
-		Events:    events,
-		Total:     total,
-		Offset:    effectiveOffset,
-		Limit:     effectiveLimit,
-		Truncated: truncated,
+		Events: events,
+		Total:  total,
+		Offset: effectiveOffset,
+		Limit:  effectiveLimit,
 	})
 }
 

@@ -473,8 +473,7 @@ func (e *fileEnforcer) UpsertRole(r Role) error {
 	}
 
 	// New role — strip any incoming Seed=true; only seeding-at-construction
-	// may create seed roles. Same for Deprecated — only code marks roles
-	// deprecated, never the UI / API.
+	// may create seed roles.
 	r.Seed = false
 	r.Deprecated = false
 	e.roles = append(e.roles, r)
