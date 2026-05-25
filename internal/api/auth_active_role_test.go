@@ -95,43 +95,44 @@ func TestActiveRoleHandler_HappyPath_UserSwitch(t *testing.T) {
 	}
 }
 
-// TestActiveRoleHandler_CrossClusterSwitch: switching between cluster admins requires elevation.
+// TestActiveRoleHandler_CrossClusterSwitch: switching between cluster admins
+// is FREE — the cluster_admin grant on the target cluster is the authorization.
+// (v1.13.26: previously expected 423; that was the wrong model. Only UI Admin
+// requires sudo-style re-auth; cluster-admin switches are like swapping themes.)
 func TestActiveRoleHandler_CrossClusterSwitch(t *testing.T) {
 	srv, secret := newActiveRoleTestServer(t)
 
-	// Grant user cluster_admin on both "classe" and "lsi" via policy enforcer
 	srv.policy.AssignRole(policy.RoleAssignment{
-		UserID:  "admin",
-		RoleID:  "cluster_admin",
-		Scope:   "cluster:classe",
+		UserID: "admin",
+		RoleID: "cluster_admin",
+		Scope:  "cluster:classe",
 	})
 	srv.policy.AssignRole(policy.RoleAssignment{
-		UserID:  "admin",
-		RoleID:  "cluster_admin",
-		Scope:   "cluster:lsi",
+		UserID: "admin",
+		RoleID: "cluster_admin",
+		Scope:  "cluster:lsi",
 	})
 
-	// Start as cluster-admin on "classe" (not elevated)
 	activeRole := &auth.ActiveRole{Kind: "cluster-admin", Cluster: "classe"}
 	tok := mintActiveRoleToken(t, secret, "admin", "admin", true, activeRole)
 
-	// Try to switch to "lsi" without elevation -> 423 LOCKED
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/auth/active-role", bytes.NewReader([]byte(`{"kind":"cluster-admin","cluster":"lsi"}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusLocked {
-		t.Fatalf("expected 423 LOCKED, got %d body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d body=%s", rr.Code, rr.Body.String())
 	}
 
-	var lockResp map[string]interface{}
-	if err := json.Unmarshal(rr.Body.Bytes(), &lockResp); err != nil {
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	if !lockResp["requires_elevation"].(bool) {
-		t.Errorf("requires_elevation = false, want true")
+	ar, _ := resp["activeRole"].(map[string]interface{})
+	if ar == nil || ar["kind"] != "cluster-admin" || ar["cluster"] != "lsi" {
+		t.Errorf("activeRole = %v, want kind=cluster-admin cluster=lsi", ar)
 	}
 }
 
