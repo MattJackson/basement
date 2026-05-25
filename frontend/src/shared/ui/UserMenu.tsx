@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { client } from "@/shared/api/client";
-import { useVersion, useOrgCapabilities, useSetActiveSkin } from "@/shared/api/queries";
+import { useOrgCapabilities, useSetActiveSkin } from "@/shared/api/queries";
 import { promptElevationFromAnywhere } from "@/shared/auth/elevation";
 import { useAuthMode } from "@/shared/auth/mode";
 import { useTheme, type Theme } from "@/shared/theme/useTheme";
@@ -39,7 +39,6 @@ export function UserMenu() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: user } = useUser();
-  const { data: version } = useVersion();
   // v1.3.0a.3: "Switch to admin view" auto-elevates before navigating.
   // Operator mental model is "going into admin = entering admin mode";
   // decoupling URL from mode meant the first action under /admin always
@@ -175,7 +174,7 @@ export function UserMenu() {
             elevation prompt on 423 LOCKED. */}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger data-testid="role-submenu-trigger">
-            Role {activeRole && `(${availableRoles.find(r => r.kind === activeRole.kind && (activeRole.cluster ? r.cluster === activeRole.cluster : true))?.label || activeRole.kind})`}
+            {t("userMenu.switchRole")}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             <DropdownMenuRadioGroup value={activeRole ? activeRole.kind + (activeRole.cluster ? ":" + activeRole.cluster : "") : "user"} onValueChange={handleRoleChange}>
@@ -317,21 +316,10 @@ export function UserMenu() {
         </DropdownMenuSub>
 
         <DropdownMenuItem onClick={handleLogout}>{t("auth.signOut")}</DropdownMenuItem>
-        {version?.version && (
-          <>
-            <DropdownMenuSeparator />
-            <div
-              className="px-1.5 py-1 text-[10px] font-mono opacity-40 select-text"
-              title={
-                version.commit
-                  ? `commit ${version.commit.slice(0, 7)} · built ${version.builtAt}`
-                  : undefined
-              }
-            >
-              {version.version}
-            </div>
-          </>
-        )}
+        {/* v1.13.36: version footer removed from the dropdown. The
+            same tag is already visible in the header under the
+            "Basement" wordmark via <LogoVersion>, and the operator
+            flagged the duplication. One source of truth. */}
       </DropdownMenuContent>
     </DropdownMenu>
   );

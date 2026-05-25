@@ -16,6 +16,9 @@
     "federations": "Federations",
     "webhooks": "Webhooks"
   },
+  "userMenu": {
+    "switchRole": "Switch role"
+  },
   "buttons": {
     "save": "Save",
     "cancel": "Cancel",

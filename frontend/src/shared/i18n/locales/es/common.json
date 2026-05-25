@@ -16,6 +16,9 @@
     "federations": "Federaciones",
     "webhooks": "Webhooks"
   },
+  "userMenu": {
+    "switchRole": "Cambiar de rol"
+  },
   "buttons": {
     "save": "Guardar",
     "cancel": "Cancelar",

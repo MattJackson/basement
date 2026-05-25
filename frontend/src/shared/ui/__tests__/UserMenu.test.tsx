@@ -443,26 +443,30 @@ describe("UserMenu — Role selector (v1.13.18)", () => {
     expect(screen.queryByText("UI Admin")).not.toBeInTheDocument();
   });
 
-  it("Role selector displays current role in trigger", async () => {
-    setUserMock({ 
-      username: "matthew", 
-      role: "user", 
-      uiAdmin: true, 
+  it("Role selector trigger reads 'Switch role'", async () => {
+    // v1.13.36 changed the trigger from "Role ({currentLabel})" to a
+    // fixed "Switch role" — the current role is already visible in
+    // the PersonaPill and as a check on the radio item, so duplicating
+    // it on the trigger was redundant. Per operator: "Role (user) ->
+    // change to 'Switch Role'".
+    setUserMock({
+      username: "matthew",
+      role: "user",
+      uiAdmin: true,
       oidcUser: false,
       activeRole: { kind: "cluster-admin", cluster: "lsi" },
       availableRoles: [
         { kind: "user", label: "User" },
-        { kind: "cluster-admin", cluster: "classe", label: "Cluster Admin: classe" },
         { kind: "cluster-admin", cluster: "lsi", label: "Cluster Admin: lsi" },
-        { kind: "ui-admin", label: "UI Admin" }
-      ]
+        { kind: "ui-admin", label: "UI Admin" },
+      ],
     });
 
     render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
     const roleTrigger = await screen.findByTestId("role-submenu-trigger");
-    expect(roleTrigger).toHaveTextContent(/Role.*Cluster Admin: lsi/);
+    expect(roleTrigger).toHaveTextContent(/Switch role/i);
   });
 });
 
