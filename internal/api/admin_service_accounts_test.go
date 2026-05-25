@@ -65,13 +65,16 @@ func newServiceAccountTestEnv(t *testing.T, grant bool) (*Server, *store.Store) 
 // serviceAccountAdminCookie issues an ADMIN-mode JWT for userID
 // (defaults to "admin" — the username generateAdminToken uses). The
 // host:manage_users gate requires ADMIN mode per MinModeFor.
+//
+// v1.13.29.1: mints activeRole=ui-admin so the cookie passes the
+// uiAdminG group's ActiveRoleUIAdminMiddleware that gates /admin/service-accounts/*.
 func serviceAccountAdminCookie(t *testing.T, userID string) *http.Cookie {
 	t.Helper()
 	modeExpiresAt := time.Now().Add(time.Hour).Unix()
-	token, err := auth.IssueTokenWithMode(testSecret, userID, "admin", true,
-		"admin", modeExpiresAt, 24*time.Hour)
+	token, err := auth.IssueTokenWithActiveRole(testSecret, userID, "admin", true,
+		"admin", modeExpiresAt, 24*time.Hour, &auth.ActiveRole{Kind: "ui-admin"})
 	if err != nil {
-		t.Fatalf("IssueTokenWithMode: %v", err)
+		t.Fatalf("IssueTokenWithActiveRole: %v", err)
 	}
 	return &http.Cookie{
 		Name:     "__Host-basement_session",

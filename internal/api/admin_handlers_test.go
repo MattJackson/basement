@@ -469,10 +469,16 @@ var testSecret = func() []byte {
 // token satisfies the gate. Tests that specifically want to exercise
 // USER-mode behaviour mint their own token via auth.IssueToken (USER
 // default).
+//
+// v1.13.29.1: now mints activeRole=ui-admin so admin tests pass the
+// ActiveRoleAnyAdminMiddleware + ActiveRoleUIAdminMiddleware gates
+// added in v1.13.29. Tests that want explicit cluster-admin scope or
+// user-mode active role mint via generateClusterAdminToken /
+// generateUserModeAdminToken.
 func generateAdminToken() string {
 	modeExpiresAt := time.Now().Add(1 * time.Hour).Unix()
-	token, err := auth.IssueTokenWithMode(testSecret, "admin", "admin", true,
-		"admin", modeExpiresAt, 24*time.Hour)
+	token, err := auth.IssueTokenWithActiveRole(testSecret, "admin", "admin", true,
+		"admin", modeExpiresAt, 24*time.Hour, &auth.ActiveRole{Kind: "ui-admin"})
 	if err != nil {
 		panic(err)
 	}
