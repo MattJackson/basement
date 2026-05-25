@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   useBulkCreateUserKeys,
   useCreateUserKey,
@@ -148,14 +149,21 @@ function AddKeyPage() {
   };
 
   // applyExample fills both the endpoint AND region from a curated
-  // DriverDefaults row. Triggered ONLY by an explicit "Use this" click
-  // — per cycle constraint, never auto-overwrite. Marks the region as
-  // touched so subsequent endpoint typing doesn't unsettle it.
+  // DriverDefaults row. Triggered when the operator clicks a Common
+  // endpoint row — never auto-overwrite from typing in the endpoint
+  // field. Marks the region as touched so subsequent endpoint typing
+  // doesn't unsettle it.
   //
   // v1.3.0c: AWS rows auto-check the virtual-host toggle because AWS
   // S3 prefers virtual-host addressing for S3-tool compatibility
   // (boto3 / aws-cli default). Self-hosted backends (Garage, MinIO)
   // keep the toggle off — path-style is the safe choice for them.
+  //
+  // v1.13.37: also collapses the Common endpoints panel + flashes a
+  // brief "Applied" highlight on the form. Operator: "no visual
+  // feedback clicking a common endpoint does anything". Without a
+  // visible cue the form-fill is silent, so users click multiple
+  // times wondering if the click registered.
   const applyExample = (d: DriverDefaults) => {
     if (d.s3Endpoint) setEndpoint(d.s3Endpoint);
     if (d.regionLabel) {
@@ -165,6 +173,8 @@ function AddKeyPage() {
     if (d.driver === "aws-s3") {
       setVirtualHost(true);
     }
+    setShowCommonEndpoints(false);
+    toast.success(`Filled endpoint from ${d.displayName}`);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -273,15 +283,18 @@ function AddKeyPage() {
               <p className="text-xs text-muted-foreground">
                 Quick-fill the endpoint + region for a known driver. Replace the host with yours.
               </p>
-              <ul className="divide-y">
+              <ul className="divide-y -mx-2">
                 {driverDefaults
                   .filter((d) => !!d.s3Endpoint)
                   .map((d) => (
-                    <li
-                      key={d.driver}
-                      className="flex flex-wrap items-center justify-between gap-2 py-2"
-                    >
-                      <div className="min-w-0 flex-1">
+                    <li key={d.driver}>
+                      <button
+                        type="button"
+                        onClick={() => applyExample(d)}
+                        className="w-full text-left px-2 py-2 hover:bg-muted/40 rounded-sm transition-colors min-h-[44px]"
+                        data-testid={`use-endpoint-${d.driver}`}
+                        aria-label={`Use ${d.displayName} endpoint`}
+                      >
                         <div className="text-sm font-medium">{d.displayName}</div>
                         <div className="font-mono text-xs text-muted-foreground break-all">
                           {d.s3Endpoint}
@@ -290,14 +303,6 @@ function AddKeyPage() {
                         {d.s3EndpointHint && (
                           <div className="text-xs text-muted-foreground">{d.s3EndpointHint}</div>
                         )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => applyExample(d)}
-                        className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-muted/40"
-                        data-testid={`use-endpoint-${d.driver}`}
-                      >
-                        Use this
                       </button>
                     </li>
                   ))}
