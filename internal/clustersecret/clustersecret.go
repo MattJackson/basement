@@ -13,20 +13,19 @@
 // Each WrappedCSK carries the Argon2id salt + params plus the AES-GCM
 // ciphertext of the CSK under the password-derived wrapping key. The
 // CSK plaintext NEVER touches the WrappedCSK; only the wrapping key
-// (transiently held during unlock) can recover it.
-//
-// API summary:
-//
-//	Unlock(cid, password)     decode CSK into memory using one admin's password
-//	Lock(cid)                 zero CSK from memory
-//	IsUnlocked(cid)           cheap predicate for the request path
-//	Encrypt/Decrypt(cid, …)   AES-GCM under the in-memory CSK
-//	AddAdmin/RemoveAdmin      manage the set of wrappedCSK records
-//	MigrateFromJWT            re-encrypt legacy JWT-AES-GCM secret under CSK
-//
-// Anything that reaches "I need a cluster's stored secret" calls
-// Decrypt(cid, ciphertext) and converts ErrLocked into HTTP 423 LOCKED
-// at the API edge so the FE can surface the unlock modal.
+	// (transiently held during unlock) can recover it.
+	//
+	// API summary:
+	//
+	//	Unlock(cid, password)     decode CSK into memory using one admin's password
+	//	Lock(cid)                 zero CSK from memory
+	//	IsUnlocked(cid)           cheap predicate for the request path
+	//	Encrypt/Decrypt(cid, …)   AES-GCM under the in-memory CSK
+	//	AddAdmin/RemoveAdmin      manage the set of wrappedCSK records
+	//
+	// Anything that reaches "I need a cluster's stored secret" calls
+	// Decrypt(cid, ciphertext) and converts ErrLocked into HTTP 423 LOCKED
+	// at the API edge so the FE can surface the unlock modal.
 package clustersecret
 
 import (
@@ -35,7 +34,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -482,96 +480,9 @@ func (m *ClusterSecretManager) RemoveAdmin(clusterID, adminUserID string) error 
 	return m.store.DeleteWrappedCSK(clusterID, adminUserID)
 }
 
-// MigrateFromJWT re-encrypts a legacy AES-GCM ciphertext (wrapped
-// under sha256(jwtSecret)) under the cluster's CSK. The cluster MUST
-// already be unlocked.
-//
-// The returned ciphertext is in the same wire format as Encrypt's
-// output (nonce||ct||tag). Caller is responsible for swapping the
-// stored ciphertext on disk inside one save() pass — the migration
-// is only complete once the legacy ciphertext is dropped from disk.
-//
-// This function does NOT touch disk; it's a pure value transform. The
-// store-layer caller decides when (and atomically) to overwrite the
-// legacy field. That keeps the bridge un-burned: on partial failure
-// the legacy ciphertext remains on disk and the next migration retry
-// works fine.
-func (m *ClusterSecretManager) MigrateFromJWT(clusterID string, legacyCiphertext, jwtSecret []byte) ([]byte, error) {
-	if len(jwtSecret) == 0 {
-		return nil, errors.New("clustersecret: empty jwtSecret")
-	}
-
-	m.mu.RLock()
-	csk, ok := m.csks[clusterID]
-	m.mu.RUnlock()
-	if !ok {
-		return nil, ErrLocked
-	}
-
-	// Decrypt under the legacy JWT-derived key. Wire format matches
-	// internal/store/crypto.go: nonce(12) || ciphertext+tag.
-	plaintext, err := jwtAESGCMOpen(jwtSecret, legacyCiphertext)
-	if err != nil {
-		return nil, fmt.Errorf("clustersecret: decrypt legacy ciphertext: %w", err)
-	}
-	defer func() {
-		// Best-effort wipe of the plaintext before it falls out of scope.
-		for i := range plaintext {
-			plaintext[i] = 0
-		}
-	}()
-
-	out, err := aesGCMSeal(csk, plaintext)
-	if err != nil {
-		return nil, fmt.Errorf("clustersecret: re-encrypt under CSK: %w", err)
-	}
-	return out, nil
-}
-
-// MigrateFromJWTMap is a convenience for migrating a whole
-// map[string]string of sensitive Config keys (the v1.0.0a Connection
-// ConfigEnc shape carries the JSON-serialised map). Returns a fresh
-// CSK-encrypted blob ready to swap in for the legacy ConfigEnc field.
-func (m *ClusterSecretManager) MigrateFromJWTMap(clusterID string, legacyConfigEnc, jwtSecret []byte) ([]byte, error) {
-	if len(legacyConfigEnc) == 0 {
-		return nil, nil
-	}
-	if len(jwtSecret) == 0 {
-		return nil, errors.New("clustersecret: empty jwtSecret")
-	}
-
-	m.mu.RLock()
-	csk, ok := m.csks[clusterID]
-	m.mu.RUnlock()
-	if !ok {
-		return nil, ErrLocked
-	}
-
-	plaintext, err := jwtAESGCMOpen(jwtSecret, legacyConfigEnc)
-	if err != nil {
-		return nil, fmt.Errorf("clustersecret: decrypt legacy ConfigEnc: %w", err)
-	}
-	defer func() {
-		for i := range plaintext {
-			plaintext[i] = 0
-		}
-	}()
-
-	// Sanity-check shape: legacy ConfigEnc serialises a JSON map.
-	// If unmarshal fails the caller almost certainly handed us a
-	// non-ConfigEnc blob — fail loudly rather than silently re-encrypt
-	// arbitrary bytes.
-	var sanity map[string]string
-	if err := json.Unmarshal(plaintext, &sanity); err != nil {
-		return nil, fmt.Errorf("clustersecret: legacy plaintext is not a JSON map: %w", err)
-	}
-
-	out, err := aesGCMSeal(csk, plaintext)
-	if err != nil {
-		return nil, fmt.Errorf("clustersecret: re-encrypt under CSK: %w", err)
-	}
-	return out, nil
-}
+// MigrateFromJWT and MigrateFromJWTMap were removed in v2.0.0-beta.2.
+// Legacy JWT-encrypted credentials are no longer supported; clusters with
+// ConfigEnc but no ConfigEncCSK are dropped on first boot per [[v2_clean_break]].
 
 // ─── internals ──────────────────────────────────────────────────────
 

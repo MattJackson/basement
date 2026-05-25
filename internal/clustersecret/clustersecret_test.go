@@ -6,7 +6,6 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -265,91 +264,6 @@ func TestLockZeroesCachedCSK(t *testing.T) {
 	m.mu.RUnlock()
 	if present {
 		t.Fatalf("expected map entry removed after Lock")
-	}
-}
-
-func TestMigrateFromJWTReEncryptsUnderCSK(t *testing.T) {
-	jwtSecret := []byte("the-jwt-signing-secret-must-be-at-least-32-bytes-long")
-	plaintext := []byte("legacy admin_token plaintext")
-
-	// Pre-encrypt under the legacy JWT-derived key.
-	legacy, err := jwtSeal(jwtSecret, plaintext)
-	if err != nil {
-		t.Fatalf("jwtSeal: %v", err)
-	}
-
-	m := New(NewMemoryStore())
-	if err := m.BootstrapFirstAdmin("cidA", "matthew", "hunter2"); err != nil {
-		t.Fatalf("BootstrapFirstAdmin: %v", err)
-	}
-
-	cskCt, err := m.MigrateFromJWT("cidA", legacy, jwtSecret)
-	if err != nil {
-		t.Fatalf("MigrateFromJWT: %v", err)
-	}
-	if bytes.Equal(cskCt, legacy) {
-		t.Fatalf("migrated ciphertext identical to legacy — re-encryption did not happen")
-	}
-
-	// Decrypt under CSK recovers the original plaintext.
-	got, err := m.Decrypt("cidA", cskCt)
-	if err != nil {
-		t.Fatalf("Decrypt migrated: %v", err)
-	}
-	if !bytes.Equal(plaintext, got) {
-		t.Fatalf("migrate round-trip mismatch: %q != %q", got, plaintext)
-	}
-}
-
-func TestMigrateFromJWTLockedReturnsErrLocked(t *testing.T) {
-	jwtSecret := []byte("0123456789012345678901234567890123")
-	legacy, err := jwtSeal(jwtSecret, []byte("x"))
-	if err != nil {
-		t.Fatalf("jwtSeal: %v", err)
-	}
-	m := New(NewMemoryStore())
-	_, err = m.MigrateFromJWT("cidA", legacy, jwtSecret)
-	if !errors.Is(err, ErrLocked) {
-		t.Fatalf("MigrateFromJWT while locked: got %v want ErrLocked", err)
-	}
-}
-
-func TestMigrateFromJWTMapPreservesShape(t *testing.T) {
-	jwtSecret := []byte("0123456789012345678901234567890123")
-	original := map[string]string{
-		"admin_token":   "supersecret-token",
-		"s3_secret_key": "abcdef-secret",
-	}
-	jsonBlob, err := json.Marshal(original)
-	if err != nil {
-		t.Fatalf("marshal original: %v", err)
-	}
-	legacy, err := jwtSeal(jwtSecret, jsonBlob)
-	if err != nil {
-		t.Fatalf("jwtSeal: %v", err)
-	}
-
-	m := New(NewMemoryStore())
-	if err := m.BootstrapFirstAdmin("cidA", "matthew", "hunter2"); err != nil {
-		t.Fatalf("BootstrapFirstAdmin: %v", err)
-	}
-
-	cskCt, err := m.MigrateFromJWTMap("cidA", legacy, jwtSecret)
-	if err != nil {
-		t.Fatalf("MigrateFromJWTMap: %v", err)
-	}
-	got, err := m.Decrypt("cidA", cskCt)
-	if err != nil {
-		t.Fatalf("Decrypt migrated map: %v", err)
-	}
-	var roundTrip map[string]string
-	if err := json.Unmarshal(got, &roundTrip); err != nil {
-		t.Fatalf("unmarshal migrated map: %v", err)
-	}
-	for k, v := range original {
-		if roundTrip[k] != v {
-			t.Fatalf("migrated map[%q]=%q want %q", k, roundTrip[k], v)
-		}
 	}
 }
 

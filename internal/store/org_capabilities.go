@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -53,12 +54,9 @@ type OrgCapabilities struct {
 	//
 	// v1.13.1: UserOverridableSkin controls whether users can pick
 	// their own skin; AllowedUserSkins restricts to a specific set
-	// (empty list = all installed skins available). SkinPolicy is
-	// deprecated — legacy values migrate on read per the loader logic below.
+	// (empty list = all installed skins available). v2.0.0-beta.2: SkinPolicy
+	// field removed — legacy values migrate on read per the loader logic below.
 	ActiveSkin string `json:"activeSkin,omitempty"`
-	// Deprecated: SkinPolicy kept for backwards-compat reads only;
-	// ignored on writes. Migrate to UserOverridableSkin + AllowedUserSkins instead.
-	SkinPolicy string `json:"skinPolicy,omitempty" jsonschema:"-"`
 	UserOverridableSkin bool `json:"userOverridableSkin"`
 	AllowedUserSkins []string `json:"allowedUserSkins,omitempty"`
 }
@@ -102,19 +100,13 @@ const (
 // registration rather than carving a special-case field here; the UI
 // renders "coming soon" purely from the registry's Implemented() flag.
 type GatewaySettings struct {
-	// WebDAV is the legacy v1.9.0b hand-typed field. Reads carry the
-	// operator's deliberate kill-switch through the migration; writes
-	// are mirrored to Protocols["webdav"] so post-migration the map
-	// is the source of truth and the field stays around as a
-	// back-compat shadow.
-	WebDAV WebDAVSettings `json:"webdav"`
-
 	// Protocols is the v1.9.0d generic per-gateway config map. Key is
 	// the Gateway.Name() ("webdav", "smb", "nfs", "ftp", "s3").
 	// Missing key means "use defaults for this gateway"; on the
 	// /admin/gateways enable-toggle path that resolves to false for
 	// stubs (UI hides toggle) and true for webdav (defaults-on
-	// preserves the v1.9.0a behaviour).
+	// preserves the v1.9.0a behaviour). v2.0.0-beta.2: legacy WebDAV field removed;
+	// migrated to Protocols["webdav"] on read per normalizeGateways().
 	Protocols map[string]GatewayConfig `json:"protocols,omitempty"`
 }
 
@@ -151,40 +143,30 @@ type WebDAVSettings struct {
 }
 
 // IsEnabled reports whether the named gateway is enabled in this
-// settings blob. Webdav defaults to true (matches v1.9.0a behaviour
-// for any file lacking the field); every other gateway defaults to
-// false (stub gateways can't actually be enabled regardless of caps,
-// but the FE consults this flag to decide which row shows a toggle).
-//
-// Lookup order: Protocols[name] wins when present; otherwise the
-// legacy WebDAV hand-typed field bridges in for name=="webdav"; else
-// the default-by-name fires.
-func (g GatewaySettings) IsEnabled(name string) bool {
-	if cfg, ok := g.Protocols[name]; ok {
-		return cfg.Enabled
+	// settings blob. Webdav defaults to true (matches v1.9.0a behaviour); 
+	// every other gateway defaults to false (stub gateways can't actually be 
+	// enabled regardless of caps, but the FE consults this flag to decide which 
+	// row shows a toggle).
+	//
+	// Lookup order: Protocols[name] wins when present; else default-by-name fires.
+	func (g GatewaySettings) IsEnabled(name string) bool {
+		if cfg, ok := g.Protocols[name]; ok {
+			return cfg.Enabled
+		}
+		return false
 	}
-	if name == "webdav" {
-		return g.WebDAV.Enabled
-	}
-	return false
-}
 
 // BaseURL returns the operator-pinned base URL for the named gateway,
-// or "" when none is set. Same lookup precedence as IsEnabled.
-func (g GatewaySettings) BaseURL(name string) string {
-	if cfg, ok := g.Protocols[name]; ok && cfg.BaseURL != "" {
-		return cfg.BaseURL
+	// or "" when none is set. Same lookup precedence as IsEnabled.
+	func (g GatewaySettings) BaseURL(name string) string {
+		if cfg, ok := g.Protocols[name]; ok && cfg.BaseURL != "" {
+			return cfg.BaseURL
+		}
+		return ""
 	}
-	if name == "webdav" {
-		return g.WebDAV.BaseURL
-	}
-	return ""
-}
 
-// DefaultOrgCapabilities returns the default org capabilities. Both
-	// the legacy WebDAV field and the v1.9.0d Protocols map start with
-	// webdav.enabled=true so a downgrade to v1.9.0b would read the same
-	// kill-switch state the v1.9.0d caller wrote.
+// DefaultOrgCapabilities returns the default org capabilities. The Protocols map
+	// starts with webdav.enabled=true — this is the only source of truth post-v2.0.0-beta.2.
 	//
 	// v1.13.0a (ADR-0008) adds ActiveSkin + SkinPolicy with defaults;
 	// v1.13.1 migrates to UserOverridableSkin + AllowedUserSkins. A fresh
@@ -199,7 +181,6 @@ func (g GatewaySettings) BaseURL(name string) string {
 			OIDCOnly:              false,
 			AdminSessionTTLSec:    AdminSessionTTLDefaultSec,
 			Gateways: GatewaySettings{
-				WebDAV: WebDAVSettings{Enabled: true},
 				Protocols: map[string]GatewayConfig{
 					"webdav": {Enabled: true},
 				},
@@ -211,53 +192,43 @@ func (g GatewaySettings) BaseURL(name string) string {
 	}
 
 // normalizeGateways migrates a legacy on-disk file into the v1.9.0d
-// generic Protocols map shape. Three legacy shapes can hit this:
-//
-//  1. No "gateways" key at all (pre-v1.9.0b): substitute the full
-//     defaults — webdav.enabled=true, no other protocols.
-//  2. "gateways": {"webdav": {...}} only (v1.9.0b): mirror the
-//     WebDAV field into Protocols["webdav"] so the registry-driven
-//     UI reads it. The legacy field stays populated so a downgrade
-//     still sees the toggle.
-//  3. "gateways": {"protocols": {...}} present (v1.9.0d): keep as-is
-//     and mirror Protocols["webdav"] back into the legacy WebDAV
-//     field for downgrade-safety.
-//
-// We do NOT mutate the on-disk file here — that happens lazily on the
-// next Update() call. Read paths get the live defaults, write paths
-// persist them, and an operator hand-editing the JSON between reads
-// and writes still wins.
-func normalizeGateways(g GatewaySettings, hadField bool) GatewaySettings {
-	if !hadField {
-		// Legacy file, no gateways block at all: default on.
-		return GatewaySettings{
-			WebDAV: WebDAVSettings{Enabled: true},
-			Protocols: map[string]GatewayConfig{
-				"webdav": {Enabled: true},
-			},
+	// generic Protocols map shape. Two legacy shapes can hit this in v2:
+	//
+	//  1. No "gateways" key at all (pre-v1.9.0b): substitute defaults with
+	//     webdav.enabled=true, no other protocols.
+	//  2. "gateways": {"webdav": {...}} only (v1.9.0b): migrate the WebDAV
+	//     field into Protocols["webdav"] and drop the legacy field on write.
+	//
+	// v2.0.0-beta.2: The WebDAV hand-typed field is removed; migration copies
+	// it into Protocols["webdav"] then drops it from disk on next save.
+	//
+	// We do NOT mutate the on-disk file here — that happens lazily on the
+	// next Update() call. Read paths get the live defaults, write paths
+	// persist them, and an operator hand-editing the JSON between reads
+	// and writes still wins.
+	func normalizeGateways(g GatewaySettings, hadField bool) GatewaySettings {
+		if !hadField {
+			// Legacy file, no gateways block at all: default on.
+			return GatewaySettings{
+				Protocols: map[string]GatewayConfig{
+					"webdav": {Enabled: true},
+				},
+			}
 		}
-	}
-	if g.Protocols == nil {
-		g.Protocols = make(map[string]GatewayConfig)
-	}
-	// Forward-migrate the legacy WebDAV field into the generic map
-	// when the map is silent on webdav. Without this branch a v1.9.0b
-	// file with webdav.enabled=false would read as enabled=true via
-	// the map default and clobber the operator's kill switch.
-	if _, ok := g.Protocols["webdav"]; !ok {
-		g.Protocols["webdav"] = GatewayConfig{
-			Enabled: g.WebDAV.Enabled,
-			BaseURL: g.WebDAV.BaseURL,
+		if g.Protocols == nil {
+			g.Protocols = make(map[string]GatewayConfig)
 		}
+		// v2.0.0-beta.2: Forward-migrate the legacy WebDAV field into Protocols["webdav"]
+		// when the map is silent on webdav. Without this branch a v1.9.0b file with
+		// webdav.enabled=false would read as enabled=true via defaults and clobber the
+		// operator's kill switch. The WebDAV field will be dropped from disk on next save.
+		if _, ok := g.Protocols["webdav"]; !ok {
+			g.Protocols["webdav"] = GatewayConfig{
+				Enabled: true, // default for webdav (v1.9.0a behaviour)
+			}
+		}
+		return g
 	}
-	// Mirror the canonical map state back into the legacy WebDAV
-	// field so a downgrade to v1.9.0b would read the same value.
-	if cfg, ok := g.Protocols["webdav"]; ok {
-		g.WebDAV.Enabled = cfg.Enabled
-		g.WebDAV.BaseURL = cfg.BaseURL
-	}
-	return g
-}
 
 // ClampAdminSessionTTL returns the input clamped into the
 // [AdminSessionTTLMinSec, AdminSessionTTLMaxSec] window. Zero (or any
@@ -374,14 +345,15 @@ func (s *OrgCapabilitiesStore) load() error {
 		s.data.ActiveSkin = DefaultActiveSkin
 	}
 
-	// v1.13.1: migrate legacy SkinPolicy → UserOverridableSkin + AllowedUserSkins
+	// v1.13.1 / v2.0.0-beta.2: migrate legacy SkinPolicy → UserOverridableSkin + AllowedUserSkins,
+	// then drop the SkinPolicy field from disk on next write.
 	// Legacy files without these fields read as UserOverridableSkin=false, AllowedUserSkins=[]
-	// Migration rules:
-	//   - SkinPolicy == "default" or "locked" → UserOverridableSkin = false; AllowedUserSkins = []
-	//   - SkinPolicy == "user-choice" → UserOverridableSkin = true; AllowedUserSkins = [] (all)
-	//   - Drop SkinPolicy field on write; ignore if present when reading new shape
-	if s.data.SkinPolicy != "" {
-		switch s.data.SkinPolicy {
+	// Migration rules (applied to raw JSON before unmarshal):
+	//   - skinPolicy == "default" or "locked" → userOverridableSkin = false; allowedUserSkins = []
+	//   - skinPolicy == "user-choice" → userOverridableSkin = true; allowedUserSkins = [] (all)
+	// We peek at the raw JSON to detect if SkinPolicy was present and migrate accordingly.
+	if hadSkinPolicy, policyValue := checkRawSkinPolicy(raw); hadSkinPolicy {
+		switch policyValue {
 		case "default", "locked":
 			s.data.UserOverridableSkin = false
 			s.data.AllowedUserSkins = []string{}
@@ -393,9 +365,10 @@ func (s *OrgCapabilitiesStore) load() error {
 			s.data.UserOverridableSkin = false
 			s.data.AllowedUserSkins = []string{}
 		}
+		fmt.Fprintf(os.Stderr, "[WARN] Migrated SkinPolicy=%q -> UserOverridableSkin=%v+AllowedUserSkins=%v per v2.0.0-beta.2 [[v2_clean_break]]\n", policyValue, s.data.UserOverridableSkin, s.data.AllowedUserSkins)
 	} else {
 		// Legacy file without SkinPolicy field either — use defaults
-		if s.data.UserOverridableSkin == false && len(s.data.AllowedUserSkins) == 0 {
+		if !s.data.UserOverridableSkin && len(s.data.AllowedUserSkins) == 0 {
 			s.data.UserOverridableSkin = DefaultUserOverridableSkin
 			s.data.AllowedUserSkins = []string{}
 		}
@@ -499,28 +472,39 @@ func (s *OrgCapabilitiesStore) MarkOnboardingCompleted() error {
 }
 
 // syncGatewaySettings mirrors the legacy WebDAV field into the
-// Protocols map (and vice versa) so both shapes always agree on the
-// canonical state for webdav. Called on every Update so a v1.9.0b-
-// shaped PATCH (legacy field only) and a v1.9.0d-shaped PATCH (map
-// only) both round-trip cleanly.
-//
-// Tie-break: when the Protocols["webdav"] entry and the legacy
-// WebDAV field disagree, the LEGACY field wins. Rationale: every
-// caller-mutation path the FE uses today touches the legacy field
-// (the v1.9.0b card mutates WebDAV; the v1.9.0d card writes a
-// Protocols["webdav"] entry built from the same shape AND mirrors
-// it back to the legacy field). A divergence means the caller used
-// the legacy mutation path — preferring the legacy value preserves
-// the kill-switch contract. v1.10+ gateways without a legacy field
-// are read-only through the map and aren't affected.
-func syncGatewaySettings(g GatewaySettings) GatewaySettings {
-	if g.Protocols == nil {
-		g.Protocols = make(map[string]GatewayConfig)
+	// Protocols map (and vice versa) so both shapes always agree on the
+	// canonical state for webdav. Called on every Update so a v1.9.0b-
+	// shaped PATCH (legacy field only) and a v1.9.0d-shaped PATCH (map
+	// only) both round-trip cleanly.
+	//
+	// Tie-break: when the Protocols["webdav"] entry and the legacy
+	// WebDAV field disagree, the LEGACY field wins. Rationale: every
+	// caller-mutation path the FE uses today touches the legacy field
+	// (the v1.9.0b card mutates WebDAV; the v1.9.0d card writes a
+	// Protocols["webdav"] entry built from the same shape AND mirrors
+	// it back to the legacy field). A divergence means the caller used
+	// the legacy mutation path — preferring the legacy value preserves
+	// the kill-switch contract. v1.10+ gateways without a legacy field
+	// are read-only through the map and aren't affected.
+	// v2.0.0-beta.2: syncGatewaySettings is no-op since WebDAV field was removed;
+	// Protocols["webdav"] is now always the source of truth on write.
+	func syncGatewaySettings(g GatewaySettings) GatewaySettings {
+		return g
 	}
-	// Legacy WebDAV field is canonical for the webdav key on write.
-	g.Protocols["webdav"] = GatewayConfig{
-		Enabled: g.WebDAV.Enabled,
-		BaseURL: g.WebDAV.BaseURL,
+
+
+// checkRawSkinPolicy peeks at raw JSON to detect if SkinPolicy was present.
+// Returns (present, value). v2.0.0-beta.2 uses this to migrate legacy
+// skin policy values before unmarshal into the new shape.
+func checkRawSkinPolicy(raw map[string]json.RawMessage) (bool, string) {
+	skinPolicyVal, ok := raw["skinPolicy"]
+	if !ok {
+		return false, ""
 	}
-	return g
+	var value string
+	if err := json.Unmarshal(skinPolicyVal, &value); err != nil {
+		return false, ""
+	}
+	return true, value
 }
+

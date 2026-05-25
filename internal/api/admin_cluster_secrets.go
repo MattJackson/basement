@@ -36,16 +36,17 @@
 package api
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
-	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/clustersecret"
+	"github.com/mattjackson/basement/internal/store"
 )
 
 // SetClusterSecrets wires the clustersecret manager into the server.
@@ -427,85 +428,14 @@ func (s *Server) removeAdminHandler(w http.ResponseWriter, r *http.Request) {
 //     surfaced as an error the caller logs but doesn't fail on.
 //
 // Safety: the legacy ConfigEnc is NEVER mutated. The CSK-encrypted
-// parallel goes into ConfigEncCSK so the JWT-decryptable bridge stays
-// recoverable until a future cycle teaches load() to prefer CSK and
-// schedule the legacy field for purge. On any partial failure
-// (decrypt fails, re-encrypt fails, swap save fails), the on-disk
-// state is unchanged and the next unlock retries the migration with
-// the same legacy ConfigEnc input.
-//
-// Returns (migrated, error). migrated=true means a fresh CSK blob
-// was written to disk AND the audit event cluster:csk_migrated should
-// fire. migrated=false with nil error means the no-op cases above.
-func (s *Server) maybeMigrateLegacyClusterSecret(r *http.Request, cid string) (bool, error) {
-	if s.clusterSecrets == nil {
+// v2.0.0-beta.2: This function was removed — legacy JWT-encrypted credentials
+	// are no longer supported. Clusters with ConfigEnc but no ConfigEncCSK are
+	// dropped on boot per [[v2_clean_break]]. Returns (migrated, error) where
+	// migrated is always false and there is nothing to migrate.
+	func (s *Server) maybeMigrateLegacyClusterSecret(r *http.Request, cid string) (bool, error) {
+		// Legacy migration removed in v2.0.0-beta.2 — no-op for API compat.
 		return false, nil
 	}
-	if s.conns == nil {
-		return false, nil
-	}
-
-	conn, err := s.conns.Get(r.Context(), cid)
-	if err != nil {
-		return false, fmt.Errorf("get connection for migration: %w", err)
-	}
-
-	// Nothing on the legacy path → nothing to migrate.
-	if len(conn.ConfigEnc) == 0 {
-		return false, nil
-	}
-
-	jwtSecret := s.cfg.JWT.Secret
-	if len(jwtSecret) == 0 {
-		// Encryption-off mode (tests / dev): can't decrypt the legacy
-		// blob, but also nothing meaningful to migrate. Skip without
-		// surfacing an error.
-		return false, nil
-	}
-
-	// Re-encrypt under the in-memory CSK. MigrateFromJWTMap is a pure
-	// value transform — it decrypts under JWT (validating the JSON
-	// shape) then seals under CSK with a fresh nonce. ErrLocked means
-	// the cluster was relocked between the unlock path's IsUnlocked
-	// check and this call — propagate so the unlock handler logs and
-	// the next unlock retries.
-	newBlob, err := s.clusterSecrets.MigrateFromJWTMap(cid, conn.ConfigEnc, jwtSecret)
-	if err != nil {
-		return false, fmt.Errorf("re-encrypt under CSK: %w", err)
-	}
-	if len(newBlob) == 0 {
-		// Defensive: MigrateFromJWTMap returns nil for an empty input
-		// which we already short-circuited above; treat any other nil
-		// as "no-op, nothing to write."
-		return false, nil
-	}
-
-	// Idempotency: pass the connection's CURRENT ConfigEncCSK as the
-	// expected old-value. First-time migration: empty → match the
-	// freshly-loaded empty field. Second admin races: the store's
-	// bytes-equal guard rejects the stale swap.
-	if err := s.conns.SwapClusterSecret(r.Context(), cid, conn.ConfigEncCSK, newBlob); err != nil {
-		return false, fmt.Errorf("swap cluster secret: %w", err)
-	}
-
-	// SwapClusterSecret no-ops silently when the bytes-equal check
-	// fails (concurrent migration). To distinguish "we migrated" from
-	// "someone else already did" we re-read and compare; on a true
-	// no-op we report migrated=false so the audit log doesn't double-
-	// count the same migration.
-	post, err := s.conns.Get(r.Context(), cid)
-	if err != nil {
-		// Swap succeeded but the post-read failed; report migrated
-		// optimistically so the audit fires. Worst case is one
-		// duplicate audit event on a transient store read failure.
-		return true, nil
-	}
-	if !bytes.Equal(post.ConfigEncCSK, newBlob) {
-		// Another goroutine got there first; their swap won.
-		return false, nil
-	}
-	return true, nil
-}
 
 // clusterRequiresLegacyMigration reports whether the cluster's
 // Connection still carries a legacy JWT-encrypted ConfigEnc with no

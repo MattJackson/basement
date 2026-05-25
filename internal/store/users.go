@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,8 +12,9 @@ import (
 //
 // Provider + Subject are populated for OIDC-provisioned users (e.g.
 // Provider="https://accounts.google.com", Subject="1234567890") and
-// empty for local-password users. Existing local-password users
-// continue to deserialize cleanly because both fields are omitempty.
+// empty for local-password users. v2.0.0-beta.2: OIDCSubject field
+// removed; Subject is now the canonical OIDC subject claim field.
+// Legacy files with oidc_subject migrate on load per loadAll().
 type User struct {
 	ID           string    `json:"id"` // UUID
 	Username     string    `json:"username"`
@@ -21,10 +23,52 @@ type User struct {
 	UIAdmin      bool      `json:"uiAdmin,omitempty"`       // UI Admin axis: platform-level config access
 	Provider     string    `json:"provider,omitempty"`      // OIDC issuer URL ("" = local password)
 	Subject      string    `json:"subject,omitempty"`       // OIDC subject claim ("" = local password)
-	OIDCSubject  string    `json:"oidc_subject,omitempty"`  // legacy field, kept for back-compat
 	Email        string    `json:"email,omitempty"`
 	Name         string    `json:"name,omitempty"`
 	Created      time.Time `json:"created"`
+}
+
+// UnmarshalJSON implements custom unmarshalling to handle legacy oidc_subject field.
+// v2.0.0-beta.2: If oidc_subject is present and subject is empty, copy it to Subject.
+func (u *User) UnmarshalJSON(data []byte) error {
+	// Define a type alias to avoid infinite recursion
+	type userAlias User
+	var raw struct {
+		ID           string `json:"id"`
+		Username     string `json:"username"`
+		PasswordHash string `json:"password_hash,omitempty"`
+		Role         string `json:"role"`
+		UIAdmin      bool   `json:"uiAdmin,omitempty"`
+		Provider     string `json:"provider,omitempty"`
+		Subject      string `json:"subject,omitempty"`
+		OIDCSubject  string `json:"oidc_subject,omitempty"` // legacy field - migrate to Subject
+		Email        string `json:"email,omitempty"`
+		Name         string `json:"name,omitempty"`
+		Created      string `json:"created"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	u.ID = raw.ID
+	u.Username = raw.Username
+	u.PasswordHash = raw.PasswordHash
+	u.Role = raw.Role
+	u.UIAdmin = raw.UIAdmin
+	u.Provider = raw.Provider
+	u.Subject = raw.Subject
+	if u.Subject == "" && raw.OIDCSubject != "" {
+		u.Subject = raw.OIDCSubject // migrate legacy field
+	}
+	u.Email = raw.Email
+	u.Name = raw.Name
+	if raw.Created != "" {
+		t, err := time.Parse(time.RFC3339, raw.Created)
+		if err != nil {
+			return fmt.Errorf("parsing created timestamp: %w", err)
+		}
+		u.Created = t
+	}
+	return nil
 }
 
 // Users returns a deep copy of all users. Callers can mutate the returned slice freely.

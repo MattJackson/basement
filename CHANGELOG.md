@@ -36,6 +36,67 @@ Touched: `internal/auth/policy/types.go`, `internal/auth/policy/enforcer.go`,
 `frontend/src/routes/admin/policies.tsx`, `internal/store/store.go`,
 `docs/upgrading/v1-to-v2.md`, `CHANGELOG.md`.
 
+## v2.0.0-beta.2 — 2026-05-24
+
+**BREAKING**: Cleanup cycle dropping legacy encryption, deprecated fields, and backward-compat shims per [[v2_clean_break]].
+
+### BREAKING CHANGES
+
+1. **Dropped `auditResponse.Truncated` field**
+   - Audit logs are no longer truncated; full entries returned
+   - Frontend `truncated` prop removed from `/admin/audit`
+
+2. **Dropped legacy JWT-encrypted connections (`ConfigEnc` without `ConfigEncCSK`)**
+   - Connections with ConfigEnc but no ConfigEncCSK are dropped on boot
+   - Operators must re-create via `/admin/connections` or `/admin/clusters/new`
+   - Boot-time warning: `[WARN] Dropped {N} connection(s) with legacy JWT-encrypted credentials; re-add via /admin/connections per v2.0.0-beta.2 [[v2_clean_break]]`
+
+3. **Dropped `MigrateFromJWT` and `MigrateFromJWTMap` functions**
+   - Legacy cluster secret migration from v1.0.0a removed entirely
+   - No backward-compat path for JWT-encrypted clusters without CSK
+
+4. **Dropped `User.OIDCSubject` field**
+   - Canonical `subject` claim now serves both local-password and OIDC users
+   - Custom UnmarshalJSON migrates legacy `oidc_subject` → `Subject` if Subject is empty
+   - Migration warning: `[WARN] Migrated %d user(s): copied OIDCSubject -> Subject per v2.0.0-beta.2 [[v2_clean_break]]`
+
+5. **Dropped `OrgCapabilities.SkinPolicy` field**
+   - Replaced with granular `UserOverridableSkin` + `AllowedUserSkins` (introduced in v1.13.0a)
+   - On load: `skinPolicy="user-choice"` → `UserOverridableSkin=true`, others → `false`
+
+6. **Dropped `GatewaySettings.WebDAV` field**
+   - Replaced with generic `Protocols["webdav"]` map (introduced in v1.9.0d)
+   - On load: legacy `{"gateways":{"webdav":{...}}}` migrates to `Protocols["webdav"]`
+   - `IsEnabled(name)` and `BaseURL(name)` now only consult Protocols map
+
+7. **Simplified `GatewaySettings.IsEnabled()` and `BaseURL()`**
+   - Removed WebDAV fallback branches; only Protocols lookup remains
+   - Missing protocol key returns `false` / empty string
+
+### Migration Path
+
+- **Backup data directory** before upgrading — some fields are dropped destructively
+- **Re-create any legacy JWT connections** that get dropped (ConfigEnc without ConfigEncCSK)
+- **Verify OIDC users** have their subject claim set; migration handles this automatically
+- **Check skin configuration**: ensure `UserOverridableSkin` + `AllowedUserSkins` are correct
+- **Audit logs**: confirm no `truncated` field in responses
+
+There is **no safe rollback path** from v2.0.0-beta.2 to v1.x if legacy JWT connections were dropped. Upgrade only after migrating all clusters to CSK encryption (v1.12.0b+).
+
+### Implementation Notes
+
+- Removed orphaned test code from `clustersecret_test.go`
+- Deleted obsolete test files: `org_capabilities_test.go`, `connections_encryption_test.go`, `connections_csk_swap_test.go`
+- Custom UnmarshalJSON on User struct handles OIDCSubject migration (no store-level code needed)
+- `checkRawSkinPolicy()` helper peeks raw JSON before unmarshal for SkinPolicy detection
+- `normalizeGateways()` migrates legacy WebDAV → Protocols["webdav"] on load
+
+Touched: `internal/auth/policy/enforcer.go`, `internal/api/admin_audit.go`,
+`internal/clustersecret/clustersecret.go`, `internal/store/users.go`,
+`internal/store/org_capabilities.go`, `internal/store/store.go`,
+`internal/api/admin_cluster_secrets.go`, `frontend/src/routes/admin/audit.tsx`,
+`docs/upgrading/v1-to-v2.md`, `CHANGELOG.md`.
+
 ## v1.13.0a — 2026-05-23
 
 Pluggable-skins foundation (ADR-0008). First of four sub-cycles for
