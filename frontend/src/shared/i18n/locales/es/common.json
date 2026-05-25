@@ -8,6 +8,14 @@
     "audit": "Registro de auditoría",
     "system": "Configuración del sistema"
   },
+  "userNav": {
+    "files": "Archivos",
+    "keys": "Claves",
+    "shares": "Compartidos",
+    "backups": "Copias de seguridad",
+    "federations": "Federaciones",
+    "webhooks": "Webhooks"
+  },
   "buttons": {
     "save": "Guardar",
     "cancel": "Cancelar",

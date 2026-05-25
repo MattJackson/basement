@@ -30,7 +30,7 @@ func New() *Gateway { return &Gateway{} }
 func (g *Gateway) Name() string        { return "ftp" }
 func (g *Gateway) DisplayName() string { return "FTP / SFTP" }
 func (g *Gateway) Description() string {
-	return "File Transfer Protocol — FTP, FTPS, and SFTP variants for legacy + embedded clients. Implementation planned for v1.11."
+	return "File Transfer Protocol — FTP, FTPS, and SFTP variants for legacy + embedded clients."
 }
 
 func (g *Gateway) Capabilities() gateway.Capabilities {

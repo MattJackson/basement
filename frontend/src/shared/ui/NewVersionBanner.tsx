@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { subscribe } from "@/shared/api/buildWatcher";
+import { useVersion } from "@/shared/api/queries";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -9,10 +10,18 @@ import { Button } from "@/components/ui/button";
  * browser fetches the new index.html (Cache-Control: no-store on
  * the entry HTML guarantees a fresh response) and pulls the new
  * hashed bundles.
+ *
+ * v1.13.33: gate the banner on serverVersion !== clientVersion (the
+ * user-facing tag, e.g. v1.13.32) instead of raw commit. The build
+ * watcher reports mismatch on any X-Build diff — but two different
+ * commits of the SAME version (e.g. a quick re-tag or a CI rebuild)
+ * are not a meaningful "newer version" event for the operator, just
+ * cache noise. Only prompt to refresh when the tag itself moved.
  */
 export function NewVersionBanner() {
   const [show, setShow] = useState(false);
   const [version, setVersion] = useState<string | undefined>(undefined);
+  const { data: clientVersion } = useVersion();
 
   useEffect(() => {
     return subscribe((state) => {
@@ -21,7 +30,14 @@ export function NewVersionBanner() {
     });
   }, []);
 
-  if (!show) return null;
+  // Suppress when the user-facing version tags match — commit-only
+  // diffs within the same version aren't worth a refresh banner.
+  const sameVersion =
+    !!version &&
+    !!clientVersion?.version &&
+    version === clientVersion.version;
+
+  if (!show || sameVersion) return null;
 
   const message = version 
     ? `Basement ${version} now available — Refresh`

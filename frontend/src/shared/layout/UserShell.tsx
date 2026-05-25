@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Outlet, Link } from "@tanstack/react-router";
+import { useTranslation } from "react-i18next";
 import { Logo } from "@/shared/ui/Logo";
 import { UserMenu } from "@/shared/ui/UserMenu";
 import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
@@ -27,6 +28,7 @@ export function UserShell({ children }: UserShellProps): ReactNode {
   // back on /admin, mirroring AppShell. USER mode stays on /files.
   const { mode } = useAuthMode();
   const logoHref = mode === "user" ? "/files" : "/admin";
+  const { t } = useTranslation("common");
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -53,56 +55,42 @@ export function UserShell({ children }: UserShellProps): ReactNode {
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
                 activeOptions={{ exact: true }}
               >
-                Files
+                {t("userNav.files")}
               </Link>
               <Link
                 to="/files/keys"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
               >
-                Keys
+                {t("userNav.keys")}
               </Link>
               <Link
                 to="/files/shares"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
               >
-                Shares
+                {t("userNav.shares")}
               </Link>
-              {/* v1.5.0a: scheduled backups land alongside Keys + */}
-              {/* Shares in the user shell. The pivot from /files/syncs */}
-              {/* (ad-hoc copies) to /files/backups (recurring + named) */}
-              {/* is the post-v0.8 backup story spelled out. */}
               <Link
                 to="/files/backups"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
               >
-                Backups
+                {t("userNav.backups")}
               </Link>
-              {/* v1.6.0d: federations — multi-backend mirrored buckets, */}
-              {/* the v1.6 differentiator. Lands alongside Backups (sibling */}
-              {/* concept: scheduled one-way copies vs. continuous multi-target */}
-              {/* mirrors) and ahead of v2.0's gateway, which routes inbound */}
-              {/* requests across the federation topology this UI manages. */}
               <Link
                 to="/files/federated-buckets"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
               >
-                Federations
+                {t("userNav.federations")}
               </Link>
-              {/* v1.7.0e: webhook subscriptions — operator-defined HTTP */}
-              {/* callbacks on bucket events. Sits between Federations */}
-              {/* (multi-backend infrastructure) and Shares (per-object */}
-              {/* outbound access) because webhooks straddle the same */}
-              {/* "external integration" theme without belonging to either. */}
               <Link
                 to="/files/webhooks"
                 className={NAV_LINK}
                 activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
               >
-                Webhooks
+                {t("userNav.webhooks")}
               </Link>
             </nav>
           </div>

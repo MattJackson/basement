@@ -30,7 +30,7 @@ func New() *Gateway { return &Gateway{} }
 func (g *Gateway) Name() string        { return "nfs" }
 func (g *Gateway) DisplayName() string { return "NFS" }
 func (g *Gateway) Description() string {
-	return "Network File System exports for Linux + NAS clients. Pure-Go NFSv4 server integration lands in v1.10."
+	return "Network File System exports for Linux + NAS clients. Pure-Go NFSv4 server."
 }
 
 // Capabilities advertises what NFS would do when implemented.
