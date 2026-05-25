@@ -191,10 +191,23 @@ func (s *Server) computeAvailableRoles(claims *auth.Claims) []auth.AvailableRole
 					if cid != "" {
 						key := "cluster-admin:" + cid
 						if !clusterAdminSet[key] {
+							// v1.13.34: look up the cluster's friendly
+							// label via the connection store; fall back
+							// to the cid only if the connection isn't
+							// found or has no label. The wildcard branch
+							// above already does this — mirror its
+							// behavior so explicit per-cluster grants
+							// don't render raw UUIDs in the role pill.
+							label := cid
+							if s.conns != nil {
+								if conn, err := s.conns.Get(context.Background(), cid); err == nil && conn.Label != "" {
+									label = conn.Label
+								}
+							}
 							roles = append(roles, auth.AvailableRole{
 								Kind:    "cluster-admin",
 								Cluster: cid,
-								Label:   "Cluster Admin: " + cid,
+								Label:   "Cluster Admin: " + label,
 							})
 							clusterAdminSet[key] = true
 						}

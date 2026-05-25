@@ -32,10 +32,21 @@ i18next
     resources,
     fallbackLng,
     supportedLngs: SUPPORTED_LANGUAGES,
+    // v1.13.34: collapse regional variants to the base language so
+    // navigator="es-MX" / "es-AR" / "es-ES" all map to "es", and
+    // "en-US" / "en-GB" / "en-CA" to "en". Without this, region-
+    // tagged browsers fell through to fallbackLng even when the base
+    // language IS supported — the operator's flag for "language
+    // should detect from system or default to english if not found".
+    load: "languageOnly",
+    nonExplicitSupportedLngs: true,
     interpolation: {
       escapeValue: false,
     },
     detection: {
+      // Order: 1) explicit user choice in localStorage (sticky across
+      // sessions); 2) navigator.language(s) (system preference); 3)
+      // fallbackLng kicks in if neither yields a supported match.
       order: ["localStorage", "navigator"],
       caches: ["localStorage"],
       lookupLocalStorage: "basement_language",
