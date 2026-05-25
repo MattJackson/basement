@@ -1,0 +1,9 @@
+{
+  "filesHome": {
+    "pageTitle": "Mis regiones",
+    "pageSubtitle": "Cada tarjeta es una de sus claves de acceso — haga clic para explorar los buckets que puede ver",
+    "emptyStateTitle": "Aún no hay claves",
+    "emptyStateDescription": "Agregue una clave de su administrador del clúster para ver los buckets a los que puede acceder.",
+    "addKeyButton": "+ Agregar una clave"
+  }
+}

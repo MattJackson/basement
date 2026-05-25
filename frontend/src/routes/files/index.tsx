@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/shared/ui/EmptyState";
 import { ErrorBanner } from "@/shared/ui/ErrorBanner";
 import { InstallToHomeScreenHint } from "@/shared/ui/InstallToHomeScreenHint";
+import { useTranslation } from "react-i18next";
 
 // /files = "My Regions" — heading kept per ADR-0002, but v1.2.0d
 // refines the model: each card is one of the user's ACCESS KEYS. A
@@ -19,6 +20,7 @@ export const Route = createFileRoute("/files/")({
 });
 
 function FilesHome() {
+  const { t } = useTranslation("pages");
   const { data: regionsData, isLoading, error } = useUserRegions();
   const regions = regionsData ?? [];
 
@@ -67,14 +69,14 @@ function FilesHome() {
       ) : regions.length === 0 ? (
         <EmptyState
           icon="server"
-          title="No keys yet"
-          description="Add a key from your cluster admin to see the buckets it can reach."
+          title={t("filesHome.emptyStateTitle")}
+          description={t("filesHome.emptyStateDescription")}
           action={
             <a
               href="/files/keys/new"
               className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 min-h-[44px] sm:min-h-0"
             >
-              + Add a key
+              {t("filesHome.addKeyButton")}
             </a>
           }
         />
@@ -90,13 +92,14 @@ function FilesHome() {
 }
 
 function Header({ action }: { action?: React.ReactNode }) {
+  const { t } = useTranslation("pages");
+
   return (
     <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">My Regions</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{t("filesHome.pageTitle")}</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Each card is one of your access keys — click to browse the buckets it
-          can see
+          {t("filesHome.pageSubtitle")}
         </p>
       </div>
       {action && <div className="flex items-center gap-2">{action}</div>}

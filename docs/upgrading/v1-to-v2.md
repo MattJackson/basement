@@ -2,6 +2,43 @@
 
 This document covers breaking changes and migration steps when upgrading from basement v1.x to v2.0.0a and later.
 
+## v2.0.0-beta.3 — Multilingual UI with English + Spanish
+
+**Date**: 2026-05-25
+
+### Summary
+
+v2.0.0-beta.3 introduces multilingual UI support using react-i18next. The interface now ships in English and Spanish, with a language switcher available in the user menu.
+
+### What Changed
+
+- **Languages**: User interface is available in English (en) and Spanish (es)
+- **Language Picker**: A "Language" submenu appears in the user menu dropdown alongside Theme and Role selectors
+- **Persistence**: Language choice persists via localStorage (`basement_language`)
+- **Auto-detection**: On first visit, language is detected from browser settings; subsequent visits use stored preference
+
+### User Flow Impact
+
+1. Users see the UI in their browser's preferred language (if supported)
+2. Users can switch languages via the "Language" submenu in the user menu
+3. The choice persists across page reloads and sessions
+
+### Technical Details
+
+- **Library**: react-i18next with i18next-browser-languagedetector
+- **Namespaces**: `common` (buttons, navigation) + `pages` (page-specific strings)
+- **Translation files**: Located in `frontend/src/shared/i18n/locales/<lang>/`
+- **Fallback**: Missing keys fall back to English
+
+### Migration Path
+
+No migration required. Existing users will see the language switcher in their user menu. The default language is English; Spanish translations cover all common UI strings plus the /files page.
+
+### Related Documentation
+
+- [`docs/development/i18n.md`](../development/i18n.md) — i18n development guide
+- [`CHANGELOG.md`](../../CHANGELOG.md) — v2.0.0-beta.3 entry
+
 ## v2.0.0a — Removed: `bucket_user` role
 
 **Date**: 2026-05-24

@@ -1,0 +1,9 @@
+{
+  "filesHome": {
+    "pageTitle": "My Regions",
+    "pageSubtitle": "Each card is one of your access keys — click to browse the buckets it can see",
+    "emptyStateTitle": "No keys yet",
+    "emptyStateDescription": "Add a key from your cluster admin to see the buckets it can reach.",
+    "addKeyButton": "+ Add a key"
+  }
+}

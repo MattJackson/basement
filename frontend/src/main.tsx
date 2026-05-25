@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 
 import "./index.css";
+import "@/shared/i18n";
 import { routeTree } from "./routeTree.gen";
 import { applyCookieThemeEarly } from "./shared/theme/useTheme";
 import { AuthModeProvider } from "./shared/auth/mode";
