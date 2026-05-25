@@ -3,7 +3,6 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuLinkItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -61,7 +60,6 @@ export function UserMenu() {
   const { t, i18n } = useTranslation("common");
 
   const username = user?.username ?? "—";
-  const role = user?.role ?? "—";
   const activeRole = user?.activeRole;
   const availableRoles = user?.availableRoles ?? [];
   const initial = (user?.username ?? "?").charAt(0).toUpperCase();
@@ -162,18 +160,19 @@ export function UserMenu() {
         <span className="hidden sm:inline">{username}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>
-            <div className="flex flex-col">
-              <span className="font-medium">{username}</span>
-              <span className="text-xs text-muted-foreground capitalize">{role}</span>
-            </div>
-          </DropdownMenuLabel>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        {/* v1.13.18: Active role selector — replaces binary "Switch to admin/user view" */}
-        {/* Dynamic, one active role at a time. User always available; cluster admins listed per grant; */}
-        {/* UI Admin only if user.uiAdmin === true. Switching to admin roles triggers elevation prompt on 423 LOCKED. */}
+        {/* v1.13.35: dropped the username + role label header. The
+            trigger button (avatar + username) already shows who's
+            logged in, and the Role submenu trigger below shows the
+            current activeRole — the old header duplicated the
+            username AND showed the JWT role claim ("admin") even
+            when the activeRole was "user", which confused operators
+            in user mode. */}
+
+        {/* v1.13.18: Active role selector — Role submenu shows current
+            active role + lists every role the user is eligible to switch
+            to (User always; per-cluster Cluster Admin grants; UI Admin
+            if user.uiAdmin === true). Switching to admin roles triggers
+            elevation prompt on 423 LOCKED. */}
         <DropdownMenuSub>
           <DropdownMenuSubTrigger data-testid="role-submenu-trigger">
             Role {activeRole && `(${availableRoles.find(r => r.kind === activeRole.kind && (activeRole.cluster ? r.cluster === activeRole.cluster : true))?.label || activeRole.kind})`}
