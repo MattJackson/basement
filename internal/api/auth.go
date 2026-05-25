@@ -463,11 +463,9 @@ func (s *Server) activeRoleHandler(w http.ResponseWriter, r *http.Request) {
 		requiresElevation = false
 
 	case "cluster-admin":
-		// Cluster admin requires elevation if not already elevated
-		if claims.Mode != "admin" && claims.Mode != "elevated" {
-			requiresElevation = true
-			elevationPrompt = "Switching to cluster admin requires admin re-authentication."
-		}
+		// Cluster admin does NOT require sudo-style elevation: the cluster_admin
+		// grant itself is the authorization. The grant check below is what gates
+		// the switch. Only UI Admin (platform-wide super-admin) needs re-auth.
 
 		// Validate cluster parameter is provided for cluster-admin kind
 		if req.Cluster == "" {
@@ -475,13 +473,13 @@ func (s *Server) activeRoleHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Verify user has cluster_admin capability on this specific cluster
-		if s.policy != nil {
+		// Verify user has cluster_admin capability on this specific cluster.
+		// UI Admins implicitly admin every cluster (matches computeAvailableRoles).
+		if !claims.UIAdmin && s.policy != nil {
 			hasGrant := false
 			assignments := s.policy.AssignmentsFor(claims.UserID)
 			for _, a := range assignments {
-				// Check for exact cluster match or wildcard
-				if (strings.HasPrefix(a.RoleID, "cluster_admin") || a.RoleID == "cluster_admin") &&
+				if strings.HasPrefix(a.RoleID, "cluster_admin") &&
 					(a.Scope == "cluster:*" || a.Scope == "cluster:"+req.Cluster) {
 					hasGrant = true
 					break
