@@ -154,36 +154,11 @@ describe("UserMenu — Switch to admin elevation", () => {
     vi.restoreAllMocks();
   });
 
-  it("USER mode: clicking 'Switch to admin view' opens the elevation modal and navigates on success", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: Wrapper });
-
-    // Open the dropdown.
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    
-    // Clear auto-navigation that may have fired
-    navigateMock.mockClear();
-
-    // Click the switch-to-admin entry.
-    const switchItem = await screen.findByTestId("switch-to-admin");
-    fireEvent.click(switchItem);
-
-    // Modal should open (USER mode → needs elevate).
-    const password = await screen.findByTestId("elevation-password");
-    expect(password).toBeInTheDocument();
-    // Navigation should NOT have fired yet.
-    expect(navigateMock).not.toHaveBeenCalled();
-
-    // Submit the password — stubbed fetch returns 200 → onSuccess
-    // resolves → navigation fires.
-    fireEvent.change(password, { target: { value: "hunter2" } });
-    fireEvent.click(screen.getByRole("button", { name: /^submit$/i }));
-
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
-    });
-  });
+  // v1.13.32: removed two tests that referenced data-testid="switch-to-admin",
+  // a button the v1.13.18 active-role selector cycle removed. The role-submenu-trigger
+  // tests at the bottom of this file cover the replacement flow. Keep the
+  // "ADMIN mode: navigates immediately" test below — it doesn't reference
+  // the removed testids and still validates the auto-nav behavior.
 
   it("ADMIN mode: navigates immediately without opening the modal", async () => {
     render(<UserMenu />, {
@@ -204,24 +179,8 @@ describe("UserMenu — Switch to admin elevation", () => {
     expect(screen.queryByTestId("elevation-password")).not.toBeInTheDocument();
   });
 
-  it("Cancel from elevation modal: does NOT navigate", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: Wrapper });
-
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    fireEvent.click(await screen.findByTestId("switch-to-admin"));
-
-    await screen.findByTestId("elevation-password");
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
-
-    // Wait a tick — give the cancel promise a chance to reject + the
-    // catch block to swallow it.
-    await waitFor(() => {
-      expect(screen.queryByTestId("elevation-password")).not.toBeInTheDocument();
-    });
-    expect(navigateMock).not.toHaveBeenCalled();
-  });
+  // "Cancel from elevation modal" test removed in v1.13.32 — relied on
+  // data-testid="switch-to-admin" (removed in v1.13.18 by active-role selector).
 });
 
 // v1.10.0.2 — UserMenu trigger tap-target. Pre-fix the trigger
@@ -241,46 +200,11 @@ describe("UserMenu trigger tap-target (v1.10.0.2)", () => {
   });
 });
 
-describe("UserMenu — Switch to admin (v1.9.0e.2 routing)", () => {
-  // v1.9.0e.2 pins the post-elevation landing target. Under the new
-  // tight mode/view coupling, elevating always navigates to /admin
-  // (specifically /admin/clusters as the admin landing route). Already-
-  // elevated clicks short-circuit straight to the same target.
-  beforeEach(() => {
-    navigateMock.mockReset();
-    vi.spyOn(window, "fetch").mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          mode: "admin",
-          mode_expires_at: Math.floor(Date.now() / 1000) + 900,
-          mode_ttl_seconds: 900,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("navigates to /admin/clusters after successful elevation (USER mode)", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: Wrapper });
-
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    fireEvent.click(await screen.findByTestId("switch-to-admin"));
-
-    const password = await screen.findByTestId("elevation-password");
-    fireEvent.change(password, { target: { value: "hunter2" } });
-    fireEvent.click(screen.getByRole("button", { name: /^submit$/i }));
-
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
-    });
-  });
-});
+// v1.13.32: removed "UserMenu — Switch to admin (v1.9.0e.2 routing)" describe
+// block — the single test relied on data-testid="switch-to-admin", removed in
+// v1.13.18 active-role selector cycle. Equivalent post-elevation routing is
+// now covered by the active-role mutation tests in
+// src/shared/api/__tests__/mutations.test.ts.
 
 // v1.13.0a (ADR-0008) — pluggable-skins foundation. The Theme submenu
 // replaces the standalone ThemeToggle button that used to sit in
@@ -378,95 +302,12 @@ describe("UserMenu — Theme submenu (v1.13.0a)", () => {
   });
 });
 
-describe("UserMenu — Switch to user (v1.9.0e.2)", () => {
-  // Tight coupling: "Switch to user view" drops privileges AND
-  // navigates. USER-mode clicks just navigate (no privileges to
-  // drop). On a successful drop the local mode flips to USER and the
-  // /auth/me cache invalidates so the next hydrate sees the rotated
-  // cookie.
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    navigateMock.mockReset();
-    setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
-    fetchSpy = vi.spyOn(window, "fetch").mockResolvedValue(
-      new Response(null, { status: 200 }),
-    );
-  });
-
-  afterEach(() => {
-    fetchSpy.mockRestore();
-    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
-    navigateMock.mockClear();
-  });
-
-  it("USER mode: sees 'Switch to admin view' button", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: Wrapper });
-
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    const switchToAdmin = await screen.findByTestId("switch-to-admin");
-    expect(switchToAdmin).toBeInTheDocument();
-    expect(switchToAdmin).toHaveTextContent("Switch to admin view");
-  });
-
-  it("ADMIN mode: POSTs logout-elevation, then navigates to /files", async () => {
-    render(<UserMenu />, {
-      wrapper: ({ children }) => (
-        <Wrapper
-          initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }}
-        >
-          {children}
-        </Wrapper>
-      ),
-    });
-
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    fireEvent.click(await screen.findByTestId("switch-to-user"));
-
-    await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "/api/v1/auth/logout-elevation",
-        expect.objectContaining({ method: "POST", credentials: "include" }),
-      );
-    });
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
-    });
-  });
-
-  it("ADMIN mode + backend rejects drop: does NOT navigate", async () => {
-    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 500 }));
-    
-    render(<UserMenu />, {
-      wrapper: ({ children }) => (
-        <Wrapper
-          initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }}
-        >
-          {children}
-        </Wrapper>
-      ),
-    });
-
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    
-    // Wait for auto-navigation to /admin/clusters
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
-    });
-    
-    navigateMock.mockClear();
-    
-    fireEvent.click(await screen.findByTestId("switch-to-user"));
-
-    await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalled();
-    });
-    // Navigation should not happen when drop fails
-    expect(navigateMock).not.toHaveBeenCalledWith({ to: "/files" });
-  });
-});
+// v1.13.32: removed "UserMenu — Switch to user (v1.9.0e.2)" describe block.
+// All three tests relied on data-testid="switch-to-admin" / "switch-to-user",
+// removed in v1.13.18 when the active-role selector replaced the binary
+// mode switch. The drop-elevation flow is now exercised via the role
+// selector tests at the bottom of this file + logout-elevation network
+// behavior in src/shared/api/__tests__/mutations.test.ts.
 
 describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
   beforeEach(() => {
@@ -477,29 +318,26 @@ describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
     vi.restoreAllMocks();
   });
 
-  it("user role sees 'Switch to admin view', NOT 'Switch to user view'", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: true, oidcUser: false });
+  // v1.13.32: removed two tests that asserted the v1.x binary "Switch
+  // to admin view" / "Switch to user view" buttons. The v1.13.18
+  // active-role selector replaced those buttons and the equivalent
+  // conditional visibility is now covered by the role-selector tests
+  // at the bottom of this file.
 
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-
-    expect(await screen.findByTestId("switch-to-admin")).toBeInTheDocument();
-    expect(screen.queryByTestId("switch-to-user")).not.toBeInTheDocument();
-  });
-
-  it("admin role sees 'Switch to user view', NOT 'Switch to admin view'", async () => {
-    setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("switch-to-user")).toBeInTheDocument();
+  it("UI admin sees 'System settings' link", async () => {
+    // v1.13.31 split admin nav by activeRole.kind: System settings only
+    // renders when activeRole.kind === "ui-admin". The mock must set it.
+    setUserMock({
+      username: "matthew",
+      role: "admin",
+      uiAdmin: true,
+      oidcUser: false,
+      activeRole: { kind: "ui-admin" },
+      availableRoles: [
+        { kind: "user", label: "User" },
+        { kind: "ui-admin", label: "UI Admin" },
+      ],
     });
-  });
-
-it("UI admin sees 'System settings' link", async () => {
-    setUserMock({ username: "matthew", role: "admin", uiAdmin: true, oidcUser: false });
 
     render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));

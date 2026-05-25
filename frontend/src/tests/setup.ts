@@ -1,40 +1,18 @@
+// IMPORTANT: localStorage shim MUST run before @/shared/i18n imports.
+// JS hoists imports above statement-level code, so the shim has to
+// live in its own module that's imported first — otherwise the
+// LanguageDetector captures undefined window.localStorage at i18n
+// init time and never sees the shim. v1.13.32 fix.
+import "./shims-localstorage";
+
 import "@testing-library/jest-dom";
 
-// Node 26 + Vitest 4 + jsdom 29: neither the Node experimental
-// localStorage (gated on --localstorage-file) nor jsdom's
-// window.localStorage is reliably exposed as the bare `localStorage`
-// global, and even `window.localStorage` is undefined in non-DOM test
-// files like src/shared/i18n/__tests__/i18n.test.ts. Shim a minimal
-// Storage on globalThis + window so callers can use either reference
-// without an env probe. Added v2.0.0-beta.3.1 alongside the i18n
-// scaffolding cycle.
-if (typeof (globalThis as { localStorage?: Storage }).localStorage === "undefined") {
-  const store: Record<string, string> = {};
-  const shim: Storage = {
-    get length() {
-      return Object.keys(store).length;
-    },
-    clear() {
-      for (const k of Object.keys(store)) delete store[k];
-    },
-    getItem(key) {
-      return Object.prototype.hasOwnProperty.call(store, key) ? store[key] ?? null : null;
-    },
-    key(index) {
-      return Object.keys(store)[index] ?? null;
-    },
-    removeItem(key) {
-      delete store[key];
-    },
-    setItem(key, value) {
-      store[key] = String(value);
-    },
-  };
-  (globalThis as { localStorage?: Storage }).localStorage = shim;
-  if (typeof window !== "undefined") {
-    Object.defineProperty(window, "localStorage", { value: shim, configurable: true });
-  }
-}
+// Initialize i18n once for all tests so any component that calls
+// useTranslation() gets a resolved t() on first render — regardless
+// of whether the test file imports @/shared/i18n directly. Must be
+// imported AFTER ./shims-localstorage (above) so the detector sees
+// a valid localStorage at init.
+import "@/shared/i18n";
 
 // jsdom doesn't ship ResizeObserver; @tanstack/react-virtual (v1.4.0a)
 // needs it to measure the scroll element. The mock is intentionally

@@ -31,20 +31,25 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { data, isLoading } = useUser();
 
   useEffect(() => {
-    if (isLoading || !data) return;
-    
+    // Wait for the user query to finish before deciding anything.
+    if (isLoading) return;
+
     // Already on the login route? Nothing to do — don't recurse.
     if (location.pathname === "/login") return;
 
-    const activeRole = data.activeRole;
     const pathname = location.pathname;
 
-    // If not authenticated, redirect to /login
+    // Unauthenticated → /login with ?next preserving the destination.
+    // v1.13.32: this branch was previously unreachable because the
+    // earlier guard early-returned on !data, so unauthenticated users
+    // saw LoadingSpinner forever instead of being redirected.
     if (!data) {
       const next = pathname.startsWith("/admin") ? pathname : "/files";
       navigate({ to: "/login", search: { next } });
       return;
     }
+
+    const activeRole = data.activeRole;
 
     // v1.13.18: Active role gating for /admin/* routes
     if (pathname.startsWith("/admin")) {
