@@ -50,12 +50,21 @@ export function observeResponse(res: Response): void {
 }
 
 function startHeartbeat(): void {
-  if (heartbeatInterval !== null || mismatched) return;
-  
+  if (heartbeatInterval !== null) return;
+
+  // v1.13.30: route the heartbeat through observeResponse so serverVersion
+  // tracks the deployed tag even after the initial mismatch fires. Previous
+  // code called checkBuild() directly, which has an early-return guard once
+  // mismatched=true — so the banner kept showing the FIRST mismatched
+  // version it saw and never updated as more deploys landed. Operator hit
+  // this: banner said "v1.13.24 available" while live was at v1.13.28.
+  // observeResponse refreshes serverVersion AND notifies listeners every
+  // call, so the banner now reflects whatever the server most recently
+  // advertised.
   const fetchVersion = async () => {
     try {
       const res = await fetch("/api/v1/version", { credentials: "include" });
-      checkBuild(res);
+      observeResponse(res);
     } catch {
       // Silently swallow failures; retry on next tick
     }
