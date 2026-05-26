@@ -80,6 +80,42 @@ export const Route = createFileRoute("/files/keys/new")({
   component: AddKeyPage,
 });
 
+// Parse "https://garage:3902/path" into {scheme:"https", host:"garage", port:"3902"}.
+// Empty / unparseable input yields {scheme:"https", host:"", port:""} so the
+// form fields can still render. URL paths after the host are silently dropped —
+// the S3 endpoint inputs target the cluster root, not a per-bucket path.
+function parseEndpointParts(raw: string): { scheme: "http" | "https"; host: string; port: string } {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return { scheme: "https", host: "", port: "" };
+  try {
+    const u = new URL(trimmed);
+    const scheme = u.protocol === "http:" ? "http" : "https";
+    return { scheme, host: u.hostname, port: u.port };
+  } catch {
+    // Bare host like "garage:3902" or "garage" — split on the last colon.
+    const colonIdx = trimmed.lastIndexOf(":");
+    if (colonIdx > 0 && /^\d+$/.test(trimmed.slice(colonIdx + 1))) {
+      return { scheme: "https", host: trimmed.slice(0, colonIdx), port: trimmed.slice(colonIdx + 1) };
+    }
+    return { scheme: "https", host: trimmed, port: "" };
+  }
+}
+
+// Inverse of parseEndpointParts. Omits the port suffix when port is
+// blank OR when port matches the scheme's default (443 for https, 80
+// for http) — keeps the composed URL minimal and matches what S3
+// SDKs canonicalize internally.
+function composeEndpointFromParts(parts: { scheme: "http" | "https"; host: string; port: string }): string {
+  const host = parts.host.trim();
+  if (!host) return "";
+  const port = parts.port.trim();
+  const isDefaultPort =
+    (parts.scheme === "https" && port === "443") ||
+    (parts.scheme === "http" && port === "80");
+  const portSuffix = port && !isDefaultPort ? `:${port}` : "";
+  return `${parts.scheme}://${host}${portSuffix}`;
+}
+
 function AddKeyPage() {
   const navigate = useNavigate();
   const createKey = useCreateUserKey();
@@ -148,6 +184,32 @@ function AddKeyPage() {
     }
   };
 
+  // v1.13.40: endpoint URL is split into scheme + host + port inputs so
+  // operators can type "garage" and "12344" without remembering URL
+  // syntax. Parts MUST be state (not derived from endpoint), otherwise
+  // typing the host into an empty endpoint reverts the scheme select
+  // back to the parseEndpointParts default — losing the user's choice
+  // mid-edit. handleEndpointChange composes from parts and keeps the
+  // canonical `endpoint` string in sync so submit, validation,
+  // region-suggest, and virtual-host probe all read from it unchanged.
+  const [endpointParts, setEndpointParts] = useState<{
+    scheme: "http" | "https";
+    host: string;
+    port: string;
+  }>(() => parseEndpointParts(""));
+  const setEndpointPart = (
+    part: "scheme" | "host" | "port",
+    value: string,
+  ) => {
+    const next = { ...endpointParts, [part]: value };
+    setEndpointParts(next);
+    const composed = composeEndpointFromParts(next);
+    handleEndpointChange(composed);
+    if (fieldErrors.endpoint && composed.trim()) {
+      setFieldErrors((prev) => ({ ...prev, endpoint: undefined }));
+    }
+  };
+
   // applyExample fills both the endpoint AND region from a curated
   // DriverDefaults row. Triggered when the operator clicks a Common
   // endpoint row — never auto-overwrite from typing in the endpoint
@@ -165,7 +227,13 @@ function AddKeyPage() {
   // visible cue the form-fill is silent, so users click multiple
   // times wondering if the click registered.
   const applyExample = (d: DriverDefaults) => {
-    if (d.s3Endpoint) setEndpoint(d.s3Endpoint);
+    if (d.s3Endpoint) {
+      // v1.13.40: parse the example URL into the part state so the
+      // visible inputs reflect the applied scheme/host/port instead
+      // of the inputs going stale while only `endpoint` updates.
+      setEndpointParts(parseEndpointParts(d.s3Endpoint));
+      setEndpoint(d.s3Endpoint);
+    }
     if (d.regionLabel) {
       setRegion(d.regionLabel);
       setRegionTouched(true);
@@ -350,25 +418,50 @@ function AddKeyPage() {
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="endpoint" className="text-sm font-medium">
-            S3 endpoint URL *
-          </label>
-          <input
-            id="endpoint"
-            type="url"
-            value={endpoint}
-            onChange={(e) => {
-              handleEndpointChange(e.target.value);
-              if (fieldErrors.endpoint && e.target.value.trim()) {
-                setFieldErrors((prev) => ({ ...prev, endpoint: undefined }));
-              }
-            }}
-            placeholder="https://s3.example.com"
-            autoComplete="off"
-            aria-invalid={fieldErrors.endpoint ? true : undefined}
-            aria-describedby={fieldErrors.endpoint ? "endpoint-error" : undefined}
-            className={`w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${fieldErrors.endpoint ? "border-red-500" : ""}`}
-          />
+          <span className="text-sm font-medium">S3 endpoint *</span>
+          {/* v1.13.40: split into protocol + host + port to spare the
+              operator from URL syntax. Internally we still keep
+              `endpoint` as the composed string so submit, validation,
+              region auto-detect, and virtual-host probing all work
+              unchanged. The composed URL preview below shows what's
+              actually being sent. */}
+          <div className="flex flex-wrap gap-2 items-start">
+            <select
+              aria-label="Protocol"
+              value={endpointParts.scheme}
+              onChange={(e) => setEndpointPart("scheme", e.target.value as "http" | "https")}
+              className="rounded-md border bg-background px-2 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="https">https://</option>
+              <option value="http">http://</option>
+            </select>
+            <input
+              id="endpoint-host"
+              type="text"
+              value={endpointParts.host}
+              onChange={(e) => setEndpointPart("host", e.target.value)}
+              placeholder="garage"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Host"
+              aria-invalid={fieldErrors.endpoint ? true : undefined}
+              aria-describedby={fieldErrors.endpoint ? "endpoint-error" : "endpoint-preview"}
+              className={`flex-1 min-w-[12rem] rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring ${fieldErrors.endpoint ? "border-red-500" : ""}`}
+            />
+            <span className="self-center text-sm text-muted-foreground">:</span>
+            <input
+              id="endpoint-port"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={endpointParts.port}
+              onChange={(e) => setEndpointPart("port", e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder={endpointParts.scheme === "https" ? "443" : "80"}
+              autoComplete="off"
+              aria-label="Port"
+              className="w-24 rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
           {fieldErrors.endpoint && (
             <p
               id="endpoint-error"
@@ -378,9 +471,11 @@ function AddKeyPage() {
               {fieldErrors.endpoint}
             </p>
           )}
+          <p id="endpoint-preview" className="text-xs text-muted-foreground font-mono break-all">
+            {endpoint ? endpoint : <span className="italic">Endpoint preview will appear here</span>}
+          </p>
           <p className="text-xs text-muted-foreground">
-            Paste an endpoint with &quot;amazonaws.com&quot;, &quot;garage&quot;, or &quot;minio&quot; in the
-            URL and we&apos;ll suggest a region label.
+            Host names like &quot;amazonaws&quot;, &quot;garage&quot;, or &quot;minio&quot; auto-fill the region label below.
           </p>
         </div>
 

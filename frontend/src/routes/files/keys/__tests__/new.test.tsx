@@ -50,6 +50,44 @@ function renderWithProviders(node: React.ReactNode) {
   );
 }
 
+// v1.13.40: the endpoint URL field is now split into protocol +
+// host + port. Tests that used to userEvent.type the whole URL into
+// "S3 endpoint URL" now parse the URL and fill the three fields.
+// Whitespace is trimmed by URL parsing as a side-effect, which the
+// trim-payload test relied on the input doing implicitly.
+async function fillEndpoint(url: string) {
+  const trimmed = url.trim();
+  let scheme: "http" | "https" = "https";
+  let host = trimmed;
+  let port = "";
+  try {
+    const u = new URL(trimmed);
+    scheme = u.protocol === "http:" ? "http" : "https";
+    host = u.hostname;
+    port = u.port;
+  } catch {
+    // Bare "host:port" form — split on the last colon if the right
+    // side is all digits, otherwise treat the whole thing as a host.
+    const colonIdx = trimmed.lastIndexOf(":");
+    if (colonIdx > 0 && /^\d+$/.test(trimmed.slice(colonIdx + 1))) {
+      host = trimmed.slice(0, colonIdx);
+      port = trimmed.slice(colonIdx + 1);
+    }
+  }
+  await userEvent.selectOptions(
+    screen.getByLabelText("Protocol"),
+    scheme,
+  );
+  const hostInput = screen.getByLabelText("Host");
+  await userEvent.clear(hostInput);
+  await userEvent.type(hostInput, host);
+  if (port) {
+    const portInput = screen.getByLabelText("Port");
+    await userEvent.clear(portInput);
+    await userEvent.type(portInput, port);
+  }
+}
+
 const mutateAsyncMock = vi.fn();
 const bulkMutateAsyncMock = vi.fn();
 
@@ -102,7 +140,9 @@ describe("AddKeyPage (/files/keys/new)", () => {
       screen.getByRole("heading", { name: "Add a key" }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText(/Key alias/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/S3 endpoint URL/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Host")).toBeInTheDocument();
+    expect(screen.getByLabelText("Port")).toBeInTheDocument();
+    expect(screen.getByLabelText("Protocol")).toBeInTheDocument();
     expect(screen.getByLabelText(/Access Key ID/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Secret Access Key/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Add key/ })).toBeInTheDocument();
@@ -135,7 +175,10 @@ describe("AddKeyPage (/files/keys/new)", () => {
       "aria-invalid",
       "true",
     );
-    expect(screen.getByLabelText(/S3 endpoint URL/)).toHaveAttribute(
+    // v1.13.40: the endpoint is now a Host input (with Port + Protocol
+    // siblings); aria-invalid lives on the Host field since that's the
+    // primary required input for the endpoint.
+    expect(screen.getByLabelText("Host")).toHaveAttribute(
       "aria-invalid",
       "true",
     );
@@ -179,10 +222,7 @@ describe("AddKeyPage (/files/keys/new)", () => {
 
     // Whitespace around inputs should be trimmed by the submit path.
     await userEvent.type(screen.getByLabelText(/Key alias/), "  home  ");
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "  https://s3.example.com  ",
-    );
+    await fillEndpoint("  https://s3.example.com  ");
     await userEvent.type(
       screen.getByLabelText(/Access Key ID/),
       "  GK_TEST  ",
@@ -212,10 +252,7 @@ describe("AddKeyPage (/files/keys/new)", () => {
     renderWithProviders(<AddKeyPage />);
 
     await userEvent.type(screen.getByLabelText(/Key alias/), "home");
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "https://s3.pq.io",
-    );
+    await fillEndpoint("https://s3.pq.io");
     await userEvent.type(screen.getByLabelText(/Access Key ID/), "GK_TEST");
     await userEvent.type(screen.getByLabelText(/Secret Access Key/), "sssh");
 
@@ -237,10 +274,7 @@ describe("AddKeyPage (/files/keys/new)", () => {
   it("disables the virtual-host toggle when the endpoint host is an IP", async () => {
     renderWithProviders(<AddKeyPage />);
 
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "http://10.1.7.10:3902",
-    );
+    await fillEndpoint("http://10.1.7.10:3902");
     await userEvent.click(screen.getByTestId("toggle-advanced"));
 
     const toggle = screen.getByTestId(
@@ -275,10 +309,7 @@ describe("AddKeyPage (/files/keys/new)", () => {
     const regionInput = screen.getByLabelText(/S3 region/) as HTMLInputElement;
     expect(regionInput.value).toBe("us-east-1");
 
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "http://garage.lan:3902",
-    );
+    await fillEndpoint("http://garage.lan:3902");
     expect(regionInput.value).toBe("garage");
   });
 
@@ -289,10 +320,7 @@ describe("AddKeyPage (/files/keys/new)", () => {
     await userEvent.clear(regionInput);
     await userEvent.type(regionInput, "fr-par");
 
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "http://garage.lan:3902",
-    );
+    await fillEndpoint("http://garage.lan:3902");
     expect(regionInput.value).toBe("fr-par");
   });
 
@@ -303,9 +331,15 @@ describe("AddKeyPage (/files/keys/new)", () => {
     const useGarage = screen.getByTestId("use-endpoint-garage-v1");
     await userEvent.click(useGarage);
 
-    const endpointInput = screen.getByLabelText(/S3 endpoint URL/) as HTMLInputElement;
+    // v1.13.40: assert via the host + port fields directly. The
+    // composed endpoint surfaces in the preview <p>.
+    const hostInput = screen.getByLabelText("Host") as HTMLInputElement;
+    const portInput = screen.getByLabelText("Port") as HTMLInputElement;
+    const protocolSelect = screen.getByLabelText("Protocol") as HTMLSelectElement;
     const regionInput = screen.getByLabelText(/S3 region/) as HTMLInputElement;
-    expect(endpointInput.value).toBe("http://garage-host:3902");
+    expect(protocolSelect.value).toBe("http");
+    expect(hostInput.value).toBe("garage-host");
+    expect(portInput.value).toBe("3902");
     expect(regionInput.value).toBe("garage");
   });
 
@@ -315,10 +349,7 @@ describe("AddKeyPage (/files/keys/new)", () => {
     renderWithProviders(<AddKeyPage />);
 
     await userEvent.type(screen.getByLabelText(/Key alias/), "home");
-    await userEvent.type(
-      screen.getByLabelText(/S3 endpoint URL/),
-      "https://s3.example.com",
-    );
+    await fillEndpoint("https://s3.example.com");
     await userEvent.type(screen.getByLabelText(/Access Key ID/), "GK_TEST");
     await userEvent.type(screen.getByLabelText(/Secret Access Key/), "sssh");
 
