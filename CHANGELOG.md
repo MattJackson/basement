@@ -4,6 +4,54 @@ All notable changes to basement are recorded here. See the linked
 release-notes files in `docs/release-notes/` for the full per-release
 write-up; this file is the at-a-glance index.
 
+## v1.13.32 → v1.13.40 — 2026-05-25 (operator live-smoke burst)
+
+12 patch tags from a single-day live-bug session as the operator
+exercised the v2.0.0-beta.3 build at basement.pq.io. The PATCH
+`/admin/system` merge fix (v1.13.39) is the highest-impact entry —
+it cures the underlying cause of "Settings save inconsistency"
+reports. The rest are surgical UX fixes.
+
+### Backend
+
+- **v1.13.32** — UserMenu `role-submenu-trigger` label-lookup bug (since v1.13.18): the `.find()` compared `r.kind` to the concat `kind:cluster` instead of separate fields, so the trigger always fell back to the bare kind. Fixed to compare kind and cluster independently. Also fixed `ProtectedRoute` unreachable unauth redirect (since v1.13.16) where the `!data` early-return short-circuited the `navigate(/login)` body that lived below it; unauthenticated users had been seeing `LoadingSpinner` forever. Deleted 9 dead UserMenu test cases that referenced the binary `switch-to-admin` / `switch-to-user` testids removed in v1.13.18.
+
+- **v1.13.34** — explicit `cluster:<cid>` cluster-admin grants now render the cluster's friendly label, not the raw UUID. The wildcard branch already did this; the explicit branch missed the conn lookup. Also added i18n `load: "languageOnly"` + `nonExplicitSupportedLngs: true` so regional browsers (`es-MX`, `en-GB`, etc.) collapse to their base language for detection.
+
+- **v1.13.38** — `/auth/org-capabilities` now returns `userOverridableSkin`, `allowedUserSkins`, `activeSkin`. The endpoint had only returned `allowUserBackends` + `userBackendDrivers`, so the UserMenu Skin submenu gate was undefined && anything → false for every user, no matter what the UI Admin set in `/admin/system`.
+
+- **v1.13.39** — `PATCH /admin/system` now merges fields instead of replacing the whole record. The handler used to decode the body into a full `store.OrgCapabilities` then call `Update(caps)` which does `s.data = caps` — every field the FE didn't send went to its Go zero value. Skins-card saves silently wiped `SignupMode`, `AllowUserBackends`, `OidcOnly`, `AdminSessionTTLSec`, `Gateways` to defaults. Now uses a pointer-field `orgCapabilitiesPatch` struct + per-field merge.
+
+- **v1.13.33** (gateway descriptions) — dropped "Implementation planned for v1.11" / "Lands in v2.0" / "lands in v1.10" from `internal/gateway/{s3,ftp,nfs}/gateway.go` `.Description()` strings. The "Coming soon" badge already conveys not-yet-implemented status.
+
+### Frontend
+
+- **v1.13.33** — six-fix UX batch:
+  - PersonaPill "Admin session ended" toast suppressed on upward role switch (User → UI Admin) where the active-role mutation caused a transient mode flicker.
+  - NewVersionBanner suppresses banner when `serverVersion === clientVersion` (commit-only diffs within the same version no longer prompt refresh).
+  - Dropped stale `bucket_user` backward-compat sentence from `/admin/policies` (role was removed in v2.0.0a).
+  - Removed trailing Usage/Policies/Audit shortcut cards from `/admin/system` (redundant with the UserMenu admin nav).
+  - UserShell top nav extracted to i18n: `userNav.{files,keys,shares,backups,federations,webhooks}` keys in `common.json` (en + es).
+
+- **v1.13.35** — root route `/` is activeRole-aware. Previously always redirected to `/files` via a dead `localStorage` check. Now awaits `/auth/me` then redirects: `ui-admin` → `/admin/clusters`, `cluster-admin@cid` → `/admin/clusters/<cid>`, `user`/none → `/files`. Also dropped the redundant `{username} ({role})` dropdown header — the trigger already shows the username and the Role submenu trigger shows the activeRole.
+
+- **v1.13.36** — Role submenu trigger label changed from "Role ({currentRoleLabel})" to a fixed "Switch role" (current role is already in the PersonaPill + the radio check). Version footer removed from the dropdown — same tag is visible in the header under the Logo wordmark via `<LogoVersion>`.
+
+- **v1.13.37** — Common-endpoint quick-fill rows on `/files/keys/new` are now fully clickable (no separate "Use this" button). Panel auto-collapses on click and a toast confirms the fill so operators get explicit feedback.
+
+- **v1.13.40** — `/files/keys/new` endpoint field split into protocol `<select>` + host `<input>` + port `<input>` with an assembled URL preview line. `parseEndpointParts(raw)` and `composeEndpointFromParts(parts)` round-trip cleanly. Subtle: parts MUST be `useState`, not derived from the canonical endpoint string — otherwise typing host into an empty endpoint causes `parseEndpointParts("")` to return the default scheme, silently reverting the user's just-set protocol choice mid-edit.
+
+### Tests
+
+- Frontend vitest: 433/433 passing at every push.
+- Go `test -race ./...`: 31 packages clean at every push.
+- 9 keys/new tests migrated from `userEvent.type(getByLabelText(/S3 endpoint URL/), url)` to a `fillEndpoint(url)` helper that parses the URL once and `selectOptions`+types into the three new fields.
+
+### Carry-over
+
+- v2.0.0-beta.4 (full app i18n extraction) is WIP-paused on branch `wip/v2.0.0-beta.4-2026-05-25` (12 files modified, ~100s of strings to extract still pending). Resume by checking out the branch and either redispatching the freshman with `prompts/v2.0.0-beta.4_full_i18n_extraction_2026-05-25.md` or finishing the extraction as senior.
+- v2.0.0-beta.5 (mass language pour to ~25-30 LTR locales) is the natural next freshman target post-beta.4.
+
 ## v2.0.0-beta.3 — 2026-05-25
 
 **Added**: Multilingual UI scaffolding with react-i18next integration.
