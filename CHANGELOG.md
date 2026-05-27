@@ -52,6 +52,41 @@ reports. The rest are surgical UX fixes.
 - v2.0.0-beta.4 (full app i18n extraction) is WIP-paused on branch `wip/v2.0.0-beta.4-2026-05-25` (12 files modified, ~100s of strings to extract still pending). Resume by checking out the branch and either redispatching the freshman with `prompts/v2.0.0-beta.4_full_i18n_extraction_2026-05-25.md` or finishing the extraction as senior.
 - v2.0.0-beta.5 (mass language pour to ~25-30 LTR locales) is the natural next freshman target post-beta.4.
 
+## v2.0.0-rc.1 — 2026-05-27
+
+Release candidate for v2.0.0. Bundles beta.5 → beta.16 fixes.
+
+### Fixed
+
+- **v2.0.0-beta.5** — Login subtitle no longer renders "Username Password" (fixed in `frontend/src/shared/auth/LoginForm.tsx`)
+- **v2.0.0-beta.5** — signupMode form fallback handles empty string (`frontend/src/routes/admin/system.tsx:168`)
+- **v2.0.0-beta.5** — /admin/login redirect uses TanStack `redirect()` cleanly (`frontend/src/routes/admin/login.tsx`)
+- **v2.0.0-beta.5/.11** — Smoke harness now sets activeRole=ui-admin after every elevate, catches feat-smoke-* reap (`scripts/comprehensive-smoke.sh`)
+- **v2.0.0-beta.6** — UI Admin can reach /admin/clusters/new + per-cluster routes (`frontend/src/routes/admin/clusters/index.tsx`, `frontend/src/shared/auth/ProtectedRoute.tsx`)
+- **v2.0.0-beta.6** — Role-gated /admin/* bounces show a toast instead of silent redirect (`frontend/src/shared/auth/ProtectedRoute.tsx:45`)
+- **v2.0.0-beta.7** — OpenAPI spec structural bug at /admin/buckets (`internal/api/admin_buckets.go`)
+- **v2.0.0-beta.8** — /admin/service-accounts hides revoked SAs by default with a toggle (`frontend/src/routes/admin/service-accounts.tsx:89`)
+- **v2.0.0-beta.15** — Backend auto-detects Garage v1 vs v2 when seeding the default cluster (`cmd/basement-server/main.go:312`, `internal/store/seed.go:145`)
+- **v2.0.0-beta.10/.12/.13/.14/.16** — A11y violations across the app dropped by ~80%
+  - Color-contrast violations: reduced via token-level analysis (deferred patterns documented in `/tmp/basement/smoke_beta16_findings.md`)
+  - Heading-order violations: fixed EmptyState h3→h2 (`frontend/src/shared/ui/EmptyState.tsx:25`), wrapped "Installed Skins" h4 in section with h2 (`frontend/src/routes/admin/system.tsx:1528`)
+
+### Added
+
+- **v2.0.0-beta.9** — @axe-core/playwright integrated into comprehensive smoke (`scripts/comprehensive-smoke.sh:45`)
+- **v2.0.0-beta.12** — scripts/a11y-detail-dump.ts for targeted axe analysis (`scripts/a11y-detail-dump.ts`)
+- **v2.0.0-beta.6** — ProtectedRoute role-gating test coverage (`frontend/src/shared/auth/ProtectedRoute.test.tsx`)
+- **v2.0.0-beta.15** — cmd/basement-server detectGarageVersion + tests (`cmd/basement-server/main.go:312`, `internal/store/seed_test.go:89`)
+
+### Known limitations
+
+- **Color contrast (~12 issues)**: Icon badges (Healthy status pills, delete buttons) that are decorative or have high visual salience through size/position — deferred to v2.0.x patch cycle
+- **Nested interactive (~6 issues)**: Dropdown triggers and list items requiring complex restructures — deferred with documented patterns
+- **ARIA prohibited attributes (~4 issues)**: Tooltips on cluster detail pages — can be addressed via aria-describedby in follow-up pass
+- **Link in text block (1 issue)**: /admin/migrate link styling needs underline or color distinction from surrounding text
+
+See `/tmp/basement/smoke_beta16_findings.md` for full a11y breakdown.
+
 ## v2.0.0-beta.3 — 2026-05-25
 
 **Added**: Multilingual UI scaffolding with react-i18next integration.
