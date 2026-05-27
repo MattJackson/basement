@@ -26,7 +26,19 @@ vi.mock("@/shared/auth/elevation", () => ({
     () => (fn: () => Promise<unknown>) => fn(),
 }));
 
-const mockT = vi.fn((key: string) => key);
+// Load real English strings so test text-matchers can match the
+// rendered output (otherwise t() returned the raw i18n key and
+// queries like "inherited from global" / "manual" / "OIDC" missed).
+import enPages from "@/shared/i18n/locales/en/pages.json";
+function lookupEn(key: string, vars?: Record<string, unknown>): string {
+  const parts = key.split(".");
+  let val: unknown = enPages;
+  for (const p of parts) val = (val as Record<string, unknown> | undefined)?.[p];
+  if (typeof val !== "string") return key;
+  if (!vars) return val;
+  return val.replace(/\{(\w+)\}/g, (_m, k) => String(vars[k] ?? `{${k}}`));
+}
+const mockT = vi.fn((key: string, opts?: Record<string, unknown>) => lookupEn(key, opts));
 vi.mock("react-i18next", () => ({
   ...vi.importActual("react-i18next"),
   useTranslation: () => ({ t: mockT }),
