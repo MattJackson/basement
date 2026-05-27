@@ -275,6 +275,14 @@ async function elevateToAdmin(page: Page): Promise<void> {
   if (!resp.ok()) {
     throw new Error(`POST /api/v1/auth/elevate → ${resp.status()} ${await resp.text()}`);
   }
+  // v2.0.0-beta.11: activeRole gating (v1.13.29) requires explicit
+  // PUT after every elevate — the elevate handler resets activeRole
+  // back to "user" by design. Without this, admin route walks bounce
+  // and admin POSTs return 403.
+  await page.request.put(`${BASE_URL}/api/v1/auth/active-role`, {
+    headers: { "Content-Type": "application/json" },
+    data: { kind: "ui-admin" },
+  });
 }
 
 async function dropToUser(page: Page): Promise<void> {
@@ -320,12 +328,16 @@ async function countRealResources(page: Page): Promise<Counts> {
 async function countOperatorReal(page: Page): Promise<Counts> {
   async function countNonSmoke(url: string, nameField: string): Promise<number> {
     const r = await page.request.get(`${BASE_URL}${url}`);
-    if (!r.ok()) return -1;
+    if (!r.ok()) {
+      throw new Error(`countNonSmoke ${url} → ${r.status()}`);
+    }
     const body = await r.json().catch(() => null);
     const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : null;
-    if (!arr) return -1;
+    if (!arr) {
+      throw new Error(`countNonSmoke ${url} returned non-array body`);
+    }
     return arr.filter(
-      (it: any) => !((it[nameField] ?? "") as string).startsWith("smoke-") && !it.revokedAt,
+      (it: any) => !/^(smoke|feat-smoke)-/.test((it[nameField] ?? "") as string) && !it.revokedAt,
     ).length;
   }
   return {
@@ -410,9 +422,6 @@ async function main(): Promise<number> {
     // is idempotent — admin-mode pages re-fire it as needed too.
     await check("elevate desktop context to admin mode", async () => {
       await elevateToAdmin(desktop!);
-      await desktop!.request.put(`${BASE_URL}/api/v1/auth/active-role`, {
-        data: { kind: "ui-admin" },
-      });
       const me = await desktop!.request.get(`${BASE_URL}/api/v1/auth/me`);
       const body = await me.json();
       if (body.mode !== "admin") throw new Error(`expected mode=admin, got ${body.mode}`);
@@ -656,9 +665,6 @@ async function main(): Promise<number> {
     // Mobile context needs its own elevation so admin endpoints work.
     await check("[E] elevate mobile context to admin", async () => {
       await elevateToAdmin(mobile!);
-      await mobile!.request.put(`${BASE_URL}/api/v1/auth/active-role`, {
-        data: { kind: "ui-admin" },
-      });
     });
 
     for (const spec of routes) {
