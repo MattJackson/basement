@@ -129,12 +129,11 @@ export function PersonaPill() {
       } else if (selectedRole.kind === "ui-admin") {
         await navigate({ to: "/admin/system" });
       }
-    } catch (error: any) {
-      if (error?.status === 423) {
-        try {
-          const prompt = "Switching to this role requires admin re-authentication.";
-          setMenuOpen(false);
-          await promptElevationFromAnywhere("admin", prompt);
+     } catch (error: any) {
+    if (error?.status === 423) {
+      try {
+        const prompt = "Switching to this role requires admin re-authentication.";
+        await promptElevationFromAnywhere("admin", prompt);
           
           await switchActiveRoleMutation.mutateAsync({
             kind: selectedRole.kind,
@@ -157,7 +156,6 @@ export function PersonaPill() {
     }
   };
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
   // warnedRef tracks the latest expiresAt for which we've fired the
@@ -365,7 +363,7 @@ export function PersonaPill() {
 
     if (availableRoles.length > 1) {
       return (
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenu>
           <DropdownMenuTrigger
             data-testid="persona-role-trigger"
             aria-label="Switch role"

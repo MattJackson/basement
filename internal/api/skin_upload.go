@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/skin"
 	"github.com/mattjackson/basement/internal/store"
 )
@@ -393,6 +395,21 @@ func (s *Server) getActiveSkinHandler(w http.ResponseWriter, r *http.Request) {
 		skinName = store.DefaultActiveSkin
 	}
 
+	// If authed and user has a per-user skin preference, use that instead
+	if c, ok := auth.FromContext(r.Context()); ok && c.UserID != "" {
+		slog.Debug("getActiveSkinHandler: found claims with UserID", "userID", c.UserID)
+		if s.store.UserSkins() != nil {
+			if userSkin, ok := s.store.UserSkins().Get(c.UserID); ok {
+				slog.Debug("getActiveSkinHandler: using user's skin preference", "skin", userSkin)
+				skinName = userSkin
+			} else {
+				slog.Debug("getActiveSkinHandler: no user-specific skin, using org default")
+			}
+		} else {
+			slog.Debug("getActiveSkinHandler: UserSkins store is nil")
+		}
+	}
+
 	// Get full skin details from registry for complete response
 	var skinObj *skin.Skin
 	if s.skins != nil {
@@ -405,15 +422,16 @@ func (s *Server) getActiveSkinHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if skinObj != nil {
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"name":        skinObj.Name,
-			"displayName": skinObj.DisplayName,
-			"version":     skinObj.Version,
-			"productName": skinObj.ProductName,
-			"typography":  skinObj.Typography,
+			"name":         skinObj.Name,
+			"displayName":  skinObj.DisplayName,
+			"version":      skinObj.Version,
+			"productName":  skinObj.ProductName,
+			"typography":   skinObj.Typography,
 			"borderRadius": skinObj.BorderRadius,
-			"density":     skinObj.Density,
-			"footer":      skinObj.Footer,
-			"loginHero":   skinObj.LoginHero,
+			"density":      skinObj.Density,
+			"footer":       skinObj.Footer,
+			"loginHero":    skinObj.LoginHero,
+			"palette":      skinObj.Palette,
 		})
 	} else {
 		// Fallback to minimal response if skin not in registry
@@ -421,6 +439,7 @@ func (s *Server) getActiveSkinHandler(w http.ResponseWriter, r *http.Request) {
 			"name":        skinName,
 			"displayName": strings.Title(skinName),
 			"version":     "1.0.0",
+			"palette": map[string]interface{}{},
 		})
 	}
 }
@@ -448,6 +467,12 @@ func (s *Server) setUserSkinHandler(w http.ResponseWriter, r *http.Request) {
 
 	if req.SkinName == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "MISSING_SKIN_NAME", "skinName required")
+		return
+	}
+
+	claims, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
 		return
 	}
 
@@ -487,11 +512,24 @@ func (s *Server) setUserSkinHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Persist user's skin choice (stored in a per-user location; for now just echo back)
-	// In a full implementation, this would write to a user preferences store
+	// Persist user's skin choice to per-user store
+	slog.Debug("setUserSkinHandler: persisting user skin", "user", claims.UserID, "skin", req.SkinName)
+	if s.store.UserSkins() != nil {
+		if err := s.store.UserSkins().Set(claims.UserID, req.SkinName); err != nil {
+			slog.Error("setUserSkinHandler: failed to persist user skin", "user", claims.UserID, "skin", req.SkinName, "err", err)
+			writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to save skin preference")
+			return
+		}
+		slog.Debug("setUserSkinHandler: persisted successfully", "user", claims.UserID, "skin", req.SkinName)
+	} else {
+		slog.Error("setUserSkinHandler: userSkins store not wired")
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SKINS_NOT_WIRED", "Skin store is not configured")
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
+		"success":  true,
 		"skinName": req.SkinName,
 	})
 }
