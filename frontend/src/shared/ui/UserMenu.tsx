@@ -93,8 +93,6 @@ export function UserMenu() {
             when the activeRole was "user", which confused operators
             in user mode. */}
 
- 
-        <DropdownMenuSeparator />
         {/* v1.13.0a (ADR-0008): Theme submenu — System / Light / Dark.
             Replaces the standalone ThemeToggle button that used to sit
             in the AppShell + UserShell headers. Radio-style; the
@@ -133,7 +131,6 @@ export function UserMenu() {
         {/* v1.13.0c: Skin selector — only shown when org policy permits user choice */}
         {orgCaps.data?.userOverridableSkin && skinRegistry.data && (
           <>
-            <DropdownMenuSeparator />
             <DropdownMenuSub>
               <DropdownMenuSubTrigger data-testid="skin-submenu-trigger">
                 Skin
@@ -166,8 +163,6 @@ export function UserMenu() {
                 </DropdownMenuRadioGroup>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-
-            <DropdownMenuSeparator />
           </>
         )}
 
@@ -187,6 +182,7 @@ export function UserMenu() {
           </DropdownMenuSubContent>
         </DropdownMenuSub>
 
+        <DropdownMenuSeparator />
         <DropdownMenuItem onClick={handleLogout}>{t("auth.signOut")}</DropdownMenuItem>
         {/* v1.13.36: version footer removed from the dropdown. The
             same tag is already visible in the header under the

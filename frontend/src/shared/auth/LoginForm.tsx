@@ -24,6 +24,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { LoginHeroDisplay } from "@/shared/components/SkinInjector";
+import { Logo } from "@/shared/ui/Logo";
 
 // v2.0.0-beta.4: zod schema lives at module load — useTranslation
 // is a React hook and can't be called here. Keep the validation
@@ -110,9 +111,13 @@ export function LoginForm() {
         <ThemeToggle />
       </div>
       <Card className="w-full max-w-md">
-        {loginHero && !skinLoading && (
+        {loginHero && !skinLoading ? (
           <CardHeader className="text-center pb-2">
             <LoginHeroDisplay imageDataUri={loginHero.imageDataUri} tagline={loginHero.tagline} />
+          </CardHeader>
+        ) : (
+          <CardHeader className="flex flex-col items-center pb-0 pt-6">
+            <Logo href="/login" />
           </CardHeader>
         )}
         <CardHeader className="text-center">
@@ -127,8 +132,8 @@ export function LoginForm() {
               <Input
                 id="username"
                 type="text"
-                placeholder="admin"
                 autoComplete="username"
+                autoFocus
                 {...register("username")}
                 disabled={isSubmitting}
               />
@@ -142,7 +147,6 @@ export function LoginForm() {
               <Input
                 id="password"
                 type="password"
-                placeholder="••••••••"
                 autoComplete="current-password"
                 {...register("password")}
                 disabled={isSubmitting}

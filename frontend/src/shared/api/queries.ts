@@ -806,7 +806,7 @@ export function useSetActiveSkin() {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skin: skinName }),
+        body: JSON.stringify({ skinName }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
