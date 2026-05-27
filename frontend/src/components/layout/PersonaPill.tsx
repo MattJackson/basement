@@ -366,8 +366,14 @@ export function PersonaPill() {
     if (availableRoles.length > 1) {
       return (
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger>
-            <button type="button" data-testid="persona-role-trigger">
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              data-testid="persona-role-trigger"
+              aria-label="Switch role"
+              title="Switch role"
+              className="cursor-pointer hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-full"
+            >
               {pillContent}
             </button>
           </DropdownMenuTrigger>
