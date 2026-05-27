@@ -95,6 +95,14 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       return;
     }
 
+    // v2.0.0-beta.30 T3: Cluster admin only has ONE cluster — bounce them from the list
+    // page to their cluster's detail page so the 403 from the cross-cluster aggregate
+    // endpoint never surfaces.
+    if (pathname === "/admin/clusters" && activeRole.kind === "cluster-admin" && activeRole.cluster) {
+      navigate({ to: `/admin/clusters/${activeRole.cluster}` });
+      return;
+    }
+
     if (pathname === "/admin" || pathname === "/admin/") {
       if (activeRole.kind === "cluster-admin" && activeRole.cluster) {
         navigate({ to: `/admin/clusters/${activeRole.cluster}` });

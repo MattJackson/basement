@@ -326,12 +326,15 @@ export function PersonaPill() {
       );
     }
 
-    // v1.13.18: Display active role dynamically
-    const roleLabel = activeRole.kind === "cluster-admin" && activeRole.cluster
-      ? `Cluster Admin: ${activeRole.cluster}`
-      : activeRole.kind === "ui-admin"
-        ? "UI Admin"
-        : "User";
+    // v1.13.18 + v2.0.0-beta.30 T1: Display active role dynamically using availableRoles lookup
+    const matchedRole = availableRoles.find(
+      (r) => r.kind === activeRole.kind &&
+             (r.kind !== "cluster-admin" || r.cluster === activeRole.cluster),
+    );
+    const roleLabel = matchedRole?.label
+      ?? (activeRole.kind === "ui-admin" ? "UI Admin"
+        : activeRole.kind === "cluster-admin" ? "Cluster Admin"
+        : "User");
 
     // For UI Admin with elevated mode, show countdown + admin-session-TTL hint
     const isElevated = mode === "admin" || mode === "elevated";
