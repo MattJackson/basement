@@ -32,8 +32,8 @@ export interface LoginHero {
 
 export interface PaletteVariant {
   primary?: string;
-  background?: string;
-  foreground?: string;
+  bg?: string;
+  fg?: string;
   muted?: string;
   accent?: string;
   destructive?: string;

@@ -80,22 +80,38 @@ export function useSkin() {
     const variant = isDark ? skin.palette.dark : skin.palette.light;
     if (!variant) return;
     const root = document.documentElement;
-    const tokens = [
-      "primary",
-      "background",
-      "foreground",
-      "muted",
-      "accent",
-      "destructive",
-      "warning",
-      "success",
-      "info",
-    ] as const;
-    for (const key of tokens) {
-      const value = variant[key];
+    // Map backend palette field names → frontend CSS variable suffix
+    // (Palette type in internal/skin/skin.go uses bg/fg short forms;
+    // frontend index.css uses --color-background / --color-foreground.)
+    const mapping: Array<[keyof typeof variant, string]> = [
+      ["primary", "primary"],
+      ["bg" as keyof typeof variant, "background"],
+      ["fg" as keyof typeof variant, "foreground"],
+      ["muted", "muted"],
+      ["accent", "accent"],
+      ["destructive", "destructive"],
+      ["warning", "warning"],
+      ["success", "success"],
+      ["info", "info"],
+    ];
+    for (const [paletteKey, cssName] of mapping) {
+      const value = (variant as Record<string, string | undefined>)[paletteKey as string];
       if (typeof value === "string" && value) {
-        root.style.setProperty(`--basement-${key}`, value);
+        root.style.setProperty(`--color-${cssName}`, `hsl(${value})`);
       }
+    }
+    // Common derived tokens follow the base palette so cards / popovers /
+    // borders pick up the new colors without each skin needing to specify
+    // them explicitly. These are the same defaults pattern index.css uses.
+    const bg = (variant as Record<string, string | undefined>).bg;
+    const fg = (variant as Record<string, string | undefined>).fg;
+    if (bg) {
+      root.style.setProperty("--color-card", `hsl(${bg})`);
+      root.style.setProperty("--color-popover", `hsl(${bg})`);
+    }
+    if (fg) {
+      root.style.setProperty("--color-card-foreground", `hsl(${fg})`);
+      root.style.setProperty("--color-popover-foreground", `hsl(${fg})`);
     }
     // Cleanup is intentionally omitted: the next skin change will
     // overwrite, and a reset would briefly flash basement-default
