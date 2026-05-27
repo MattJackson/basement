@@ -29,7 +29,20 @@
     "confirm": "Confirm",
     "ok": "OK",
     "submit": "Submit",
-    "add": "Add"
+    "add": "Add",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip",
+    "finish": "Finish",
+    "getStarted": "Get started",
+    "testConnection": "Test connection",
+    "testing": "Testing…",
+    "saveAndContinue": "Save & continue",
+    "saving": "Saving…",
+    "generating": "Generating…",
+    "assigning": "Assigning…",
+    "revoking": "Revoking…",
+    "running": "Running…"
   },
   "roles": {
     "user": "User",
@@ -41,7 +54,9 @@
     "signOut": "Sign out",
     "login": "Login",
     "password": "Password",
-    "username": "Username"
+    "username": "Username",
+    "createAccount": "Create a new account",
+    "backToLogin": "Back to Login"
   },
   "states": {
     "loading": "Loading…",
@@ -50,6 +65,13 @@
   },
   "confirmations": {
     "areYouSure": "Are you sure?",
-    "thisCannotBeUndone": "This cannot be undone"
+    "thisCannotBeUndone": "This cannot be undone",
+    "deleteRole": "Delete role {id}? Assignments using it will be cleared.",
+    "revokeAssignment": "Revoke {roleId} from {userId} on {scope}? They lose those capabilities immediately."
+  },
+  "validation": {
+    "required": "This field is required",
+    "allFieldsRequired": "All three fields are required",
+    "userCapabilityScopeRequired": "User, capability, and scope are all required"
   }
 }

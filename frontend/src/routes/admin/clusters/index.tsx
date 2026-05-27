@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Table,
   TableBody,
@@ -38,6 +39,11 @@ export const Route = createFileRoute("/admin/clusters/")({
 
 function ClustersScreen() {
   const navigate = useNavigate();
+  // v2.0.0-beta.4: useTranslation returns {t, i18n, ready} — to alias
+  // 't' to 'tp' you destructure-rename, not just expect a 'tp' field.
+  // The freshman's original `const { tp } = useTranslation("pages")`
+  // got `tp = undefined`.
+  const { t: tp } = useTranslation("pages");
   const { data: clustersData, isLoading, error } = useListClusters();
   const deleteCluster = useDeleteCluster();
   // ADR-0003 v1.2.0b: cluster:delete is an ELEVATED-min capability,
@@ -80,13 +86,13 @@ function ClustersScreen() {
 const header = (
     <header className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">Clusters</h1>
+        <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">{tp("adminClustersList.pageTitle")}</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Garage and S3-compatible storage backends.
+          {tp("adminClustersList.pageSubtitle")}
         </p>
       </div>
       <Button onClick={() => navigate({ to: "/admin/clusters/new" })}>
-        + Add cluster
+        {tp("adminClustersList.addClusterButton")}
       </Button>
     </header>
   );
@@ -95,7 +101,7 @@ if (error) {
     return (
       <div className="space-y-6">
         {header}
-        <ErrorBanner message="Couldn&apos;t connect to backend. Retrying automatically..." />
+        <ErrorBanner message={tp("errors.connectionFailed")} />
       </div>
     );
   }
@@ -110,11 +116,11 @@ if (error) {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12"></TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Driver</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Resources</TableHead>
-                <TableHead className="w-16">Actions</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnLabel")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnDriver")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnStatus")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnResources")}</TableHead>
+                <TableHead className="w-16">{tp("adminClustersList.addColumnActions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -135,11 +141,11 @@ if (error) {
         <div className="rounded-lg border bg-card p-8 sm:p-12">
           <EmptyState
             icon="server"
-            title="Welcome to basement"
-            description="One pane of glass for Garage, MinIO, OpenMaxIO, and AWS S3. Add your first cluster to get started — basement talks to its admin API and surfaces buckets, keys, and layout from here."
+            title={tp("adminClustersList.emptyStateTitle")}
+            description={tp("adminClustersList.emptyStateDescription")}
             action={
               <Button onClick={() => navigate({ to: "/admin/clusters/new" })} size="lg">
-                + Add your first cluster
+                {tp("adminClustersList.firstClusterButton")}
               </Button>
             }
           />
@@ -150,11 +156,11 @@ if (error) {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-12"></TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Driver</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Resources</TableHead>
-                <TableHead className="w-16">Actions</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnLabel")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnDriver")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnStatus")}</TableHead>
+                <TableHead>{tp("adminClustersList.addColumnResources")}</TableHead>
+                <TableHead className="w-16">{tp("adminClustersList.addColumnActions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -203,6 +209,7 @@ function getStatusFromResult(result: components["schemas"]["ConnectionTestResult
  *  cached for 30s — and on a single-row deployment we're talking
  *  one extra fetch per resource type. */
 function ClusterCounts({ cid }: { cid: string }) {
+  const { t: tp } = useTranslation("pages");
   const { data: buckets, isLoading: loadingB } = useClusterBuckets(cid);
   const { data: keys, isLoading: loadingK } = useClusterKeys(cid);
   if (loadingB || loadingK) return <span className="text-xs text-muted-foreground">…</span>;
@@ -210,7 +217,7 @@ function ClusterCounts({ cid }: { cid: string }) {
   const k = keys?.length ?? 0;
   return (
     <span className="text-xs text-muted-foreground">
-      <strong className="text-foreground tabular-nums">{b}</strong> buckets · <strong className="text-foreground tabular-nums">{k}</strong> keys
+      <strong className="text-foreground tabular-nums">{b}</strong> {tp("adminClustersList.bucketCount")} · <strong className="text-foreground tabular-nums">{k}</strong> {tp("adminClustersList.keyCount")}
     </span>
   );
 }
@@ -222,6 +229,7 @@ interface ClusterRowProps {
 }
 
 function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
+  const { t: tp } = useTranslation("pages");
   const navigate = useNavigate();
   // Manual test only — Garage /v1/health is 10-20s round-trip, so we
   // never auto-poll. User clicks "Test" on the detail page when they
@@ -278,13 +286,13 @@ function ClusterRow({ cluster, onEdit, onDelete }: ClusterRowProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>
-              Edit
+              {tp("buttons.edit")}
             </DropdownMenuItem>
             <DropdownMenuItem 
               variant="destructive" 
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
             >
-              Delete
+              {tp("buttons.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -307,6 +315,7 @@ function TooltipWrapper({ message, children }: { message: string; children: Reac
 }
 
 function HealthPill({ status }: { status: "healthy" | "degraded" | "unavailable" | "checking" }) {
+  const { t: tp } = useTranslation("pages");
   const variants = {
     healthy: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
     degraded: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
@@ -315,10 +324,10 @@ function HealthPill({ status }: { status: "healthy" | "degraded" | "unavailable"
   } as const;
 
   const labels = {
-    healthy: "Healthy",
-    degraded: "Degraded",
-    unavailable: "Unavailable",
-    checking: "Checking…",
+    healthy: tp("adminClustersList.healthy"),
+    degraded: tp("adminClustersList.degraded"),
+    unavailable: tp("adminClustersList.unavailable"),
+    checking: tp("adminClustersList.checking"),
   } as const;
 
   return (

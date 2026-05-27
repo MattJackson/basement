@@ -29,7 +29,20 @@
     "confirm": "Confirmar",
     "ok": "Aceptar",
     "submit": "Enviar",
-    "add": "Agregar"
+    "add": "Agregar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "skip": "Omitir",
+    "finish": "Finalizar",
+    "getStarted": "Comenzar",
+    "testConnection": "Probar conexión",
+    "testing": "Probando…",
+    "saveAndContinue": "Guardar y continuar",
+    "saving": "Guardando…",
+    "generating": "Generando…",
+    "assigning": "Asignando…",
+    "revoking": "Revocando…",
+    "running": "Ejecutando…"
   },
   "roles": {
     "user": "Usuario",
@@ -41,7 +54,9 @@
     "signOut": "Cerrar sesión",
     "login": "Acceder",
     "password": "Contraseña",
-    "username": "Nombre de usuario"
+    "username": "Nombre de usuario",
+    "createAccount": "Crear una nueva cuenta",
+    "backToLogin": "Volver al inicio de sesión"
   },
   "states": {
     "loading": "Cargando…",
@@ -50,6 +65,13 @@
   },
   "confirmations": {
     "areYouSure": "¿Está seguro?",
-    "thisCannotBeUndone": "Esta acción no se puede deshacer"
+    "thisCannotBeUndone": "Esta acción no se puede deshacer",
+    "deleteRole": "¿Eliminar rol {id}? Las asignaciones que lo usan se borrarán.",
+    "revokeAssignment": "¿Revocar {roleId} de {userId} en {scope}? Perderán esas capacidades inmediatamente."
+  },
+  "validation": {
+    "required": "Este campo es obligatorio",
+    "allFieldsRequired": "Los tres campos son obligatorios",
+    "userCapabilityScopeRequired": "Usuario, capacidad y ámbito son todos obligatorios"
   }
 }
