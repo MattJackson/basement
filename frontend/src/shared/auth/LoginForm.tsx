@@ -24,7 +24,6 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { LoginHeroDisplay } from "@/shared/components/SkinInjector";
-import { Logo } from "@/shared/ui/Logo";
 
 // v2.0.0-beta.4: zod schema lives at module load — useTranslation
 // is a React hook and can't be called here. Keep the validation
@@ -116,13 +115,18 @@ export function LoginForm() {
             <LoginHeroDisplay imageDataUri={loginHero.imageDataUri} tagline={loginHero.tagline} />
           </CardHeader>
         ) : (
-          <CardHeader className="flex flex-col items-center pb-0 pt-6">
-            <Logo href="/login" />
+          <CardHeader className="flex flex-col items-center gap-3 pb-2 pt-8">
+            <img
+              src="/favicon.svg"
+              alt=""
+              aria-hidden="true"
+              className="h-16 w-16"
+            />
+            <h1 className="text-3xl font-semibold tracking-tight leading-none">
+              Basement
+            </h1>
           </CardHeader>
         )}
-        <CardHeader className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight leading-none">{t("authLogin.signInTitle")}</h1>
-        </CardHeader>
         <CardContent>
           {/* OIDC error handling removed in v1.11.0.24 - no longer supported via query param */}
 
