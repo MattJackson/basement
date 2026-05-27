@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { useUser } from "./useUser";
 import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 
@@ -10,20 +11,13 @@ interface ProtectedRouteProps {
 
 /**
  * ProtectedRoute redirects to /login if the user isn't
- * authenticated. Carries the current pathname as `?next=` so the
- * user lands back where they started after login.
+ * authenticated, and to /files when the active role doesn't grant
+ * access to an /admin/* route.
  *
- * Guards against the recursive-next bug:
- *   - never redirect when already on /login (would just stack)
- *   - uses pathname (path-only), not href (full origin URL), so the
- *     next value is short and ergonomic
- *   - rejects `next` values that don't start with /admin (no
- *     open-redirect to attacker-controlled URLs)
- *
- * v1.13.18: Active role gating — redirects based on activeRole:
- *   - UI Admin routes (/admin/system, /admin/policies, etc.): redirect to /files if activeRole !== "ui-admin"
- *   - Cluster Admin routes (/admin/clusters/{cid}/...): redirect to /files if activeRole !== "cluster-admin" OR if URL's {cid} doesn't match activeRole.cluster
- *   - Cross-cluster admin routes: redirect to per-cluster page in active role's cluster
+ * v2.0.0-beta.6: B2 — /admin/clusters/new + /admin/clusters/{cid}/*
+ * now allow UI Admin (org-level operations); cluster-admin remains
+ * scoped to their assigned cluster. B4 — bounces fire a toast that
+ * tells the user which role they need, so the redirect isn't silent.
  */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const navigate = useNavigate();
@@ -31,18 +25,11 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { data, isLoading } = useUser();
 
   useEffect(() => {
-    // Wait for the user query to finish before deciding anything.
     if (isLoading) return;
-
-    // Already on the login route? Nothing to do — don't recurse.
     if (location.pathname === "/login") return;
 
     const pathname = location.pathname;
 
-    // Unauthenticated → /login with ?next preserving the destination.
-    // v1.13.32: this branch was previously unreachable because the
-    // earlier guard early-returned on !data, so unauthenticated users
-    // saw LoadingSpinner forever instead of being redirected.
     if (!data) {
       const next = pathname.startsWith("/admin") ? pathname : "/files";
       navigate({ to: "/login", search: { next } });
@@ -51,92 +38,71 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
     const activeRole = data.activeRole;
 
-    // v1.13.18: Active role gating for /admin/* routes
-    if (pathname.startsWith("/admin")) {
-      // Extract cluster ID from path if present (e.g., /admin/clusters/{cid}/...)
-      const match = pathname.match(/\/admin\/clusters\/([^/]+)/);
-      const pathClusterId = match ? match[1] : null;
+    if (!pathname.startsWith("/admin")) return;
 
-      // UI Admin routes: /admin/system, /admin/policies, /admin/skins/*, /admin/policies/*, /admin/oidc-*, /admin/audit
-      const isUIAdminRoute = 
-        pathname === "/admin/system" ||
-        pathname === "/admin/policies" ||
-        pathname.startsWith("/admin/skins") ||
-        pathname.startsWith("/admin/policies/") ||
-        pathname.startsWith("/admin/oidc") ||
-        pathname === "/admin/audit" ||
-        pathname.startsWith("/admin/users") ||
-        pathname.startsWith("/admin/service-accounts") ||
-        pathname.startsWith("/admin/gateways") ||
-        pathname.startsWith("/admin/onboarding");
+    const clusterSegMatch = pathname.match(/^\/admin\/clusters\/([^/]+)/);
+    const clusterSeg = clusterSegMatch ? clusterSegMatch[1] : null;
+    const isClusterNewRoute = pathname === "/admin/clusters/new";
+    const pathClusterId = clusterSeg && clusterSeg !== "new" ? clusterSeg : null;
 
-      // Cluster Admin routes: /admin/clusters/{cid}/...
-      const isClusterAdminRoute = pathname.startsWith("/admin/clusters/");
+    const isUIAdminRoute =
+      pathname === "/admin/system" ||
+      pathname === "/admin/policies" ||
+      pathname.startsWith("/admin/skins") ||
+      pathname.startsWith("/admin/policies/") ||
+      pathname.startsWith("/admin/oidc") ||
+      pathname === "/admin/audit" ||
+      pathname.startsWith("/admin/users") ||
+      pathname.startsWith("/admin/service-accounts") ||
+      pathname.startsWith("/admin/gateways") ||
+      pathname.startsWith("/admin/onboarding") ||
+      isClusterNewRoute;
 
-      if (isUIAdminRoute) {
-        // Must be UI Admin - check that activeRole exists and is not user
-        if (!activeRole || activeRole.kind === "user") {
-          navigate({ to: "/files" });
-          return;
-        }
-        // Now we know activeRole is either cluster-admin or ui-admin, check it's ui-admin
-        const roleIsUIAdmin = activeRole.kind === "ui-admin";
-        if (!roleIsUIAdmin) {
-          navigate({ to: "/files" });
-          return;
-        }
-      } else if (isClusterAdminRoute) {
-        // Must be cluster-admin AND cluster ID must match - check that activeRole exists and is not user
-        if (!activeRole || activeRole.kind === "user") {
-          navigate({ to: "/files" });
-          return;
-        }
-        // Now we know activeRole is either cluster-admin or ui-admin, check it's cluster-admin
-        const roleIsClusterAdmin = activeRole.kind === "cluster-admin";
-        if (!roleIsClusterAdmin) {
-          navigate({ to: "/files" });
-          return;
-        }
+    const isClusterScopedRoute = pathClusterId !== null;
 
-        // If path has a cluster ID, it must match active role's cluster
-        if (pathClusterId && activeRole.cluster && pathClusterId !== activeRole.cluster) {
-          // Redirect to the cluster in the active role
-          navigate({ to: `/admin/clusters/${activeRole.cluster}` });
-          return;
-        }
+    const bounceToFiles = (message: string) => {
+      toast.info(message);
+      navigate({ to: "/files" });
+    };
 
-        // If no cluster ID in path, redirect to active role's cluster
-        if (!pathClusterId && activeRole.cluster) {
-          navigate({ to: `/admin/clusters/${activeRole.cluster}` });
-          return;
-        }
-      } else {
-        // Any other /admin/* route — check if user has any admin role
-        const activeRoleKind = (activeRole?.kind ?? "user") as string | undefined;
-        
-        // If role is user, redirect to files
-        if (activeRoleKind === "user") {
-          navigate({ to: "/files" });
-          return;
-        }
-
-        // For cluster-admin routes without explicit cid in path, redirect to active cluster
-        if (pathname === "/admin" || pathname === "/admin/") {
-          if (activeRoleKind === "cluster-admin" && activeRole?.cluster) {
-            navigate({ to: `/admin/clusters/${activeRole.cluster}` });
-            return;
-          }
-          // Default to clusters list for UI Admin or cluster-admin without specific route
-          const roleIsUser = activeRoleKind === "user";
-          if (!roleIsUser) {
-            navigate({ to: "/admin/clusters" });
-            return;
-          }
-        }
+    if (isUIAdminRoute) {
+      if (!activeRole || activeRole.kind !== "ui-admin") {
+        bounceToFiles("Switch to UI Admin role to access this page.");
+        return;
       }
+      return;
     }
 
-    // If we get here, user has appropriate access — render children
+    if (isClusterScopedRoute) {
+      if (!activeRole || activeRole.kind === "user") {
+        bounceToFiles("Switch to an admin role to access this page.");
+        return;
+      }
+      if (activeRole.kind === "cluster-admin") {
+        if (pathClusterId && activeRole.cluster && pathClusterId !== activeRole.cluster) {
+          // Cross-cluster redirect — silent (auto-route to own cluster).
+          navigate({ to: `/admin/clusters/${activeRole.cluster}` });
+          return;
+        }
+      }
+      return;
+    }
+
+    // Other /admin/* routes (the bare /admin landing, /admin/clusters list,
+    // /admin/buckets, /admin/migrate, /admin/usage, /admin/first-run).
+    if (!activeRole || activeRole.kind === "user") {
+      bounceToFiles("Switch to an admin role to access this page.");
+      return;
+    }
+
+    if (pathname === "/admin" || pathname === "/admin/") {
+      if (activeRole.kind === "cluster-admin" && activeRole.cluster) {
+        navigate({ to: `/admin/clusters/${activeRole.cluster}` });
+        return;
+      }
+      navigate({ to: "/admin/clusters" });
+      return;
+    }
   }, [isLoading, data, navigate, location]);
 
   if (isLoading || !data) {
@@ -145,4 +111,3 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   return <>{children}</>;
 }
-
