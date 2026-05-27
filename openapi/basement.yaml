@@ -298,30 +298,6 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
-  /admin/layout:
-      get:
-        operationId: getLayout
-        summary: Get current cluster layout
-        description: Returns the currently applied cluster layout including all nodes
-          with their zone, capacity (bytes), and tags. Also includes any staged changes
-          that have not yet been applied. Used by Cluster — Layout editor screen.
-        tags:
-        - AdminCluster
-        security:
-        - cookieAuth: []
-        responses:
-          '200':
-            description: Current cluster layout with optional staged changes
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/Layout'
-          '401':
-            description: No active session or insufficient role
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
   /admin/layout/apply:
       post:
         operationId: applyLayoutChange
@@ -359,35 +335,7 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
-  /admin/layout/revert:
-      post:
-        operationId: revertLayoutChange
-        summary: Discard staged layout changes
-        description: Clears all staged layout changes without applying them. Restores
-          the layout editor to match the currently applied version. Used by Cluster
-          — Layout editor screen when user decides not to apply modifications.
-        tags:
-        - AdminCluster
-        security:
-        - cookieAuth: []
-        responses:
-          '200':
-            description: Staged changes discarded successfully
-            content:
-              application/json:
-                schema:
-                  type: object
-                  properties:
-                    message:
-                      type: string
-                      example: Staged layout changes discarded
-          '401':
-            description: No active session or insufficient role
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-  /admin/layout/stage:
+  /admin/nodes:
       post:
         operationId: stageLayoutChange
         summary: Stage layout modifications
@@ -418,32 +366,6 @@ paths:
               application/json:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
-          '401':
-            description: No active session or insufficient role
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-  /admin/nodes:
-      get:
-        operationId: listNodes
-        summary: List all cluster nodes
-        description: Returns all storage and gateway nodes registered in the cluster
-          layout, including their current connection state (live/dead), zone assignment,
-          capacity, and tags. Used by Dashboard and Cluster — Nodes screens.
-        tags:
-        - AdminCluster
-        security:
-        - cookieAuth: []
-        responses:
-          '200':
-            description: List of cluster nodes
-            content:
-              application/json:
-                schema:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/Node'
           '401':
             description: No active session or insufficient role
             content:
@@ -1968,43 +1890,6 @@ paths:
                 schema:
                   $ref: '#/components/schemas/ErrorResponse'
   /admin/users/{id}:
-      get:
-        operationId: getUser
-        summary: Get user details (v1.1+)
-        description: Returns detailed information about a specific basement user
-          including ID, username, role, creation timestamp, and OIDC subject if provisioned
-          via OIDC. Used by Admin — Users screen detail view.
-        tags:
-        - AdminUsers
-        x-basement-since: '1.1'
-        security:
-        - cookieAuth: []
-        parameters:
-        - name: id
-          in: path
-          required: true
-          description: User ID
-          schema:
-            type: string
-        responses:
-          '200':
-            description: User details
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/User'
-          '401':
-            description: No active session or insufficient role
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-          '404':
-            description: User not found
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
       patch:
         operationId: updateUser
         summary: Update user details (v1.1+)
