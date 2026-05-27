@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -130,7 +132,8 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 	// Save initial job state
 	if err := s.syncStore.Save(job); err != nil {
 		s.auditFailure(r, "sync:create", resourceSync(job.ID), err)
-		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", "Failed to save sync job")
+		slog.Error("userCreateSyncHandler: syncStore.Save failed", "user", claims.UserID, "job_id", job.ID, "err", err)
+		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", fmt.Sprintf("Failed to save sync job: %v", err))
 		return
 	}
 
@@ -182,6 +185,11 @@ func (s *Server) userListSyncsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.syncStore == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SYNC_STORE_NOT_WIRED", "Sync store is not configured on this deployment.")
+		return
+	}
+
 	claims, ok := auth.FromContext(r.Context())
 	if !ok {
 		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
@@ -190,7 +198,8 @@ func (s *Server) userListSyncsHandler(w http.ResponseWriter, r *http.Request) {
 
 	jobs, err := s.syncStore.List(claims.UserID)
 	if err != nil {
-		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", "Failed to list sync jobs")
+		slog.Error("listSyncsHandler: syncStore.List failed", "user", claims.UserID, "err", err)
+		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", fmt.Sprintf("Failed to list sync jobs: %v", err))
 		return
 	}
 
@@ -266,7 +275,8 @@ func (s *Server) userDeleteSyncHandler(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.syncStore.Delete(jobID); err != nil {
 		s.auditFailure(r, "sync:delete", resourceSync(jobID), err)
-		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", "Failed to delete sync job")
+		slog.Error("userDeleteSyncHandler: syncStore.Delete failed", "user", claims.UserID, "job_id", jobID, "err", err)
+		writeErrorSimple(w, http.StatusInternalServerError, "SYNC_STORE_ERROR", fmt.Sprintf("Failed to delete sync job: %v", err))
 		return
 	}
 
