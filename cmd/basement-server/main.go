@@ -259,6 +259,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// v2.0.0-beta.28: per-user skin preference store. A missing
+	// user_skins.json is fine — WireUserSkins treats it as empty.
+	if err := st.WireUserSkins(); err != nil {
+		slog.Error("failed to wire user-skin store", "error", err)
+		os.Exit(1)
+	}
+
 	// v1.7.0a: basement-issued long-lived service-account access
 	// keys (CI, k8s, CLI, MCP). Data layer only this cycle; the
 	// v1.7.0b SigV4 middleware will read VerifySecret + TouchLastUsed

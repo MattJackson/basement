@@ -28,12 +28,17 @@ type Store struct {
 	orgCapsPath string
 
 	usersCache  []User
-	sharesCache []Share
-	orgCaps     *OrgCapabilitiesStore
-	oidcGroups  *OIDCGroupMappingsStore
-	userRegions UserRegions
-	invites     Invites
-	feds        federation.FederatedBuckets
+	sharesCache       []Share
+	orgCaps           *OrgCapabilitiesStore
+	oidcGroups        *OIDCGroupMappingsStore
+	userRegions       UserRegions
+	invites           Invites
+	feds              federation.FederatedBuckets
+	// v2.0.0-beta.28: per-user skin preference store. Nil until
+	// WireUserSkins() runs in production main.go at boot — tests that
+	// don't care leave it unset; handlers nil-check and return 503
+	// SKINS_NOT_WIRED when absent.
+	userSkins UserSkins
 	// v1.7.0a: basement-issued long-lived service-account access
 	// keys for automated clients (CI, k8s, CLI, MCP). Nil until
 	// WireServiceAccounts() runs in production main.go after federation
@@ -200,6 +205,27 @@ func (s *Store) WireServiceAccounts() error {
 	}
 	s.serviceAccounts = sa
 	return nil
+}
+
+// WireUserSkins opens the per-user skin preference store at
+// {dataDir}/user_skins.json and attaches it to this Store. Kept
+// separate from Open() for source-compatibility with test callers.
+// Production main.go calls this once at boot after OpenFederated.
+func (s *Store) WireUserSkins() error {
+	us, err := OpenUserSkins(s.dataDir)
+	if err != nil {
+		return fmt.Errorf("opening user skins: %w", err)
+	}
+	s.userSkins = us
+	return nil
+}
+
+// UserSkins returns the per-user skin preference store (v2.0.0-beta.28).
+// Returns nil if WireUserSkins has not been called — handlers nil-check
+// and return 503 SKINS_NOT_WIRED when absent. Production main.go always
+// wires it before Start.
+func (s *Store) UserSkins() UserSkins {
+	return s.userSkins
 }
 
 // ServiceAccounts returns the v1.7.0a service-account store. Returns

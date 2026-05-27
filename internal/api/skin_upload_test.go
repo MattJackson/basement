@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/skin"
 	"github.com/mattjackson/basement/internal/store"
@@ -496,11 +497,168 @@ func TestSkinUploadWithPolicy(t *testing.T) {
 	}
 }
 
+// TestSetUserSkin_PersistsAndGets tests that setUserSkin persists and getActiveSkin returns it.
+func TestSetUserSkin_PersistsAndGets(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{DataDir: tmpDir}
+
+	st, err := store.Open(tmpDir, 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+	if err := st.WireUserSkins(); err != nil {
+		t.Fatalf("Failed to wire user skins: %v", err)
+	}
+
+	srv := New(cfg, st, nil, nil, nil)
+	skinRegistry := skin.New()
+	skin.RegisterBuiltInSkins(skinRegistry)
+	srv.SetSkinRegistry(skinRegistry)
+
+	// Set org active skin to basement-default first
+	caps := st.OrgCapabilities()
+	caps.Update(store.OrgCapabilities{ActiveSkin: "basement-default", UserOverridableSkin: true})
+
+	// Create user token with specific UserID using test secret from admin_handlers_test.go
+	testSecret := []byte("0123456789abcdef0123456789abcdef")
+	token, err := auth.IssueToken(testSecret, "test-user-123", "user", false, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to issue token: %v", err)
+	}
+
+	// Call setUserSkin with user token wrapped in middleware
+	reqBody := `{"skinName": "basement-95"}`
+	body := bytes.NewReader([]byte(reqBody))
+	req, _ := http.NewRequest(http.MethodPut, "/api/v1/user/skin", body)
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    token,
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+	})
+
+	rw := httptest.NewRecorder()
+	handler := auth.Middleware(testSecret)(http.HandlerFunc(srv.setUserSkinHandler))
+	handler.ServeHTTP(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rw.Code, rw.Body.String())
+	}
+
+	var setResp map[string]interface{}
+	json.Unmarshal(rw.Body.Bytes(), &setResp)
+	if setResp["success"] != true {
+		t.Error("Expected success=true in setUserSkin response")
+	}
+
+	t.Logf("Set user skin response: %+v", setResp)
+
+	// Verify the preference was persisted by reading directly from store
+	if userSkin, ok := st.UserSkins().Get("test-user-123"); ok {
+		t.Logf("Stored user skin for test-user-123: %s", userSkin)
+	} else {
+		t.Log("No stored user skin found for test-user-123")
+	}
+
+	// Now call getActiveSkin as the same user — should return basement-95, not basement-default
+	t.Logf("Getting active skin for test-user-123")
+
+	getReq, _ := http.NewRequest(http.MethodGet, "/api/v1/skins/active", nil)
+	getReq.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    token,
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+	})
+
+	testSecret = []byte("0123456789abcdef0123456789abcdef")
+	getRw2 := httptest.NewRecorder()
+	handler = auth.Middleware(testSecret)(http.HandlerFunc(srv.getActiveSkinHandler))
+	handler.ServeHTTP(getRw2, getReq)
+
+	t.Logf("Get active skin response status: %d", getRw2.Code)
+	t.Logf("Get active skin response body: %s", getRw2.Body.String())
+
+	var activeResp map[string]interface{}
+	json.Unmarshal(getRw2.Body.Bytes(), &activeResp)
+
+	if activeResp["name"] != "basement-95" {
+		t.Errorf("Expected name=basement-95 (user preference), got %v", activeResp["name"])
+	}
+
+	// Verify org default still returns basement-default when no user preference
+	getReq2, _ := http.NewRequest(http.MethodGet, "/api/v1/skins/active", nil)
+	getRw3 := httptest.NewRecorder()
+	srv.getActiveSkinHandler(getRw3, getReq2)
+
+	if getRw3.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, getRw3.Code, getRw3.Body.String())
+	}
+
+	var orgResp map[string]interface{}
+	json.Unmarshal(getRw3.Body.Bytes(), &orgResp)
+	if orgResp["name"] != "basement-default" {
+		t.Errorf("Expected name=basement-default (org default), got %v", orgResp["name"])
+	}
+}
+
+// TestGetActiveSkin_IncludesPalette tests that getActiveSkin response includes palette field.
+func TestGetActiveSkin_IncludesPalette(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{DataDir: tmpDir}
+
+	st, err := store.Open(tmpDir, 90*24*time.Hour)
+	if err != nil {
+		t.Fatalf("Failed to open store: %v", err)
+	}
+
+	srv := New(cfg, st, nil, nil, nil)
+	skinRegistry := skin.New()
+	skin.RegisterBuiltInSkins(skinRegistry)
+	srv.SetSkinRegistry(skinRegistry)
+
+	// Test with anonymous request (should still work and return org default with palette)
+	req, _ := http.NewRequest(http.MethodGet, "/api/v1/skins/active", nil)
+	rw := httptest.NewRecorder()
+	srv.getActiveSkinHandler(rw, req)
+
+	if rw.Code != http.StatusOK {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusOK, rw.Code, rw.Body.String())
+	}
+
+	var resp map[string]interface{}
+	json.Unmarshal(rw.Body.Bytes(), &resp)
+
+	palette, ok := resp["palette"]
+	if !ok {
+		t.Fatal("Expected 'palette' field in response")
+	}
+
+	paletteMap, ok := palette.(map[string]interface{})
+	if !ok {
+		t.Fatalf("Expected palette to be an object, got %T", palette)
+	}
+
+	if _, hasLight := paletteMap["light"]; !hasLight {
+		t.Error("Expected 'light' sub-object in palette")
+	}
+
+	if _, hasDark := paletteMap["dark"]; !hasDark {
+		t.Error("Expected 'dark' sub-object in palette")
+	}
+}
+
 // setupTestServerWithConfig creates a test server with given config.
 func setupTestServerWithConfig(cfg *config.Config, t *testing.T) *Server {
 	st, err := store.Open(cfg.DataDir, 90*24*time.Hour)
 	if err != nil {
 		t.Fatalf("Failed to open store: %v", err)
+	}
+	// Wire user skins store for per-user skin persistence tests
+	if err := st.WireUserSkins(); err != nil {
+		t.Fatalf("Failed to wire user skins: %v", err)
 	}
 	
 	srv := New(cfg, st, nil, nil, nil)
