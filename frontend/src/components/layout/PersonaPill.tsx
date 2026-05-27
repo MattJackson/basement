@@ -295,7 +295,7 @@ export function PersonaPill() {
             UserMenu is the canonical identity surface. */}
         <span>{roleLabel}</span>
         {isElevated && activeRole.kind === "ui-admin" && (
-          <span className="ml-2 text-xs opacity-75">(elevated)</span>
+          <span className="ml-2 text-xs opacity-90">(elevated)</span>
         )}
       </span>
     );
