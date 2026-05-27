@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { client } from "@/shared/api/client";
@@ -1143,27 +1143,42 @@ function OIDCGroupMappingsSection() {
   const updateMappings = useUpdateOIDCGroupMappings();
   const [addOpen, setAddOpen] = useState(false);
 
+  // Local state for tracking changes before explicit save
+  const [localMappings, setLocalMappings] = useState<OIDCGroupMapping[]>([]);
+  const [isDirty, setIsDirty] = useState(false);
+
   const mappings = mappingsData?.mappings ?? [];
   const roles: PolicyRole[] = policiesData?.roles ?? [];
 
-  async function saveMappings(next: OIDCGroupMapping[]) {
+  // Sync local state with query data when it changes
+  useEffect(() => {
+    if (mappingsData) {
+      setLocalMappings(mappingsData.mappings);
+      setIsDirty(false);
+    }
+  }, [mappingsData]);
+
+  async function handleSave() {
     try {
-      await updateMappings.mutateAsync(next);
+      await updateMappings.mutateAsync(localMappings);
       await queryClient.invalidateQueries({ queryKey: ["admin", "oidc-group-mappings"] });
       toast.success("OIDC mappings updated");
+      setIsDirty(false);
     } catch (err) {
       toast.error(`Failed to update mappings: ${(err as Error).message}`);
     }
   }
 
   async function handleDelete(idx: number) {
-    const next = mappings.filter((_, i) => i !== idx);
-    await saveMappings(next);
+    const next = localMappings.filter((_, i) => i !== idx);
+    setLocalMappings(next);
+    setIsDirty(true);
   }
 
-  async function handleAdd(m: OIDCGroupMapping) {
-    const next = [...mappings, m];
-    await saveMappings(next);
+  function handleAdd(m: OIDCGroupMapping) {
+    const next = [...localMappings, m];
+    setLocalMappings(next);
+    setIsDirty(true);
     setAddOpen(false);
   }
 
@@ -1200,7 +1215,7 @@ function OIDCGroupMappingsSection() {
                 </tr>
               </thead>
               <tbody>
-                {mappings.map((m, idx) => (
+                {localMappings.map((m, idx) => (
                   <tr key={`${m.claim}-${m.claimValue}-${m.roleId}-${m.scope}-${idx}`} className="border-t border-input">
                     <td className="px-3 py-2 font-mono text-xs">{m.claim}</td>
                     <td className="px-3 py-2 font-mono text-xs">{m.claimValue}</td>
@@ -1224,13 +1239,29 @@ function OIDCGroupMappingsSection() {
         )}
 
         <div className="flex items-center justify-between">
-          <p className="text-xs text-muted-foreground">
-            Test a mapping by logging the affected user out and back in &mdash;
-            existing sessions are unaffected until they re-authenticate.
-          </p>
-          <Button onClick={() => setAddOpen(true)} disabled={updateMappings.isPending}>
-            Add mapping
-          </Button>
+          <div className="flex items-center gap-4">
+            <p className="text-xs text-muted-foreground">
+              Test a mapping by logging the affected user out and back in &mdash;
+              existing sessions are unaffected until they re-authenticate.
+            </p>
+            {isDirty && (
+              <p className="text-xs text-muted-foreground">
+                You have unsaved changes
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button 
+              onClick={handleSave} 
+              disabled={!isDirty || updateMappings.isPending}
+              data-testid="oidc-mappings-save"
+            >
+              Save changes
+            </Button>
+            <Button onClick={() => setAddOpen(true)} disabled={updateMappings.isPending}>
+              Add mapping
+            </Button>
+          </div>
         </div>
       </CardContent>
 
@@ -1407,6 +1438,7 @@ function SkinsManager() {
   const [defaultSkin, setDefaultSkin] = useState<string>("basement-default");
   const [userOverridable, setUserOverridable] = useState<boolean>(false);
   const [allowedUserSkins, setAllowedUserSkins] = useState<string[]>([]);
+  const [isDirty, setIsDirty] = useState(false);
 
   // Sync local state with query data when org-capabilities refetches after skin change
   useEffect(() => {
@@ -1417,35 +1449,42 @@ function SkinsManager() {
     }
   }, [caps.data]);
 
-  // Debounced save on change - only trigger after initial mount to avoid race conditions
-  const mountedRef = useRef(false);
-  
+  // Track dirty state when local values differ from query data
   useEffect(() => {
-    if (!mountedRef.current) {
-      mountedRef.current = true;
-      return;
+    if (caps.data) {
+      const isDirtyNow = 
+        defaultSkin !== (caps.data.activeSkin || "basement-default") ||
+        userOverridable !== (caps.data.userOverridableSkin || false) ||
+        JSON.stringify(allowedUserSkins) !== JSON.stringify(caps.data.allowedUserSkins || []);
+      setIsDirty(isDirtyNow);
+    } else {
+      // Initial load - not dirty until changed
+      const hasInitialState = 
+        defaultSkin === "basement-default" &&
+        userOverridable === false &&
+        allowedUserSkins.length === 0;
+      setIsDirty(!hasInitialState);
     }
-    
-    const timer = setTimeout(async () => {
-      try {
-        // @ts-ignore - admin/system path not in generated types yet
-        await client.PATCH("/admin/system", {
-          body: {
-            activeSkin: defaultSkin,
-            userOverridableSkin: userOverridable,
-            allowedUserSkins: allowedUserSkins,
-          },
-        });
-        toast.success("Saved");
-        queryClient.invalidateQueries({ queryKey: ["org-capabilities"] });
-        queryClient.invalidateQueries({ queryKey: ["skin", "active"] });
-      } catch (error) {
-        toast.error("Failed to save skin settings");
-      }
-    }, 500);
+  }, [defaultSkin, userOverridable, allowedUserSkins, caps.data]);
 
-    return () => clearTimeout(timer);
-  }, [defaultSkin, userOverridable, allowedUserSkins, queryClient]);
+  async function handleSave() {
+    try {
+      // @ts-ignore - admin/system path not in generated types yet
+      await client.PATCH("/admin/system", {
+        body: {
+          activeSkin: defaultSkin,
+          userOverridableSkin: userOverridable,
+          allowedUserSkins: allowedUserSkins,
+        },
+      });
+      toast.success("Saved");
+      queryClient.invalidateQueries({ queryKey: ["org-capabilities"] });
+      queryClient.invalidateQueries({ queryKey: ["skin", "active"] });
+      setIsDirty(false);
+    } catch (error) {
+      toast.error("Failed to save skin settings");
+    }
+  }
 
   if (loading) {
     return <Card><CardContent className="text-sm text-muted-foreground">Loading skins...</CardContent></Card>;
@@ -1465,7 +1504,7 @@ function SkinsManager() {
         {/* Default Skin */}
         <div className="space-y-2">
           <label className="text-sm font-medium" htmlFor="default-skin-select">Default Skin</label>
-          <Select value={defaultSkin} onValueChange={setDefaultSkin}>
+          <Select value={defaultSkin} onValueChange={(v) => { setDefaultSkin(v); setIsDirty(true); }}>
             <SelectTrigger id="default-skin-select">
               <SelectValue />
             </SelectTrigger>
@@ -1490,7 +1529,7 @@ function SkinsManager() {
           <label className="text-sm font-medium flex items-center gap-2">
             <Switch 
               checked={userOverridable} 
-              onCheckedChange={setUserOverridable}
+              onCheckedChange={(checked) => { setUserOverridable(checked); setIsDirty(true); }}
             />
             User Overridable
           </label>
@@ -1508,8 +1547,10 @@ function SkinsManager() {
                     onCheckedChange={(checked) => {
                       if (checked && userOverridable) {
                         setAllowedUserSkins([...allowedUserSkins, skin.name]);
+                        setIsDirty(true);
                       } else if (!checked) {
                         setAllowedUserSkins(allowedUserSkins.filter(n => n !== skin.name));
+                        setIsDirty(true);
                       }
                     }}
                   />
@@ -1568,6 +1609,22 @@ function SkinsManager() {
             ))}
           </div>
         </section>
+
+        {/* Save button with dirty state indicator */}
+        <div className="flex items-center justify-between pt-4 border-t">
+          {isDirty && (
+            <p className="text-xs text-muted-foreground">
+              You have unsaved changes
+            </p>
+          )}
+          <Button 
+            onClick={handleSave} 
+            disabled={!isDirty}
+            data-testid="skins-save"
+          >
+            Save skin settings
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
