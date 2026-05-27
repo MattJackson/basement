@@ -166,7 +166,7 @@ function OrgCapabilitiesPage() {
         <div className="space-y-2">
           <label className="text-sm font-medium">Signup Mode</label>
           <select
-            value={data.signupMode ?? "invite"}
+            value={data.signupMode || "invite"}
             onChange={(e) => setData({ ...data, signupMode: e.target.value as OrgCapabilities["signupMode"] })}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           >

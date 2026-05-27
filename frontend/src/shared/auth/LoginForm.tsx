@@ -21,7 +21,6 @@ import { ThemeToggle } from "@/shared/theme/ThemeToggle";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
 } from "@/components/ui/card";
 import { LoginHeroDisplay } from "@/shared/components/SkinInjector";
@@ -118,7 +117,6 @@ export function LoginForm() {
         )}
         <CardHeader className="text-center">
           <h1 className="text-2xl font-bold tracking-tight leading-none">{t("authLogin.signInTitle")}</h1>
-          <CardDescription>{t("auth.username")} {t("auth.password")}</CardDescription>
         </CardHeader>
         <CardContent>
           {/* OIDC error handling removed in v1.11.0.24 - no longer supported via query param */}
