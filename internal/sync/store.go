@@ -91,6 +91,9 @@ func (s *fileStore) List(userID string) ([]*SyncJob, error) {
 
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []*SyncJob{}, nil
+		}
 		return nil, fmt.Errorf("reading sync directory: %w", err)
 	}
 

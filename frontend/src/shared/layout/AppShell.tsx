@@ -129,7 +129,7 @@ if (location.pathname === "/login") return;
               shoving the right cluster (PersonaPill/ThemeToggle/UserMenu)
               off-screen. Without this, every admin route's header
               overflowed the viewport by 200-260px on phones. */}
-          <div className="flex items-center gap-3 sm:gap-6 min-w-0 flex-1">
+          <div className="flex items-center gap-4 sm:gap-6 min-w-0 flex-1">
             <Logo href={logoHref} />
             {/* v1.11.0.17 mobile audit — same scrollable-nav pattern as
                 UserShell (v1.8.0e): on narrow viewports the nav
