@@ -56,7 +56,7 @@ function SharesList() {
       {shares.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center space-y-3">
           <LinkIcon className="mx-auto h-12 w-12 text-muted-foreground" />
-          <h3 className="text-lg font-medium">No shares yet</h3>
+          <h2 className="text-lg font-medium">No shares yet</h2>
           <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Create share links to give others access to your buckets or specific objects.
           </p>

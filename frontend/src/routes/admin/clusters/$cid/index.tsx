@@ -364,7 +364,7 @@ function ClusterDetailScreen() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="font-medium">Maintenance — Scrub</h3>
+                <h2 className="font-medium">Maintenance — Scrub</h2>
                 <p className="text-sm text-muted-foreground mt-1">
                   Inspect block-scrub state and kick off a durability scan.
                 </p>
@@ -394,7 +394,7 @@ function ClusterDetailScreen() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-medium">Layout</h3>
+                  <h2 className="font-medium">Layout</h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     Edit cluster topology and node assignments.
                   </p>
@@ -418,7 +418,7 @@ function ClusterDetailScreen() {
       ) : (
         <Card>
           <CardContent className="pt-6">
-            <h3 className="font-medium mb-2">Layout</h3>
+            <h2 className="font-medium mb-2">Layout</h2>
             <p className="text-sm text-muted-foreground">
               Layout management is not supported by this backend.
             </p>

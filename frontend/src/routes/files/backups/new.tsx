@@ -270,7 +270,7 @@ function NewBackupPage() {
 
           {mode === "snapshot" && (
             <div className="rounded-md border bg-muted/20 p-4 space-y-4">
-              <h3 className="text-sm font-medium">Retention policy</h3>
+              <h2 className="text-sm font-medium">Retention policy</h2>
               <p className="text-xs text-muted-foreground">
                 Grandfather-Father-Son rotation. The keep set is the union of the three buckets — a single
                 snapshot can count toward all three at once. Default 7/4/12 covers about 14 months with 23
