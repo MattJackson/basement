@@ -315,85 +315,14 @@ describe("PersonaPill — admin session ended toast (v1.13.2)", () => {
   });
 });
 
-describe("PersonaPill — role switcher (v2.0.0-beta.23)", () => {
-  const navigateSpy = vi.fn((_opts: { to: string }) => Promise.resolve());
-
-  beforeEach(() => {
-    vi.useRealTimers();
-    __resetPersonaPillTestState();
-    navigateSpy.mockClear();
-    
-    // Mock at module level before PersonaPill imports are evaluated
-    vi.mock("@/shared/auth/useUser", async (importOriginal) => {
-      const actual = await importOriginal();
-      return {
-        ...(actual as object),
-        useUser: () => ({ 
-          data: {
-            username: "matthew",
-            activeRole: { kind: "user" },
-            availableRoles: [
-              { kind: "user", label: "User" },
-              { kind: "ui-admin", label: "UI Admin" }
-            ]
-          }, 
-          isLoading: false, 
-          isError: false 
-        }),
-      };
-    });
-
-    vi.mock("@/shared/api/mutations", async (importOriginal) => {
-      const actual = await importOriginal();
-      return {
-        ...(actual as object),
-        useSwitchActiveRole: () => ({
-          isPending: false,
-          mutateAsync: (_data: any) => Promise.resolve(),
-        }),
-      };
-    });
-
-    vi.doMock("@tanstack/react-router", () => ({
-      useNavigate: () => navigateSpy,
-      Link: ({ children }: any) => <a>{children}</a>,
-    }));
-  });
-
-  afterEach(() => {
-    vi.resetModules();
-    vi.restoreAllMocks();
-  });
-
-  it("renders role trigger button when multiple roles available", async () => {
-    const client = newClient();
-    
-    render(
-      <QueryClientProvider client={client}>
-        <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
-          <PersonaPill />
-        </AuthModeProvider>
-      </QueryClientProvider>,
-    );
-
-    expect(await screen.findByTestId("persona-role-trigger")).toBeInTheDocument();
-  });
-
-  it("role switcher trigger button exists when multiple roles available", async () => {
-    const client = newClient();
-    
-    render(
-      <QueryClientProvider client={client}>
-        <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
-          <PersonaPill />
-        </AuthModeProvider>
-      </QueryClientProvider>,
-    );
-
-    const roleTrigger = await screen.findByTestId("persona-role-trigger");
-    expect(roleTrigger).toBeInTheDocument();
-  });
-});
+// v2.0.0-beta.24: the freshman's "PersonaPill — role switcher (v2.0.0-beta.23)"
+// describe block was removed. It called vi.mock("@/shared/auth/useUser", ...)
+// inside a beforeEach. Vitest hoists vi.mock to module level, so the mock
+// applied to ALL describe blocks in this file — every other test then saw
+// activeRole:{kind:"user"} from the broken mock, falling through to the
+// wrong rendering branch. Result: 5 pre-existing tests (warning windows,
+// drop privileges) regressed. Role-switcher coverage moved to a dedicated
+// file with properly-scoped mocks: PersonaPill.roleSwitcher.test.tsx.
 
 describe("formatRemaining", () => {
   it("renders mm:ss under an hour", () => {
