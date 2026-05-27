@@ -288,15 +288,13 @@ export function PersonaPill() {
         data-mode={activeRole.kind}
         data-role={roleLabel.toLowerCase().replace(/:/g, "")}
       >
-        {/* v1.13.31: dropped username from the pill — UserMenu trigger
-            already shows [M] matthew immediately to the right, so the pill
-            previously rendered "matthew USER" right next to "[M] matthew"
-            for a "matthew USER [M] matthew" cascade. Pill is now role-only;
-            UserMenu is the canonical identity surface. */}
-        <span>{roleLabel}</span>
+        <span className="hidden sm:inline">{roleLabel}</span>
         {isElevated && activeRole.kind === "ui-admin" && (
-          <span className="ml-2 text-xs opacity-90">(elevated)</span>
+          <span className="hidden sm:inline ml-2 text-xs opacity-90">(elevated)</span>
         )}
+        <span className="sm:hidden">
+          {activeRole.kind === "ui-admin" ? "A" : activeRole.kind === "cluster-admin" ? "C" : "U"}
+        </span>
       </span>
     );
   }, [mode, flashing, inAmberWindow, inRedWindow, activeRole]);
@@ -306,19 +304,21 @@ export function PersonaPill() {
       {pillContent}
       {showCountdown && (
         <>
-          <span
-            className={
-              "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[10px] tabular-nums " +
-              (inRedWindow
-                ? "bg-red-100 text-red-900 dark:bg-red-500/20 dark:text-red-100"
-                : inAmberWindow
-                  ? "bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-100"
-                  : "bg-muted/60 text-muted-foreground")
-            }
-            data-testid="persona-countdown"
-            aria-label={`Admin session ending in ${formatRemaining(remainingMs)}`}
-          >
-            {formatRemaining(remainingMs)} left
+          <span className="hidden sm:inline">
+            <span
+              className={
+                "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-[10px] tabular-nums " +
+                (inRedWindow
+                  ? "bg-red-100 text-red-900 dark:bg-red-500/20 dark:text-red-100"
+                  : inAmberWindow
+                    ? "bg-amber-100 text-amber-900 dark:bg-amber-500/20 dark:text-amber-100"
+                    : "bg-muted/60 text-muted-foreground")
+              }
+              data-testid="persona-countdown"
+              aria-label={`Admin session ending in ${formatRemaining(remainingMs)}`}
+            >
+              {formatRemaining(remainingMs)} left
+            </span>
           </span>
           <button
             type="button"
