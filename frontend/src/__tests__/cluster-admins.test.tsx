@@ -17,12 +17,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Table, TableBody } from "@/components/ui/table";
 import { ClusterAdminRow } from "@/routes/admin/clusters/$cid";
+import { useTranslation } from "react-i18next";
 
 // useElevationGuard reads the mode store; stub it so the row's
 // runWithElevation just calls through.
 vi.mock("@/shared/auth/elevation", () => ({
   useElevationGuard:
     () => (fn: () => Promise<unknown>) => fn(),
+}));
+
+const mockT = vi.fn((key: string) => key);
+vi.mock("react-i18next", () => ({
+  ...vi.importActual("react-i18next"),
+  useTranslation: () => ({ t: mockT }),
 }));
 
 function makeQueryClient() {
@@ -56,6 +63,7 @@ describe("ClusterAdminRow (v1.3.0e)", () => {
 
   it("inherited row renders the wildcard badge + disables Remove", () => {
     const client = makeQueryClient();
+    const { t } = useTranslation("pages");
 
     render(
       <Wrapper client={client}>
@@ -69,6 +77,7 @@ describe("ClusterAdminRow (v1.3.0e)", () => {
             source: "manual",
             inherited: true,
           }}
+          t={t}
         />
       </Wrapper>,
     );
@@ -83,6 +92,7 @@ describe("ClusterAdminRow (v1.3.0e)", () => {
 
   it("manual row renders source=manual + enables Remove", () => {
     const client = makeQueryClient();
+    const { t } = useTranslation("pages");
 
     render(
       <Wrapper client={client}>
@@ -96,6 +106,7 @@ describe("ClusterAdminRow (v1.3.0e)", () => {
             source: "manual",
             inherited: false,
           }}
+          t={t}
         />
       </Wrapper>,
     );
@@ -110,6 +121,7 @@ describe("ClusterAdminRow (v1.3.0e)", () => {
 
   it("OIDC-sourced manual row renders the OIDC badge", () => {
     const client = makeQueryClient();
+    const { t } = useTranslation("pages");
 
     render(
       <Wrapper client={client}>
@@ -122,6 +134,7 @@ describe("ClusterAdminRow (v1.3.0e)", () => {
             source: "oidc",
             inherited: false,
           }}
+          t={t}
         />
       </Wrapper>,
     );

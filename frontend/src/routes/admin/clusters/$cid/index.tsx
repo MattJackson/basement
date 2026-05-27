@@ -3,6 +3,7 @@ import { useUser } from "@/shared/auth/useUser";
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -54,6 +55,7 @@ function ClusterDetailScreen() {
   const navigate = useNavigate();
   const { data: user } = useUser();
   const activeRole = user?.activeRole;
+  const { t } = useTranslation("pages");
 
   const { data: cluster, isLoading, error } = useGetCluster(cid);
   const { data: nodes } = useNodes(cid);
@@ -95,7 +97,7 @@ function ClusterDetailScreen() {
     return (
       <div className="space-y-6">
         <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
-        <ErrorBanner message="Couldn&apos;t load cluster details." />
+        <ErrorBanner message={t("errors.connectionFailed")} />
       </div>
     );
   }
@@ -138,22 +140,22 @@ function ClusterDetailScreen() {
           ) : null}
           <div className="flex-1 min-w-0" />
           <div className="flex flex-wrap gap-2 flex-shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
-              title="Bulk-copy every bucket from this cluster to another cluster"
-            >
-              Migrate this cluster
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
-              title="Edit label, color, admin token, S3 endpoint…"
-            >
-              Edit cluster
-            </Button>
+             <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
+                title={t("migrateThisClusterTitle")}
+              >
+                {t("migrateThisCluster")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
+                title={t("editClusterTitle")}
+              >
+                {t("editCluster")}
+              </Button>
           </div>
         </div>
       </div>
@@ -166,17 +168,17 @@ function ClusterDetailScreen() {
               <div className="text-xl font-semibold tabular-nums">
                 {bucketsLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (buckets?.length ?? 0)}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Buckets</div>
+              <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.bucketCount")}</div>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
               <div className="text-xl font-semibold tabular-nums">
                 {keysLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (keys?.length ?? 0)}
               </div>
-              <div className="text-xs text-muted-foreground mt-1">Keys</div>
+              <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.keyCount")}</div>
             </div>
             <div className="text-center p-4 rounded-lg bg-muted/50">
               <div className="text-xl font-semibold tabular-nums">{nodes?.length ?? 0}</div>
-              <div className="text-xs text-muted-foreground mt-1">Nodes</div>
+              <div className="text-xs text-muted-foreground mt-1">{t("adminClustersDetail.nodesTitle")}</div>
             </div>
           </div>
         </CardContent>
@@ -185,45 +187,45 @@ function ClusterDetailScreen() {
       {/* Test Connection */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <span>Connection test</span>
+          <span>{t("adminClustersDetail.testConnection")}</span>
           <Button 
             size="sm" 
             variant="outline"
             onClick={handleTestCluster}
             disabled={testQuery.isPending}
           >
-            {testQuery.isPending ? "Testing…" : "Test connection"}
+            {testQuery.isPending ? t("adminClustersDetail.testing") : t("adminClustersDetail.testConnection")}
           </Button>
         </CardHeader>
         <CardContent className="pt-6">
           {testResult ? (
             <div className={`text-sm ${testResult.ok ? "text-green-600" : "text-destructive"}`}>
-              {testResult.ok ? "✓ Connection successful" : `✗ ${testResult.message}`}
+              {testResult.ok ? t("adminClustersDetail.connectionHealthy") : `${t("adminClustersDetail.connectionUnavailable").replace("{message}", testResult.message || "")}`}
             </div>
           ) : (testQuery.isFetching || testQuery.isPending) ? (
-            <p className="text-sm text-muted-foreground">Checking connection…</p>
+            <p className="text-sm text-muted-foreground">{t("adminClustersDetail.testing")}…</p>
           ) : (
-            <p className="text-sm text-muted-foreground">Click "Test connection" to verify the cluster is reachable.</p>
+            <p className="text-sm text-muted-foreground">Click "{t("adminClustersDetail.testConnection")}" to verify the cluster is reachable.</p>
           )}
         </CardContent>
       </Card>
 
-      {/* Cluster admins — persona-level info, shown above Buckets
+    {/* Cluster admins — persona-level info, shown above Buckets
           because "who runs this cluster" is the operator's first
           question when they hit a cluster detail page. v1.3.0e. */}
-      <ClusterAdminsSection cid={cid} />
+       <ClusterAdminsSection cid={cid} t={t} />
 
-      {/* v1.12.0a (ADR-0007) — per-cluster envelope encryption.
+     {/* v1.12.0a (ADR-0007) — per-cluster envelope encryption.
           Lives next to the persona-level admin list because the
           two questions ("who runs this cluster" + "who can unlock
           its secrets") are operationally adjacent. */}
-      <ClusterEncryptionSection cid={cid} clusterLabel={cluster.label} />
+       <ClusterEncryptionSection cid={cid} clusterLabel={cluster.label} t={t} />
 
       {/* Buckets section — admin-grade columns */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-medium text-muted-foreground">
-            Buckets
+            {t("adminClustersDetail.bucketsTitle")}
             {buckets ? <span className="ml-1.5 text-muted-foreground/60">({buckets.length})</span> : null}
           </h2>
         </div>
@@ -233,8 +235,8 @@ function ClusterDetailScreen() {
           <div className="rounded-lg border bg-card p-6">
             <EmptyState
               icon="database"
-              title="No buckets yet"
-              description="Buckets in this cluster will appear here."
+              title={t("adminClustersDetail.noBucketsYet")}
+              description={t("adminClustersDetail.bucketsAppearHere")}
             />
           </div>
         ) : (
@@ -264,18 +266,13 @@ function ClusterDetailScreen() {
         )}
       </section>
 
-      {/* Keys section — admin-grade columns */}
+     {/* Keys section — admin-grade columns */}
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-sm font-medium text-muted-foreground">
-            Keys
+            {t("adminClustersDetail.keysTitle")}
             {keys ? <span className="ml-1.5 text-muted-foreground/60">({keys.length})</span> : null}
           </h2>
-          {/* v1.11.0.15: no global "View all →" — keys are per-cluster
-              by design and this section already lists every key on
-              this cluster. The old cross-cluster /admin/keys
-              aggregate was removed (orphan route per the
-              per-cluster route model). */}
         </div>
         {keysLoading ? (
           <Skeleton className="h-24 w-full rounded-lg" />
@@ -283,8 +280,8 @@ function ClusterDetailScreen() {
           <div className="rounded-lg border bg-card p-6">
             <EmptyState
               icon="key"
-              title="No keys yet"
-              description="Access keys for this cluster will appear here."
+              title={t("adminClustersDetail.noKeysYet")}
+              description={t("adminClustersDetail.keysAppearHere")}
             />
           </div>
         ) : (
@@ -319,13 +316,13 @@ function ClusterDetailScreen() {
       {/* Nodes section - gated by capability */}
       {capabilities?.layout !== "readonly" && (
         <Card>
-          <CardHeader>Nodes</CardHeader>
+          <CardHeader>{t("adminClustersDetail.nodesTitle")}</CardHeader>
           <CardContent className="pt-6">
             {!nodes || nodes.length === 0 ? (
               <EmptyState
                 icon="server"
-                title="No nodes configured"
-                description="Add nodes via the Layout editor."
+                title={t("adminClustersDetail.noNodesConfigured")}
+                description={t("adminClustersDetail.addNodesViaLayout")}
               />
             ) : (
               <div className="overflow-x-auto">
@@ -357,21 +354,21 @@ function ClusterDetailScreen() {
         </Card>
       )}
 
-      {/* Maintenance → Scrub link (v1.4.0c). Always rendered — the
+    {/* Maintenance → Scrub link (v1.4.0c). Always rendered — the
           page itself surfaces "not supported" for AWS/MinIO drivers
           rather than hiding the link, so an operator can always learn
           why scrub isn't available on a backend instead of finding
           it missing without explanation. */}
-      <Link to="/admin/clusters/$cid/scrub" params={{ cid }}>
-        <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-medium">Maintenance — Scrub</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Inspect block-scrub state and kick off a durability scan.
-                </p>
-              </div>
+       <Link to="/admin/clusters/$cid/scrub" params={{ cid }}>
+         <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
+           <CardContent className="pt-6">
+             <div className="flex items-center justify-between">
+               <div>
+                 <h2 className="font-medium">{t("adminClustersDetail.maintenanceScrubTitle")}</h2>
+                 <p className="text-sm text-muted-foreground mt-1">
+                   {t("adminClustersDetail.maintenanceScrubDescription")}
+                 </p>
+               </div>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 viewBox="0 0 24 24"
@@ -389,19 +386,19 @@ function ClusterDetailScreen() {
         </Card>
       </Link>
 
-      {/* Layout section - gated by capability. Route under cluster
+   {/* Layout section - gated by capability. Route under cluster
           scope lands with CLUSTER.LAYOUT-EDITOR; for now anchor. */}
-      {capabilities?.layout !== "readonly" ? (
-        <Link to="/admin/clusters/$cid/layout" params={{ cid }}>
-          <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-medium">Layout</h2>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    Edit cluster topology and node assignments.
-                  </p>
-                </div>
+       {capabilities?.layout !== "readonly" ? (
+         <Link to="/admin/clusters/$cid/layout" params={{ cid }}>
+           <Card className="cursor-pointer hover:bg-muted/50 transition-colors">
+             <CardContent className="pt-6">
+               <div className="flex items-center justify-between">
+                 <div>
+                   <h2 className="font-medium">{t("adminClustersDetail.layoutTitle")}</h2>
+                   <p className="text-sm text-muted-foreground mt-1">
+                     {t("adminClustersDetail.editTopology")}
+                   </p>
+                 </div>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
@@ -421,9 +418,9 @@ function ClusterDetailScreen() {
       ) : (
         <Card>
           <CardContent className="pt-6">
-            <h2 className="font-medium mb-2">Layout</h2>
+            <h2 className="font-medium mb-2">{t("adminClustersDetail.layoutTitle")}</h2>
             <p className="text-sm text-muted-foreground">
-              Layout management is not supported by this backend.
+              {t("adminClustersDetail.layoutNotSupported")}
             </p>
           </CardContent>
         </Card>
@@ -431,17 +428,17 @@ function ClusterDetailScreen() {
 
       {/* Created */}
       {cluster.createdAt && humanizeTime(cluster.createdAt) !== "—" && (
-        <p className="text-xs text-muted-foreground">Created {humanizeTime(cluster.createdAt)}</p>
+        <p className="text-xs text-muted-foreground">{t("adminClustersDetail.createdLabel")} {humanizeTime(cluster.createdAt)}</p>
       )}
 
       {/* Danger Zone */}
-      <DangerZone description="Deleting this cluster removes the connection configuration. All buckets and keys remain but become inaccessible. Cannot be undone.">
+      <DangerZone description={t("adminClustersDetail.deleteDescription")}>
         <Button
           variant="destructive"
           onClick={() => setDeleteDialogOpen(true)}
           disabled={testQuery.isPending}
         >
-          Delete cluster
+          {t("adminClustersDetail.deleteClusterButton")}
         </Button>
       </DangerZone>
 
@@ -611,7 +608,7 @@ function NodeStatus({ status }: { status?: string }) {
 // from global" badge and disable the Remove button — those have to
 // be managed from /admin/policies because they affect more than this
 // cluster.
-function ClusterAdminsSection({ cid }: { cid: string }) {
+function ClusterAdminsSection({ cid, t }: { cid: string; t: ReturnType<typeof useTranslation>["t"] }) {
   const { data, isLoading, error } = useClusterAdmins(cid);
   const [addOpen, setAddOpen] = useState(false);
 
@@ -619,7 +616,7 @@ function ClusterAdminsSection({ cid }: { cid: string }) {
     <section className="space-y-3">
       <div className="flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-muted-foreground">
-          Cluster admins
+          {t("adminClustersDetail.clusterAdminsTitle")}
           {data?.assignments ? (
             <span className="ml-1.5 text-muted-foreground/60">
               ({data.assignments.length})
@@ -627,20 +624,20 @@ function ClusterAdminsSection({ cid }: { cid: string }) {
           ) : null}
         </h2>
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-          + Add cluster admin
+          {t("adminClustersDetail.+AddClusterAdmin")}
         </Button>
       </div>
 
       {error ? (
-        <ErrorBanner message="Couldn't load cluster admins." />
+        <ErrorBanner message={t("adminClustersDetail.clusterAdminsLoadFailed") || "Couldn't load cluster admins."} />
       ) : isLoading ? (
         <Skeleton className="h-24 w-full rounded-lg" />
       ) : !data || data.assignments.length === 0 ? (
         <div className="rounded-lg border bg-card p-6">
           <EmptyState
             icon="key"
-            title="No cluster admins assigned"
-            description="Anyone with cluster_admin@cluster:* (global) or host_admin still controls this cluster. Add a manual assignment to grant admin rights to a specific user on this cluster only."
+            title={t("adminClustersDetail.noClusterAdminsAssigned")}
+            description={t("adminClustersDetail.adminControlsCluster")}
           />
         </div>
       ) : (
@@ -649,20 +646,21 @@ function ClusterAdminsSection({ cid }: { cid: string }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead className="w-[140px] sm:hidden">Role</TableHead>
-                  <TableHead className="w-[180px] sm:hidden">Source</TableHead>
-                  <TableHead className="w-[120px] text-right sm:hidden">Actions</TableHead>
+                  <TableHead>{t("adminClustersDetail.userColumn")}</TableHead>
+                  <TableHead className="w-[140px] sm:hidden">{t("adminClustersDetail.roleColumn")}</TableHead>
+                  <TableHead className="w-[180px] sm:hidden">{t("adminClustersDetail.sourceColumn")}</TableHead>
+                  <TableHead className="w-[120px] text-right sm:hidden">{t("adminClustersDetail.actionsColumn")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {data.assignments.map((a, i) => (
-                  <ClusterAdminRow
-                    key={`${a.userId}|${a.roleId}|${a.scope}|${i}`}
-                    cid={cid}
-                    assignment={a}
-                  />
-                ))}
+                   <ClusterAdminRow
+                     key={`${a.userId}|${a.roleId}|${a.scope}|${i}`}
+                     cid={cid}
+                     assignment={a}
+                     t={t}
+                   />
+                 ))}
               </TableBody>
             </Table>
           </div>
@@ -673,6 +671,7 @@ function ClusterAdminsSection({ cid }: { cid: string }) {
         <AddClusterAdminDialog
           cid={cid}
           onClose={() => setAddOpen(false)}
+          t={t}
         />
       )}
     </section>
@@ -683,9 +682,11 @@ function ClusterAdminsSection({ cid }: { cid: string }) {
 export function ClusterAdminRow({
   cid,
   assignment,
+  t,
 }: {
   cid: string;
   assignment: ClusterAdminAssignment;
+  t: ReturnType<typeof useTranslation>["t"];
 }) {
   const queryClient = useQueryClient();
   const unassign = useUnassignRole();
@@ -703,19 +704,19 @@ export function ClusterAdminRow({
   let sourceLabel: string;
   let sourceBadgeClass = "text-muted-foreground border-muted-foreground/30";
   if (assignment.inherited) {
-    sourceLabel = "inherited from global";
+    sourceLabel = t("adminClustersDetail.inheritedFromGlobal");
     sourceBadgeClass =
       "text-amber-700 dark:text-amber-400 border-amber-500/40 bg-amber-500/10";
   } else if (assignment.source === "oidc") {
-    sourceLabel = "OIDC";
+    sourceLabel = t("adminClustersDetail.oidcSource");
   } else {
-    sourceLabel = "manual";
+    sourceLabel = t("adminClustersDetail.manualSource");
   }
 
   const handleRevoke = async () => {
     if (
       !confirm(
-        `Revoke ${assignment.roleId} from ${assignment.userId} on this cluster?`,
+        t("adminClustersDetail.revokeConfirm", { roleId: assignment.roleId, userId: assignment.userId }),
       )
     ) {
       return;
@@ -734,7 +735,7 @@ export function ClusterAdminRow({
       // Also refresh /admin/policies cache so the global matrix
       // sees the change without a full reload.
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
-      toast.success("Assignment revoked");
+      toast.success(t("adminClustersDetail.clusterDeletedSuccess"));
     } catch (e) {
       if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
       toast.error((e as Error).message);
@@ -760,15 +761,12 @@ export function ClusterAdminRow({
             <TooltipTrigger asChild>
               <span>
                 <Button variant="destructive" size="sm" disabled>
-                  Remove
+                  {t("adminClustersDetail.removeButton")}
                 </Button>
               </span>
             </TooltipTrigger>
             <TooltipContent className="max-w-xs">
-              This assignment is inherited from a global scope (
-              <code className="font-mono text-[10px]">{assignment.scope}</code>
-              ) and affects more than this cluster. Manage it from{" "}
-              <code className="font-mono text-[10px]">/admin/policies</code>.
+              {t("adminClustersDetail.assignmentInherited", { scope: assignment.scope })}
             </TooltipContent>
           </Tooltip>
         ) : (
@@ -778,7 +776,7 @@ export function ClusterAdminRow({
             onClick={handleRevoke}
             disabled={unassign.isPending}
           >
-            Remove
+            {t("adminClustersDetail.removeButton")}
           </Button>
         )}
       </TableCell>
@@ -795,9 +793,11 @@ export function ClusterAdminRow({
 function AddClusterAdminDialog({
   cid,
   onClose,
+  t,
 }: {
   cid: string;
   onClose: () => void;
+  t: ReturnType<typeof useTranslation>["t"];
 }) {
   const queryClient = useQueryClient();
   const assign = useAssignRole();
@@ -855,7 +855,7 @@ function AddClusterAdminDialog({
 
   const handleAssign = async () => {
     if (!userId.trim() || !roleId) {
-      toast.error("Pick a user and a role");
+      toast.error(t("adminClustersDetail.pickUserAndRole"));
       return;
     }
     try {
@@ -870,7 +870,7 @@ function AddClusterAdminDialog({
         queryKey: ["admin", "clusters", cid, "admins"],
       });
       queryClient.invalidateQueries({ queryKey: ["admin", "policies"] });
-      toast.success(`Assigned ${roleId} to ${userId} on this cluster`);
+      toast.success(t("adminClustersDetail.clusterAdminAssignedSuccess", { roleId, userId }));
       onClose();
     } catch (e) {
       if ((e as Error)?.message === "ELEVATION_CANCELLED") return;
@@ -881,26 +881,25 @@ function AddClusterAdminDialog({
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogHeader>
-        <DialogTitle>Add cluster admin</DialogTitle>
+        <DialogTitle>{t("adminClustersDetail.+AddClusterAdminDialog")}</DialogTitle>
         <p className="text-sm text-muted-foreground">
-          Grant a user admin rights on this cluster only. Scope:{" "}
-          <code className="font-mono text-xs">cluster:{cid}</code>.
+          {t("adminClustersDetail.grantAdminRights", { cid })}
         </p>
       </DialogHeader>
 
       <div className="space-y-3">
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">
-            User
+            {t("adminClustersDetail.userLabel")}
           </label>
           {usersError ? (
             <div className="space-y-1">
               <Input
                 value={userId}
                 onChange={(e) => setUserId(e.target.value)}
-                placeholder="Enter username"
+                placeholder={t("adminClustersDetail.usernamePlaceholder") || "Enter username"}
               />
-              <p className="text-xs text-destructive">{usersError} — enter manually.</p>
+              <p className="text-xs text-destructive">{usersError} — {t("adminClustersDetail.enterManually") || "enter manually"}</p>
             </div>
           ) : users.length === 0 ? (
             <Skeleton className="h-8 w-full" />
@@ -910,7 +909,7 @@ function AddClusterAdminDialog({
               onChange={(e) => setUserId(e.target.value)}
               className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm"
             >
-              <option value="">— pick a user —</option>
+              <option value="">{t("adminClustersDetail.pickUserPlaceholder")}</option>
               {users.map((u) => (
                 <option key={u.username} value={u.username}>
                   {u.name ? `${u.name} (${u.username})` : u.username}
@@ -922,7 +921,7 @@ function AddClusterAdminDialog({
 
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground">
-            Role
+            {t("adminClustersDetail.roleLabel")}
           </label>
           <select
             value={roleId}
@@ -936,18 +935,17 @@ function AddClusterAdminDialog({
             ))}
           </select>
           <p className="text-xs text-muted-foreground">
-            Most operators want <code className="font-mono">cluster_admin</code>{" "}
-            here. Other roles assignable at cluster scope are available too.
+            {t("adminClustersDetail.mostOperatorsWant")}
           </p>
         </div>
       </div>
 
       <DialogFooter>
         <Button variant="outline" onClick={onClose} disabled={assign.isPending}>
-          Cancel
+          {t("adminClustersDetail.cancelButton")}
         </Button>
         <Button onClick={handleAssign} disabled={assign.isPending}>
-          {assign.isPending ? "Assigning…" : "Assign"}
+          {assign.isPending ? t("adminClustersDetail.AssigningLabel") : t("adminClustersDetail.assignButton")}
         </Button>
       </DialogFooter>
     </Dialog>
@@ -964,9 +962,11 @@ function AddClusterAdminDialog({
 function ClusterEncryptionSection({
   cid,
   clusterLabel,
+  t,
 }: {
   cid: string;
   clusterLabel: string;
+  t: ReturnType<typeof useTranslation>["t"];
 }) {
   const { data: status, isLoading } = useClusterLockStatus(cid);
   const promptUnlock = useClusterUnlockPrompt();
@@ -988,8 +988,8 @@ function ClusterEncryptionSection({
 
   const handleLock = () => {
     lock.mutate(undefined, {
-      onSuccess: () => toast.success("Cluster locked"),
-      onError: (e) => toast.error(e.message || "Lock failed"),
+      onSuccess: () => toast.success(t("adminClustersDetail.clusterLocked")),
+      onError: (e) => toast.error(e.message || t("adminClustersDetail.lockFailed") || "Lock failed"),
     });
   };
 
@@ -1001,14 +1001,14 @@ function ClusterEncryptionSection({
 
   const handleRemove = (adminUserId: string) => {
     const ok = window.confirm(
-      `Remove ${adminUserId} from the cluster admins? Other admins still hold their own wrapped CSK; ${adminUserId} just loses the ability to unlock.`,
+      t("adminClustersDetail.removeAdminConfirm", { adminUserId }),
     );
     if (!ok) return;
     removeAdmin.mutate(
       { adminUserId },
       {
-        onSuccess: () => toast.success(`Removed ${adminUserId}`),
-        onError: (e) => toast.error(e.message || "Remove failed"),
+        onSuccess: () => toast.success(t("adminClustersDetail.adminRemoved", { adminUserId })),
+        onError: (e) => toast.error(e.message || t("adminClustersDetail.removeFailed") || "Remove failed"),
       },
     );
   };
@@ -1016,8 +1016,8 @@ function ClusterEncryptionSection({
   return (
     <section className="space-y-3">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-medium text-muted-foreground">Envelope encryption</h2>
-        <span className="text-xs text-muted-foreground">ADR-0007</span>
+        <h2 className="text-sm font-medium text-muted-foreground">{t("adminClustersDetail.EnvelopeEncryptionTitle")}</h2>
+        <span className="text-xs text-muted-foreground">{t("adminClustersDetail.ADR0007Reference")}</span>
       </div>
       <Card>
         <CardContent className="pt-6 space-y-4">
@@ -1036,23 +1036,23 @@ function ClusterEncryptionSection({
           ) : (
             <>
               <div className="flex items-center gap-3 text-sm">
-                <span className="text-muted-foreground">Status:</span>
+                <span className="text-muted-foreground">{t("adminClustersDetail.statusLabel")}</span>
                 {status.unlocked ? (
-                  <span className="text-green-700">Unlocked — secrets accessible</span>
+                  <span className="text-green-700">{t("adminClustersDetail.secretsAccessible")}</span>
                 ) : (
-                  <span className="text-red-700">Locked — mutations needing secrets will prompt for password</span>
+                  <span className="text-red-700">{t("adminClustersDetail.mutationsPromptPassword")}</span>
                 )}
               </div>
 
               {status.requiresMigration ? (
                 <p className="text-xs rounded border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900">
-                  Legacy JWT-encrypted secret will migrate to CSK on next unlock.
+                  {t("adminClustersDetail.legacyMigrationNotice")}
                 </p>
               ) : null}
 
               <div className="space-y-2">
                 <div className="text-xs text-muted-foreground">
-                  Admins ({status.admins.length})
+                  {t("adminClustersDetail.adminsSectionLabel")} ({status.admins.length})
                 </div>
                 <ul className="space-y-1">
                   {status.admins.map((u) => (
@@ -1075,15 +1075,15 @@ function ClusterEncryptionSection({
                 {status.unlocked ? (
                   <>
                     <Button size="sm" variant="outline" onClick={handleLock} disabled={lock.isPending}>
-                      {lock.isPending ? "Locking…" : "Lock cluster"}
+                      {lock.isPending ? t("adminClustersDetail.LockingLabel") : t("adminClustersDetail.lockClusterButton")}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
-                      Add admin
+                      {t("adminClustersDetail.AddAdminDialog")}
                     </Button>
                   </>
                 ) : (
                   <Button size="sm" onClick={handleUnlock}>
-                    Unlock cluster
+                    {t("adminClustersDetail.UnlockClusterButton")}
                   </Button>
                 )}
               </div>
@@ -1100,16 +1100,17 @@ function ClusterEncryptionSection({
             { adminUserId, password },
             {
               onSuccess: () => {
-                toast.success(`Added ${adminUserId}`);
+                toast.success(t("adminClustersDetail.adminAdded", { adminUserId }));
                 setAddOpen(false);
               },
-              onError: (e) => toast.error(e.message || "Add admin failed"),
+              onError: (e) => toast.error(e.message || t("adminClustersDetail.addAdminFailed") || "Add admin failed"),
             },
           )
         }
         pending={addAdmin.isPending}
-        title="Add cluster admin"
-        description="Wrap the cluster's CSK under a new admin's password. The new admin can then unlock the cluster with their own password."
+        title={t("adminClustersDetail.addAdminTitle")}
+        description={t("adminClustersDetail.wrapCskDescription")}
+        t={t}
       />
 
       <AddAdminDialog
@@ -1120,16 +1121,17 @@ function ClusterEncryptionSection({
             { adminUserId, password },
             {
               onSuccess: () => {
-                toast.success("Envelope encryption enabled");
+                toast.success(t("adminClustersDetail.envelopeEncryptionEnabled"));
                 setBootstrapOpen(false);
               },
-              onError: (e) => toast.error(e.message || "Enable failed"),
+              onError: (e) => toast.error(e.message || t("adminClustersDetail.enableFailed") || "Enable failed"),
             },
           )
         }
         pending={addAdmin.isPending}
-        title="Enable envelope encryption"
-        description="Choose the first cluster admin user ID and a password. The password derives an Argon2id wrapping key that protects the cluster's secrets at rest."
+        title={t("adminClustersDetail.enableEnvelopeEncryptionTitle")}
+        description={t("adminClustersDetail.deriveArgon2idDescription")}
+        t={t}
       />
     </section>
   );
@@ -1142,6 +1144,7 @@ function AddAdminDialog({
   pending,
   title,
   description,
+  t,
 }: {
   open: boolean;
   onClose: () => void;
@@ -1149,6 +1152,7 @@ function AddAdminDialog({
   pending: boolean;
   title: string;
   description: string;
+  t: ReturnType<typeof useTranslation>["t"];
 }) {
   const [adminUserId, setAdminUserId] = useState("");
   const [password, setPassword] = useState("");
@@ -1180,7 +1184,7 @@ function AddAdminDialog({
         <p className="text-sm text-muted-foreground">{description}</p>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">
-            Admin user ID
+            {t("adminClustersDetail.adminUserIdLabel")}
           </label>
           <Input
             autoFocus
@@ -1192,14 +1196,14 @@ function AddAdminDialog({
         </div>
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground">
-            Password
+            {t("adminClustersDetail.passwordLabel")}
           </label>
           <Input
             type="password"
             autoComplete="off"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Cluster admin password"
+            placeholder={t("adminClustersDetail.clusterAdminPasswordPlaceholder") || "Cluster admin password"}
             data-testid="add-admin-password"
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -1212,10 +1216,10 @@ function AddAdminDialog({
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onClose} disabled={pending}>
-          Cancel
+          {t("adminClustersDetail.cancelButton")}
         </Button>
         <Button onClick={submit} disabled={pending || !adminUserId || !password}>
-          {pending ? "Saving…" : "Save"}
+          {pending ? t("adminClustersDetail.savingButton") : t("adminClustersDetail.saveButton")}
         </Button>
       </DialogFooter>
     </Dialog>
