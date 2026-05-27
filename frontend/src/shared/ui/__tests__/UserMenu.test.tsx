@@ -155,12 +155,16 @@ describe("UserMenu — Switch to admin elevation", () => {
   });
 
   // v1.13.32: removed two tests that referenced data-testid="switch-to-admin",
-  // a button the v1.13.18 active-role selector cycle removed. The role-submenu-trigger
-  // tests at the bottom of this file cover the replacement flow. Keep the
-  // "ADMIN mode: navigates immediately" test below — it doesn't reference
-  // the removed testids and still validates the auto-nav behavior.
+  // a button the v1.13.18 active-role selector cycle removed.
+  // v2.0.0-beta.21: the previous "ADMIN mode: navigates immediately" test
+  // validated a `onOpenChange` side-effect that auto-routed admins to
+  // /admin/clusters when opening the menu. That behaviour was hijacking
+  // the first click of the avatar trigger — the navigation interrupted
+  // the dropdown render, so users had to click twice to actually see
+  // the menu. The trigger now just opens the menu; navigation lives
+  // on the menu items themselves.
 
-  it("ADMIN mode: navigates immediately without opening the modal", async () => {
+  it("ADMIN mode: opening the menu does NOT navigate (no auto-route hijack)", async () => {
     render(<UserMenu />, {
       wrapper: ({ children }) => (
         <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }}>
@@ -171,11 +175,12 @@ describe("UserMenu — Switch to admin elevation", () => {
 
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
-    // In admin mode, clicking the user menu should navigate immediately to /admin/clusters
+    // The trigger MUST NOT auto-navigate. The dropdown opens; the user
+    // picks where they want to go from the menu items themselves.
     await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
+      expect(navigateMock).not.toHaveBeenCalled();
     });
-    // No modal should be in the DOM.
+    // No modal should be in the DOM either.
     expect(screen.queryByTestId("elevation-password")).not.toBeInTheDocument();
   });
 

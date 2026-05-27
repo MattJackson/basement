@@ -89,6 +89,12 @@ const WARN_RED_MS = 30 * 1000;
 // fire fresh.
 let sessionEndedHandledFor: number | null = null;
 
+// Test-only: reset the module-level falling-edge sentinel so tests
+// driving multiple admin→user transitions don't observe stale state.
+export function __resetPersonaPillTestState() {
+  sessionEndedHandledFor = null;
+}
+
 export function PersonaPill() {
   const { mode, expiresAt } = useAuthMode();
   const setAuthMode = useSetAuthMode();
@@ -216,6 +222,11 @@ export function PersonaPill() {
       //    banner sat over the page asking the operator to elevate
       //    they just dropped from.
       void navigate({ to: "/files" });
+      // Claim the falling-edge latch so the mode-transition effect
+      // doesn't ALSO fire "Admin session ended" right after this
+      // success toast. Same sentinel the effect at :141 checks; this
+      // keeps the drop-button success toast as the sole signal.
+      sessionEndedHandledFor = expiresAt;
       toast.success("Privileges dropped");
     } catch {
       toast.error("Failed to drop privileges — network error");

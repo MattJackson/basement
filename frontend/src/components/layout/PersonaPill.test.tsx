@@ -7,12 +7,12 @@
 // vibes).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { PersonaPill, formatRemaining } from "./PersonaPill";
-import { AuthModeProvider } from "@/shared/auth/mode";
+import { PersonaPill, formatRemaining, __resetPersonaPillTestState } from "./PersonaPill";
+import { AuthModeProvider, useSetAuthMode } from "@/shared/auth/mode";
 import { toast } from "sonner";
 
 // Sonner's toast is a side-effect; mock to keep DOM clean.
@@ -262,6 +262,7 @@ describe("PersonaPill — admin session ended toast (v1.13.2)", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     navigateSpy.mockReset();
+    __resetPersonaPillTestState();
   });
 
   afterEach(() => {
@@ -269,36 +270,46 @@ describe("PersonaPill — admin session ended toast (v1.13.2)", () => {
   });
 
   it("module-level guard prevents duplicate toasts across multiple PersonaPill instances", async () => {
+    // v2.0.0-beta.21: the previous test set React Query data directly,
+    // which doesn't change useAuthMode() — so the falling-edge effect
+    // never fired in isolation and the test was passing only via
+    // inter-test pollution of the module-level `sessionEndedHandledFor`.
+    // Fix: drive the transition through useSetAuthMode() so the effect
+    // actually sees mode go admin→user. This validates the real guard.
     const client = newClient();
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 min, not expired yet
-    
-    // Render TWO PersonaPill instances (simulating AppShell + UserShell)
+    const expiresAt = Date.now() + 5 * 60 * 1000;
+    toast.info = vi.fn() as typeof toast.info;
+
+    function Probe() {
+      const setMode = useSetAuthMode();
+      // Expose setMode to the test via a stable test id we can click.
+      return (
+        <button
+          data-testid="drop-mode"
+          onClick={() => setMode({ mode: "user", expiresAt: 0 })}
+        />
+      );
+    }
+
     render(
       <QueryClientProvider client={client}>
         <AuthModeProvider initial={{ mode: "admin", expiresAt }}>
           <>
             <PersonaPill />
             <PersonaPill />
+            <Probe />
           </>
         </AuthModeProvider>
       </QueryClientProvider>,
     );
 
-    // The module-level guard (sessionEndedFiredRef) ensures that when mode changes
-    // from admin to user, the "Admin session ended" toast fires exactly once even
-    // though both PersonaPill instances subscribe to the same auth mode context.
-    // This is verified by the implementation using a Set keyed on expiresAt.
-
-    // Trigger transition from admin -> user mode (simulates session expiry)
-    await client.setQueryData(
-      ["auth-me"],
-      { username: "matthew", role: "user", uiAdmin: false, oidcUser: false },
-    );
-    
-    // Wait for the effect to fire
+    // Trigger the admin→user falling edge once for both PersonaPills.
+    // fireEvent (not userEvent) — userEvent uses setTimeout internally
+    // and hangs under vi.useFakeTimers() unless we plumb a userEvent
+    // delay/advance helper.
+    fireEvent.click(screen.getByTestId("drop-mode"));
     await vi.advanceTimersByTimeAsync(100);
 
-    // Should have fired exactly once despite two PersonaPill instances
     expect(toast.info).toHaveBeenCalledTimes(1);
     expect(toast.info).toHaveBeenCalledWith("Admin session ended");
   });

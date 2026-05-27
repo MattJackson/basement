@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,7 +20,6 @@ import { toast } from "sonner";
 import { client } from "@/shared/api/client";
 import { useOrgCapabilities, useSetActiveSkin } from "@/shared/api/queries";
 import { promptElevationFromAnywhere } from "@/shared/auth/elevation";
-import { useAuthMode } from "@/shared/auth/mode";
 import { useTheme, type Theme } from "@/shared/theme/useTheme";
 import { useSkinRegistry, useSkin } from "@/shared/hooks/useSkin";
 import { useUser } from "@/shared/auth/useUser";
@@ -39,13 +39,11 @@ export function UserMenu() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: user } = useUser();
-  // v1.3.0a.3: "Switch to admin view" auto-elevates before navigating.
-  // Operator mental model is "going into admin = entering admin mode";
-  // decoupling URL from mode meant the first action under /admin always
-  // 403'd and required a re-click after the elevate modal. We now pop
-  // the modal up front and only navigate on successful elevation —
-  // already-elevated users skip the prompt and go straight to /admin.
-  const { mode } = useAuthMode();
+  // Controlled open so handlers (role switch → 423 elevation prompt)
+  // can close the dropdown before the modal opens. Without this, the
+  // dropdown sits on top of (or under) the elevation modal and steals
+  // focus from the password input.
+  const [menuOpen, setMenuOpen] = useState(false);
   // v1.13.0a (ADR-0008) — the light/dark/system toggle moved out of
   // the page chrome (formerly the standalone ThemeToggle button) and
   // into a Theme submenu here. Per-user always, regardless of the
@@ -110,6 +108,10 @@ export function UserMenu() {
       if (error?.status === 423) {
         try {
           const prompt = "Switching to this role requires admin re-authentication.";
+          // Close the dropdown BEFORE opening the elevation modal so
+          // the password input gets focus + the modal isn't visually
+          // shadowed by the still-open menu.
+          setMenuOpen(false);
           await promptElevationFromAnywhere("admin", prompt);
           
           // Retry the role switch after successful elevation
@@ -137,12 +139,7 @@ export function UserMenu() {
   };
 
   return (
-    <DropdownMenu onOpenChange={(open) => {
-      // Auto-navigate admin users to /admin/clusters when opening menu.
-      if (open && mode === "admin") {
-        void navigate({ to: "/admin/clusters" });
-      }
-    }}>
+    <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger
         // v1.10.0.2 — pre-fix the trigger rendered at ~40px tall on
         // mobile (the inner 32px avatar + 1px×2 padding), below the
