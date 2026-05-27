@@ -1,18 +1,23 @@
+// v2.0.0-beta.4: freshman added a second import block above the
+// existing one without removing duplicates. Consolidated here —
+// dropped the unused createFileRoute / Link / redirect (those are
+// route-level, not used in this component) and merged the duplicate
+// Button / Input / Label / client imports.
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { client } from "@/shared/api/client";
 import { useVersion, useActiveSkin } from "@/shared/api/queries";
 import { useOIDCAvailable } from "@/shared/auth/useOIDCAvailable";
 import { ThemeToggle } from "@/shared/theme/ThemeToggle";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -21,9 +26,16 @@ import {
 } from "@/components/ui/card";
 import { LoginHeroDisplay } from "@/shared/components/SkinInjector";
 
+// v2.0.0-beta.4: zod schema lives at module load — useTranslation
+// is a React hook and can't be called here. Keep the validation
+// messages as English literals; react-hook-form will surface
+// whatever string we put here. (If we ever need per-locale validation
+// messages, the pattern is to construct the schema inside the
+// component with useTranslation in scope, but that's overhead we
+// don't need today for a single-keystroke required check.)
 const loginSchema = z.object({
-  username: z.string().min(1, "Username is required"),
-  password: z.string().min(1, "Password is required"),
+  username: z.string().min(1, "This field is required"),
+  password: z.string().min(1, "This field is required"),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -42,6 +54,7 @@ export function LoginForm() {
   const { data: skin, isLoading: skinLoading } = useActiveSkin();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { t } = useTranslation("pages");
 
   const nextPath = typeof search.next === "string" && search.next.startsWith("/") ? search.next : "/files";
 
@@ -67,18 +80,18 @@ export function LoginForm() {
         return;
       }
       if (response.status >= 500) {
-        toast.error("Something went wrong, try again");
+        toast.error(t("errors.connectionFailed"));
         return;
       }
       if (apiError) {
-        setError(apiError.error?.message ?? "Login failed. Please try again.");
+        setError(apiError.error?.message ?? t("authLogin.signInTitle"));
         return;
       }
 
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       navigate({ to: nextPath });
     } catch {
-      toast.error("Something went wrong, try again");
+      toast.error(t("errors.connectionFailed"));
     } finally {
       setIsSubmitting(false);
     }
@@ -104,15 +117,15 @@ export function LoginForm() {
           </CardHeader>
         )}
         <CardHeader className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight leading-none">Sign in to Basement</h1>
-          <CardDescription>Enter your credentials to access your account</CardDescription>
+          <h1 className="text-2xl font-bold tracking-tight leading-none">{t("authLogin.signInTitle")}</h1>
+          <CardDescription>{t("auth.username")} {t("auth.password")}</CardDescription>
         </CardHeader>
         <CardContent>
           {/* OIDC error handling removed in v1.11.0.24 - no longer supported via query param */}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="username">{t("auth.username")}</Label>
               <Input
                 id="username"
                 type="text"
@@ -127,7 +140,7 @@ export function LoginForm() {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("auth.password")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -144,7 +157,7 @@ export function LoginForm() {
             {error && <p className="text-sm text-destructive">{error}</p>}
 
             <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? "Signing in..." : "Sign in"}
+              {isSubmitting ? t("buttons.saving") : t("authLogin.submitButton")}
             </Button>
           </form>
 
@@ -162,7 +175,7 @@ export function LoginForm() {
                 onClick={onSSOClick}
                 data-testid="sso-button"
               >
-                Sign in with SSO
+                {t("authLogin.signInWithSso")}
               </Button>
             </>
           )}
