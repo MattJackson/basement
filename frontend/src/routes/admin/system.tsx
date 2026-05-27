@@ -674,12 +674,12 @@ function ImplementedGatewayRow({
       {/* on phones so the row collapses cleanly. */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <h3
+          <h2
             id={`gateways-${gateway.name}-heading`}
             className="text-base font-semibold"
           >
             {gateway.displayName}
-          </h3>
+          </h2>
           <ImplementationBadge implemented={true} />
           <StatusPill
             gatewayName={gateway.name}
@@ -800,12 +800,12 @@ function StubGatewayRow({ gateway }: { gateway: GatewayInfo }) {
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <h3
+          <h2
             id={`gateways-${gateway.name}-heading`}
             className="text-sm font-medium"
           >
             {gateway.displayName}
-          </h3>
+          </h2>
           <ImplementationBadge implemented={false} />
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground">
