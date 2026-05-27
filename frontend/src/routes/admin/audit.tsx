@@ -378,7 +378,9 @@ function EventsTable({
               <TableHead className="w-[200px]">Action</TableHead>
               <TableHead>Resource</TableHead>
               <TableHead className="w-[100px]">Result</TableHead>
-              <TableHead className="w-[40px] text-right"></TableHead>
+              <TableHead className="w-[40px] text-right">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

@@ -701,8 +701,9 @@ function AssignmentsPane({
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Role</label>
+              <label htmlFor="policy-role-select" className="text-xs font-medium text-muted-foreground">Role</label>
               <select
+                id="policy-role-select"
                 value={newRole}
                 onChange={(e) => setNewRole(e.target.value)}
                 className="h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm"
@@ -766,9 +767,10 @@ function AssignmentsPane({
             className="h-7 w-40"
           />
         </label>
-        <label className="flex items-center gap-2">
+        <label htmlFor="policy-role-filter" className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">Filter role:</span>
           <select
+            id="policy-role-filter"
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
             className="h-7 rounded-lg border border-input bg-transparent px-2 text-sm"

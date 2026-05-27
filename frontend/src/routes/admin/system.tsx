@@ -164,8 +164,9 @@ function OrgCapabilitiesPage() {
       <div className="space-y-4">
         {/* Signup Mode */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">Signup Mode</label>
+          <label htmlFor="signup-mode" className="text-sm font-medium">Signup Mode</label>
           <select
+            id="signup-mode"
             value={data.signupMode || "invite"}
             onChange={(e) => setData({ ...data, signupMode: e.target.value as OrgCapabilities["signupMode"] })}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
@@ -399,7 +400,7 @@ function AdminSessionTTLCard({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="admin-ttl-preset">
+          <label htmlFor="admin-ttl-preset" className="text-sm font-medium">
             Timeout
           </label>
           <select
@@ -1524,8 +1525,8 @@ function SkinsManager() {
         )}
 
         {/* Installed Skins List */}
-        <div className="space-y-3 pt-4 border-t">
-          <h4 className="text-sm font-medium">Installed Skins</h4>
+        <section className="space-y-3 pt-4 border-t">
+          <h2 className="text-sm font-medium">Installed Skins</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {skins.map((skin) => (
               <div key={skin.name} className="rounded-lg border p-3 flex items-center justify-between">
@@ -1566,7 +1567,7 @@ function SkinsManager() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
       </CardContent>
     </Card>
   );

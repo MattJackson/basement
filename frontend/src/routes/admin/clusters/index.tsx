@@ -115,7 +115,9 @@ if (error) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12"></TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
                 <TableHead>{tp("adminClustersList.addColumnLabel")}</TableHead>
                 <TableHead>{tp("adminClustersList.addColumnDriver")}</TableHead>
                 <TableHead>{tp("adminClustersList.addColumnStatus")}</TableHead>
@@ -155,7 +157,9 @@ if (error) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12"></TableHead>
+                <TableHead className="w-12">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
                 <TableHead>{tp("adminClustersList.addColumnLabel")}</TableHead>
                 <TableHead>{tp("adminClustersList.addColumnDriver")}</TableHead>
                 <TableHead>{tp("adminClustersList.addColumnStatus")}</TableHead>
