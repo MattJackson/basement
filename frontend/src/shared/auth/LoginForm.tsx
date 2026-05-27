@@ -105,7 +105,7 @@ export function LoginForm() {
   const loginHero = skin?.loginHero;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <main className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
@@ -179,15 +179,15 @@ export function LoginForm() {
           )}
 
           {version && (
-            <p
-              className="mt-6 text-center text-xs text-muted-foreground/60"
-              title={`commit ${version.commit?.slice(0, 7) ?? "unknown"} · built ${version.builtAt}`}
-            >
-              {version.version}
-            </p>
+          <p
+               className="mt-6 text-center text-xs text-muted-foreground"
+               title={`commit ${version.commit?.slice(0, 7) ?? "unknown"} · built ${version.builtAt}`}
+             >
+               {version.version}
+             </p>
           )}
         </CardContent>
       </Card>
-    </div>
+    </main>
   );
 }
