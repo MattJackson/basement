@@ -49,6 +49,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@eslint/js": "^10.0.1",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/router-cli": "^1.167.5",
