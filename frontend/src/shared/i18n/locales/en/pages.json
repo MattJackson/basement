@@ -76,6 +76,8 @@
     "roleLabel": "Role",
     "pickUserPlaceholder": "— pick a user —",
     "cantLoadUsers": "Couldn't load users — enter manually.",
+    "usernamePlaceholder": "Enter username",
+    "enterManually": "enter manually",
     "pickUserAndRole": "Pick a user and a role",
     "mostOperatorsWant": "Most operators want cluster_admin here. Other roles assignable at cluster scope are available too.",
 "clusterAdminAssignedSuccess": "Assigned {roleId} to {userId} on this cluster",
