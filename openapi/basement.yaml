@@ -45,72 +45,36 @@ tags:
   description: Cross-cluster sync job management (v0.8.0c)
 paths:
   /admin/buckets:
-      get:
-        operationId: listBuckets
-        summary: List all buckets
-        description: Returns all storage buckets in the cluster with their ID, global
-          aliases, and summary statistics (object count, size). Used by Buckets — list
-          screen.
-        tags:
-        - AdminBuckets
-        security:
-        - cookieAuth: []
-        responses:
-          '200':
-            description: List of buckets
-            content:
-              application/json:
-                schema:
-                  type: array
-                  items:
-                    $ref: '#/components/schemas/Bucket'
-          '401':
-            description: No active session or insufficient role
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-      post:
-        operationId: createBucket
-        summary: Create a new bucket
-        description: Creates a new storage bucket with the specified global alias (required)
-          and optional quotas. Returns the created bucket with its ID and initial statistics.
-          Used by Buckets — list screen "Create bucket" action.
-        tags:
-        - AdminBuckets
-        security:
-        - cookieAuth: []
-        requestBody:
-          required: true
+    get:
+      operationId: listAllBuckets
+      summary: List all buckets across connections (cross-cluster aggregate)
+      description: |
+        Fans out to all configured connections and aggregates bucket
+        listings. Each bucket in the response includes its originating
+        connectionId. Errors from individual connections are collected
+        separately in the errors array, allowing the UI to show partial
+        results with error indicators for failed connections.
+
+        Bucket creation lives on the cluster-scoped endpoint
+        (POST /admin/clusters/{cid}/buckets) — this aggregate endpoint
+        is read-only.
+      tags:
+      - AdminBuckets
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: Aggregated bucket list with connection tags and error details
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BucketSpec'
-        responses:
-          '201':
-            description: Bucket created successfully
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/Bucket'
-          '400':
-            description: Invalid bucket specification (e.g., alias format)
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-          '401':
-            description: No active session or insufficient role
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-          '409':
-            description: Bucket with this global alias already exists
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/AggregatedBucketsResponse'
+        '401':
+          description: No active session or insufficient role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /admin/buckets/{id}:
       get:
         operationId: getBucket
@@ -814,43 +778,6 @@ paths:
                   $ref: '#/components/schemas/ErrorResponse'
           '404':
             description: Connection not found
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/ErrorResponse'
-      /admin/buckets: null
-      get:
-        operationId: listAllBuckets
-        summary: List all buckets across connections (cross-cluster aggregate)
-        description: 'Fans out to all configured connections and aggregates bucket listings.
-
-          Each bucket in the response includes its originating connectionId.
-
-          Errors from individual connections are collected separately in the
-
-          errors array, allowing the UI to show partial results with error
-
-          indicators for failed connections.
-
-
-          **Breaking change:** Response shape changed from flat []Bucket to
-
-          { buckets: [...], errors: [...] } wrapper object.
-
-          '
-        tags:
-        - AdminBuckets
-        security:
-        - cookieAuth: []
-        responses:
-          '200':
-            description: Aggregated bucket list with connection tags and error details
-            content:
-              application/json:
-                schema:
-                  $ref: '#/components/schemas/AggregatedBucketsResponse'
-          '401':
-            description: No active session or insufficient role
             content:
               application/json:
                 schema:
