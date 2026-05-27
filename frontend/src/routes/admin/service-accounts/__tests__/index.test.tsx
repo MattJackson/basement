@@ -95,7 +95,7 @@ describe("ServiceAccountsPage", () => {
     });
   });
 
-  it("renders one row per service account with the per-row actions visible", () => {
+  it("renders one row per service account with the per-row actions visible", async () => {
     queryClient.setQueryData(["admin", "service-accounts"], [
       baseSA,
       {
@@ -114,9 +114,12 @@ describe("ServiceAccountsPage", () => {
     expect(screen.getByText("ci-deploy")).toBeInTheDocument();
     expect(screen.getByText("BMNT1234567890ABCDEF")).toBeInTheDocument();
 
-    // Row 2 (revoked) — both row-level actions still rendered but
-    // the dropdown is disabled for re-revoke. The Active/Revoked
-    // pill renders for both rows.
+    // Row 2 (revoked) — hidden by default, shown when toggle is checked.
+    expect(screen.queryByTestId("sa-row-sa-2")).not.toBeInTheDocument();
+
+    const toggle = screen.getByTestId("show-revoked-toggle");
+    await userEvent.click(toggle);
+
     expect(screen.getByTestId("sa-row-sa-2")).toBeInTheDocument();
     expect(screen.getByText("backup-cron")).toBeInTheDocument();
     expect(screen.getAllByText("Revoked")[0]).toBeInTheDocument();
@@ -145,6 +148,30 @@ describe("ServiceAccountsPage", () => {
     await userEvent.type(searchBox, "BMNT1234");
     expect(screen.getByTestId("sa-row-sa-1")).toBeInTheDocument();
     expect(screen.queryByTestId("sa-row-sa-2")).not.toBeInTheDocument();
+  });
+
+  it("hides revoked SAs by default and shows them when toggle is checked", async () => {
+    queryClient.setQueryData(["admin", "service-accounts"], [
+      baseSA,
+      {
+        ...baseSA,
+        id: "sa-revoked",
+        name: "revoked-sa",
+        accessKeyId: "BMNTREVOKEDKEY1234567890",
+        revokedAt: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    renderList();
+
+    expect(screen.getByTestId("sa-row-sa-1")).toBeInTheDocument();
+    expect(screen.queryByTestId("sa-row-sa-revoked")).not.toBeInTheDocument();
+
+    const toggle = screen.getByTestId("show-revoked-toggle");
+    await userEvent.click(toggle);
+
+    expect(screen.getByTestId("sa-row-sa-1")).toBeInTheDocument();
+    expect(screen.getByTestId("sa-row-sa-revoked")).toBeInTheDocument();
   });
 });
 

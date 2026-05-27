@@ -53,6 +53,7 @@ function ServiceAccountsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [showRevoked, setShowRevoked] = useState(false);
   const { data: rows, isLoading, error } = useServiceAccounts();
 
   const deleteSA = useDeleteServiceAccount();
@@ -72,6 +73,7 @@ function ServiceAccountsPage() {
   const [rotated, setRotated] = useState<ServiceAccountWithSecret | null>(null);
 
   const filtered = (rows ?? []).filter((sa) => {
+    if (!showRevoked && sa.revokedAt) return false;
     if (!search) return true;
     const needle = search.toLowerCase();
     return (
@@ -123,6 +125,15 @@ function ServiceAccountsPage() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 sm:w-72"
         />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={showRevoked}
+            onChange={(e) => setShowRevoked(e.target.checked)}
+            data-testid="show-revoked-toggle"
+          />
+          Show revoked
+        </label>
         <Button
           variant="outline"
           onClick={() => navigate({ to: "/admin/service-accounts/new" })}
