@@ -317,3 +317,50 @@ describe("ProtectedRoute — /admin landing (v2.0.0-beta.23)", () => {
     });
   });
 });
+
+describe("ProtectedRoute — cluster-admin redirect on /admin/clusters (v2.0.0-beta.30 T3)", () => {
+  const clusterAdmin = {
+    username: "matthew",
+    role: "admin" as const,
+    uiAdmin: true,
+    oidcUser: false,
+    activeRole: { kind: "cluster-admin", cluster: "lsi" },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    navigateMock.mockClear();
+    mockedPathname = "/admin/clusters";
+    toastInfoMock.mockClear();
+  });
+
+  it("Cluster Admin on /admin/clusters is redirected to their cluster detail page", async () => {
+    mockUserState = { data: clusterAdmin, isLoading: false, isError: false };
+
+    render(<ProtectedRoute><div>blocked</div></ProtectedRoute>);
+
+    await vi.waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters/lsi" });
+      expect(toastInfoMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("UI Admin can reach /admin/clusters list page", async () => {
+    const uiAdmin = {
+      username: "matthew",
+      role: "admin" as const,
+      uiAdmin: true,
+      oidcUser: false,
+      activeRole: { kind: "ui-admin" },
+    };
+
+    mockUserState = { data: uiAdmin, isLoading: false, isError: false };
+
+    render(<ProtectedRoute><div data-testid="ok">ok</div></ProtectedRoute>);
+
+    await vi.waitFor(() => {
+      expect(navigateMock).not.toHaveBeenCalled();
+      expect(toastInfoMock).not.toHaveBeenCalled();
+    });
+  });
+});

@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useUser } from "@/shared/auth/useUser";
 import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -51,6 +52,8 @@ export const Route = createFileRoute("/admin/clusters/$cid/")({
 function ClusterDetailScreen() {
   const { cid } = Route.useParams();
   const navigate = useNavigate();
+  const { data: user } = useUser();
+  const activeRole = user?.activeRole;
 
   const { data: cluster, isLoading, error } = useGetCluster(cid);
   const { data: nodes } = useNodes(cid);
@@ -91,7 +94,7 @@ function ClusterDetailScreen() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
         <ErrorBanner message="Couldn&apos;t load cluster details." />
       </div>
     );
@@ -100,7 +103,7 @@ function ClusterDetailScreen() {
   if (isLoading || !cluster) {
     return (
       <div className="space-y-6">
-        <BackLink />
+        <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
         <Skeleton className="h-8 w-48" />
         <Card>
           <CardContent className="pt-6">
@@ -117,7 +120,7 @@ function ClusterDetailScreen() {
 
   return (
     <div className="space-y-6">
-      <BackLink />
+      <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
 
       {/* Header */}
       <div className="space-y-2">
@@ -527,7 +530,8 @@ function ClusterKeyRow({ cid, keyId, fallbackName }: { cid: string; keyId: strin
   );
 }
 
-function BackLink() {
+function BackLink({ isClusterAdmin }: { isClusterAdmin?: boolean }) {
+  if (isClusterAdmin) return null;
   return (
     <Link
       to="/admin/clusters"
