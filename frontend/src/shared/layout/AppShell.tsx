@@ -10,6 +10,7 @@ import { useUser } from "@/shared/auth/useUser";
 import { useAuthMode } from "@/shared/auth/mode";
 import { useOnboardingState } from "@/shared/api/queries";
 import { SkinInjector, OperatorFooter } from "@/shared/components/SkinInjector";
+import { useTranslation } from "react-i18next";
 
 interface AppShellProps {
   children?: ReactNode;
@@ -27,10 +28,11 @@ const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function AppShell({ children }: AppShellProps): ReactNode {
   const { data: user, isLoading: userLoading } = useUser();
-  const isUIAdmin = user?.uiAdmin === true;
+  const isUIAdminActive = user?.activeRole?.kind === "ui-admin";
   const { mode } = useAuthMode();
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation("common");
 
   // v1.9.0e.2 — tight mode/view coupling. USER mode visiting /admin/*
   // gets a silent redirect to /files; no elevation prompt, no banner.
@@ -154,12 +156,8 @@ if (location.pathname === "/login") return;
               >
                 Buckets
               </Link>
-              {isUIAdmin && (
+              {isUIAdminActive && (
                 <>
-                  {/* OBS.USAGE v0.9.0k — sits between Buckets and */}
-                  {/* Clusters so the operator's natural left-to-right */}
-                  {/* scan hits "what's there" (buckets) → "how much" */}
-                  {/* (usage) → "where it lives" (clusters). */}
                   <Link
                     to="/admin/usage"
                     className={NAV_LINK}
@@ -174,12 +172,34 @@ if (location.pathname === "/login") return;
                   >
                     Clusters
                   </Link>
-                  {/* v1.11.0.15: top-level "Keys" link removed. Keys
-                      are inherently per-cluster (Garage admin model);
-                      the canonical per-cluster keys list lives on
-                      the cluster detail page at /admin/clusters/{cid}.
-                      The orphan cross-cluster /admin/keys route was
-                      removed in the same cycle. */}
+                  <Link
+                    to="/admin/policies"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    {t("navigation.policies")}
+                  </Link>
+                  <Link
+                    to="/admin/service-accounts"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    {t("navigation.serviceAccounts")}
+                  </Link>
+                  <Link
+                    to="/admin/audit"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    {t("navigation.audit")}
+                  </Link>
+                  <Link
+                    to="/admin/system"
+                    className={NAV_LINK}
+                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                  >
+                    {t("navigation.system")}
+                  </Link>
                 </>
               )}
             </nav>

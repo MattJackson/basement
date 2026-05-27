@@ -78,7 +78,7 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
       isLoading: false,
       error: null,
     })),
-    useOrgCapabilities: () => ({ data: {} }),
+    useOrgCapabilities: () => ({ data: { userOverridableSkin: true, allowedUserSkins: [] } }),
     useActiveSkin: () => ({ data: null, isLoading: false }),
     useSetActiveSkin: vi.fn(() => ({ mutate: vi.fn() })),
   };
@@ -314,7 +314,7 @@ describe("UserMenu — Theme submenu (v1.13.0a)", () => {
 // selector tests at the bottom of this file + logout-elevation network
 // behavior in src/shared/api/__tests__/mutations.test.ts.
 
-describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
+describe("UserMenu — slim dropdown (v2.0.0-beta.23)", () => {
   beforeEach(() => {
     navigateMock.mockReset();
   });
@@ -323,155 +323,78 @@ describe("UserMenu — conditional rendering by role (v1.11.0.26)", () => {
     vi.restoreAllMocks();
   });
 
-  // v1.13.32: removed two tests that asserted the v1.x binary "Switch
-  // to admin view" / "Switch to user view" buttons. The v1.13.18
-  // active-role selector replaced those buttons and the equivalent
-  // conditional visibility is now covered by the role-selector tests
-  // at the bottom of this file.
+  it("dropdown contains Theme submenu", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
 
-  it("UI admin sees 'System settings' link", async () => {
-    // v1.13.31 split admin nav by activeRole.kind: System settings only
-    // renders when activeRole.kind === "ui-admin". The mock must set it.
-    setUserMock({
-      username: "matthew",
-      role: "admin",
-      uiAdmin: true,
+    expect(await screen.findByTestId("theme-submenu-trigger")).toBeInTheDocument();
+  });
+
+  it("dropdown contains Language submenu", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByTestId("language-submenu-trigger")).toBeInTheDocument();
+  });
+
+  it("dropdown contains Skin submenu when org allows", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "user", 
+      uiAdmin: true, 
+      oidcUser: false,
+      activeRole: { kind: "user" },
+      availableRoles: [{ kind: "user", label: "User" }]
+    });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByTestId("skin-submenu-trigger")).toBeInTheDocument();
+  });
+
+  it("dropdown contains Sign out option", async () => {
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(await screen.findByText(/Sign out/i)).toBeInTheDocument();
+  });
+
+  it("dropdown does NOT contain role switcher (moved to PersonaPill)", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "user", 
+      uiAdmin: true, 
+      oidcUser: false,
+      activeRole: { kind: "user" },
+      availableRoles: [
+        { kind: "user", label: "User" },
+        { kind: "ui-admin", label: "UI Admin" }
+      ]
+    });
+
+    render(<UserMenu />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByLabelText("Open admin menu"));
+
+    expect(screen.queryByTestId("role-submenu-trigger")).not.toBeInTheDocument();
+  });
+
+  it("dropdown does NOT contain admin nav links (moved to top nav)", async () => {
+    setUserMock({ 
+      username: "matthew", 
+      role: "admin", 
+      uiAdmin: true, 
       oidcUser: false,
       activeRole: { kind: "ui-admin" },
-      availableRoles: [
-        { kind: "user", label: "User" },
-        { kind: "ui-admin", label: "UI Admin" },
-      ],
+      availableRoles: [{ kind: "user", label: "User" }]
     });
 
     render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
     fireEvent.click(screen.getByLabelText("Open admin menu"));
 
-    expect(await screen.findByText("System settings")).toBeInTheDocument();
-  });
-
-it("non-UI admin does NOT see 'System settings' link", async () => {
-    setUserMock({ username: "matthew", role: "admin", uiAdmin: false, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-
-    expect(screen.queryByText("System settings")).not.toBeInTheDocument();
-  });
-
-it("user role does NOT see 'System settings' link", async () => {
-    setUserMock({ username: "matthew", role: "user", uiAdmin: false, oidcUser: false });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "admin", expiresAt: Date.now() + 900_000 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-
-    expect(screen.queryByText("System settings")).not.toBeInTheDocument();
-  });
-});
-
-describe("UserMenu — Role selector (v1.13.18)", () => {
-  beforeEach(() => {
-    navigateMock.mockReset();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("shows Role submenu with available roles", async () => {
-    setUserMock({ 
-      username: "matthew", 
-      role: "user", 
-      uiAdmin: true, 
-      oidcUser: false,
-      activeRole: { kind: "user" },
-      availableRoles: [
-        { kind: "user", label: "User" },
-        { kind: "cluster-admin", cluster: "classe", label: "Cluster Admin: classe" },
-        { kind: "ui-admin", label: "UI Admin" }
-      ]
-    });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-
-    expect(await screen.findByTestId("role-submenu-trigger")).toBeInTheDocument();
-  });
-
-  it("Role submenu shows User, Cluster Admin options, and UI Admin when eligible", async () => {
-    setUserMock({ 
-      username: "matthew", 
-      role: "user", 
-      uiAdmin: true, 
-      oidcUser: false,
-      activeRole: { kind: "cluster-admin", cluster: "classe" },
-      availableRoles: [
-        { kind: "user", label: "User" },
-        { kind: "cluster-admin", cluster: "classe", label: "Cluster Admin: classe" },
-        { kind: "ui-admin", label: "UI Admin" }
-      ]
-    });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    
-    // Open role submenu
-    const roleTrigger = await screen.findByTestId("role-submenu-trigger");
-    fireEvent.click(roleTrigger);
-
-    expect(await screen.findByText("User")).toBeInTheDocument();
-    expect(await screen.findByText("Cluster Admin: classe")).toBeInTheDocument();
-    expect(await screen.findByText("UI Admin")).toBeInTheDocument();
-  });
-
-  it("Role submenu shows only User when not eligible for admin roles", async () => {
-    setUserMock({ 
-      username: "matthew", 
-      role: "user", 
-      uiAdmin: false, 
-      oidcUser: false,
-      activeRole: { kind: "user" },
-      availableRoles: [
-        { kind: "user", label: "User" }
-      ]
-    });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-    
-    // Open role submenu
-    const roleTrigger = await screen.findByTestId("role-submenu-trigger");
-    fireEvent.click(roleTrigger);
-
-    expect(await screen.findByText("User")).toBeInTheDocument();
-    expect(screen.queryByText("Cluster Admin")).not.toBeInTheDocument();
-    expect(screen.queryByText("UI Admin")).not.toBeInTheDocument();
-  });
-
-  it("Role selector trigger reads 'Switch role'", async () => {
-    // v1.13.36 changed the trigger from "Role ({currentLabel})" to a
-    // fixed "Switch role" — the current role is already visible in
-    // the PersonaPill and as a check on the radio item, so duplicating
-    // it on the trigger was redundant. Per operator: "Role (user) ->
-    // change to 'Switch Role'".
-    setUserMock({
-      username: "matthew",
-      role: "user",
-      uiAdmin: true,
-      oidcUser: false,
-      activeRole: { kind: "cluster-admin", cluster: "lsi" },
-      availableRoles: [
-        { kind: "user", label: "User" },
-        { kind: "cluster-admin", cluster: "lsi", label: "Cluster Admin: lsi" },
-        { kind: "ui-admin", label: "UI Admin" },
-      ],
-    });
-
-    render(<UserMenu />, { wrapper: (p) => <Wrapper initialMode={{ mode: "user", expiresAt: 0 }} {...p} /> });
-    fireEvent.click(screen.getByLabelText("Open admin menu"));
-
-    const roleTrigger = await screen.findByTestId("role-submenu-trigger");
-    expect(roleTrigger).toHaveTextContent(/Switch role/i);
+    expect(screen.queryByText(/Policies/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Service accounts/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Audit/i)).not.toBeInTheDocument();
   });
 });
 

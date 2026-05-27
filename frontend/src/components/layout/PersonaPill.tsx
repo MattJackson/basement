@@ -36,6 +36,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { useAuthMode, useSetAuthMode } from "@/shared/auth/mode";
 import { useElevationPrompt } from "@/shared/auth/elevation";
 import { useUser } from "@/shared/auth/useUser";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu";
+import { useSwitchActiveRole } from "@/shared/api/mutations";
+import { promptElevationFromAnywhere } from "@/shared/auth/elevation";
 
 /** formatRemaining renders a countdown as h:mm:ss when ≥1h, otherwise mm:ss. */
 export function formatRemaining(msRemaining: number): string {
@@ -104,6 +107,57 @@ export function PersonaPill() {
   const { data: user } = useUser();
 
   const activeRole = user?.activeRole;
+  const availableRoles = user?.availableRoles ?? [];
+  const switchActiveRoleMutation = useSwitchActiveRole();
+
+  const handleRoleChange = async (roleKey: string) => {
+    if (!user?.activeRole || !availableRoles.length) return;
+
+    const selectedRole = availableRoles.find(r => r.kind === roleKey.split(":")[0] && (!r.cluster || r.cluster === roleKey.split(":")[1]));
+    if (!selectedRole) return;
+
+    try {
+      await switchActiveRoleMutation.mutateAsync({
+        kind: selectedRole.kind,
+        cluster: selectedRole.cluster,
+      });
+      
+      if (selectedRole.kind === "user") {
+        await navigate({ to: "/files" });
+      } else if (selectedRole.kind === "cluster-admin" && selectedRole.cluster) {
+        await navigate({ to: `/admin/clusters/${selectedRole.cluster}` });
+      } else if (selectedRole.kind === "ui-admin") {
+        await navigate({ to: "/admin/system" });
+      }
+    } catch (error: any) {
+      if (error?.status === 423) {
+        try {
+          const prompt = "Switching to this role requires admin re-authentication.";
+          setMenuOpen(false);
+          await promptElevationFromAnywhere("admin", prompt);
+          
+          await switchActiveRoleMutation.mutateAsync({
+            kind: selectedRole.kind,
+            cluster: selectedRole.cluster,
+          });
+          
+          if (selectedRole.kind === "user") {
+            await navigate({ to: "/files" });
+          } else if (selectedRole.kind === "cluster-admin" && selectedRole.cluster) {
+            await navigate({ to: `/admin/clusters/${selectedRole.cluster}` });
+          } else if (selectedRole.kind === "ui-admin") {
+            await navigate({ to: "/admin/system" });
+          }
+        } catch (elevationError) {
+          toast.error("Elevation required for this role and was cancelled");
+        }
+      } else {
+        toast.error(error?.message || "Failed to switch role");
+      }
+    }
+  };
+
+  const [menuOpen, setMenuOpen] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
   // warnedRef tracks the latest expiresAt for which we've fired the
@@ -289,7 +343,7 @@ export function PersonaPill() {
             ? "bg-amber-200 text-amber-900 dark:bg-amber-500/20 dark:text-amber-200"
             : "bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground";
 
-    return (
+    const pillContent = (
       <span
         className={
           "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
@@ -308,6 +362,36 @@ export function PersonaPill() {
         </span>
       </span>
     );
+
+    if (availableRoles.length > 1) {
+      return (
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+          <DropdownMenuTrigger>
+            <button type="button" data-testid="persona-role-trigger">
+              {pillContent}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuRadioGroup
+              value={activeRole?.kind === "cluster-admin" && activeRole.cluster ? `cluster-admin:${activeRole.cluster}` : activeRole?.kind ?? "user"}
+              onValueChange={handleRoleChange}
+            >
+              {availableRoles.map((r) => (
+                <DropdownMenuRadioItem
+                  value={r.kind === "cluster-admin" && r.cluster ? `cluster-admin:${r.cluster}` : r.kind}
+                  key={r.kind + (r.cluster || "")}
+                  disabled={switchActiveRoleMutation.isPending}
+                >
+                  {r.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+
+    return pillContent;
   }, [mode, flashing, inAmberWindow, inRedWindow, activeRole]);
 
   return (

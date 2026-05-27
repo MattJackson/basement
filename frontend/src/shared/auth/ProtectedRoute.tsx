@@ -100,6 +100,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         navigate({ to: `/admin/clusters/${activeRole.cluster}` });
         return;
       }
+      if (activeRole.kind === "ui-admin") {
+        navigate({ to: "/admin/system" });
+        return;
+      }
       navigate({ to: "/admin/clusters" });
       return;
     }

@@ -230,3 +230,106 @@ describe("AppShell — hydration-race guards on /admin/* redirect (v1.10.0e)", (
     expect(navigateSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("AppShell — role-aware top nav (v2.0.0-beta.23)", () => {
+  beforeEach(() => {
+    navigateSpy.mockClear();
+    vi.resetModules();
+  });
+
+  it("UI Admin activeRole shows admin pages in top nav", async () => {
+    mockedPath = "/admin/system";
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({
+        data: {
+          username: "matthew",
+          role: "admin" as const,
+          uiAdmin: true,
+          oidcUser: false,
+          activeRole: { kind: "ui-admin" },
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    }));
+    const { AppShell } = await import("@/shared/layout/AppShell");
+    const { getByText } = render(
+      <QueryClientProvider client={newClient()}>
+        <AuthModeProvider initial={{ mode: "admin", expiresAt: Date.now() + 60000 }}>
+          <AppShell>
+            <div data-testid="page-body" />
+          </AppShell>
+        </AuthModeProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(getByText("Policies")).toBeInTheDocument();
+    expect(getByText("Service accounts")).toBeInTheDocument();
+    expect(getByText("Audit log")).toBeInTheDocument();
+    expect(getByText("System settings")).toBeInTheDocument();
+  });
+
+  it("user activeRole does NOT show admin pages in top nav", async () => {
+    mockedPath = "/files";
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({
+        data: {
+          username: "alice",
+          role: "user" as const,
+          uiAdmin: false,
+          oidcUser: false,
+          activeRole: { kind: "user" },
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    }));
+    const { AppShell } = await import("@/shared/layout/AppShell");
+    const { queryByText } = render(
+      <QueryClientProvider client={newClient()}>
+        <AuthModeProvider initial={{ mode: "user", expiresAt: 0 }}>
+          <AppShell>
+            <div data-testid="page-body" />
+          </AppShell>
+        </AuthModeProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(queryByText("Policies")).not.toBeInTheDocument();
+    expect(queryByText("Service accounts")).not.toBeInTheDocument();
+    expect(queryByText("Audit log")).not.toBeInTheDocument();
+    expect(queryByText("System settings")).not.toBeInTheDocument();
+  });
+
+  it("cluster-admin activeRole does NOT show ui-admin pages in top nav", async () => {
+    mockedPath = "/admin/clusters/lsi";
+    vi.doMock("@/shared/auth/useUser", () => ({
+      useUser: () => ({
+        data: {
+          username: "matthew",
+          role: "admin" as const,
+          uiAdmin: true,
+          oidcUser: false,
+          activeRole: { kind: "cluster-admin", cluster: "lsi" },
+        },
+        isLoading: false,
+        isError: false,
+      }),
+    }));
+    const { AppShell } = await import("@/shared/layout/AppShell");
+    const { queryByText } = render(
+      <QueryClientProvider client={newClient()}>
+        <AuthModeProvider initial={{ mode: "admin", expiresAt: Date.now() + 60000 }}>
+          <AppShell>
+            <div data-testid="page-body" />
+          </AppShell>
+        </AuthModeProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(queryByText("Policies")).not.toBeInTheDocument();
+    expect(queryByText("Service accounts")).not.toBeInTheDocument();
+    expect(queryByText("Audit log")).not.toBeInTheDocument();
+    expect(queryByText("System settings")).not.toBeInTheDocument();
+  });
+});
