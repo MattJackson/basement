@@ -3,9 +3,12 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -136,9 +139,14 @@ func main() {
 			}
 		}
 
+		driverName := cfg.Driver.Name
+		if driverName == "garage" || driverName == "garage-v1" {
+			driverName = detectGarageVersion(cfg.Driver.Garage.AdminURL, driverName)
+		}
+
 		newConn := store.Connection{
 			Label:  "default",
-			Driver: cfg.Driver.Name,
+			Driver: driverName,
 			Config: connConfig,
 			Owner:  "org",
 		}
@@ -602,6 +610,38 @@ func refreshPromGauges(c *metrics.Collector, fedStore federation.FederatedBucket
 			c.SetServiceAccountsTotal(count)
 		}
 	}
+}
+
+// detectGarageVersion probes the admin URL to choose between
+// driver=garage (v2) and driver=garage-v1. Returns the input default
+// if the probe is inconclusive (network error, etc) — the seed will
+// then fall through with whatever the operator configured.
+//
+// Probe semantics, based on actual Garage server behavior:
+//   - GET /v2/GetClusterStatus on a v1-only server returns
+//     {"code":"InvalidRequest","message":"Bad request: Unknown API endpoint..."}
+//     We detect this body marker and report v1.
+//   - On a true v2 server, /v2/GetClusterStatus returns either 200
+//     (no auth) or 401/403 with a different error body. We report v2.
+func detectGarageVersion(adminURL, fallback string) string {
+	if adminURL == "" {
+		return fallback
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(strings.TrimRight(adminURL, "/") + "/v2/GetClusterStatus")
+	if err != nil {
+		slog.Warn("detectGarageVersion: probe failed; falling back", "err", err, "fallback", fallback)
+		return fallback
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, "Unknown API endpoint") {
+		slog.Info("detectGarageVersion: detected Garage v1 (admin URL rejects /v2/* endpoints)", "url", adminURL)
+		return "garage-v1"
+	}
+	slog.Info("detectGarageVersion: detected Garage v2 (admin URL accepts /v2/* shape)", "url", adminURL)
+	return "garage"
 }
 
 // serviceAccountsLister is the narrow interface refreshPromGauges

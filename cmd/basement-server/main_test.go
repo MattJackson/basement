@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -54,5 +57,37 @@ func TestLogFormatText_IsHumanReadable(t *testing.T) {
 	}
 	if !strings.Contains(out, `addr=:8080`) {
 		t.Errorf("expected addr=:8080 in text output, got: %s", out)
+	}
+}
+
+func TestDetectGarageVersion(t *testing.T) {
+	v1srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/") {
+			w.WriteHeader(400)
+			fmt.Fprintln(w, `{"code":"InvalidRequest","message":"Bad request: Unknown API endpoint: GET /v2/GetClusterStatus"}`)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer v1srv.Close()
+	if got := detectGarageVersion(v1srv.URL, "garage"); got != "garage-v1" {
+		t.Errorf("v1 server: want garage-v1, got %s", got)
+	}
+
+	v2srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/") {
+			w.WriteHeader(401)
+			fmt.Fprintln(w, `{"code":"AccessDenied","message":"Forbidden: Authorization token must be provided"}`)
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer v2srv.Close()
+	if got := detectGarageVersion(v2srv.URL, "garage"); got != "garage" {
+		t.Errorf("v2 server: want garage, got %s", got)
+	}
+
+	if got := detectGarageVersion("http://127.0.0.1:1", "garage-v1"); got != "garage-v1" {
+		t.Errorf("net failure: want fallback garage-v1, got %s", got)
 	}
 }
