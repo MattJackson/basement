@@ -109,12 +109,15 @@ export function PersonaPill() {
   const activeRole = user?.activeRole;
   const availableRoles = user?.availableRoles ?? [];
   const switchActiveRoleMutation = useSwitchActiveRole();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleRoleChange = async (roleKey: string) => {
     if (!user?.activeRole || !availableRoles.length) return;
 
     const selectedRole = availableRoles.find(r => r.kind === roleKey.split(":")[0] && (!r.cluster || r.cluster === roleKey.split(":")[1]));
     if (!selectedRole) return;
+
+    setMenuOpen(false);
 
     try {
       await switchActiveRoleMutation.mutateAsync({
@@ -132,6 +135,7 @@ export function PersonaPill() {
      } catch (error: any) {
     if (error?.status === 423) {
       try {
+        setMenuOpen(false);
         const prompt = "Switching to this role requires admin re-authentication.";
         await promptElevationFromAnywhere("admin", prompt);
           
@@ -361,43 +365,44 @@ export function PersonaPill() {
       </span>
     );
 
-    if (availableRoles.length > 1) {
-      return (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            data-testid="persona-role-trigger"
-            aria-label="Switch role"
-            title="Switch role"
-            className="cursor-pointer hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-full"
-          >
-            {pillContent}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup
-              value={activeRole?.kind === "cluster-admin" && activeRole.cluster ? `cluster-admin:${activeRole.cluster}` : activeRole?.kind ?? "user"}
-              onValueChange={handleRoleChange}
-            >
-              {availableRoles.map((r) => (
-                <DropdownMenuRadioItem
-                  value={r.kind === "cluster-admin" && r.cluster ? `cluster-admin:${r.cluster}` : r.kind}
-                  key={r.kind + (r.cluster || "")}
-                  disabled={switchActiveRoleMutation.isPending}
-                >
-                  {r.label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      );
-    }
-
     return pillContent;
   }, [mode, flashing, inAmberWindow, inRedWindow, activeRole]);
 
+  const roleSelector = useMemo(() => {
+    if (availableRoles.length <= 1) return null;
+    return (
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger
+          data-testid="persona-role-trigger"
+          aria-label="Switch role"
+          title="Switch role"
+          className="cursor-pointer hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-full"
+        >
+          {pillContent}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[14rem]">
+          <DropdownMenuRadioGroup
+            value={activeRole?.kind === "cluster-admin" && activeRole.cluster ? `cluster-admin:${activeRole.cluster}` : activeRole?.kind ?? "user"}
+            onValueChange={handleRoleChange}
+          >
+            {availableRoles.map((r) => (
+              <DropdownMenuRadioItem
+                value={r.kind === "cluster-admin" && r.cluster ? `cluster-admin:${r.cluster}` : r.kind}
+                key={r.kind + (r.cluster || "")}
+                disabled={switchActiveRoleMutation.isPending}
+              >
+                {r.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }, [availableRoles, menuOpen, pillContent, handleRoleChange, switchActiveRoleMutation.isPending]);
+
   return (
     <div className="flex items-center gap-1.5">
-      {pillContent}
+      {roleSelector ?? pillContent}
       {showCountdown && (
         <>
           <span className="hidden sm:inline">
