@@ -410,6 +410,9 @@ async function main(): Promise<number> {
     // is idempotent — admin-mode pages re-fire it as needed too.
     await check("elevate desktop context to admin mode", async () => {
       await elevateToAdmin(desktop!);
+      await desktop!.request.put(`${BASE_URL}/api/v1/auth/active-role`, {
+        data: { kind: "ui-admin" },
+      });
       const me = await desktop!.request.get(`${BASE_URL}/api/v1/auth/me`);
       const body = await me.json();
       if (body.mode !== "admin") throw new Error(`expected mode=admin, got ${body.mode}`);
@@ -435,7 +438,7 @@ async function main(): Promise<number> {
         const body = await r.json().catch(() => null);
         const arr = Array.isArray(body) ? body : Array.isArray(body?.items) ? body.items : [];
         const stale = arr.filter(
-          (it: any) => (it.name ?? "").startsWith("smoke-") && !it.revokedAt,
+          (it: any) => /^(smoke|feat-smoke)-/.test(it.name ?? "") && !it.revokedAt,
         );
         for (const it of stale) {
           const d = await desktop!.request.delete(`${BASE_URL}${t.delUrl(it.id)}`);
@@ -653,6 +656,9 @@ async function main(): Promise<number> {
     // Mobile context needs its own elevation so admin endpoints work.
     await check("[E] elevate mobile context to admin", async () => {
       await elevateToAdmin(mobile!);
+      await mobile!.request.put(`${BASE_URL}/api/v1/auth/active-role`, {
+        data: { kind: "ui-admin" },
+      });
     });
 
     for (const spec of routes) {
