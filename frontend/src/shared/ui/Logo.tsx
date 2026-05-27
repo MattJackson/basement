@@ -59,7 +59,7 @@ function LogoVersion() {
   const { data } = useVersion();
   if (!data?.version) return null;
   return (
-    <span className="text-[10px] text-muted-foreground/50 tabular-nums leading-none">
+    <span className="text-[10px] text-muted-foreground/70 tabular-nums leading-none">
       {data.version}
     </span>
   );
