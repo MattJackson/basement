@@ -2,9 +2,13 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/sync"
 )
 
@@ -13,11 +17,12 @@ var syncErrNotFound = fmt.Errorf("sync job not found")
 
 // mockSyncStore implements sync.Store for testing.
 type mockSyncStore struct {
-	listErr     error
-	saveErr     error
-	deleteErr   error
-	syncJob     *sync.SyncJob
-	jobs        []*sync.SyncJob
+	listErr      error
+	saveErr      error
+	deleteErr    error
+	syncJob      *sync.SyncJob
+	jobs         []*sync.SyncJob
+	isNotExistErr bool
 }
 
 func (m *mockSyncStore) Save(job *sync.SyncJob) error {
@@ -75,5 +80,30 @@ func TestUserListSyncsHandler_NilStore(t *testing.T) {
 
 	if w.Code != 503 {
 		t.Errorf("expected status 503, got %d", w.Code)
+	}
+}
+
+func TestUserListSyncsHandler_ENOENT(t *testing.T) {
+	mockStore := &mockSyncStore{}
+	s := &Server{syncStore: mockStore, cfg: &config.Config{JWT: config.JWTConfig{Secret: testSecret}}}
+
+	secret := testSecret
+	token, err := auth.IssueTokenWithActiveRole(secret, "test-user", "admin", true, "user", 0, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatalf("failed to generate test token: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/v1/user/syncs", nil)
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: token, Path: "/", Secure: true, HttpOnly: true})
+	w := httptest.NewRecorder()
+
+	authMw := s.authMiddleware()
+	handler := authMw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.userListSyncsHandler(w, r)
+	}))
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
 	}
 }
