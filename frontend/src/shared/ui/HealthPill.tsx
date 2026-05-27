@@ -8,9 +8,9 @@ interface HealthPillProps {
 
 export function HealthPill({ status }: HealthPillProps) {
   const variants = {
-    healthy: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-    degraded: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20",
-    unavailable: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
+    healthy: "bg-green-500/10 text-green-700 dark:text-green-300 border-green-500/20",
+    degraded: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 border-yellow-500/20",
+    unavailable: "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20",
   } as const;
 
   const labels = {
