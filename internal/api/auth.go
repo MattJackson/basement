@@ -37,6 +37,11 @@ type UserResponse struct {
 	ModeExpiresAt  int64         `json:"modeExpiresAt,omitempty"`
 	ActiveRole     *auth.ActiveRole `json:"activeRole,omitempty"`
 	AvailableRoles []auth.AvailableRole `json:"availableRoles,omitempty"`
+	// Capabilities is the flat list of capability strings the user's
+	// active role grants. The FE reads this to drive useCan(...) —
+	// single source of truth shared with the BE's RequireCapability
+	// middleware. See ADR-0009.
+	Capabilities []string `json:"capabilities,omitempty"`
 	// OIDCUser is true when this account was provisioned via OIDC
 	// (no local password). The FE branches its elevation modal on
 	// this — OIDC-only users see an "Elevate via SSO" button that
@@ -285,6 +290,7 @@ func (s *Server) meHandler(w http.ResponseWriter, r *http.Request) {
 		ModeExpiresAt:  claims.ModeExpiresAt,
 		ActiveRole:     activeRole,
 		AvailableRoles: s.computeAvailableRoles(claims),
+		Capabilities:   auth.CapabilitiesFor(activeRole),
 	}
 
 	// OIDCUser flag: a user with an empty PasswordHash + non-empty
@@ -596,6 +602,7 @@ func (s *Server) activeRoleHandler(w http.ResponseWriter, r *http.Request) {
 		ModeExpiresAt:  claims.ModeExpiresAt,
 		ActiveRole:     newActiveRole,
 		AvailableRoles: s.computeAvailableRoles(claims),
+		Capabilities:   auth.CapabilitiesFor(newActiveRole),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
