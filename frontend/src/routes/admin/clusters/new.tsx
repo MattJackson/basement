@@ -8,6 +8,7 @@ import { useCreateCluster } from "@/shared/api/mutations";
 import { useDriverDefaults, type DriverDefaults } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
+import { useUser } from "@/shared/auth/useUser";
 
 type Driver = "garage-v1" | "garage" | "aws-s3" | "minio";
 
@@ -31,6 +32,8 @@ function AddClusterPage() {
   const navigate = useNavigate();
   const createCluster = useCreateCluster();
   const { data: driverDefaults } = useDriverDefaults();
+  const { data: user } = useUser();
+  const activeRole = user?.activeRole;
 
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("#C9874B");
@@ -194,22 +197,25 @@ function AddClusterPage() {
           <div>
             <h2 className="text-sm font-medium text-muted-foreground">Garage S3 plane (optional)</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              S3 endpoint URL where Garage's S3 API listens (default :3902). Required for presign + user-side object browsing. <strong>Per-user S3 credentials now live as Grants — see <Link to="/admin/users" className="underline hover:no-underline">/admin/users</Link>.</strong>
+              S3 endpoint URL where Garage's S3 API listens (default :3902). Required for presign + user-side object browsing.
+              {activeRole?.kind === "ui-admin" && (
+                <strong> Per-user S3 credentials now live as Grants — see <Link to="/admin/users" className="underline hover:no-underline">/admin/users</Link>.</strong>
+              )}
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="s3Url">S3 URL</Label>
               <Input id="s3Url" value={s3Url} onChange={(e) => setS3Url(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.s3Endpoint || "http://garage-host:3902"} />
-              {dDefaults?.s3EndpointHint && (
-                <p className="text-xs text-muted-foreground">{dDefaults.s3EndpointHint}</p>
-              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="s3Region">S3 Region</Label>
               <Input id="s3Region" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={createCluster.isPending} placeholder={dDefaults?.regionLabel || "garage"} />
             </div>
           </div>
+          {dDefaults?.s3EndpointHint && (
+            <p className="text-xs text-muted-foreground mt-1">{dDefaults.s3EndpointHint}</p>
+          )}
         </section>
       )}
 

@@ -397,8 +397,8 @@ export function useSwitchActiveRole() {
       }
       return (await res.json()) as UserResponse;
     },
-    onSuccess: () => {
-      // Invalidate /auth/me so the next fetch picks up the new active role
+    onSuccess: (user) => {
+      queryClient.setQueryData(["auth", "me"], user);
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
     },
   });
