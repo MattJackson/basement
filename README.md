@@ -68,10 +68,11 @@ Shots ending in `-mocked.png` are Playwright-driven static-HTML renders for comp
 
 ## Roadmap
 
-**v1.x is complete.** The v1 line built basement from a single-cluster admin surface into a multi-backend control plane with federation, backups, M2M auth, MCP, mobile PWA, gateways, compliance primitives, and launch-readiness onboarding.
+**v2.0 is out.** basement has completed its clean break from legacy patterns: dropped legacy JWT encryption, OIDC subject-only users, SkinPolicy, and WebDAV path-style addressing; added multilingual i18n, role-aware nav with persona pill role switcher, user-tier skin persistence, B1 cluster auto-detect (garage v1 vs v2), and an accessibility pass (-71% violations).
 
 | Minor | Headline |
 |------|---------|
+| v2.0 | Clean break: drop legacy JWT encryption, OIDC subject, SkinPolicy, WebDAV path-style; multilingual i18n; role-aware nav + persona pill role switcher; user-tier skin persistence; B1 cluster auto-detect (garage v1 vs v2); accessibility pass (-71% violations) |
 | v1.0 | RBAC + audit log + metrics persistence |
 | v1.1 | Region-tier user persona ([ADR-0002](docs/adr/0002-region-tier-user-model.md)) |
 | v1.2 | Sudo-style admin elevation ([ADR-0003](docs/adr/0003-sudo-style-admin-elevation.md)) |
@@ -85,7 +86,7 @@ Shots ending in `-mocked.png` are Playwright-driven static-HTML renders for comp
 | v1.10 | Bucket versioning + Object Lock + SSE-S3 / SSE-KMS |
 | v1.11 | Launch readiness — first-run wizard, 5-min install, observability, deployment guide |
 
-What's next is open — file an issue or start a discussion if there's a direction you'd like to see basement go.
+v2.0 establishes the foundation for what comes next. Want to influence the roadmap? File an issue, start a discussion in [GitHub Discussions](https://github.com/mattjackson/basement/discussions), or join the conversation on our [question template](.github/ISSUE_TEMPLATE/question.yml).
 
 ## Compared to other OSS admin UIs
 
@@ -111,7 +112,7 @@ The self-hosted S3 admin-UI landscape shifted in 2026 — upstream MinIO archive
 | Audit log UI                         | yes                                   | partial                 | partial               | no                      | no                |
 | Mobile / installable PWA             | yes                                   | no                      | no                    | partial (manifest only) | no                |
 | License                              | AGPL-3.0                              | AGPL-3.0                | AGPL-3.0              | MIT                     | MIT               |
-| Latest release / activity            | v1.11 (2026-05)                       | last commit 2025-11     | last commit 2025-06   | v1.1.0 (2025-09)        | v0.6.2 (2026-05)  |
+| Latest release / activity            | v2.0.0-beta.34 (2026-05)              | last commit 2025-11     | last commit 2025-06   | v1.1.0 (2025-09)        | v0.6.2 (2026-05)  |
 
 "n/a (backend)" means the upstream object store doesn't expose the feature, so no admin UI can ship it — Garage core does not implement versioning, Object Lock, or SSE-S3/SSE-KMS, and this isn't a UI gap. Rows for MinIO Console reflect the AGPL fork (opens3/console), since github.com/minio/console itself was retired alongside minio/minio in April 2026.
 
@@ -144,11 +145,28 @@ Verified against project READMEs, source code searches, and latest release notes
 - [Contributing](CONTRIBUTING.md) — DCO sign-off, dev loop, driver author guide
 - [Changelog](CHANGELOG.md)
 
+## Getting Help / Community
+
+- **File a bug** → [bug_report.yml](.github/ISSUE_TEMPLATE/bug_report.yml)
+- **Ask a question** → [question.yml](.github/ISSUE_TEMPLATE/question.yml) or [GitHub Discussions](https://github.com/mattjackson/basement/discussions)
+- **Security** → [`SECURITY.md`](SECURITY.md) (do not file in public)
+- **Chat**: OPEN — TODO: configure Discord / Matrix / IRC channel
+
 ## Contributing
 
 PRs welcome. Driver authors and gateway authors especially — basement is built to accept new backends and new access surfaces. Start at [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev loop and DCO sign-off, and [`docs/integrations/adding-a-gateway.md`](docs/integrations/adding-a-gateway.md) for the gateway tier.
 
 Security reports: [`SECURITY.md`](SECURITY.md).
+
+## Versioning
+
+basement follows [Semantic Versioning](https://semver.org/) for its public API:
+
+- **Major** (e.g. v1.x → v2.0): breaking changes — see CHANGELOG
+- **Minor** (e.g. v2.0 → v2.1): new features, backwards-compatible
+- **Patch** (e.g. v2.0.0 → v2.0.1): bug fixes only
+
+CHANGELOG.md lists every release. Use the `latest` Docker tag for the rolling line, or pin to a specific tag (e.g. `:v2.0.0`) for production reproducibility.
 
 ## License
 
