@@ -15,6 +15,8 @@ var (
 	ErrInvalid = errors.New("driver: invalid input")
 	// ErrUnauthenticated is returned when the caller is not authenticated.
 	ErrUnauthenticated = errors.New("driver: not authenticated")
+	// ErrMissingAdminToken is returned when a garage driver is used without admin_token configured.
+	ErrMissingAdminToken = errors.New("driver: missing admin token for garage driver")
 )
 
 // Error wraps a sentinel error with backend-specific context.

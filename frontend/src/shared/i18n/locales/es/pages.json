@@ -107,6 +107,7 @@
     "legacyMigrationNotice": "El primer desbloqueo migrará los secretos heredados al nuevo almacén cifrado.",
     "lockClusterButton": "Bloquear clúster",
     "missingAdminTokenBanner": "El token de administrador no está configurado para este clúster — agréguelo en la página Editar para que el análisis de salud pueda autenticarse.",
+    "adminTokenRequired": "Se requiere un token de administrador para los clústeres garage.",
     "mutationsPromptPassword": "Bloqueado — las operaciones que necesitan secretos solicitarán la contraseña",
     "passwordLabel": "Contraseña",
     "revokeConfirm": "¿Revocar el acceso de este administrador? Otros administradores mantienen el suyo.",

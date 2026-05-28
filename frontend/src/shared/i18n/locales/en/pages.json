@@ -107,6 +107,7 @@
     "legacyMigrationNotice": "First unlock will migrate legacy secrets into the new encrypted store.",
     "lockClusterButton": "Lock cluster",
     "missingAdminTokenBanner": "Admin token isn't set for this cluster — add it on the Edit page so the health check can authenticate.",
+    "adminTokenRequired": "Admin token is required for garage clusters.",
     "mutationsPromptPassword": "Locked — operations needing secrets will prompt for the password",
     "passwordLabel": "Password",
     "revokeConfirm": "Revoke this admin's access? Other admins keep theirs.",

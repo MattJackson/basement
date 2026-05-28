@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/admin/clusters/new")({
 
 function AddClusterPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const createCluster = useCreateCluster();
   const { data: driverDefaults } = useDriverDefaults();
   const { data: user } = useUser();
@@ -88,8 +90,16 @@ function AddClusterPage() {
       onSuccess: (created) => {
         navigate({ to: "/admin/clusters/$cid", params: { cid: created.id } });
       },
+      onError: (err) => {
+        const error = err as Error & { code?: string };
+        if (error?.code === "MISSING_ADMIN_TOKEN") {
+          setFormError(t("adminClustersDetail.adminTokenRequired"));
+        }
+      },
     });
   };
+
+  const [formError, setFormError] = useState<string | null>(null);
 
   // ADR-0001 (v0.9.0d): the s3_endpoint+key tri-state guard is gone
   // because user-tier creds (access_key_id, secret_key) moved out of
@@ -182,6 +192,9 @@ function AddClusterPage() {
             <div className="grid gap-2">
               <Label htmlFor="adminToken">Admin Token *</Label>
               <Input id="adminToken" type="password" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} disabled={createCluster.isPending} />
+              {formError && (
+                <p className="text-sm text-destructive">{formError}</p>
+              )}
               {dDefaults?.secretUrl && (
                 <a href={dDefaults.secretUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline hover:no-underline">
                   Where to find your admin token →
