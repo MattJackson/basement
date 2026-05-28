@@ -795,7 +795,7 @@ func TestCreateClusterHandler_ListError(t *testing.T) {
 	}
 	srv := New(newTestConfig(), nil, connsStore, nil, nil)
 
-	body := `{"label":"x","driver":"garage","config":{"k":"v"}}`
+	body := `{"label":"x","driver":"garage","config":{"admin_url":"http://localhost:3476","admin_token":"test"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters", stringsReader(body))
 	req.AddCookie(adminCookie())
 	req.Header.Set("Content-Type", "application/json")
@@ -816,7 +816,7 @@ func TestCreateClusterHandler_CreateFails(t *testing.T) {
 	}
 	srv := New(newTestConfig(), nil, connsStore, nil, nil)
 
-	body := `{"label":"x","driver":"garage","config":{"k":"v"}}`
+	body := `{"label":"x","driver":"garage","config":{"admin_url":"http://localhost:3476","admin_token":"test"}}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters", stringsReader(body))
 	req.AddCookie(adminCookie())
 	req.Header.Set("Content-Type", "application/json")

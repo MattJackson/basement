@@ -59,6 +59,15 @@ func newClient(cfg driverpkg.Config) *client {
 // The response body is preserved verbatim in *driver.Error.Message so callers
 // can surface Garage's diagnostic text upstream.
 func (c *client) do(ctx context.Context, method, path string, body, out any) error {
+	if c.token == "" {
+		return &driverpkg.Error{
+			Op:      method,
+			Driver:  driverName,
+			Err:     driverpkg.ErrMissingAdminToken,
+			Message: "Garage admin token is not configured for this cluster. Edit the cluster to provide it.",
+		}
+	}
+
 	var reqBody io.Reader
 	if body != nil {
 		jsonBytes, err := json.Marshal(body)

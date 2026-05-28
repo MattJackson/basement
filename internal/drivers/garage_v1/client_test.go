@@ -182,16 +182,12 @@ func TestClientDo_5xx(t *testing.T) {
 }
 
 func TestClientDo_NoToken(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
-			t.Errorf("expected no Authorization header when token is empty, got %q", r.Header.Get("Authorization"))
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	c := newClient(map[string]string{"admin_url": ts.URL, "admin_token": ""})
-	if err := c.do(context.Background(), "GET", "/v1/health", nil, nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	c := newClient(map[string]string{"admin_url": "http://localhost:3903", "admin_token": ""})
+	err := c.do(context.Background(), "GET", "/v1/health", nil, nil)
+	if err == nil {
+		t.Fatal("expected error when admin token is empty")
+	}
+	if !errors.Is(err, driverpkg.ErrMissingAdminToken) {
+		t.Errorf("expected ErrMissingAdminToken, got: %v", err)
 	}
 }

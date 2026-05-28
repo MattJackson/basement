@@ -297,7 +297,7 @@ func TestCreateClusterHandler_HappyPath(t *testing.T) {
 	body := map[string]any{
 		"label":  "new-cluster",
 		"driver": "garage",
-		"config": map[string]string{"admin_url": "http://localhost:3476"},
+		"config": map[string]string{"admin_url": "http://localhost:3476", "admin_token": "test-token"},
 	}
 	jsonBody, _ := json.Marshal(body)
 
@@ -331,7 +331,7 @@ func TestCreateClusterHandler_DuplicateLabel(t *testing.T) {
 	body := map[string]any{
 		"label":  "duplicate",
 		"driver": "garage",
-		"config": map[string]string{"admin_url": "http://localhost:3476"},
+		"config": map[string]string{"admin_url": "http://localhost:3476", "admin_token": "test-token"},
 	}
 	jsonBody, _ := json.Marshal(body)
 

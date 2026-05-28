@@ -48,6 +48,15 @@ func newClient(cfg driverpkg.Config) *client {
 //	400, 405, 422-> ErrInvalid
 //	5xx          -> raw "HTTP <code>: <body>" (no sentinel)
 func (c *client) do(ctx context.Context, method, path string, body, out any) error {
+	if c.token == "" {
+		return &driverpkg.Error{
+			Op:      method,
+			Driver:  driverName,
+			Err:     driverpkg.ErrMissingAdminToken,
+			Message: "Garage admin token is not configured for this cluster. Edit the cluster to provide it.",
+		}
+	}
+
 	var reqBody io.Reader
 	if body != nil {
 		jsonBytes, err := json.Marshal(body)

@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -33,6 +34,7 @@ export const Route = createFileRoute("/admin/clusters/$cid/edit")({
 function EditClusterPage() {
   const { cid } = Route.useParams();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { data: cluster, isLoading, error: loadError } = useGetCluster(cid);
   const updateCluster = useUpdateCluster(cid);
   const { data: driverDefaults } = useDriverDefaults();
@@ -128,11 +130,27 @@ function EditClusterPage() {
     try {
       await runWithElevation(() => updateCluster.mutateAsync(update));
       navigate({ to: "/admin/clusters/$cid", params: { cid } });
-    } catch {
-      // ELEVATION_CANCELLED / network errors surface via the existing
-      // updateCluster.error banner above the form.
+    } catch (err) {
+      const error = err as Error & { code?: string };
+      if (error.code === "MISSING_ADMIN_TOKEN") {
+        setFormError(t("adminClustersDetail.adminTokenRequired"));
+      }
+      // Other errors surface via the existing updateCluster.error banner above the form.
     }
   };
+
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (updateCluster.isError) {
+      const error = updateCluster.error as Error & { code?: string };
+      if (error?.code === "MISSING_ADMIN_TOKEN") {
+        setFormError(t("adminClustersDetail.adminTokenRequired"));
+      } else {
+        setFormError(null);
+      }
+    }
+  }, [updateCluster.isError, updateCluster.error]);
 
   // ADR-0001 (v0.9.0d): the s3_endpoint+key tri-state guard is gone
   // because user-tier creds (access_key_id, secret_key) moved out of
@@ -234,6 +252,9 @@ function EditClusterPage() {
             <div className="grid gap-2">
               <Label htmlFor="adminToken">Admin Token *</Label>
               <Input id="adminToken" value={adminToken} onChange={(e) => setAdminToken(e.target.value)} disabled={updateCluster.isPending} type="password" />
+              {formError && (
+                <p className="text-sm text-destructive">{formError}</p>
+              )}
               {dDefaults?.secretUrl && (
                 <a href={dDefaults.secretUrl} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline hover:no-underline">
                   Where to find your admin token →

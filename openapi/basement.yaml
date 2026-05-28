@@ -4049,6 +4049,9 @@ components:
           message:
             type: string
             description: Human-readable status message.
+          code:
+            type: string
+            description: Error code for structured error handling (e.g., MISSING_ADMIN_TOKEN). Optional, only present on failure.
       ClusterUnlockRequest:
         type: object
         required:

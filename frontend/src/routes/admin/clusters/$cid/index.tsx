@@ -144,17 +144,17 @@ function ClusterDetailScreen() {
                 variant="outline"
                 size="sm"
                 onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
-                title={t("migrateThisClusterTitle")}
+                title={t("adminClustersDetail.migrateThisClusterTitle")}
               >
-                {t("migrateThisCluster")}
+                {t("adminClustersDetail.migrateThisCluster")}
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
-                title={t("editClusterTitle")}
+                title={t("adminClustersDetail.editClusterTitle")}
               >
-                {t("editCluster")}
+                {t("adminClustersDetail.editCluster")}
               </Button>
           </div>
         </div>
@@ -199,9 +199,25 @@ function ClusterDetailScreen() {
         </CardHeader>
         <CardContent className="pt-6">
           {testResult ? (
-            <div className={`text-sm ${testResult.ok ? "text-green-600" : "text-destructive"}`}>
-              {testResult.ok ? t("adminClustersDetail.connectionHealthy") : `${t("adminClustersDetail.connectionUnavailable").replace("{message}", testResult.message || "")}`}
-            </div>
+            testResult.code === "MISSING_ADMIN_TOKEN" ? (
+              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-4">
+                <p className="text-sm text-yellow-700 dark:text-yellow-300">
+                  {t("adminClustersDetail.missingAdminTokenBanner")}{" "}
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="p-0 h-auto text-yellow-700 underline dark:text-yellow-300"
+                    onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
+                  >
+                    {t("adminClustersDetail.editCluster")}
+                  </Button>
+                </p>
+              </div>
+            ) : (
+              <div className={`text-sm ${testResult.ok ? "text-green-600" : "text-destructive"}`}>
+                {testResult.ok ? t("adminClustersDetail.connectionHealthy") : `${t("adminClustersDetail.connectionUnavailable").replace("{message}", testResult.message || "")}`}
+              </div>
+            )
           ) : (testQuery.isFetching || testQuery.isPending) ? (
             <p className="text-sm text-muted-foreground">{t("adminClustersDetail.testing")}…</p>
           ) : (
@@ -243,13 +259,13 @@ function ClusterDetailScreen() {
           <div className="rounded-lg border bg-card overflow-hidden">
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="text-right w-[140px] sm:hidden">Size</TableHead>
-                    <TableHead className="text-right w-[120px] sm:hidden">Objects</TableHead>
-                  </TableRow>
-                </TableHeader>
+                 <TableHeader>
+                    <TableRow>
+                      <TableHead>{t("adminClustersDetail.nameColumn")}</TableHead>
+                      <TableHead className="text-right w-[140px] sm:hidden">{t("adminClustersDetail.sizeColumn")}</TableHead>
+                      <TableHead className="text-right w-[120px] sm:hidden">{t("adminClustersDetail.objectsColumn")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {buckets.slice(0, 8).map((b) => (
                     <ClusterBucketRow key={b.id} cid={cid} bucketId={b.id} fallbackAlias={b.aliases?.[0]} />
@@ -289,11 +305,11 @@ function ClusterDetailScreen() {
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead className="sm:hidden">Access Key ID</TableHead>
-                  </TableRow>
-                </TableHeader>
+                    <TableRow>
+                      <TableHead>{t("adminClustersDetail.nameColumn")}</TableHead>
+                      <TableHead className="sm:hidden">{t("adminClustersDetail.accessKeyIdColumn")}</TableHead>
+                    </TableRow>
+                  </TableHeader>
                 <TableBody>
                   {keys.slice(0, 8).map((k) => (
                     <ClusterKeyRow key={k.id} cid={cid} keyId={k.id} fallbackName={k.name} />
@@ -327,15 +343,15 @@ function ClusterDetailScreen() {
             ) : (
               <div className="overflow-x-auto">
                 <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-1/4 sm:hidden">ID</TableHead>
-                      <TableHead className="sm:hidden">Hostname</TableHead>
-                      <TableHead className="sm:hidden">Role</TableHead>
-                      <TableHead className="sm:hidden">Zone</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                 <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-1/4 sm:hidden">{t("adminClustersDetail.idColumn")}</TableHead>
+                        <TableHead className="sm:hidden">{t("adminClustersDetail.hostnameColumn")}</TableHead>
+                        <TableHead className="sm:hidden">{t("adminClustersDetail.roleColumn")}</TableHead>
+                        <TableHead className="sm:hidden">{t("adminClustersDetail.zoneColumn")}</TableHead>
+                        <TableHead>{t("adminClustersDetail.statusColumn")}</TableHead>
+                      </TableRow>
+                    </TableHeader>
                   <TableBody>
                     {nodes.map((node) => (
                       <TableRow key={node.id}>
@@ -1023,14 +1039,9 @@ function ClusterEncryptionSection({
         <CardContent className="pt-6 space-y-4">
           {!status.hasCsk ? (
             <div className="space-y-3">
-              <p className="text-sm">
-                This cluster has no CSK admin yet. Stored secrets are protected by
-                the deployment-wide JWT key only. Enable per-cluster envelope
-                encryption to wrap secrets under a CSK that only the admin
-                password can unlock.
-              </p>
+              <p className="text-sm">{t("adminClustersDetail.unencryptedClusterCopy")}</p>
               <Button size="sm" onClick={() => setBootstrapOpen(true)}>
-                Enable encryption
+                {t("adminClustersDetail.enableEncryptionButton")}
               </Button>
             </div>
           ) : (
@@ -1056,17 +1067,17 @@ function ClusterEncryptionSection({
                 </div>
                 <ul className="space-y-1">
                   {status.admins.map((u) => (
-                    <li key={u} className="flex items-center justify-between text-sm">
-                      <span className="font-mono">{u}</span>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleRemove(u)}
-                        disabled={removeAdmin.isPending}
-                      >
-                        Remove
-                      </Button>
-                    </li>
+                   <li key={u} className="flex items-center justify-between text-sm">
+                        <span className="font-mono">{u}</span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleRemove(u)}
+                          disabled={removeAdmin.isPending}
+                        >
+                          {t("adminClustersDetail.remove")}
+                        </Button>
+                      </li>
                   ))}
                 </ul>
               </div>

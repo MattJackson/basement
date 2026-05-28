@@ -22,6 +22,7 @@ const opDeleteCluster = "delete:cluster"
 type TestClusterResult struct {
 	Ok      bool   `json:"ok"`
 	Message string `json:"message,omitempty"`
+	Code    *string `json:"code,omitempty"`
 }
 
 // listClustersHandler handles GET /api/v1/admin/clusters.
@@ -82,6 +83,14 @@ func (s *Server) createClusterHandler(w http.ResponseWriter, r *http.Request) {
 	if len(spec.Config) == 0 {
 		writeError(w, http.StatusBadRequest, "CONFIG_REQUIRED", "Connection config map must be non-empty", nil)
 		return
+	}
+
+	// Validate admin_token for garage drivers
+	if spec.Driver == "garage" || spec.Driver == "garage-v1" {
+		if spec.Config["admin_token"] == "" {
+			writeError(w, http.StatusUnprocessableEntity, "MISSING_ADMIN_TOKEN", "Garage clusters require an admin_token in config", nil)
+			return
+		}
 	}
 
 	// Check label uniqueness using validation helper
@@ -259,10 +268,20 @@ func (s *Server) updateClusterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Validate driver if provided
+// Validate driver if provided
 	if patch.Driver != "" && !supportedDriver(patch.Driver) {
-		writeError(w, http.StatusBadRequest, "INVALID_DRIVER", "Unsupported driver. Supported drivers: garage, garage-v1, aws-s3", nil)
+		writeError(w, http.StatusBadRequest, "INVALID_DRIVER", "Unsupported drivers: garage, garage-v1, aws-s3", nil)
 		return
+	}
+
+	// For PATCH requests on garage drivers, validate admin_token presence
+	// If patch specifies a new driver or config with admin_token field, ensure it's set.
+	// Otherwise preserve existing token by not overwriting it (operator can clear explicitly).
+	if patch.Driver == "garage" || patch.Driver == "garage-v1" {
+		if patch.Config != nil && patch.Config["admin_token"] == "" {
+			writeError(w, http.StatusUnprocessableEntity, "MISSING_ADMIN_TOKEN", "Garage clusters require an admin_token in config", nil)
+			return
+		}
 	}
 
 	conn, err := s.conns.Update(r.Context(), cid, patch)
@@ -427,9 +446,14 @@ func (s *Server) testClusterHandler(w http.ResponseWriter, r *http.Request) {
 
 	report, err := drv.HealthCheck(r.Context())
 	if err != nil {
+		code := "HEALTH_CHECK_FAILED"
+		if errors.Is(err, driver.ErrMissingAdminToken) {
+			code = "MISSING_ADMIN_TOKEN"
+		}
 		writeJSON(w, http.StatusOK, TestClusterResult{
 			Ok:      false,
 			Message: "Health check failed: " + err.Error(),
+			Code:    &code,
 		})
 		return
 	}
