@@ -10,6 +10,7 @@ import { useUpdateCluster } from "@/shared/api/mutations";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
 import { useElevationGuard } from "@/shared/auth/elevation";
+import { useUser } from "@/shared/auth/useUser";
 
 type Driver = "garage-v1" | "garage" | "aws-s3" | "minio";
 
@@ -35,6 +36,8 @@ function EditClusterPage() {
   const { data: cluster, isLoading, error: loadError } = useGetCluster(cid);
   const updateCluster = useUpdateCluster(cid);
   const { data: driverDefaults } = useDriverDefaults();
+  const { data: user } = useUser();
+  const activeRole = user?.activeRole;
   // v1.3.0a.3: cluster:edit is ADMIN-min on the backend. In USER mode
   // the first save 403s; wrap so the modal pops + the save retries on
   // success (one-click instead of double-click).
@@ -246,22 +249,25 @@ function EditClusterPage() {
           <div>
             <h2 className="text-sm font-medium text-muted-foreground">Garage S3 plane (optional)</h2>
             <p className="text-xs text-muted-foreground mt-1">
-              S3 endpoint URL where Garage's S3 API listens (default :3902). Required for presign + user-side object browsing. <strong>Per-user S3 credentials now live as Grants — see <Link to="/admin/users" className="underline hover:no-underline">/admin/users</Link>.</strong>
+              S3 endpoint URL where Garage's S3 API listens (default :3902). Required for presign + user-side object browsing.
+              {activeRole?.kind === "ui-admin" && (
+                <strong> Per-user S3 credentials now live as Grants — see <Link to="/admin/users" className="underline hover:no-underline">/admin/users</Link>.</strong>
+              )}
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="s3Url">S3 URL</Label>
               <Input id="s3Url" value={s3Url} onChange={(e) => setS3Url(e.target.value)} disabled={updateCluster.isPending} placeholder={dDefaults?.s3Endpoint || "http://garage-host:3902"} />
-              {dDefaults?.s3EndpointHint && (
-                <p className="text-xs text-muted-foreground">{dDefaults.s3EndpointHint}</p>
-              )}
             </div>
             <div className="grid gap-2">
               <Label htmlFor="s3Region">S3 Region</Label>
               <Input id="s3Region" value={s3Region} onChange={(e) => setS3Region(e.target.value)} disabled={updateCluster.isPending} placeholder={dDefaults?.regionLabel || "garage"} />
             </div>
           </div>
+          {dDefaults?.s3EndpointHint && (
+            <p className="text-xs text-muted-foreground mt-1">{dDefaults.s3EndpointHint}</p>
+          )}
         </section>
       )}
 

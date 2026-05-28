@@ -5,6 +5,7 @@ import { EmptyState } from "@/shared/ui/EmptyState";
 import { useBucketLifecycle, usePutBucketLifecycle } from "@/shared/api/queries";
 import type { LifecycleRule } from "@/shared/api/queries";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 
 /**
  * LifecycleSection renders the bucket-detail lifecycle panel.
@@ -28,6 +29,7 @@ export function LifecycleSection({ cid, bid }: { cid: string; bid: string }) {
   const { data, isLoading, error } = useBucketLifecycle(cid, bid);
   const putMutation = usePutBucketLifecycle(cid, bid);
   const queryClient = useQueryClient();
+  const { t } = useTranslation("pages");
 
   if (isLoading) {
     return (
@@ -45,7 +47,9 @@ export function LifecycleSection({ cid, bid }: { cid: string; bid: string }) {
       <section className="space-y-3" data-testid="lifecycle-section">
         <SectionHeader cid={cid} bid={bid} supported={false} canAdd={false} />
         <div className="rounded-lg border bg-card p-6">
-          <p className="text-sm text-destructive">Couldn't load lifecycle policy.</p>
+          <p className="text-sm text-destructive">
+            {t("bucketLifecycle.couldntLoadLifecyclePolicy", { error: error?.message || "" })}
+          </p>
         </div>
       </section>
     );
