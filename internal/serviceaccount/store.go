@@ -47,12 +47,34 @@ import (
 // so audit greps work — `IsRevoked()` distinguishes.
 var ErrNotFound = errors.New("service account not found")
 
+// saBcryptCost is the bcrypt cost for SA secret hashing. SA secrets are
+// 256-bit CSPRNG values, so the cost is security-irrelevant for cracking
+// (a random 256-bit secret is unbruteforceable at any cost) — we keep
+// DefaultCost (10) rather than 12 because bcrypt runs on EVERY bearer
+// (M2M) request and cost 12 quadruples that hot-path CPU for no gain.
+// CRITICAL: this single constant is shared by Create, Rotate, AND
+// dummyBcryptHash so the timing-equalizer hash can never drift to a
+// different cost than the real hashes (which would reopen the AKID
+// enumeration oracle).
+const saBcryptCost = bcrypt.DefaultCost
+
+// mustBcrypt hashes at saBcryptCost and panics on failure (a programming
+// invariant — bcrypt does not fail on valid cost + input).
+func mustBcrypt(s string) []byte {
+	h, err := bcrypt.GenerateFromPassword([]byte(s), saBcryptCost)
+	if err != nil {
+		panic("serviceaccount: bcrypt init failed: " + err.Error())
+	}
+	return h
+}
+
 // dummyBcryptHash is a fixed, never-matching bcrypt hash. VerifySecret
 // compares against it on the access-key-not-found / revoked / expired
 // paths so they spend the same bcrypt time as a real wrong-secret check,
 // closing the timing oracle that would otherwise let an attacker
-// enumerate valid AccessKeyIDs. Computed once at package load.
-var dummyBcryptHash, _ = bcrypt.GenerateFromPassword([]byte("basement-akid-timing-equalizer"), bcrypt.DefaultCost)
+// enumerate valid AccessKeyIDs. Computed once at package load (fail-fast
+// on error rather than silently leaving the equalizer broken).
+var dummyBcryptHash = mustBcrypt("basement-akid-timing-equalizer")
 
 // ErrDuplicateName is returned by Create when an existing, NON-REVOKED
 // service account for the same OwnerUserID already uses the supplied
@@ -259,7 +281,7 @@ func (fs *fileStore) Create(_ context.Context, sa ServiceAccount) (ServiceAccoun
 		return ServiceAccount{}, "", fmt.Errorf("generating secret: %w", err)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), saBcryptCost)
 	if err != nil {
 		return ServiceAccount{}, "", fmt.Errorf("hashing secret: %w", err)
 	}
@@ -470,7 +492,7 @@ func (fs *fileStore) Rotate(_ context.Context, id string) (ServiceAccount, strin
 	if err != nil {
 		return ServiceAccount{}, "", fmt.Errorf("generating rotated secret: %w", err)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(secret), saBcryptCost)
 	if err != nil {
 		return ServiceAccount{}, "", fmt.Errorf("hashing rotated secret: %w", err)
 	}
@@ -484,6 +506,12 @@ func (fs *fileStore) Rotate(_ context.Context, id string) (ServiceAccount, strin
 	}
 	if cur.IsRevoked() {
 		return ServiceAccount{}, "", errors.New("cannot rotate a revoked service account")
+	}
+	// Refuse to rotate an EXPIRED SA — rotating would mint a fresh secret
+	// and effectively resurrect a credential that was supposed to be dead.
+	// (The doc comment promised this; the check was missing.)
+	if cur.IsExpired(time.Now().UTC()) {
+		return ServiceAccount{}, "", errors.New("cannot rotate an expired service account")
 	}
 
 	original := cur
