@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -170,7 +171,10 @@ func (p *OIDCProvider) VerifyIDTokenWithAuthTime(ctx context.Context, rawIDToken
 		return nil, 0, fmt.Errorf("oidc: id_token verification failed: %w", err)
 	}
 
-	if expectedNonce != "" && idToken.Nonce != expectedNonce {
+	// Nonce is MANDATORY: an empty expectedNonce (caller forgot to thread
+	// the cookie nonce) used to silently disable ID-token replay protection.
+	// Both production callers always pass a non-empty nonce.
+	if expectedNonce == "" || idToken.Nonce != expectedNonce {
 		return nil, 0, ErrOIDCNonceMismatch
 	}
 
@@ -211,7 +215,8 @@ func (p *OIDCProvider) VerifyIDTokenWithAllClaims(ctx context.Context, rawIDToke
 		return nil, nil, fmt.Errorf("oidc: id_token verification failed: %w", err)
 	}
 
-	if expectedNonce != "" && idToken.Nonce != expectedNonce {
+	// Nonce is MANDATORY (see VerifyIDTokenWithAuthTime).
+	if expectedNonce == "" || idToken.Nonce != expectedNonce {
 		return nil, nil, ErrOIDCNonceMismatch
 	}
 
@@ -261,8 +266,13 @@ func ClaimStringValues(all map[string]interface{}, name string) []string {
 	}
 	switch v := raw.(type) {
 	case string:
-		if v != "" {
-			out = append(out, v)
+		// Some IdPs (e.g. Pocket-ID in older configs) emit multi-valued
+		// claims like `roles` as a single comma-separated string. Split so
+		// each group matches individually instead of the whole blob.
+		for _, part := range strings.Split(v, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				out = append(out, p)
+			}
 		}
 	case []interface{}:
 		for _, el := range v {

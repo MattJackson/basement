@@ -307,7 +307,11 @@ func (s *Server) elevateOIDCCallbackHandler(w http.ResponseWriter, r *http.Reque
 	// proof. If the IdP returned an old auth_time (i.e. it ignored
 	// max_age=0 and reused a cached session) we reject with 401.
 	now := nowFunc()
-	if authTime <= 0 || now.Unix()-authTime > int64(oidcElevationAuthTimeFreshness.Seconds()) {
+	// Symmetric freshness: reject auth_time that is too old OR too far in the
+	// FUTURE. A one-sided `now-authTime > freshness` check let a future
+	// auth_time (IdP clock ahead) produce a negative delta that passed.
+	authDelta := now.Unix() - authTime
+	if authTime <= 0 || authDelta > int64(oidcElevationAuthTimeFreshness.Seconds()) || authDelta < -int64(oidcElevationAuthTimeFreshness.Seconds()) {
 		s.audit.Log(audit.Event{
 			Time:      now.UTC(),
 			Actor:     claims.UserID,
