@@ -4,11 +4,17 @@
 
 ## TL;DR — where we are right now
 
-- **Live deploy:** `v2.0.0-beta.37` (Watchtower auto-rolls from latest tag)
+- **Live deploy:** `v2.0.0-beta.39` (Watchtower auto-rolls from latest tag)
 - **Latest release-candidate tag:** `v2.0.0-rc.2`
 - **GA tag:** NOT yet (`v2.0.0` final awaits explicit operator OK)
 - **Big in-flight migration:** ADR-0009 capability-based RBAC, 5 phases
-  — Phase A + B shipped, Phase C running (beta.39 freshman), Phase D + E queued
+  — Phase A + B + **C shipped** (beta.39, senior), Phase D + E queued
+- **⚠️ Known live rough edge (introduced by Phase C):** the FE cluster
+  detail page (`$cid/index.tsx`) fetches wiring AND contents from one
+  screen. The backend now enforces the split, so a **UI Admin opening a
+  cluster detail page gets 403s** on contents calls (buckets/keys/
+  admins/lock-status) until Phase D splits the views with `useCan`.
+  Expected per the plan — Phase D (beta.40) resolves it.
 
 ## First three commands when resuming
 
@@ -39,8 +45,8 @@ Decision tree:
 
 | Last tag | Next action |
 |---|---|
-| `v2.0.0-beta.37` (current) | Dispatch `prompts/v2.0.0-beta.39_capability_middleware_migration_2026-05-28.md` if not already running |
-| `v2.0.0-beta.39` | Dispatch `prompts/v2.0.0-beta.40_capability_frontend_useCan_2026-05-28.md` |
+| ~~`v2.0.0-beta.37`~~ | ~~beta.39~~ DONE — Phase C shipped as senior (capability middleware + super-admin branch deleted) |
+| `v2.0.0-beta.39` (current) | Dispatch `prompts/v2.0.0-beta.40_capability_frontend_useCan_2026-05-28.md` — Phase D fixes the UI Admin 403-on-detail-page rough edge |
 | `v2.0.0-beta.40` | Dispatch `prompts/v2.0.0-beta.41_capability_sweep_components_2026-05-28.md` |
 | `v2.0.0-beta.41` | ADR-0009 migration complete. Run full smoke + a11y pass; ask operator about v2.0.0 GA tag |
 
@@ -51,15 +57,30 @@ ADR-0009 capability migration (read `docs/adr/0009-capability-based-rbac.md`):
 ```
 Phase A ✓ ADR + operations matrix (commit 09514ab)
 Phase B ✓ internal/auth/capabilities.go + UserResponse.Capabilities (commit 54f33f7, in beta.37 tree)
-Phase C ⏳ backend RequireCapability middleware + sweep + DELETE super-admin branch (beta.39)
+Phase C ✓ backend RequireCapability middleware + full sweep + DELETED super-admin branch (beta.39, commit 9e05797)
 Phase D … FE useCan + ProtectedRoute rewrite (beta.40)
 Phase E … sweep all activeRole.kind === ... sites in components (beta.41)
 ```
 
-**The architectural anchor being removed:** `internal/auth/active_role.go:68-72`
-"UI Admin is super-admin — passes any cluster route". That branch is the
-root cause of the recurring leak class (beta.6, beta.30, beta.36 item 3).
-Phase C deletes it.
+**The architectural anchor — REMOVED in Phase C (beta.39):** the
+"UI Admin is super-admin — passes any cluster route" branch in
+`active_role.go` (the whole obsolete `ActiveRoleClusterMiddlewareFromPath`
+is gone, with a do-not-reintroduce guard comment). It was the root cause
+of the recurring leak class (beta.6, beta.30, beta.36 item 3). Live-verified
+2026-06-04: UI Admin gets 403 on cluster contents, 200 on wiring;
+cluster-admin@cid gets 200 on contents, 403 on platform.
+
+**Phase C decisions (operator-approved, for D/E continuity):**
+- Full sweep: clusterG + crossG + the platform group all on RequireCapability.
+- `cluster.wiring.read` is the ONE wiring cap held by BOTH roles (ui-admin
+  any cluster, cluster-admin their cluster) — used by GET /admin/clusters/{cid}
+  + driver-info. The FE mirror (Phase D) must reflect this.
+- New caps added beyond the ADR matrix: `cluster.wiring.read`,
+  `cluster.layout.write`, `cluster.scrub.write`, `cluster.keys.update`,
+  and `platform.{system,oidc,skins,onboarding}.read`. Phase E's FE
+  `capabilities.ts` mirror must include these.
+- Bucket lifecycle was re-homed from ui-admin → cluster-admin contents
+  (it was mis-grouped). Phase D route-capabilities map must follow.
 
 **The locked role visibility split** (2026-05-28):
 
