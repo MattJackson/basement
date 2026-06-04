@@ -387,7 +387,8 @@ func (s *OrgCapabilitiesStore) Save() error {
 		return err
 	}
 
-	return os.WriteFile(s.path, data, 0644)
+	// 0600: org config (admin session TTL, signup/OIDC mode, gateways).
+	return os.WriteFile(s.path, data, 0600)
 }
 
 // Get returns a copy of the current capabilities. Legacy

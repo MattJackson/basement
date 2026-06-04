@@ -34,7 +34,10 @@ func loadJSON[T any](path string) (T, error) {
 // then renames over <path> atomically.
 func saveJSON(path string, v any) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// 0700/0600: these files back invites (bcrypt token hashes), OIDC
+	// group->role mappings (authorization config), org capabilities, and
+	// user prefs — none should be world-readable on a multi-user host.
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating dir for %s: %w", path, err)
 	}
 
@@ -47,11 +50,11 @@ func saveJSON(path string, v any) error {
 
 	data = append(data, '\n')
 
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return fmt.Errorf("writing tmp file: %w", err)
 	}
 
-	f, err := os.OpenFile(tmpPath, os.O_RDONLY|os.O_SYNC, 0644)
+	f, err := os.OpenFile(tmpPath, os.O_RDONLY, 0600)
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("opening tmp for fsync: %w", err)
