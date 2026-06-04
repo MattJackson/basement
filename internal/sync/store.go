@@ -5,10 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
 )
+
+// validJobID rejects ids that could escape the syncs directory when used
+// as a path component. Job IDs are UUIDs in normal operation; this guards
+// the path-traversal surface (Delete does os.RemoveAll on the joined path).
+func validJobID(id string) bool {
+	if id == "" || id == "." || id == ".." {
+		return false
+	}
+	return !strings.ContainsAny(id, "/\\") && !strings.Contains(id, "..")
+}
 
 // Store handles persistence of sync jobs to JSON files.
 type Store interface {
@@ -39,9 +50,19 @@ func GenerateID() string {
 
 // Load loads a sync job from disk.
 func (s *fileStore) Load(id string) (*SyncJob, error) {
+	if !validJobID(id) {
+		return nil, fmt.Errorf("invalid job id")
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.loadLocked(id)
+}
 
+// loadLocked reads a job assuming the caller already holds s.mu (read or
+// write). List uses this to avoid re-acquiring RLock while already holding
+// it — sync.RWMutex is NOT reentrant, so the previous self-call could
+// deadlock when a writer was queued between the two RLocks.
+func (s *fileStore) loadLocked(id string) (*SyncJob, error) {
 	path := filepath.Join(s.dir, id, "state.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -103,7 +124,7 @@ func (s *fileStore) List(userID string) ([]*SyncJob, error) {
 			continue
 		}
 
-		job, err := s.Load(entry.Name())
+		job, err := s.loadLocked(entry.Name())
 		if err != nil {
 			continue
 		}
@@ -118,6 +139,9 @@ func (s *fileStore) List(userID string) ([]*SyncJob, error) {
 
 // Delete removes a sync job from disk.
 func (s *fileStore) Delete(id string) error {
+	if !validJobID(id) {
+		return fmt.Errorf("invalid job id")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
