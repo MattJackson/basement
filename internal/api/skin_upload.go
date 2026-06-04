@@ -86,7 +86,64 @@ func validateSkinJSON(data []byte) (*skin.Skin, error) {
 		return nil, errors.New("palette must have primary colors for both light and dark modes")
 	}
 
+	// Content injection guards (server-side defense in depth — these fields
+	// are rendered into the UI, and LoginHero is on the PRE-AUTH login page).
+	// Asset fields are inlined data: URIs; only image data URIs are
+	// legitimate (reject data:text/html, javascript:, etc.).
+	for _, a := range []struct{ name, val string }{
+		{"assets.logoLight", s.Assets.LogoLight},
+		{"assets.logoDark", s.Assets.LogoDark},
+		{"assets.favicon", s.Assets.Favicon},
+	} {
+		if err := validateSkinAsset(a.name, a.val); err != nil {
+			return nil, err
+		}
+	}
+	if s.LoginHero != nil {
+		if err := validateSkinAsset("loginHero.imageDataUri", s.LoginHero.ImageDataURI); err != nil {
+			return nil, err
+		}
+	}
+	// URL fields render into <link href>/<a href>: allow only https or a
+	// relative path — never javascript:/data:.
+	if err := validateSkinURL("typography.fontUrl", s.Typography.FontURL); err != nil {
+		return nil, err
+	}
+	if s.Footer != nil {
+		for i, l := range s.Footer.Links {
+			if err := validateSkinURL(fmt.Sprintf("footer.links[%d].url", i), l.URL); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	return &s, nil
+}
+
+// skinImageDataURIRe matches only image data URIs (the legitimate form for
+// a skin asset). NOTE: svg+xml is allowed because logos are commonly SVG;
+// the FE MUST render assets via <img src> (where SVG scripts do not execute),
+// never inline.
+var skinImageDataURIRe = regexp.MustCompile(`^data:image/(png|jpe?g|gif|webp|svg\+xml|x-icon|vnd\.microsoft\.icon);base64,`)
+
+func validateSkinAsset(field, v string) error {
+	if v == "" {
+		return nil
+	}
+	if !skinImageDataURIRe.MatchString(v) {
+		return fmt.Errorf("%s must be an image data URI (data:image/<type>;base64,...)", field)
+	}
+	return nil
+}
+
+func validateSkinURL(field, v string) error {
+	if v == "" {
+		return nil
+	}
+	if !strings.HasPrefix(v, "https://") && !strings.HasPrefix(v, "/") {
+		return fmt.Errorf("%s must be an https:// URL or a relative path (/...)", field)
+	}
+	return nil
 }
 
 // skinDataDir returns the configured skins directory under dataDir.
