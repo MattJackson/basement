@@ -570,7 +570,10 @@ func TestMeHandler_IncludesModeAndExpiry(t *testing.T) {
 		}
 	})
 
-	t.Run("pre-v1.2 cookie surfaces as admin during grace", func(t *testing.T) {
+	t.Run("pre-v1.2 cookie surfaces as user (grace closed)", func(t *testing.T) {
+		// Security fix: the pre-v1.2 admin grace window is closed
+		// (preV12GraceUntil is a fixed past date). A mode-less cookie now
+		// always surfaces as user mode, never admin.
 		tok := mintLegacyModelessToken(t, secret, "matthew")
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
@@ -581,27 +584,23 @@ func TestMeHandler_IncludesModeAndExpiry(t *testing.T) {
 		}
 		var resp UserResponse
 		_ = json.Unmarshal(rr.Body.Bytes(), &resp)
-		if resp.Mode != "admin" {
-			t.Errorf("legacy cookie Mode = %q, want admin (grace window promotion)", resp.Mode)
+		if resp.Mode != "user" {
+			t.Errorf("legacy cookie Mode = %q, want user (grace window closed)", resp.Mode)
 		}
-		// Legacy claim has no mode-layer expiry — must surface as 0
-		// so the FE doesn't render a misleading countdown.
 		if resp.ModeExpiresAt != 0 {
 			t.Errorf("legacy cookie ModeExpiresAt = %d, want 0", resp.ModeExpiresAt)
 		}
 	})
 }
 
-// TestCurrentMode_PreV12Cookie_TreatedAsAdmin: a token minted by
-// pre-v1.2 code has Mode="" (the field is omitempty). During the
-// 7-day grace window the gate treats it as ADMIN so the existing
-// matthew session keeps working. Past the window it drops to USER.
-func TestCurrentMode_PreV12Cookie_TreatedAsAdmin(t *testing.T) {
+// TestCurrentMode_PreV12Cookie_TreatedAsUser: a token minted by pre-v1.2
+// code has Mode="" (the field is omitempty). SECURITY: the back-compat
+// admin grace window is now CLOSED (preV12GraceUntil is a fixed past
+// date), so a mode-less cookie always resolves to USER — never admin —
+// regardless of process-restart timing.
+func TestCurrentMode_PreV12Cookie_TreatedAsUser(t *testing.T) {
 	srv, secret := newElevateTestServer(t)
 
-	// Build a token with the legacy IssueToken — which now defaults
-	// Mode="user". We need a TRULY mode-less token to test the
-	// pre-v1.2 path; mint one by hand via the jwt library.
 	tok := mintLegacyModelessToken(t, secret, "matthew")
 
 	var observed string
@@ -610,27 +609,12 @@ func TestCurrentMode_PreV12Cookie_TreatedAsAdmin(t *testing.T) {
 	})
 	wrapped := auth.Middleware(secret)(captured)
 
-	// Grace window: now < preV12GraceUntil (set to now+7d at package init).
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
 	rr := httptest.NewRecorder()
 	wrapped.ServeHTTP(rr, req)
-	if observed != "admin" {
-		t.Errorf("pre-v1.2 cookie in grace window: observed mode = %q, want admin", observed)
-	}
-
-	// Simulate post-grace by stubbing nowFunc.
-	origNow := nowFunc
-	nowFunc = func() time.Time { return preV12GraceUntil.Add(time.Hour) }
-	t.Cleanup(func() { nowFunc = origNow })
-
-	observed = ""
-	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
-	req2.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
-	rr2 := httptest.NewRecorder()
-	wrapped.ServeHTTP(rr2, req2)
 	if observed != "user" {
-		t.Errorf("pre-v1.2 cookie past grace window: observed mode = %q, want user", observed)
+		t.Errorf("pre-v1.2 mode-less cookie: observed mode = %q, want user (grace closed)", observed)
 	}
 
 	_ = srv
