@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -739,6 +740,15 @@ func (e *Engine) RemoveLoop(fbID string) {
 		close(wch)
 		delete(e.watchdogQuit, fbID)
 	}
+	// Prune this federation's consecutive-failure counters (key
+	// "fbID|region|bucket") so deleted federations don't leak entries into
+	// e.failures over the engine's lifetime.
+	prefix := fbID + "|"
+	for k := range e.failures {
+		if strings.HasPrefix(k, prefix) {
+			delete(e.failures, k)
+		}
+	}
 	e.mu.Unlock()
 }
 
@@ -782,15 +792,18 @@ func (e *Engine) spawnLoop(ctx context.Context, fbID string) {
 	if e.engineCtx != nil {
 		loopCtx = e.engineCtx
 	}
+	// Add to the WaitGroup BEFORE releasing the lock. Stop closes the quit
+	// channels and Wait()s on e.loops after taking the same lock; if Add
+	// ran after Unlock it could race a concurrent Stop's Wait (a
+	// sync.WaitGroup misuse) and leak the goroutine past shutdown.
+	e.loops.Add(2)
 	e.mu.Unlock()
 
-	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
 		e.runFederation(loopCtx, fbID, quit, trigger)
 	}()
 
-	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
 		e.runEventWorker(loopCtx, fbID, quit, tasks)
@@ -818,9 +831,10 @@ func (e *Engine) spawnWatchdog(ctx context.Context, fbID string) {
 	if e.engineCtx != nil {
 		watchdogCtx = e.engineCtx
 	}
+	// Add before Unlock — see spawnLoop.
+	e.loops.Add(1)
 	e.mu.Unlock()
 
-	e.loops.Add(1)
 	go func() {
 		defer e.loops.Done()
 		e.runWatchdog(watchdogCtx, fbID, quit)
@@ -1802,7 +1816,11 @@ func (e *Engine) tickWatchdog(ctx context.Context, fbID string, state *watchdogS
 			// one probe failure to count.
 			intervalSecs = 1
 		}
-		probesRequired = fb.Policy.AutoFailoverSec / intervalSecs
+		// Ceiling division: a configured window that isn't a multiple of the
+		// watchdog interval must round UP, not down — rounding down fires
+		// failover early (e.g. 45s window / 30s interval = 1 probe = ~30s),
+		// and premature promotion compounds the split-brain risk.
+		probesRequired = (fb.Policy.AutoFailoverSec + intervalSecs - 1) / intervalSecs
 		if probesRequired < 1 {
 			probesRequired = 1
 		}
