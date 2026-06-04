@@ -214,7 +214,7 @@ func TestListRegions_NilUserContext_ReturnsEmpty(t *testing.T) {
 
 func TestDriverForRegion_NoStores_ReturnsUnsupported(t *testing.T) {
 	b := NewProductionBackend(BackendDeps{})
-	_, _, err := b.driverForRegion(context.Background(), "any")
+	_, _, err := b.driverForRegion(context.Background(), &UserContext{UserID: "x"}, "any")
 	if !errors.Is(err, ErrUnsupported) {
 		t.Errorf("driverForRegion no-stores: want ErrUnsupported, got %v", err)
 	}
