@@ -26,27 +26,6 @@ const confirmDeleteTTL = 60 * time.Second
 
 const opDeleteBucket = "delete:bucket"
 
-// listBucketsHandler handles GET /api/v1/admin/buckets.
-// Calls driver.ListBuckets and returns JSON []Bucket per OpenAPI schema.
-func (s *Server) listBucketsHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
-		return
-	}
-
-	buckets, err := s.drv.ListBuckets(r.Context())
-	if err != nil {
-		writeDriverError(w, "ListBuckets", err)
-		return
-	}
-
-	if buckets == nil {
-		buckets = []driver.Bucket{}
-	}
-
-	writeJSON(w, http.StatusOK, buckets)
-}
-
 // getBucketHandler handles GET /admin/clusters/{cid}/buckets/{id}.
 //
 // v1.11.0.2: routes through s.reg.For(ctx, cid) per-cluster driver
