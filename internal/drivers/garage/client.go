@@ -83,9 +83,8 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	// Token presence already validated at the top of do(); set unconditionally.
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -98,7 +97,9 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Bound the admin response read so a malfunctioning/compromised backend
+	// can't return an unbounded body and exhaust memory.
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxAdminRespBytes))
 	if err != nil {
 		return &driverpkg.Error{
 			Op:      method,
@@ -135,21 +136,31 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	case http.StatusBadRequest, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
 		mappedErr = driverpkg.ErrInvalid
 	default:
-		if resp.StatusCode >= 500 {
-			mappedErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
-		} else {
-			mappedErr = &driverpkg.Error{
-				Driver:  driverName,
-				Err:     driverpkg.ErrInvalid,
-				Message: fmt.Sprintf("unexpected status: %d", resp.StatusCode),
-			}
-		}
+		// 5xx and other unexpected statuses: no sentinel. Don't embed the
+		// raw backend body in BOTH Err and Message — keep the sentinel
+		// generic ("HTTP <code>") and surface a single, truncated copy of
+		// the body via Message below.
+		mappedErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	return &driverpkg.Error{
 		Op:      method,
 		Driver:  driverName,
 		Err:     mappedErr,
-		Message: string(respBody),
+		Message: truncateBody(respBody),
 	}
+}
+
+// maxAdminRespBytes bounds how much of an admin API response body we read
+// into memory (success decode + error surfacing).
+const maxAdminRespBytes = 8 << 20 // 8 MiB
+
+// truncateBody renders a (possibly large) backend response body for an error
+// Message, capped so a verbose backend can't bloat the error surface.
+func truncateBody(b []byte) string {
+	const max = 512
+	if len(b) > max {
+		return string(b[:max]) + "…(truncated)"
+	}
+	return string(b)
 }

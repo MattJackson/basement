@@ -138,9 +138,9 @@ func keyFromInfo(resp getKeyInfoResponse) driverpkg.Key {
 		AllowCreateBucket: resp.Permissions.CreateBucket,
 	}
 
-	if resp.Expiration != nil {
-		key.Created = *resp.Expiration // Use expiration as proxy for created if needed
-	}
+	// (Removed a data-integrity bug: this block overwrote key.Created with
+	// the key's EXPIRATION whenever an expiration was set, so the UI showed
+	// the expiry date as the creation date. Created comes from resp.Created.)
 
 	return key
 }

@@ -75,11 +75,9 @@ func (d *driver) ListBuckets(ctx context.Context) ([]driverpkg.Bucket, error) {
 	wg.Wait()
 
 	if len(errs) > 0 {
-		var errMsgs []string
-		for _, e := range errs {
-			errMsgs = append(errMsgs, e.Error())
-		}
-		return buckets, fmt.Errorf("ListBuckets fanout: %v", errors.Join(errs...))
+		// Partial results are returned alongside the error by design (a
+		// degraded multi-bucket fanout still shows what succeeded).
+		return buckets, fmt.Errorf("ListBuckets fanout: %w", errors.Join(errs...))
 	}
 
 	return buckets, nil
