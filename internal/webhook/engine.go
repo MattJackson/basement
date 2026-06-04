@@ -5,12 +5,15 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"syscall"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -132,6 +135,51 @@ var DefaultBackoff = []time.Duration{
 // NewEngine constructs an unstarted Engine. Passing nil for audit
 // installs a noop logger so callers that don't wire audit still get a
 // working engine; production main.go always passes the real FileLogger.
+// blockedWebhookIP reports whether ip is in a range a user-defined webhook
+// target must never reach (SSRF guard): loopback, private (RFC-1918/ULA),
+// link-local (incl. 169.254.169.254 cloud metadata), unspecified, multicast.
+func blockedWebhookIP(ip net.IP) bool {
+	return ip == nil || ip.IsLoopback() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast()
+}
+
+// newSafeWebhookClient builds the outbound webhook HTTP client with an SSRF
+// guard. The dialer's Control hook runs AFTER DNS resolution with the actual
+// IP about to be dialed, so it is DNS-rebind-safe: a hostname that resolves
+// to a public IP at validation time but an internal IP at delivery is still
+// refused. Redirects are not followed (a 3xx could bounce to an internal
+// address). Tests override this via SetHTTPClient.
+func newSafeWebhookClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			if blockedWebhookIP(net.ParseIP(host)) {
+				return fmt.Errorf("webhook: refusing to connect to non-public address %s", address)
+			}
+			return nil
+		},
+	}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext:           dialer.DialContext,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+			MaxIdleConns:          10,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+		CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("webhook: refusing to follow redirect to %s", req.URL.Redacted())
+		},
+	}
+}
+
 func NewEngine(store Store, audit audit.Logger, logger *slog.Logger) *Engine {
 	if audit == nil {
 		audit = noopAudit{}
@@ -143,7 +191,7 @@ func NewEngine(store Store, audit audit.Logger, logger *slog.Logger) *Engine {
 		store:           store,
 		audit:           audit,
 		logger:          logger,
-		httpClient:      &http.Client{Timeout: 15 * time.Second},
+		httpClient:      newSafeWebhookClient(15 * time.Second),
 		events:          make(chan EventEnvelope, eventQueueSize),
 		backoffSchedule: DefaultBackoff,
 		nowFn:           func() time.Time { return time.Now().UTC() },
@@ -510,8 +558,10 @@ func (e *Engine) attemptDelivery(ctx context.Context, w Webhook, env EventEnvelo
 			Error:       err.Error(),
 		}
 	}
-	// Drain + close so the underlying connection can be reused.
-	_, _ = io.Copy(io.Discard, resp.Body)
+	// Drain (bounded) + close so the underlying connection can be reused.
+	// Cap the drain so a malicious target can't stream an unbounded body
+	// and exhaust memory/bandwidth across delivery goroutines.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
 	_ = resp.Body.Close()
 
 	result := DeliveryResult{
