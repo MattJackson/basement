@@ -180,7 +180,9 @@ func (r *FileRecorder) openForDay(day string) error {
 	}
 
 	path := filepath.Join(r.dir, day+".jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// 0600: usage metrics (bucket sizes, object counts, connection IDs)
+	// shouldn't be world-readable on a multi-user host.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", path, err)
 	}
