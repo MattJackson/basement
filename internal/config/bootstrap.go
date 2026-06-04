@@ -176,13 +176,14 @@ func bootstrapAdminPassword(cfg *Config) error {
 	}
 	cfg.Admin.PasswordHash = hash
 
-	// Stdout banner so `docker logs basement | grep "INITIAL ADMIN
-	// PASSWORD"` works for the install-script handoff. Printed via
-	// fmt.Println (not slog) so the line is human-readable plain text
-	// regardless of BASEMENT_LOG_LEVEL or the JSON handler installed
-	// in main.go.
-	fmt.Println("INITIAL ADMIN PASSWORD: " + pw)
-	slog.Warn("auto-generated INITIAL ADMIN PASSWORD printed to stdout and persisted to disk; change it via /admin/users after first login", "user", cfg.Admin.User, "path", path)
+	// Stdout banner for the install-script handoff. SECURITY: print only
+	// the PATH, never the password itself — stdout is captured by
+	// `docker logs` / journald / centralized log aggregators, so printing
+	// the cleartext password there leaks it durably (every other secret in
+	// this codebase is deliberately never logged). The password lives in
+	// the 0600 file; the operator reads it from there.
+	fmt.Println("INITIAL ADMIN PASSWORD written to: " + path + " (mode 0600) — read it there, then change it via /admin/users.")
+	slog.Warn("auto-generated initial admin password persisted to disk (not logged); read it from the file and change it via /admin/users after first login", "user", cfg.Admin.User, "path", path)
 	return nil
 }
 
@@ -212,13 +213,25 @@ func bcryptHash(plaintext string) (string, error) {
 // terminal without misreading 0/O or 1/l.
 func randomPassword(length int) (string, error) {
 	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
-	out := make([]byte, length)
+	// Rejection sampling to avoid modulo bias: discard bytes at or above the
+	// largest multiple of len(alphabet) that fits in a byte, so every
+	// alphabet character is equally likely. (Plain `b % len(alphabet)` over
+	// 0..255 over-weights the first 256%len characters.)
+	maxByte := 256 - (256 % len(alphabet))
+	out := make([]byte, 0, length)
 	buf := make([]byte, length)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	for i, b := range buf {
-		out[i] = alphabet[int(b)%len(alphabet)]
+	for len(out) < length {
+		if _, err := rand.Read(buf); err != nil {
+			return "", err
+		}
+		for _, b := range buf {
+			if int(b) < maxByte {
+				out = append(out, alphabet[int(b)%len(alphabet)])
+				if len(out) == length {
+					break
+				}
+			}
+		}
 	}
 	return string(out), nil
 }
