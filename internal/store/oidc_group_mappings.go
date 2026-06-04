@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -117,6 +118,17 @@ func (s *OIDCGroupMappingsStore) Get() OIDCGroupMappings {
 // Replace overwrites the full mapping list and persists atomically.
 // Stamps UpdatedAt to now (UTC). nil slices are normalised to empty.
 func (s *OIDCGroupMappingsStore) Replace(mappings []OIDCGroupMapping) error {
+	// Reject mappings with any empty field. An empty ClaimValue or Claim is
+	// the dangerous case: depending on the matcher it could match EVERY
+	// login (auto-granting the mapped role to all OIDC users). RoleID/Scope
+	// must be present so a mapping can't silently grant nothing-or-anything.
+	for i, m := range mappings {
+		if strings.TrimSpace(m.Claim) == "" || strings.TrimSpace(m.ClaimValue) == "" ||
+			strings.TrimSpace(m.RoleID) == "" || strings.TrimSpace(m.Scope) == "" {
+			return fmt.Errorf("oidc-group-mappings: mapping %d has an empty claim/claimValue/roleId/scope", i)
+		}
+	}
+
 	s.mu.Lock()
 	if mappings == nil {
 		mappings = []OIDCGroupMapping{}
@@ -135,10 +147,12 @@ func (s *OIDCGroupMappingsStore) Replace(mappings []OIDCGroupMapping) error {
 	data = append(data, '\n')
 
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	// 0600: this is authorization config (which group claim grants which
+	// role) — must not be world-readable.
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return fmt.Errorf("oidc-group-mappings: writing tmp file: %w", err)
 	}
-	f, err := os.OpenFile(tmp, os.O_RDONLY|os.O_SYNC, 0644)
+	f, err := os.OpenFile(tmp, os.O_RDONLY, 0600)
 	if err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("oidc-group-mappings: opening tmp for fsync: %w", err)

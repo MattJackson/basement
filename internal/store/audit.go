@@ -27,15 +27,24 @@ func (s *Store) AppendAudit(entry AuditEntry) error {
 	auditMu.Lock()
 	defer auditMu.Unlock()
 
+	// Default the timestamp to server time when unset. (Callers are all
+	// server-side handlers that pass the real event time via time.Now();
+	// daily-file rotation is keyed on this event time. A zero value would
+	// otherwise misfile the entry into the year-1 log.)
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now().UTC()
+	}
+
 	dir := filepath.Join(s.dataDir, "audit")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("creating audit dir: %w", err)
 	}
 
 	dateStr := entry.Timestamp.Format("2006-01-02")
 	logPath := filepath.Join(dir, dateStr+".jsonl")
 
-	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// 0600: the audit trail (who-did-what) must not be world-readable.
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return fmt.Errorf("opening audit log: %w", err)
 	}
