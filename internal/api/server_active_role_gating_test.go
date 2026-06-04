@@ -101,11 +101,16 @@ func TestActiveRoleGating_Regression(t *testing.T) {
 			wantStatuses: []int{http.StatusOK},
 		},
 		{
-			name:         "ui_admin_super_admin_passes_per_cluster",
+			// ADR-0009 Phase C: the "UI Admin is super-admin" branch is
+			// GONE. UI Admin holds cluster.wiring.* but NOT the
+			// cluster.encryption-admins.list cap the /admins canary needs,
+			// so the capability middleware now blocks it with 403. This is
+			// the regression that the whole migration exists to prevent.
+			name:         "ui_admin_blocked_on_cluster_contents",
 			method:       http.MethodGet,
 			path:         "/api/v1/admin/clusters/test-cluster-4/admins",
 			activeRole:   &auth.ActiveRole{Kind: "ui-admin"},
-			wantStatuses: []int{http.StatusOK},
+			wantStatuses: []int{http.StatusForbidden},
 		},
 		{
 			name:         "cluster_admin_blocked_on_cross_cluster_clusters_list",

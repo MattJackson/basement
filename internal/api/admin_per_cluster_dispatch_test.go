@@ -133,7 +133,7 @@ func TestPerClusterDispatch_Buckets(t *testing.T) {
 			"/api/v1/admin/clusters/"+cid+"/buckets/some-bucket-id", nil)
 		req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken(cid),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
@@ -171,7 +171,7 @@ func TestPerClusterDispatch_Keys(t *testing.T) {
 			"/api/v1/admin/clusters/"+cid+"/keys/some-key-id", nil)
 		req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken(cid),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,

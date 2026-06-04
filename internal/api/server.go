@@ -419,37 +419,45 @@ func (s *Server) routes() {
 			adminG.Use(auth.RequireRole("admin"))
 			adminG.Use(auth.ActiveRoleAnyAdminMiddleware())
 
-			// Per-cluster routes: require cluster-admin for THIS cluster OR ui-admin (super-admin).
+			// Per-cluster routes. ADR-0009 Phase C: each route gates on its
+			// own capability via RequireCapability instead of the old
+			// "cluster-admin@cid OR ui-admin super-admin" group middleware
+			// (the super-admin branch was the recurring leak class). Wiring
+			// ops (read/update/delete/test) are UI Admin's; contents ops
+			// (buckets/keys/encryption/layout/scrub) are the cluster-admin's,
+			// scoped to {cid}. The wiring READ + driver-info are the two
+			// endpoints both personas share (cluster.wiring.read).
 			adminG.Group(func(clusterG chi.Router) {
-				clusterG.Use(auth.ActiveRoleClusterMiddlewareFromPath())
-				clusterG.Get("/admin/clusters/{cid}", s.getClusterHandler)
-				clusterG.Patch("/admin/clusters/{cid}", s.updateClusterHandler)
-				clusterG.Delete("/admin/clusters/{cid}", s.deleteClusterHandler)
-				clusterG.Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
-				clusterG.Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
-				clusterG.Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
-				clusterG.Get("/admin/clusters/{cid}/layout", s.getLayoutHandler)
-				clusterG.Post("/admin/clusters/{cid}/layout/stage", s.stageLayoutHandler)
-				clusterG.Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
-				clusterG.Post("/admin/clusters/{cid}/layout/revert", s.revertLayoutHandler)
+				// Cluster connection (wiring) — UI Admin.
+				clusterG.With(auth.RequireCapability(auth.CapClusterWiringRead)).Get("/admin/clusters/{cid}", s.getClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterWiringUpdate)).Patch("/admin/clusters/{cid}", s.updateClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterWiringDelete)).Delete("/admin/clusters/{cid}", s.deleteClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterWiringDelete)).Post("/admin/clusters/{cid}/_arm-delete", s.armDeleteClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterWiringTest)).Post("/admin/clusters/{cid}/_test", s.testClusterHandler)
+
+				// Cluster topology (nodes/layout) — cluster-admin contents.
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/nodes", s.listNodesHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/layout", s.getLayoutHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterLayoutWrite)).Post("/admin/clusters/{cid}/layout/stage", s.stageLayoutHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterLayoutWrite)).Post("/admin/clusters/{cid}/layout/apply", s.applyLayoutHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterLayoutWrite)).Post("/admin/clusters/{cid}/layout/revert", s.revertLayoutHandler)
 
 				// v1.4.0c SCRUB.MAINT — block-scrub maintenance surface.
-				// Both reads + writes gated on cluster:edit (per-handler)
-				// so admin-role users without cluster:edit on this cluster
-				// can't probe scrub state on a cluster they don't own.
-				clusterG.Get("/admin/clusters/{cid}/scrub", s.getClusterScrubHandler)
-				clusterG.Post("/admin/clusters/{cid}/scrub", s.postClusterScrubHandler)
+				// The per-handler cluster:edit gate still applies; the route
+				// cap keeps ui-admin (holds no contents caps) off it entirely.
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/scrub", s.getClusterScrubHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterScrubWrite)).Post("/admin/clusters/{cid}/scrub", s.postClusterScrubHandler)
 
 				// v1.12.0a (ADR-0007) per-cluster envelope encryption.
 				// Five endpoints power the unlock-modal + multi-admin
 				// password management flow. Other handlers that touch
 				// CSK-protected secrets gate on s.requireUnlocked(w, cid)
 				// to return 423 LOCKED with a structured hint.
-				clusterG.Post("/admin/clusters/{cid}/unlock", s.unlockClusterHandler)
-				clusterG.Post("/admin/clusters/{cid}/lock", s.lockClusterHandler)
-				clusterG.Get("/admin/clusters/{cid}/lock-status", s.lockStatusHandler)
-				clusterG.Post("/admin/clusters/{cid}/admins", s.addAdminHandler)
-				clusterG.Delete("/admin/clusters/{cid}/admins/{adminUserId}", s.removeAdminHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterEncryptionUnlock)).Post("/admin/clusters/{cid}/unlock", s.unlockClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterEncryptionLock)).Post("/admin/clusters/{cid}/lock", s.lockClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/lock-status", s.lockStatusHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterEncryptionAdminsAdd)).Post("/admin/clusters/{cid}/admins", s.addAdminHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterEncryptionAdminsRm)).Delete("/admin/clusters/{cid}/admins/{adminUserId}", s.removeAdminHandler)
 
 				// v1.11.0.6 — per-cluster capability matrix. The global
 				// /api/v1/capabilities endpoint reads from s.drv (default
@@ -457,38 +465,40 @@ func (s *Server) routes() {
 				// driver for {cid} so a deploy with mixed drivers can
 				// render the right UI per cluster. Routes through
 				// driverForRouteCluster per the v1.11.0.2 dispatch fix.
-				clusterG.Get("/admin/clusters/{cid}/driver-info", s.driverInfoHandler)
+				// driver-info describes the connection's driver, so it rides
+				// cluster.wiring.read (both personas, like GET the cluster).
+				clusterG.With(auth.RequireCapability(auth.CapClusterWiringRead)).Get("/admin/clusters/{cid}/driver-info", s.driverInfoHandler)
 
 				// v1.3.0e CLUSTER.ADMINS — convenience read for the
 				// cluster detail page that filters the global assignment
 				// list down to this cluster (including wildcard
 				// inheritance). Writes still go through the global
 				// /admin/policies/assignments endpoints.
-				clusterG.Get("/admin/clusters/{cid}/admins", s.listClusterAdminsHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterEncryptionAdminsList)).Get("/admin/clusters/{cid}/admins", s.listClusterAdminsHandler)
 
-				// Connection-scoped bucket operations
-				clusterG.Get("/admin/clusters/{cid}/buckets", s.listBucketsByClusterHandler)
-				clusterG.Post("/admin/clusters/{cid}/buckets", s.createBucketHandler)
-				clusterG.Get("/admin/clusters/{cid}/buckets/{id}", s.getBucketHandler)
-				clusterG.Patch("/admin/clusters/{cid}/buckets/{id}", s.updateBucketHandler)
-				clusterG.Delete("/admin/clusters/{cid}/buckets/{id}", s.deleteBucketHandler)
-				clusterG.Post("/admin/clusters/{cid}/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
+				// Connection-scoped bucket operations — cluster-admin contents.
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/buckets", s.listBucketsByClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterBucketsCreate)).Post("/admin/clusters/{cid}/buckets", s.createBucketHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/buckets/{id}", s.getBucketHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterBucketsUpdate)).Patch("/admin/clusters/{cid}/buckets/{id}", s.updateBucketHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterBucketsDelete)).Delete("/admin/clusters/{cid}/buckets/{id}", s.deleteBucketHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterBucketsDelete)).Post("/admin/clusters/{cid}/buckets/{id}/_arm-delete", s.armDeleteBucketHandler)
 
-				// Connection-scoped key operations
-				clusterG.Get("/admin/clusters/{cid}/keys", s.listKeysByClusterHandler)
-				clusterG.Post("/admin/clusters/{cid}/keys", s.createKeyHandler)
-				clusterG.Get("/admin/clusters/{cid}/keys/{id}", s.getKeyHandler)
-				clusterG.Patch("/admin/clusters/{cid}/keys/{id}", s.updateKeyHandler)
-				clusterG.Delete("/admin/clusters/{cid}/keys/{id}", s.deleteKeyHandler)
-				clusterG.Post("/admin/clusters/{cid}/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
+				// Connection-scoped key operations — cluster-admin contents.
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/keys", s.listKeysByClusterHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterKeysCreate)).Post("/admin/clusters/{cid}/keys", s.createKeyHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/keys/{id}", s.getKeyHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterKeysUpdate)).Patch("/admin/clusters/{cid}/keys/{id}", s.updateKeyHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterKeysDelete)).Delete("/admin/clusters/{cid}/keys/{id}", s.deleteKeyHandler)
+				clusterG.With(auth.RequireCapability(auth.CapClusterKeysDelete)).Post("/admin/clusters/{cid}/keys/{id}/_arm-delete", s.armDeleteKeyHandler)
 			})
 
-			// Cross-cluster routes: require UI-admin (super-admin scope).
+			// Cross-cluster routes: cluster registry + cross-cluster
+			// aggregates — UI Admin (ADR-0009 wiring + aggregate caps).
 			adminG.Group(func(crossG chi.Router) {
-				crossG.Use(auth.ActiveRoleUIAdminMiddleware())
-				crossG.Get("/admin/clusters", s.listClustersHandler)
-				crossG.Post("/admin/clusters", s.createClusterHandler)
-				crossG.Get("/admin/buckets", s.listAllBucketsHandler)
+				crossG.With(auth.RequireCapability(auth.CapClusterWiringList)).Get("/admin/clusters", s.listClustersHandler)
+				crossG.With(auth.RequireCapability(auth.CapClusterWiringCreate)).Post("/admin/clusters", s.createClusterHandler)
+				crossG.With(auth.RequireCapability(auth.CapClusterBucketsAggr)).Get("/admin/buckets", s.listAllBucketsHandler)
 			})
 
 			// v1.11.0.15: /admin/keys removed. Keys are inherently
@@ -500,14 +510,23 @@ func (s *Server) routes() {
 			// /admin/clusters/{cid}/keys.
 		})
 
-		// UI Admin routes — require activeRole.kind == "ui-admin"
+		// Platform routes. ADR-0009 Phase C: per-route platform.*
+		// capabilities replace the group-level ui-admin middleware. The
+		// baseline (RequireRole admin + AnyAdmin) is defense-in-depth so a
+		// future un-capped route still can't reach user-mode callers; the
+		// per-route cap is the real gate. NOTE: the bucket-lifecycle routes
+		// below are cluster CONTENTS (cluster-admin), not platform — they
+		// were historically mis-homed under the ui-admin group and now gate
+		// on cluster.* caps, which is why this group no longer forces
+		// ui-admin at the group level.
 		apiR.Group(func(uiAdminG chi.Router) {
 			uiAdminG.Use(s.authMiddleware())
-			uiAdminG.Use(auth.ActiveRoleUIAdminMiddleware())
+			uiAdminG.Use(auth.RequireRole("admin"))
+			uiAdminG.Use(auth.ActiveRoleAnyAdminMiddleware())
 
 			// Org capabilities management
-			uiAdminG.Get("/admin/system", s.getOrgCapabilitiesHandler)
-			uiAdminG.Patch("/admin/system", s.updateOrgCapabilitiesHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSystemRead)).Get("/admin/system", s.getOrgCapabilitiesHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSystemWrite)).Patch("/admin/system", s.updateOrgCapabilitiesHandler)
 
 			// v1.11.0a ONBOARDING — first-run wizard support.
 			// /state reports {needsOnboarding, completed} so the FE
@@ -516,18 +535,18 @@ func (s *Server) routes() {
 			// so the wizard never auto-shows again. Both gated under
 			// the uiAdminG group (the wizard is host-admin-only) and
 			// dismiss carries an explicit host:manage_org_caps check.
-			uiAdminG.Get("/admin/onboarding/state", s.getOnboardingStateHandler)
-			uiAdminG.Post("/admin/onboarding/dismiss", s.dismissOnboardingHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformOnboardingRead)).Get("/admin/onboarding/state", s.getOnboardingStateHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformOnboardingWrite)).Post("/admin/onboarding/dismiss", s.dismissOnboardingHandler)
 
 			// v1.9.0c GATEWAYS: per-protocol gateway roster (real +
 			// stub) for the generalized /admin/gateways UI. Read-only;
 			// per-protocol toggles still go through PATCH /admin/system.
-			uiAdminG.Get("/admin/gateways", s.listGatewaysHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSystemRead)).Get("/admin/gateways", s.listGatewaysHandler)
 
 			// User management (global, UI Admin only)
-			uiAdminG.Get("/admin/users", s.listAllUsersHandler)
-			uiAdminG.Post("/admin/users", s.createUserHandler)
-			uiAdminG.Delete("/admin/users/{id}", s.deleteUserHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersList)).Get("/admin/users", s.listAllUsersHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersCreate)).Post("/admin/users", s.createUserHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersDelete)).Delete("/admin/users/{id}", s.deleteUserHandler)
 
 			// Persistent invite tokens (v1.3.0d). The /admin/users
 			// invite-only flow above writes user records eagerly;
@@ -536,10 +555,10 @@ func (s *Server) routes() {
 			// surfaces are gated on host:manage_users (per-handler
 			// requireCapability), so the routes can sit next to each
 			// other under uiAdminG.
-			uiAdminG.Get("/admin/invites", s.listInvitesHandler)
-			uiAdminG.Post("/admin/invites", s.createInvitePersistedHandler)
-			uiAdminG.Delete("/admin/invites/{id}", s.revokeInviteHandler)
-			uiAdminG.Post("/admin/invites/{id}/rotate", s.rotateInviteHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersList)).Get("/admin/invites", s.listInvitesHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersCreate)).Post("/admin/invites", s.createInvitePersistedHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersDelete)).Delete("/admin/invites/{id}", s.revokeInviteHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformUsersUpdate)).Post("/admin/invites/{id}/rotate", s.rotateInviteHandler)
 
 			// v1.7.0a SERVICE_ACCOUNTS — basement-issued long-lived
 			// access keys for automated clients (CI, k8s, MCP, CLI).
@@ -548,68 +567,70 @@ func (s *Server) routes() {
 			// the uiAdminG middleware is defense-in-depth only.
 			// Cross-user GET / PUT / DELETE collapse to 404 so the
 			// wire shape doesn't leak IDs across owners.
-			uiAdminG.Get("/admin/service-accounts", s.listServiceAccountsHandler)
-			uiAdminG.Post("/admin/service-accounts", s.createServiceAccountHandler)
-			uiAdminG.Get("/admin/service-accounts/{id}", s.getServiceAccountHandler)
-			uiAdminG.Put("/admin/service-accounts/{id}", s.updateServiceAccountHandler)
-			uiAdminG.Delete("/admin/service-accounts/{id}", s.deleteServiceAccountHandler)
-			uiAdminG.Post("/admin/service-accounts/{id}/rotate", s.rotateServiceAccountHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformServiceAccountsList)).Get("/admin/service-accounts", s.listServiceAccountsHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformServiceAccountsWrite)).Post("/admin/service-accounts", s.createServiceAccountHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformServiceAccountsList)).Get("/admin/service-accounts/{id}", s.getServiceAccountHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformServiceAccountsWrite)).Put("/admin/service-accounts/{id}", s.updateServiceAccountHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformServiceAccountsWrite)).Delete("/admin/service-accounts/{id}", s.deleteServiceAccountHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformServiceAccountsWrite)).Post("/admin/service-accounts/{id}/rotate", s.rotateServiceAccountHandler)
 
 			// Policy matrix editor (ADR-0001 cycle v0.9.0g). Each
 			// handler runs its own capability gate so the legacy
 			// UIAdmin middleware is purely defense-in-depth; once
 			// the matrix lets operators rebalance assignments,
 			// UIAdmin can retire.
-			uiAdminG.Get("/admin/policies", s.listPoliciesHandler)
-			uiAdminG.Post("/admin/policies/roles", s.upsertRoleHandler)
-			uiAdminG.Delete("/admin/policies/roles/{id}", s.deleteRoleHandler)
-			uiAdminG.Post("/admin/policies/assignments", s.assignRoleHandler)
-			uiAdminG.Delete("/admin/policies/assignments", s.unassignRoleHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformPoliciesList)).Get("/admin/policies", s.listPoliciesHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformPoliciesWrite)).Post("/admin/policies/roles", s.upsertRoleHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformPoliciesWrite)).Delete("/admin/policies/roles/{id}", s.deleteRoleHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformPoliciesWrite)).Post("/admin/policies/assignments", s.assignRoleHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformPoliciesWrite)).Delete("/admin/policies/assignments", s.unassignRoleHandler)
 
 			// POLICY.SIM (v0.9.0j): what-if simulator that walks
 			// Enforcer.CanWithReason and returns the reasoning trail.
 			// Same policy:view_matrix gate as the matrix GET — pure
 			// inspector, no enforcement-logic changes.
-			uiAdminG.Post("/admin/policies/simulate", s.simulatePolicyHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformPoliciesList)).Post("/admin/policies/simulate", s.simulatePolicyHandler)
 
 			// v1.3.0a: OIDC group-claim -> role auto-mapping config.
 			// Same persona that owns /admin/policies owns this — gated
 			// on host:manage_policies inside the handler. Mappings
 			// apply on each user's next OIDC login.
-			uiAdminG.Get("/admin/oidc-group-mappings", s.listOIDCGroupMappingsHandler)
-			uiAdminG.Put("/admin/oidc-group-mappings", s.updateOIDCGroupMappingsHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformOIDCRead)).Get("/admin/oidc-group-mappings", s.listOIDCGroupMappingsHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformOIDCWrite)).Put("/admin/oidc-group-mappings", s.updateOIDCGroupMappingsHandler)
 
 			// v1.13.0b: Skin management endpoints (upload, activate, delete, policy).
-			uiAdminG.Get("/admin/skins", s.listAdminSkinsHandler)
-			uiAdminG.Post("/admin/skins/upload", s.uploadSkinHandler)
-			uiAdminG.Put("/admin/skins/{id}/activate", s.activateSkinHandler)
-			uiAdminG.Delete("/admin/skins/{id}", s.deleteSkinHandler)
-			uiAdminG.Get("/admin/skins/{id}/policy", s.getSkinPolicyHandler)
-			uiAdminG.Put("/admin/skins/{id}/policy", s.updateSkinPolicyHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSkinsRead)).Get("/admin/skins", s.listAdminSkinsHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSkinsWrite)).Post("/admin/skins/upload", s.uploadSkinHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSkinsWrite)).Put("/admin/skins/{id}/activate", s.activateSkinHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSkinsWrite)).Delete("/admin/skins/{id}", s.deleteSkinHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSkinsRead)).Get("/admin/skins/{id}/policy", s.getSkinPolicyHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformSkinsWrite)).Put("/admin/skins/{id}/policy", s.updateSkinPolicyHandler)
 
-			// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). UIAdmin
-			// middleware is belt-and-braces; the actual enforcement
-			// is the per-handler bucket:view / bucket:edit_alias gate.
-			uiAdminG.Get("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.getBucketLifecycleHandler)
-			uiAdminG.Put("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.putBucketLifecycleHandler)
+			// Bucket lifecycle (v0.9.0i LIFECYCLE.WIZARD). ADR-0009: this is
+			// cluster CONTENTS, not platform — it was mis-homed under the
+			// ui-admin group. Now gated on cluster.* caps (cluster-admin@cid),
+			// so UI Admin no longer manages bucket lifecycle. The per-handler
+			// bucket:view / bucket:edit_alias gate still applies on top.
+			uiAdminG.With(auth.RequireCapability(auth.CapClusterContentsRead)).Get("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.getBucketLifecycleHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapClusterBucketsLifecycleWrite)).Put("/admin/clusters/{cid}/buckets/{bid}/lifecycle", s.putBucketLifecycleHandler)
 
 			// OBS.USAGE (v0.9.0k): storage overview dashboard.
 			// Read-only snapshot aggregated from existing per-cluster
 			// reads; per-handler gate is host:manage_users so any Host
 			// Admin sees it without needing a new capability.
-			uiAdminG.Get("/admin/usage/overview", s.getUsageOverviewHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapClusterUsageAggr)).Get("/admin/usage/overview", s.getUsageOverviewHandler)
 
 			// OBS.USAGE.SERIES (v1.0.0d): per-bucket time series from
 			// the metrics recorder. Same host:manage_users gate as the
 			// snapshot view above.
-			uiAdminG.Get("/admin/usage/series", s.getUsageSeriesHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapClusterUsageAggr)).Get("/admin/usage/series", s.getUsageSeriesHandler)
 
 			// AUDIT.LOG (v1.0.0c): query the append-only event log.
 			// Per-handler gate is host:manage_policies — the same
 			// persona that controls the matrix is the one who needs
 			// the accountability view (and seeing audit data without
 			// the gate would leak who-did-what across the matrix).
-			uiAdminG.Get("/admin/audit", s.listAuditHandler)
+			uiAdminG.With(auth.RequireCapability(auth.CapPlatformAuditRead)).Get("/admin/audit", s.listAuditHandler)
 		})
 
 		// User routes — authenticated users only. Visibility derives

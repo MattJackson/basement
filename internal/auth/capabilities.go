@@ -30,6 +30,16 @@ const (
 	CapPlatformOIDCWrite            = "platform.oidc.write"
 	CapPlatformSystemWrite          = "platform.system.write"
 	CapPlatformOnboardingWrite      = "platform.onboarding.write"
+
+	// Read counterparts (ADR-0009 Phase C): the matrix listed only the
+	// write/list ops, but the GET routes for these surfaces need a
+	// capability of their own so RequireCapability can gate them without
+	// borrowing the write cap. All UI-Admin-only, same persona as the
+	// write side.
+	CapPlatformSystemRead     = "platform.system.read"
+	CapPlatformOIDCRead       = "platform.oidc.read"
+	CapPlatformSkinsRead      = "platform.skins.read"
+	CapPlatformOnboardingRead = "platform.onboarding.read"
 )
 
 // Cluster wiring (UI Admin — basement<->cluster connection)
@@ -41,6 +51,17 @@ const (
 	CapClusterWiringTest    = "cluster.wiring.test"
 	CapClusterBucketsAggr   = "cluster.buckets.aggregate"
 	CapClusterUsageAggr     = "cluster.usage.aggregate"
+
+	// CapClusterWiringRead reads ONE cluster's redacted connection
+	// record (GET /admin/clusters/{cid}) + its driver-info. Unlike the
+	// rest of cluster.wiring.*, this one is held by BOTH ui-admin (any
+	// cluster) and cluster-admin (their cluster only) — the cluster
+	// detail page renders the label/driver/color for both personas and
+	// the payload is redacted (no admin_token). Because it appears in
+	// the cluster-admin grant below it is treated as cluster-scoped, so
+	// cluster-admin@X cannot read cluster Y's wiring; ui-admin's grant
+	// is unscoped (Can skips the scope check for non-cluster-admin).
+	CapClusterWiringRead = "cluster.wiring.read"
 )
 
 // Cluster contents (Cluster Admin — what's inside a cluster, scoped)
@@ -51,8 +72,15 @@ const (
 	CapClusterBucketsDelete         = "cluster.buckets.delete"
 	CapClusterBucketsLifecycleWrite = "cluster.buckets.lifecycle.write"
 	CapClusterKeysCreate            = "cluster.keys.create"
+	CapClusterKeysUpdate            = "cluster.keys.update"
 	CapClusterKeysRotate            = "cluster.keys.rotate"
 	CapClusterKeysDelete            = "cluster.keys.delete"
+	// Layout (Garage topology stage/apply/revert) + block-scrub
+	// maintenance are cluster-admin operations the ADR-0009 matrix did
+	// not enumerate a write cap for. Added in Phase C so every cluster
+	// route gates uniformly on RequireCapability.
+	CapClusterLayoutWrite = "cluster.layout.write"
+	CapClusterScrubWrite  = "cluster.scrub.write"
 	CapClusterEncryptionAdminsList  = "cluster.encryption-admins.list"
 	CapClusterEncryptionAdminsAdd   = "cluster.encryption-admins.add"
 	CapClusterEncryptionAdminsRm    = "cluster.encryption-admins.remove"
@@ -95,21 +123,30 @@ var roleCapabilities = map[string][]string{
 		CapPlatformOIDCWrite,
 		CapPlatformSystemWrite,
 		CapPlatformOnboardingWrite,
+		CapPlatformSystemRead,
+		CapPlatformOIDCRead,
+		CapPlatformSkinsRead,
+		CapPlatformOnboardingRead,
 		CapClusterWiringList,
 		CapClusterWiringCreate,
 		CapClusterWiringUpdate,
 		CapClusterWiringDelete,
 		CapClusterWiringTest,
+		CapClusterWiringRead,
 		CapClusterBucketsAggr,
 		CapClusterUsageAggr,
 	},
 	"cluster-admin": {
+		CapClusterWiringRead,
 		CapClusterContentsRead,
 		CapClusterBucketsCreate,
 		CapClusterBucketsUpdate,
 		CapClusterBucketsDelete,
 		CapClusterBucketsLifecycleWrite,
+		CapClusterLayoutWrite,
+		CapClusterScrubWrite,
 		CapClusterKeysCreate,
+		CapClusterKeysUpdate,
 		CapClusterKeysRotate,
 		CapClusterKeysDelete,
 		CapClusterEncryptionAdminsList,

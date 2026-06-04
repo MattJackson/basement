@@ -179,6 +179,9 @@ func TestGetLifecycle_UnsupportedDriver(t *testing.T) {
 	srv := New(newTestConfig(), nil, conns, nil, reg)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/clusters/cid-unsup/buckets/bid-x/lifecycle")
+	// ADR-0009: bucket lifecycle is cluster CONTENTS (re-homed off the
+	// ui-admin group), so authenticate as cluster-admin for the cluster.
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-unsup"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -212,6 +215,7 @@ func TestGetLifecycle_HappyPath(t *testing.T) {
 	})
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/clusters/cid-happy/buckets/bid-1/lifecycle")
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-happy"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -252,6 +256,7 @@ func TestPutLifecycle_HappyPath(t *testing.T) {
 	bs, _ := json.Marshal(body)
 
 	req := createAuthRequest(http.MethodPut, "/api/v1/admin/clusters/cid-put/buckets/bid-2/lifecycle")
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-put"))
 	req.Body = nil
 	req = req.WithContext(req.Context())
 	req2 := httptest.NewRequest(http.MethodPut, "/api/v1/admin/clusters/cid-put/buckets/bid-2/lifecycle", bytes.NewReader(bs))
@@ -337,7 +342,7 @@ func TestPutLifecycle_RejectsUnsupportedFields(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req.AddCookie(&http.Cookie{
 				Name:     "__Host-basement_session",
-				Value:    generateUIAdminToken(),
+				Value:    generateClusterAdminToken(connID),
 				Path:     "/",
 				Secure:   true,
 				HttpOnly: true,
@@ -383,7 +388,7 @@ func TestPutLifecycle_ClearWithEmptyRules(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken(connID),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
@@ -421,7 +426,7 @@ func TestPutLifecycle_OnUnsupportedDriver_Returns409(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken(connID),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,

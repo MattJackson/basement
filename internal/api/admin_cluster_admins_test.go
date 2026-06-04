@@ -93,6 +93,11 @@ func TestListClusterAdmins_ScopedAndWildcard(t *testing.T) {
 	}
 
 	req := adminPolicyReq(http.MethodGet, "/api/v1/admin/clusters/cluster-x/admins", nil)
+	// ADR-0009: listing a cluster's encryption-admins is a cluster
+	// CONTENTS cap (cluster.encryption-admins.list), so authenticate as
+	// cluster-admin@cluster-x. The per-handler policy:view_matrix
+	// enforcer gate is what these tests actually exercise.
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cluster-x"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -158,6 +163,11 @@ func TestListClusterAdmins_SuperuserScopeMatches(t *testing.T) {
 	}
 
 	req := adminPolicyReq(http.MethodGet, "/api/v1/admin/clusters/cluster-x/admins", nil)
+	// ADR-0009: listing a cluster's encryption-admins is a cluster
+	// CONTENTS cap (cluster.encryption-admins.list), so authenticate as
+	// cluster-admin@cluster-x. The per-handler policy:view_matrix
+	// enforcer gate is what these tests actually exercise.
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cluster-x"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -206,6 +216,11 @@ func TestListClusterAdmins_DisplayNameJoin(t *testing.T) {
 	}
 
 	req := adminPolicyReq(http.MethodGet, "/api/v1/admin/clusters/cluster-x/admins", nil)
+	// ADR-0009: listing a cluster's encryption-admins is a cluster
+	// CONTENTS cap (cluster.encryption-admins.list), so authenticate as
+	// cluster-admin@cluster-x. The per-handler policy:view_matrix
+	// enforcer gate is what these tests actually exercise.
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cluster-x"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -256,6 +271,11 @@ func TestListClusterAdmins_NoCapability(t *testing.T) {
 	srv.SetPolicy(enf) // no host_admin assignment for "admin"
 
 	req := adminPolicyReq(http.MethodGet, "/api/v1/admin/clusters/cluster-x/admins", nil)
+	// ADR-0009: listing a cluster's encryption-admins is a cluster
+	// CONTENTS cap (cluster.encryption-admins.list), so authenticate as
+	// cluster-admin@cluster-x. The per-handler policy:view_matrix
+	// enforcer gate is what these tests actually exercise.
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cluster-x"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -272,6 +292,7 @@ func TestListClusterAdmins_UnknownCluster(t *testing.T) {
 	defer cleanup()
 
 	req := adminPolicyReq(http.MethodGet, "/api/v1/admin/clusters/ghost-cid/admins", nil)
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("ghost-cid"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 

@@ -109,3 +109,70 @@ func TestIsClusterScopedCapability(t *testing.T) {
 		t.Error("platform.users.create is NOT cluster-scoped")
 	}
 }
+
+// TestWiringReadSharedByBothRoles locks the ADR-0009 Phase C decision
+// that cluster.wiring.read is the one wiring capability held by both
+// personas: ui-admin reads any cluster's connection record, cluster-admin
+// only their own. Because it lives in the cluster-admin grant it is
+// cluster-scoped — which is exactly what scopes the cluster-admin side.
+func TestWiringReadSharedByBothRoles(t *testing.T) {
+	if !IsClusterScopedCapability(CapClusterWiringRead) {
+		t.Error("cluster.wiring.read must be cluster-scoped so cluster-admin@X can't read cluster Y")
+	}
+
+	uiAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "ui-admin"}}
+	if !Can(uiAdmin, CapClusterWiringRead, "cluster-a") || !Can(uiAdmin, CapClusterWiringRead, "cluster-z") {
+		t.Error("ui-admin should read wiring on ANY cluster")
+	}
+
+	clusterAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "cluster-admin", Cluster: "cluster-a"}}
+	if !Can(clusterAdmin, CapClusterWiringRead, "cluster-a") {
+		t.Error("cluster-admin@a should read cluster-a's wiring record")
+	}
+	if Can(clusterAdmin, CapClusterWiringRead, "cluster-b") {
+		t.Error("cluster-admin@a must NOT read cluster-b's wiring record")
+	}
+}
+
+// TestClusterContentsWriteCapsClusterAdminOnly covers the Phase C write
+// caps the ADR matrix did not enumerate (layout/scrub/keys.update). They
+// are cluster-admin-only and scoped — ui-admin must never hold them, or
+// the super-admin leak class reappears for those routes.
+func TestClusterContentsWriteCapsClusterAdminOnly(t *testing.T) {
+	uiAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "ui-admin"}}
+	clusterAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "cluster-admin", Cluster: "cluster-a"}}
+
+	for _, cap := range []string{CapClusterLayoutWrite, CapClusterScrubWrite, CapClusterKeysUpdate} {
+		if Can(uiAdmin, cap, "cluster-a") {
+			t.Errorf("ui-admin must NOT hold %s — it's a cluster-admin contents write", cap)
+		}
+		if !Can(clusterAdmin, cap, "cluster-a") {
+			t.Errorf("cluster-admin@a should hold %s on cluster-a", cap)
+		}
+		if Can(clusterAdmin, cap, "cluster-b") {
+			t.Errorf("cluster-admin@a must NOT hold %s on cluster-b", cap)
+		}
+		if !IsClusterScopedCapability(cap) {
+			t.Errorf("%s must be cluster-scoped", cap)
+		}
+	}
+}
+
+// TestPlatformReadCapsUIAdminOnly covers the Phase C platform read caps
+// added so the GET routes can gate without borrowing the write cap.
+func TestPlatformReadCapsUIAdminOnly(t *testing.T) {
+	uiAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "ui-admin"}}
+	clusterAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "cluster-admin", Cluster: "cluster-a"}}
+
+	for _, cap := range []string{CapPlatformSystemRead, CapPlatformOIDCRead, CapPlatformSkinsRead, CapPlatformOnboardingRead} {
+		if !Can(uiAdmin, cap, "") {
+			t.Errorf("ui-admin should hold %s", cap)
+		}
+		if Can(clusterAdmin, cap, "") {
+			t.Errorf("cluster-admin must NOT hold platform read cap %s", cap)
+		}
+		if IsClusterScopedCapability(cap) {
+			t.Errorf("%s is platform-wide, not cluster-scoped", cap)
+		}
+	}
+}
