@@ -47,7 +47,10 @@ export function isClusterLocked(err: unknown): err is Error & {
   code: "LOCKED";
   details?: { cluster_id?: string; hint?: string };
 } {
-  if (!err || typeof err !== "object") return false;
+  // Mirror isElevationRequired: require a real Error so a plain object that
+  // happens to carry {code:"LOCKED"} (e.g. a leaked response body) can't
+  // spoof the lock state and force the unlock modal with an arbitrary cid.
+  if (!(err instanceof Error)) return false;
   const e = err as { code?: string };
   return e.code === "LOCKED";
 }
@@ -122,10 +125,17 @@ export function ClusterUnlockProvider({ children }: { children: ReactNode }) {
 
   // Register / deregister the module-level prompt hook.
   useEffect(() => {
-    activePrompt = (cid: string, clusterLabel?: string) =>
+    const thisPrompt = (cid: string, clusterLabel?: string) =>
       promptForUnlock(cid, clusterLabel);
+    activePrompt = thisPrompt;
     return () => {
-      activePrompt = null;
+      // Only clear if WE are still the active prompt — a later provider's
+      // mount may have replaced us; an out-of-order unmount must not null a
+      // live handle (mirrors elevation.tsx). Otherwise the 423 unlock prompt
+      // silently stops working.
+      if (activePrompt === thisPrompt) {
+        activePrompt = null;
+      }
     };
   }, [promptForUnlock]);
 
