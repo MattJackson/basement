@@ -32,15 +32,17 @@ import (
 	"github.com/mattjackson/basement/internal/auth/policy"
 )
 
-// preV12GraceUntil is how long the gate treats pre-v1.2.0a cookies
-// (no Mode claim) as ADMIN for back-compat. After the grace window
-// elapses, such cookies drop to USER and the user must log in again
-// to mint a v1.2-shaped token. See ADR-0003 "Backwards compatibility".
+// preV12GraceUntil is the (now-closed) back-compat window during which a
+// pre-v1.2.0a cookie (no Mode claim) was treated as ADMIN. It is anchored
+// to a FIXED past date: by v2.0.0 the v1.2 grace is long over and any
+// genuinely pre-v1.2 cookie expired via its 24h JWT TTL ages ago.
 //
-// Resolved at startup time, not request time, so the window starts on
-// the v1.2.0a deploy date — operators upgrading mid-month don't see
-// the window slide. 7 * 24h per the prompt.
-var preV12GraceUntil = time.Now().Add(7 * 24 * time.Hour)
+// SECURITY: this was previously `time.Now().Add(7*24h)`, resolved at
+// PROCESS START — so every restart re-armed a fresh 7-day window, making
+// a no-Mode cookie an indefinite admin-elevation path on any regularly
+// restarted server. A fixed past timestamp closes that hole: a missing
+// Mode claim now always drops to USER.
+var preV12GraceUntil = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // nowFunc is overrideable in tests so expiry/mode tests don't have to
 // sleep through real time.
