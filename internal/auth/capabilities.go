@@ -209,10 +209,25 @@ func Can(claims *Claims, capability string, clusterID string) bool {
 	if !found {
 		return false
 	}
-	// Cluster-scoped capabilities (anything cluster-admin holds) also
-	// require ar.Cluster to match clusterID when one is supplied.
-	if ar.Kind == "cluster-admin" && clusterID != "" && ar.Cluster != clusterID {
-		return false
+	// Cluster-scoped capability enforcement (hardened, fail-closed).
+	//
+	// Previously this only checked scope for ar.Kind == "cluster-admin"
+	// and skipped entirely when clusterID was empty — so any cluster-
+	// scoped cap accidentally granted to another role, OR a route that
+	// resolved an empty cid (e.g. a mis-named path param), became an
+	// unscoped global grant. Now: a cluster-scoped capability requires a
+	// matching, non-empty clusterID for EVERY role, with exactly one
+	// explicit exception — UI Admin holds cluster.wiring.read as a
+	// platform-wide grant (reading any cluster's redacted connection
+	// record). Every other cluster-scoped cap is cluster-admin contents
+	// and is denied without an exact cluster match.
+	if IsClusterScopedCapability(capability) {
+		uiAdminWiringRead := ar.Kind == "ui-admin" && capability == CapClusterWiringRead
+		if !uiAdminWiringRead {
+			if clusterID == "" || ar.Cluster != clusterID {
+				return false
+			}
+		}
 	}
 	return true
 }

@@ -173,12 +173,14 @@ func (s *FileStore) DeleteWrappedCSK(clusterID, adminUserID string) error {
 	defer s.mu.Unlock()
 	for i, r := range s.records {
 		if r.ClusterID == clusterID && r.AdminUserID == adminUserID {
-			removed := s.records[i]
+			// Snapshot a copy so a failed save restores the exact prior
+			// records. The previous rollback re-spliced the already-mutated
+			// backing array (aliasing) and corrupted the record list.
+			prev := make([]WrappedCSK, len(s.records))
+			copy(prev, s.records)
 			s.records = append(s.records[:i], s.records[i+1:]...)
 			if err := s.saveLocked(); err != nil {
-				// Restore on save failure.
-				rest := append([]WrappedCSK{removed}, s.records[i:]...)
-				s.records = append(s.records[:i], rest...)
+				s.records = prev
 				return err
 			}
 			return nil

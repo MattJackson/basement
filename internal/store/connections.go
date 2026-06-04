@@ -627,12 +627,15 @@ func (s *store) Delete(ctx context.Context, id string) error {
 
 	for i := range s.connsCache {
 		if s.connsCache[i].ID == id {
-			removed := s.connsCache[i]
+			// Snapshot the prior slice (a copy) so a failed save restores
+			// it exactly. The previous in-place rollback re-spliced the
+			// already-mutated backing array (`s.connsCache[i:]` aliased
+			// shifted elements), corrupting the cache instead of restoring.
+			prev := make([]Connection, len(s.connsCache))
+			copy(prev, s.connsCache)
 			s.connsCache = append(s.connsCache[:i], s.connsCache[i+1:]...)
 			if err := s.saveLocked(); err != nil {
-				// Restore so an errored Delete doesn't silently mutate
-				// in-memory state.
-				s.connsCache = append(s.connsCache[:i], append([]Connection{removed}, s.connsCache[i:]...)...)
+				s.connsCache = prev
 				return fmt.Errorf("persisting delete: %w", err)
 			}
 			return nil

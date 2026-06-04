@@ -47,6 +47,13 @@ import (
 // so audit greps work — `IsRevoked()` distinguishes.
 var ErrNotFound = errors.New("service account not found")
 
+// dummyBcryptHash is a fixed, never-matching bcrypt hash. VerifySecret
+// compares against it on the access-key-not-found / revoked / expired
+// paths so they spend the same bcrypt time as a real wrong-secret check,
+// closing the timing oracle that would otherwise let an attacker
+// enumerate valid AccessKeyIDs. Computed once at package load.
+var dummyBcryptHash, _ = bcrypt.GenerateFromPassword([]byte("basement-akid-timing-equalizer"), bcrypt.DefaultCost)
+
 // ErrDuplicateName is returned by Create when an existing, NON-REVOKED
 // service account for the same OwnerUserID already uses the supplied
 // Name. Revoked rows do not block name reuse — that's the whole point
@@ -513,23 +520,30 @@ func (fs *fileStore) VerifySecret(_ context.Context, akid, candidateSecret strin
 	}
 	fs.mu.RUnlock()
 
+	// Always perform exactly ONE bcrypt comparison regardless of which
+	// path we take, so response timing can't distinguish "no such access
+	// key" (which used to skip bcrypt entirely and return fast) from "key
+	// exists, wrong secret" (which paid the bcrypt cost). That gap was an
+	// access-key enumeration oracle. Unknown / revoked / expired / no-hash
+	// rows compare against a fixed dummy hash that never matches.
+	usable := ok && !found.IsRevoked() && !found.IsExpired(time.Now().UTC()) && len(found.SecretKeyHash) > 0
+	hash := dummyBcryptHash
+	if usable {
+		hash = found.SecretKeyHash
+	}
+	matchErr := bcrypt.CompareHashAndPassword(hash, []byte(candidateSecret))
+
 	if !ok {
 		return false, ErrNotFound
 	}
-	if found.IsRevoked() {
+	if !usable {
+		// revoked / expired / no stored hash — same generic answer.
 		return false, nil
 	}
-	if found.IsExpired(time.Now().UTC()) {
-		return false, nil
-	}
-	if len(found.SecretKeyHash) == 0 {
-		return false, nil
-	}
-	if err := bcrypt.CompareHashAndPassword(found.SecretKeyHash, []byte(candidateSecret)); err != nil {
-		// bcrypt distinguishes "mismatched" (ErrMismatchedHashAndPassword)
-		// from other crypto failures, but for the caller the distinction
-		// is irrelevant — both are "no, this isn't authentic." Returning
-		// a generic (false, nil) collapses the timing-sensitive case.
+	if matchErr != nil {
+		// bcrypt distinguishes "mismatched" from other crypto failures,
+		// but for the caller the distinction is irrelevant — both are
+		// "no, this isn't authentic."
 		return false, nil
 	}
 	return true, nil

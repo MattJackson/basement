@@ -17,11 +17,25 @@ func newTestEnforcer(t *testing.T) (Enforcer, string) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
+	// The production seed no longer creates ANY assignment (the hard-coded
+	// "matthew -> host_admin" backdoor was removed). Many behaviour tests
+	// below use matthew as a convenient host-admin, so grant it explicitly
+	// here — the equivalent of what SeedEnvAdmin(cfg.Admin.User) does at
+	// boot. Tests that assert the raw seed shape call Open directly.
+	if err := e.AssignRole(RoleAssignment{UserID: "matthew", RoleID: "host_admin", Scope: "host:*"}); err != nil {
+		t.Fatalf("seed test admin: %v", err)
+	}
 	return e, dir
 }
 
 func TestEnforcer_SeedOnFirstLoad(t *testing.T) {
-	e, dir := newTestEnforcer(t)
+	// Open directly (NOT newTestEnforcer, which grants a test admin) so we
+	// assert the raw production seed shape.
+	dir := t.TempDir()
+	e, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
 
 	roles := e.Roles()
 	if len(roles) != 2 {
@@ -45,13 +59,11 @@ func TestEnforcer_SeedOnFirstLoad(t *testing.T) {
 		}
 	}
 
-	// Matthew assignment present.
-	assigns := e.AssignmentsFor("matthew")
-	if len(assigns) != 1 {
-		t.Fatalf("expected 1 assignment for matthew, got %d", len(assigns))
-	}
-	if assigns[0].RoleID != "host_admin" || assigns[0].Scope != "host:*" {
-		t.Errorf("matthew assignment = %+v, want host_admin@host:*", assigns[0])
+	// Security fix: the seed creates NO assignments. A fresh deploy has no
+	// implicit admin — there is no hard-coded username that auto-receives
+	// host_admin. The env-admin is granted separately by SeedEnvAdmin.
+	if assigns := e.AssignmentsFor("matthew"); len(assigns) != 0 {
+		t.Errorf("seed must create no assignments, got %d for matthew: %+v", len(assigns), assigns)
 	}
 
 	// File actually written.
