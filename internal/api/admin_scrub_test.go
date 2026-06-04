@@ -154,6 +154,9 @@ func TestGetScrub_Unsupported(t *testing.T) {
 	srv := New(newTestConfig(), nil, conns, nil, reg)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/clusters/cid-unsup/scrub")
+	// ADR-0009: scrub read/write are cluster CONTENTS caps, so authenticate
+	// as cluster-admin for the target cluster (ui-admin no longer passes).
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-unsup"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 
@@ -185,6 +188,7 @@ func TestGetScrub_SupportedRoundTrip(t *testing.T) {
 	// 1) GET — Supported=true, Running=false (initial).
 	{
 		req := createAuthRequest(http.MethodGet, "/api/v1/admin/clusters/cid-supp/scrub")
+		req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-supp"))
 		rr := httptest.NewRecorder()
 		srv.router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -205,6 +209,7 @@ func TestGetScrub_SupportedRoundTrip(t *testing.T) {
 	// 2) POST — kicks scrub off.
 	{
 		req := createAuthRequest(http.MethodPost, "/api/v1/admin/clusters/cid-supp/scrub")
+		req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-supp"))
 		rr := httptest.NewRecorder()
 		srv.router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -222,6 +227,7 @@ func TestGetScrub_SupportedRoundTrip(t *testing.T) {
 	// 3) GET — confirms persisted Running=true.
 	{
 		req := createAuthRequest(http.MethodGet, "/api/v1/admin/clusters/cid-supp/scrub")
+		req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-supp"))
 		rr := httptest.NewRecorder()
 		srv.router.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -248,6 +254,7 @@ func TestPostScrub_Unsupported(t *testing.T) {
 	srv := New(newTestConfig(), nil, conns, nil, reg)
 
 	req := createAuthRequest(http.MethodPost, "/api/v1/admin/clusters/cid-post-unsup/scrub")
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-post-unsup"))
 	req.Body = http.NoBody
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
@@ -278,6 +285,7 @@ func TestGetScrub_NonExistentCluster(t *testing.T) {
 	srv := New(newTestConfig(), nil, conns, nil, reg)
 
 	req := createAuthRequest(http.MethodGet, "/api/v1/admin/clusters/cid-missing/scrub")
+	req.Header.Set("Cookie", "__Host-basement_session="+generateClusterAdminToken("cid-missing"))
 	rr := httptest.NewRecorder()
 	srv.router.ServeHTTP(rr, req)
 

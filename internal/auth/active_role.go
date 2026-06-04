@@ -2,8 +2,6 @@ package auth
 
 import (
 	"net/http"
-
-	"github.com/go-chi/chi/v5"
 	"strings"
 )
 
@@ -46,45 +44,15 @@ func ActiveRoleMiddleware(requiredKinds []string, requiredCluster string) func(h
 	}
 }
 
-// ActiveRoleClusterMiddleware is a convenience wrapper for cluster-admin routes.
-// Requires activeRole.kind == "cluster-admin" AND activeRole.cluster == cid.
-func ActiveRoleClusterMiddleware(cid string) func(http.Handler) http.Handler {
-	return ActiveRoleMiddleware([]string{"cluster-admin"}, cid)
-}
-
-// ActiveRoleClusterMiddlewareFromPath reads the cluster ID from the chi
-// URL param "cid" at request time and checks activeRole.Kind == "cluster-admin"
-// AND activeRole.Cluster == cid. UI Admin active role also passes (super-admin).
-func ActiveRoleClusterMiddlewareFromPath() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, ok := FromContext(r.Context())
-			if !ok || claims == nil || claims.ActiveRole == nil {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"No active role in session"}}`, http.StatusUnauthorized)
-				return
-			}
-			ar := claims.ActiveRole
-
-			// UI Admin is super-admin — passes any cluster route
-			if ar.Kind == "ui-admin" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			if ar.Kind != "cluster-admin" {
-				http.Error(w, `{"error":{"code":"FORBIDDEN","message":"Active role not permitted for this route"}}`, http.StatusForbidden)
-				return
-			}
-
-			cid := chi.URLParam(r, "cid")
-			if cid == "" || ar.Cluster != cid {
-				http.Error(w, `{"error":{"code":"FORBIDDEN","message":"Cluster admin scope mismatch"}}`, http.StatusForbidden)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
+// NOTE (ADR-0009 Phase C, v2.0.0-beta.39): the cluster active-role
+// middleware that used to gate per-cluster routes —
+// ActiveRoleClusterMiddleware(cid) and ActiveRoleClusterMiddlewareFromPath()
+// — were DELETED here. The latter carried the "UI Admin is super-admin —
+// passes any cluster route" branch that was the root cause of the recurring
+// cluster-contents leak class (beta.6, beta.30, beta.36). Cluster routes now
+// gate on RequireCapability(cluster.*) in internal/api/server.go, where UI
+// Admin holds wiring caps but NOT contents caps. Do not reintroduce a
+// role-kind super-admin shortcut for cluster routes.
 
 // ActiveRoleUIAdminMiddleware is a convenience wrapper for UI admin routes.
 // Requires activeRole.kind == "ui-admin".

@@ -162,7 +162,7 @@ func TestListNodesHandler_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/missing/nodes", nil)
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken("missing"),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
@@ -214,7 +214,7 @@ func TestGetLayoutHandler_NotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/clusters/missing/layout", nil)
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken("missing"),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
@@ -328,7 +328,7 @@ func TestApplyLayoutHandler_ClusterNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/clusters/missing/layout/apply", nil)
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken("missing"),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,

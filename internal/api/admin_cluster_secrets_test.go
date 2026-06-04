@@ -57,7 +57,13 @@ func newClusterSecretsTestEnv(t *testing.T) (*Server, *clustersecret.ClusterSecr
 	return srv, mgr
 }
 
-// adminReq builds an admin-authed httptest request with JSON body.
+// adminReq builds a cluster-admin-authed httptest request with JSON body.
+//
+// ADR-0009 Phase C: the CSK encryption endpoints (unlock/lock/admins,
+// lock-status) are cluster CONTENTS capabilities scoped to the cluster —
+// NOT ui-admin's. Every test in this file operates on "cluster-x", so the
+// helper authenticates as cluster-admin@cluster-x. (Previously this minted
+// a ui-admin token and relied on the now-deleted super-admin branch.)
 func adminReq(t *testing.T, method, url string, body any) *http.Request {
 	t.Helper()
 	var rdr *bytes.Reader
@@ -77,7 +83,7 @@ func adminReq(t *testing.T, method, url string, body any) *http.Request {
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{
 		Name:     "__Host-basement_session",
-		Value:    generateUIAdminToken(),
+		Value:    generateClusterAdminToken("cluster-x"),
 		Path:     "/",
 		Secure:   true,
 		HttpOnly: true,
