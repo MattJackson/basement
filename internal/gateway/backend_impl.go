@@ -205,7 +205,7 @@ func (b *ProductionBackend) ListRegions(ctx context.Context, uctx *UserContext) 
 // driverForRegion builds the per-region driver. Mirrors
 // webdav.Handler.driverFactory from before the refactor — same
 // caching shape via driver.Registry, same TouchLastUsed best-effort.
-func (b *ProductionBackend) driverForRegion(ctx context.Context, regionID string) (driver.Driver, store.UserRegion, error) {
+func (b *ProductionBackend) driverForRegion(ctx context.Context, uctx *UserContext, regionID string) (driver.Driver, store.UserRegion, error) {
 	if b.regions == nil || b.driverReg == nil {
 		return nil, store.UserRegion{}, ErrUnsupported
 	}
@@ -215,6 +215,16 @@ func (b *ProductionBackend) driverForRegion(ctx context.Context, regionID string
 			return nil, store.UserRegion{}, ErrNotFound
 		}
 		return nil, store.UserRegion{}, fmt.Errorf("region lookup: %w", err)
+	}
+	// Tenant isolation (defense in depth): regions.Get is keyed by id only,
+	// so the Backend MUST verify the region belongs to the authenticated
+	// caller — otherwise a caller supplying another tenant's regionID would
+	// receive that tenant's driver + stored S3 credentials. Today the WebDAV
+	// layer only ever passes user-owned regionIDs (resolved via the
+	// user-scoped ListRegions), but the Backend should not rely on that.
+	// Return ErrNotFound (don't reveal that the region exists).
+	if uctx == nil || uctx.UserID == "" || region.UserID != uctx.UserID {
+		return nil, store.UserRegion{}, ErrNotFound
 	}
 	secret, err := b.regions.Decrypt(region)
 	if err != nil {
@@ -231,8 +241,8 @@ func (b *ProductionBackend) driverForRegion(ctx context.Context, regionID string
 // ListBuckets implements Backend. Applies the Garage admin bridge
 // when the region's endpoint matches an admin Connection on a Garage
 // backend — same logic the WebDAV handler carried pre-refactor.
-func (b *ProductionBackend) ListBuckets(ctx context.Context, _ *UserContext, regionID string) ([]Bucket, error) {
-	d, region, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) ListBuckets(ctx context.Context, uctx *UserContext, regionID string) ([]Bucket, error) {
+	d, region, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return nil, err
 	}
@@ -301,8 +311,8 @@ func (b *ProductionBackend) adminBridge(ctx context.Context, region store.UserRe
 }
 
 // ListObjects implements Backend.
-func (b *ProductionBackend) ListObjects(ctx context.Context, _ *UserContext, regionID, bucket, prefix, delimiter, continuationToken string, limit int) (ObjectPage, error) {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) ListObjects(ctx context.Context, uctx *UserContext, regionID, bucket, prefix, delimiter, continuationToken string, limit int) (ObjectPage, error) {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return ObjectPage{}, err
 	}
@@ -332,8 +342,8 @@ func (b *ProductionBackend) ListObjects(ctx context.Context, _ *UserContext, reg
 }
 
 // HeadObject implements Backend.
-func (b *ProductionBackend) HeadObject(ctx context.Context, _ *UserContext, regionID, bucket, key string) (ObjectMeta, error) {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) HeadObject(ctx context.Context, uctx *UserContext, regionID, bucket, key string) (ObjectMeta, error) {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return ObjectMeta{}, err
 	}
@@ -351,8 +361,8 @@ func (b *ProductionBackend) HeadObject(ctx context.Context, _ *UserContext, regi
 }
 
 // GetObject implements Backend.
-func (b *ProductionBackend) GetObject(ctx context.Context, _ *UserContext, regionID, bucket, key string) (io.ReadCloser, ObjectMeta, error) {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) GetObject(ctx context.Context, uctx *UserContext, regionID, bucket, key string) (io.ReadCloser, ObjectMeta, error) {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return nil, ObjectMeta{}, err
 	}
@@ -371,8 +381,8 @@ func (b *ProductionBackend) GetObject(ctx context.Context, _ *UserContext, regio
 }
 
 // PutObject implements Backend.
-func (b *ProductionBackend) PutObject(ctx context.Context, _ *UserContext, regionID, bucket, key string, body io.Reader, size int64, contentType string) error {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) PutObject(ctx context.Context, uctx *UserContext, regionID, bucket, key string, body io.Reader, size int64, contentType string) error {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return err
 	}
@@ -386,8 +396,8 @@ func (b *ProductionBackend) PutObject(ctx context.Context, _ *UserContext, regio
 }
 
 // DeleteObject implements Backend.
-func (b *ProductionBackend) DeleteObject(ctx context.Context, _ *UserContext, regionID, bucket, key string) error {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) DeleteObject(ctx context.Context, uctx *UserContext, regionID, bucket, key string) error {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return err
 	}
@@ -399,11 +409,11 @@ func (b *ProductionBackend) DeleteObject(ctx context.Context, _ *UserContext, re
 
 // CopyObject implements Backend. Same-region only — the cycle scope
 // explicitly excludes cross-region copy.
-func (b *ProductionBackend) CopyObject(ctx context.Context, _ *UserContext, srcRegionID, srcBucket, srcKey, dstRegionID, dstBucket, dstKey string) error {
+func (b *ProductionBackend) CopyObject(ctx context.Context, uctx *UserContext, srcRegionID, srcBucket, srcKey, dstRegionID, dstBucket, dstKey string) error {
 	if srcRegionID != dstRegionID {
 		return ErrUnsupported
 	}
-	d, _, err := b.driverForRegion(ctx, srcRegionID)
+	d, _, err := b.driverForRegion(ctx, uctx, srcRegionID)
 	if err != nil {
 		return err
 	}
@@ -416,8 +426,8 @@ func (b *ProductionBackend) CopyObject(ctx context.Context, _ *UserContext, srcR
 // CreateBucket implements Backend. Delegates to the driver's
 // CreateBucket — drivers that don't support bucket creation surface
 // ErrUnsupported back through mapDriverError.
-func (b *ProductionBackend) CreateBucket(ctx context.Context, _ *UserContext, regionID, bucket string) error {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) CreateBucket(ctx context.Context, uctx *UserContext, regionID, bucket string) error {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return err
 	}
@@ -428,8 +438,8 @@ func (b *ProductionBackend) CreateBucket(ctx context.Context, _ *UserContext, re
 }
 
 // DeleteBucket implements Backend.
-func (b *ProductionBackend) DeleteBucket(ctx context.Context, _ *UserContext, regionID, bucket string) error {
-	d, _, err := b.driverForRegion(ctx, regionID)
+func (b *ProductionBackend) DeleteBucket(ctx context.Context, uctx *UserContext, regionID, bucket string) error {
+	d, _, err := b.driverForRegion(ctx, uctx, regionID)
 	if err != nil {
 		return err
 	}

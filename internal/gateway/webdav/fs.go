@@ -22,6 +22,7 @@
 package webdav
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -519,7 +520,9 @@ func (wf *writeFile) Close() error {
 		return nil
 	}
 	wf.closed = true
-	reader := strings.NewReader(string(wf.buf))
+	// bytes.NewReader avoids the extra full []byte->string copy of the whole
+	// upload buffer that strings.NewReader(string(wf.buf)) forced.
+	reader := bytes.NewReader(wf.buf)
 	err := wf.backend.PutObject(wf.ctx, wf.uctx, wf.regionID, wf.bucket, wf.key, reader, int64(len(wf.buf)), "application/octet-stream")
 	wf.buf = nil
 	return err
