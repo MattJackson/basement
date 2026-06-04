@@ -97,10 +97,14 @@ func (s *Server) applyLayoutHandler(w http.ResponseWriter, r *http.Request) {
 	if drv == nil {
 		return
 	}
+	cid := chi.URLParam(r, "cid")
 	if err := drv.ApplyLayout(r.Context()); err != nil {
+		s.auditFailure(r, "cluster:layout_applied", resourceCluster(cid), err)
 		writeDriverError(w, "ApplyLayout", err)
 		return
 	}
+	// Topology-altering, potentially destructive — audit like scrub/delete.
+	s.auditSuccess(r, "cluster:layout_applied", resourceCluster(cid))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -114,9 +118,12 @@ func (s *Server) revertLayoutHandler(w http.ResponseWriter, r *http.Request) {
 	if drv == nil {
 		return
 	}
+	cid := chi.URLParam(r, "cid")
 	if err := drv.RevertLayout(r.Context()); err != nil {
+		s.auditFailure(r, "cluster:layout_reverted", resourceCluster(cid), err)
 		writeDriverError(w, "RevertLayout", err)
 		return
 	}
+	s.auditSuccess(r, "cluster:layout_reverted", resourceCluster(cid))
 	w.WriteHeader(http.StatusNoContent)
 }

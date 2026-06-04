@@ -42,7 +42,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/mattjackson/basement/internal/auth"
 	"github.com/mattjackson/basement/internal/clustersecret"
 )
 
@@ -458,15 +457,3 @@ func (s *Server) clusterRequiresLegacyMigration(r *http.Request, cid string) (bo
 	return len(conn.ConfigEnc) > 0 && len(conn.ConfigEncCSK) == 0, nil
 }
 
-// requireCapabilityCallerID is a thin wrapper that returns the caller's
-// userID after a capability gate without short-circuiting the response.
-// Used by handlers that want both the gate and the userID for audit /
-// downstream calls. Not currently used by the CSK handlers but exposed
-// so future code (e.g. attribute-bootstrap-to-caller) can attribute
-// the action to claims.UserID rather than the supplied adminUserId.
-func (s *Server) requireCapabilityCallerID(r *http.Request) string {
-	if claims, ok := auth.FromContext(r.Context()); ok && claims != nil {
-		return claims.UserID
-	}
-	return ""
-}
