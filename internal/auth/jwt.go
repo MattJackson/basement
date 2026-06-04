@@ -2,7 +2,6 @@ package auth
 
 import (
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -145,13 +144,19 @@ func ParseToken(secret []byte, tokenStr string) (*Claims, error) {
 			return nil, ErrInvalidAlgorithm
 		}
 		return secret, nil
-	})
+	},
+		// Defense in depth: reject any alg but HS256 at the parser level
+		// (not just in the keyfunc), and REQUIRE an exp claim so a token
+		// minted/forged without one can never parse as non-expiring.
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Name}),
+		jwt.WithExpirationRequired(),
+	)
 
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return nil, ErrTokenExpired
 		}
-		if strings.Contains(err.Error(), "invalid signature") {
+		if errors.Is(err, jwt.ErrTokenSignatureInvalid) {
 			return nil, ErrInvalidSignature
 		}
 		return nil, err

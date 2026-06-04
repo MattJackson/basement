@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -67,7 +68,16 @@ func RequireRole(role string) func(http.Handler) http.Handler {
 func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_, _ = w.Write([]byte(`{"error":{"code":"` + code + `","message":"` + message + `"}}`))
+	// JSON-encode rather than string-concatenate so a code/message
+	// containing a quote, backslash, or control char can't break out of
+	// (or inject into) the JSON body.
+	body, err := json.Marshal(map[string]map[string]string{
+		"error": {"code": code, "message": message},
+	})
+	if err != nil {
+		body = []byte(`{"error":{"code":"INTERNAL_ERROR","message":"failed to encode error"}}`)
+	}
+	_, _ = w.Write(body)
 }
 
 // RequireCapability returns middleware that allows the request only
@@ -81,7 +91,7 @@ func RequireCapability(capability string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			claims, ok := FromContext(r.Context())
 			if !ok || claims == nil || claims.ActiveRole == nil {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"No active role in session"}}`, http.StatusUnauthorized)
+				writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active role in session")
 				return
 			}
 			clusterID := ""
@@ -89,7 +99,7 @@ func RequireCapability(capability string) func(http.Handler) http.Handler {
 				clusterID = chi.URLParam(r, "cid")
 			}
 			if !Can(claims, capability, clusterID) {
-				http.Error(w, `{"error":{"code":"FORBIDDEN","message":"Missing required capability: `+capability+`"}}`, http.StatusForbidden)
+				writeError(w, http.StatusForbidden, "FORBIDDEN", "Missing required capability: "+capability)
 				return
 			}
 			next.ServeHTTP(w, r)

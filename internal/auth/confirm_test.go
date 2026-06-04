@@ -125,15 +125,27 @@ func TestConfirmToken_SignedButBadExpInt(t *testing.T) {
 	}
 }
 
-// TestConfirmToken_SignedButTooManyFields verifies that >4 fields are
-// tolerated (SplitN(_, 4) caps at 4 — extra pipes end up in the userID
-// field, so the userID match still succeeds when the request claims the
-// full embedded-pipe userID).
-func TestConfirmToken_SignedButTooManyFields(t *testing.T) {
-	tok := signPayload(confirmSecret, "999999999999|op|target|userwith|pipes")
-	err := VerifyConfirmToken(confirmSecret, tok, "op", "target", "userwith|pipes")
-	if err != nil {
-		t.Fatalf("expected nil (userID match including embedded pipes), got %v", err)
+// TestConfirmToken_DelimiterCharsInFields verifies the security fix:
+// op/target/userID are hex-encoded, so values containing the `|` (field)
+// or `.` (payload/sig) delimiters round-trip correctly instead of shifting
+// field boundaries — AND a hand-crafted raw (non-hex) payload is rejected.
+// Previously a target/userID containing `|` could confuse the SplitN parse
+// and let a token armed for one target verify against another.
+func TestConfirmToken_DelimiterCharsInFields(t *testing.T) {
+	op, target, userID := "delete|bucket", "weird.bucket|name", "user.name|x"
+
+	tok := MintConfirmToken(confirmSecret, op, target, userID, time.Minute)
+	if err := VerifyConfirmToken(confirmSecret, tok, op, target, userID); err != nil {
+		t.Fatalf("minted token with delimiter chars should verify, got %v", err)
+	}
+	// No boundary confusion: a different target must still mismatch.
+	if err := VerifyConfirmToken(confirmSecret, tok, op, "other.target", userID); err != ErrConfirmMismatch {
+		t.Fatalf("wrong target should be ErrConfirmMismatch, got %v", err)
+	}
+	// A hand-crafted RAW payload (fields not hex-encoded) is rejected.
+	raw := signPayload(confirmSecret, "999999999999|op|target|user")
+	if err := VerifyConfirmToken(confirmSecret, raw, "op", "target", "user"); err == nil {
+		t.Fatalf("raw non-hex payload must be rejected, got nil")
 	}
 }
 

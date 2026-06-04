@@ -58,11 +58,12 @@ func TestCanClusterAdminScopedToCluster(t *testing.T) {
 	if Can(claims, CapClusterBucketsCreate, "cluster-b") {
 		t.Error("cluster-admin on cluster-a must NOT have rights on cluster-b")
 	}
-	// Passing empty clusterID skips scoping check — useful for tests
-	// of role-level grants, but production callers should always pass
-	// the target cluster.
-	if !Can(claims, CapClusterBucketsCreate, "") {
-		t.Error("empty clusterID should skip cluster scoping")
+	// Hardened (fail-closed): an empty clusterID for a cluster-scoped
+	// capability is now DENIED rather than skipped. A route that resolves
+	// an empty cid (e.g. a mis-named path param) must never collapse to an
+	// unscoped global grant.
+	if Can(claims, CapClusterBucketsCreate, "") {
+		t.Error("empty clusterID must be denied for a cluster-scoped capability (fail-closed)")
 	}
 }
 

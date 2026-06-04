@@ -206,11 +206,16 @@ func (e *fileEnforcer) saveLocked() error {
 	data = append(data, '\n')
 
 	tmp := e.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	// 0600: policies.json holds the full role-assignment map (who is admin
+	// of what). It must not be world-readable on a multi-user host —
+	// matches cluster_secrets.json's 0600. (Was 0644.)
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return fmt.Errorf("policy: writing tmp file: %w", err)
 	}
 
-	f, err := os.OpenFile(tmp, os.O_RDONLY|os.O_SYNC, 0644)
+	// O_RDONLY (the durable fsync happens via f.Sync() below; the old
+	// O_RDONLY|O_SYNC was a no-op on a read-only reopen).
+	f, err := os.OpenFile(tmp, os.O_RDONLY, 0600)
 	if err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("policy: opening tmp for fsync: %w", err)
@@ -502,18 +507,30 @@ func (e *fileEnforcer) DeleteRole(id string) error {
 		return fmt.Errorf("policy: role %q is a seed role and cannot be deleted", id)
 	}
 
-	e.roles = append(e.roles[:idx], e.roles[idx+1:]...)
+	// Build fresh slices (don't mutate the backing arrays in place) so a
+	// failed save can be rolled back exactly. Snapshot the prior headers.
+	prevRoles, prevAssignments := e.roles, e.assignments
+
+	newRoles := make([]Role, 0, len(e.roles)-1)
+	newRoles = append(newRoles, e.roles[:idx]...)
+	newRoles = append(newRoles, e.roles[idx+1:]...)
 
 	// Drop any dangling assignments to this role.
-	filtered := e.assignments[:0]
+	newAssignments := make([]RoleAssignment, 0, len(e.assignments))
 	for _, a := range e.assignments {
 		if a.RoleID != id {
-			filtered = append(filtered, a)
+			newAssignments = append(newAssignments, a)
 		}
 	}
-	e.assignments = filtered
 
-	return e.saveLocked()
+	e.roles, e.assignments = newRoles, newAssignments
+	if err := e.saveLocked(); err != nil {
+		// Roll back: a persist failure must not leave in-memory authz
+		// state diverged from disk.
+		e.roles, e.assignments = prevRoles, prevAssignments
+		return err
+	}
+	return nil
 }
 
 func (e *fileEnforcer) AssignRole(a RoleAssignment) error {
@@ -566,7 +583,8 @@ func (e *fileEnforcer) UnassignRole(userID, roleID, scope string) error {
 	defer e.mu.Unlock()
 
 	changed := false
-	filtered := e.assignments[:0]
+	prev := e.assignments
+	filtered := make([]RoleAssignment, 0, len(e.assignments))
 	for _, a := range e.assignments {
 		if a.UserID == userID && a.RoleID == roleID && a.Scope == scope {
 			changed = true
@@ -574,12 +592,16 @@ func (e *fileEnforcer) UnassignRole(userID, roleID, scope string) error {
 		}
 		filtered = append(filtered, a)
 	}
-	e.assignments = filtered
 
 	if !changed {
 		return nil
 	}
-	return e.saveLocked()
+	e.assignments = filtered
+	if err := e.saveLocked(); err != nil {
+		e.assignments = prev
+		return err
+	}
+	return nil
 }
 
 // SyncOIDCAssignments is the per-login reconcile step for OIDC-driven
@@ -636,7 +658,8 @@ func (e *fileEnforcer) SyncOIDCAssignments(userID string, wanted []RoleAssignmen
 	// those still wanted (and remove from wantedSet so we don't re-add),
 	// drop those no longer wanted. For everything else (other users
 	// + this user's manual rows): keep verbatim.
-	kept := e.assignments[:0]
+	prev := e.assignments
+	kept := make([]RoleAssignment, 0, len(e.assignments))
 	for _, a := range e.assignments {
 		if a.UserID != userID || a.Source != "oidc" {
 			kept = append(kept, a)
@@ -673,6 +696,9 @@ func (e *fileEnforcer) SyncOIDCAssignments(userID string, wanted []RoleAssignmen
 		return added, revoked, nil
 	}
 	if err := e.saveLocked(); err != nil {
+		// Roll back so a persist failure doesn't leave OIDC sync applied
+		// only in memory (diverged from disk until restart).
+		e.assignments = prev
 		return nil, nil, fmt.Errorf("policy: persisting OIDC sync: %w", err)
 	}
 	return added, revoked, nil
@@ -703,6 +729,20 @@ func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 	if username == "" {
 		return nil
 	}
+
+	// First-boot only: if the env-admin already holds ANY assignment, the
+	// operator is in control of this user's grants — do NOT re-add the
+	// blanket superuser scope on every restart. Re-seeding unconditionally
+	// made privilege REDUCTION impossible (an operator who revoked the "*"
+	// scope via /admin/policies had it silently restored on the next boot).
+	e.mu.RLock()
+	for _, a := range e.assignments {
+		if a.UserID == username {
+			e.mu.RUnlock()
+			return nil
+		}
+	}
+	e.mu.RUnlock()
 
 	// v2.0.0a: bucket_user role removed entirely per [[v2_clean_break]].
 	// No seed assignment created; legacy assignments are dropped at boot
@@ -769,10 +809,13 @@ func ScopeMatches(assignmentScope, requestedScope string) bool {
 
 // --- Seed defaults ---------------------------------------------------------
 
-// seedDefaults returns the three built-in roles + one assignment
-// (matthew -> host_admin) per ADR-0001 + this cycle's prompt. The
-// matthew assignment exists so basement.example.com doesn't lock matthew out
-// of his own deployment on first policy-aware boot.
+// seedDefaults returns the built-in roles with NO assignments. The
+// first-boot admin grant is made exclusively by SeedEnvAdmin from
+// cfg.Admin.User (BASEMENT_ADMIN_USER), so a fresh deployment has NO
+// implicit admin — there is no hard-coded username that auto-receives
+// host_admin. (Security fix: a literal "matthew -> host_admin @ host:*"
+// seed used to live here and was a backdoor on any redistributed
+// deployment where someone registered that username.)
 func seedDefaults() ([]Role, []RoleAssignment) {
 	roles := []Role{
 		{
@@ -799,11 +842,10 @@ func seedDefaults() ([]Role, []RoleAssignment) {
 		},
 	}
 
-	// Only matthew gets a seed assignment — the env-seeded admin. Any
-	// other admin (OIDC, signup) is up to the operator to grant explicitly.
-	assignments := []RoleAssignment{
-		{UserID: "matthew", RoleID: "host_admin", Scope: "host:*"},
-	}
-
-	return roles, assignments
+	// No seed assignments. The env-admin (cfg.Admin.User) is granted by
+	// SeedEnvAdmin at boot; every other admin (OIDC, signup) is the
+	// operator's explicit grant. A fresh deploy with BASEMENT_ADMIN_USER
+	// unset therefore has zero admins until one is granted — the secure
+	// default (no implicit/hard-coded admin).
+	return roles, nil
 }
