@@ -92,6 +92,11 @@ func newTestEngine(t *testing.T) (*Engine, Store, *captureServer) {
 		t.Fatalf("Open: %v", err)
 	}
 	engine := NewEngine(store, nil, nil)
+	// The production client now has an SSRF guard that refuses loopback /
+	// private IPs (newSafeWebhookClient). Tests deliver to a loopback
+	// httptest.Server, so override with a plain client — these tests
+	// exercise delivery/retry/filter logic, not the SSRF guard.
+	engine.SetHTTPClient(&http.Client{Timeout: 5 * time.Second})
 	engine.SetBackoffSchedule(fastBackoff)
 	cs := newCaptureServer(t)
 	ctx, cancel := context.WithCancel(context.Background())

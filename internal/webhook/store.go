@@ -110,7 +110,9 @@ func (fs *fileStore) writeLocked() error {
 		return fmt.Errorf("marshaling webhooks: %w", err)
 	}
 	tmp := fs.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// 0600: webhooks.json holds plaintext HMAC signing secrets — must not be
+	// world-readable on a multi-user host. (Was 0o644.)
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("writing temp file: %w", err)
 	}
 	if err := os.Rename(tmp, fs.path); err != nil {
