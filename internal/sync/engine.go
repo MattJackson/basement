@@ -58,40 +58,63 @@ func (e *Engine) Run(ctx context.Context, job *SyncJob, srcDriver driver.Driver,
 		go func(a Action) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			// Recover so a single bad object (e.g. a nil body / driver panic)
+			// can't crash the whole server process.
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("panic copying %s: %v", a.SrcKey, r)
+						job.State = "error"
+						job.LastError = fmt.Sprintf("panic copying %s: %v", a.SrcKey, r)
+						e.store.Save(job)
+					}
+					mu.Unlock()
+				}
+			}()
 
-			if job.State == "paused" || job.State == "error" {
+			// All job.State / job.Progress access is guarded by mu; Save is
+			// done under the lock so the store never marshals a job while
+			// another worker is mutating it (was a data race). Use the
+			// captured `a`, NOT the loop variable `action` (which the for
+			// loop concurrently overwrites — a race + wrong byte attribution).
+			mu.Lock()
+			stop := job.State == "paused" || job.State == "error"
+			mu.Unlock()
+			if stop || ctx.Err() != nil {
 				return
 			}
 
 			err := e.copyObject(ctx, srcDriver, dstDriver, a)
+			mu.Lock()
+			defer mu.Unlock()
 			if err != nil {
-				mu.Lock()
-				if firstErr == nil && (job.State != "paused") {
+				if firstErr == nil && job.State != "paused" {
 					firstErr = err
 					job.State = "error"
 					job.LastError = err.Error()
 					e.store.Save(job)
 				}
-				mu.Unlock()
 				return
 			}
-
-			mu.Lock()
 			job.Progress.ObjectsCopied++
-			if action.ObjectInfo != nil {
-				job.Progress.BytesCopied += action.ObjectInfo.Size
+			if a.ObjectInfo != nil {
+				job.Progress.BytesCopied += a.ObjectInfo.Size
 			}
-			mu.Unlock()
 			e.store.Save(job)
 		}(action)
 	}
 
 	wg.Wait()
 
-	if job.State == "running" || job.State == "paused" {
-		if firstErr != nil {
-			return firstErr
-		}
+	mu.Lock()
+	defer mu.Unlock()
+	if firstErr != nil {
+		return firstErr
+	}
+	// Only a still-"running" job transitions to "done" — a job paused
+	// mid-run must STAY paused (was incorrectly marked done).
+	if job.State == "running" {
 		job.State = "done"
 		finished := time.Now()
 		job.Progress.FinishedAt = &finished
