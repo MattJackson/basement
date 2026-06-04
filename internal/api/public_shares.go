@@ -452,12 +452,19 @@ func (s *Server) shareGetHandler(w http.ResponseWriter, r *http.Request) {
 
 // cleanPath removes path traversal attempts.
 func cleanPath(path string) string {
-	// Use strings.ReplaceAll to remove any .. patterns
-	result := strings.ReplaceAll(path, "..", "")
-	
-	// Check for encoded variants
-	result = strings.ReplaceAll(result, "%2e%2e", "")
-	result = strings.ReplaceAll(result, "%2E%2E", "")
-	
-	return result
+	// Strip every ".." pattern (literal + percent-encoded, all cases),
+	// REPEATEDLY until stable. The previous single pass was non-recursive:
+	// "...." collapsed to ".." and survived. Callers compare the result to
+	// the original and reject on any change, so over-stripping is safe.
+	result := path
+	for {
+		next := result
+		for _, pat := range []string{"..", "%2e%2e", "%2E%2E", "%2e%2E", "%2E%2e"} {
+			next = strings.ReplaceAll(next, pat, "")
+		}
+		if next == result {
+			return result
+		}
+		result = next
+	}
 }

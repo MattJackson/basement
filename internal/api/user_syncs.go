@@ -291,7 +291,7 @@ func (s *Server) userPauseSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := auth.FromContext(r.Context())
+	claims, ok := auth.FromContext(r.Context())
 	if !ok {
 		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "No active session")
 		return
@@ -300,6 +300,19 @@ func (s *Server) userPauseSyncHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if jobID == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_ID", "Sync ID required")
+		return
+	}
+
+	// Ownership check (was MISSING — a cross-tenant IDOR let any authed
+	// user pause any other user's sync job by ID). Mirror the resume/
+	// delete handlers: load the job and verify the caller owns it.
+	job, err := s.syncStore.Load(jobID)
+	if err != nil {
+		writeErrorSimple(w, http.StatusNotFound, "SYNC_NOT_FOUND", "Sync job not found")
+		return
+	}
+	if job.OwnerUserID != claims.UserID {
+		writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "Access denied to this sync job")
 		return
 	}
 

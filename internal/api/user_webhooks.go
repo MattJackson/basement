@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -104,6 +105,33 @@ const generatedSecretLength = 16
 // create / update body should be rejected, or "" if everything looks
 // well-formed. Returns the typed error code so the caller can map it
 // to the matching HTTP status.
+// webhookTargetHostAllowed is an SSRF guard for webhook target URLs. It
+// blocks IP-LITERAL targets in non-public ranges (loopback, RFC-1918/ULA
+// private, link-local incl. 169.254.169.254 cloud metadata, unspecified,
+// multicast) plus the localhost/metadata literal hostnames.
+//
+// It deliberately does NOT resolve arbitrary hostnames at validation time
+// (no DNS dependency / flakiness, and DNS-rebind would defeat it anyway).
+// The COMPLETE defense is a control-plane dialer in the delivery engine
+// (internal/webhook) that re-checks the connected IP on every delivery —
+// tracked as follow-up. This validation layer stops the obvious literals.
+func webhookTargetHostAllowed(host string) bool {
+	if host == "" {
+		return false
+	}
+	switch lower := strings.ToLower(host); {
+	case lower == "localhost", strings.HasSuffix(lower, ".localhost"), lower == "metadata.google.internal":
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+			return false
+		}
+	}
+	return true
+}
+
 func validateWebhookRequest(req webhookCreateRequest, ownedRegions map[string]bool) (code, msg string) {
 	name := strings.TrimSpace(req.Name)
 	if !webhookNameRegex.MatchString(name) {
@@ -119,6 +147,9 @@ func validateWebhookRequest(req webhookCreateRequest, ownedRegions map[string]bo
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return "INVALID_TARGET_URL", "Target URL must use http or https"
+	}
+	if !webhookTargetHostAllowed(u.Hostname()) {
+		return "INVALID_TARGET_URL", "Target URL host is not allowed (loopback, private, link-local and cloud-metadata addresses are blocked)"
 	}
 	if len(req.Events) == 0 {
 		return "INVALID_EVENTS", "At least one event type is required"
