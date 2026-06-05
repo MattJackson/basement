@@ -145,20 +145,24 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 	// engine.Run; the response only needs the queued-state values.
 	respID := job.ID
 	respState := job.State
+	// Snapshot the connection IDs into locals so the goroutine doesn't close
+	// over the request struct after the handler has returned.
+	srcConnID := req.SrcConnectionID
+	dstConnID := req.DstConnectionID
 
 	// Spawn goroutine to run the sync (async, return 202 immediately)
 	go func() {
 		ctx := context.Background()
 
-		srcDrv, err := s.reg.For(ctx, req.SrcConnectionID)
+		srcDrv, err := s.reg.For(ctx, srcConnID)
 		if err != nil {
-			s.logger.Error("sync: failed to resolve source driver", "job_id", job.ID, "error", err)
+			s.logger.Error("sync: failed to resolve source driver", "job_id", respID, "error", err)
 			return
 		}
 
-		dstDrv, err := s.reg.For(ctx, req.DstConnectionID)
+		dstDrv, err := s.reg.For(ctx, dstConnID)
 		if err != nil {
-			s.logger.Error("sync: failed to resolve destination driver", "job_id", job.ID, "error", err)
+			s.logger.Error("sync: failed to resolve destination driver", "job_id", respID, "error", err)
 			return
 		}
 

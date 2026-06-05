@@ -91,10 +91,12 @@ func (s *Server) createBucketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "bucket:create", "bucket:"+cid+":*"); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "bucket:create", "bucket:"+cid+":*"); !ok {
+		return
 	}
 
 	var spec driver.BucketSpec
@@ -158,10 +160,12 @@ func (s *Server) updateBucketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "bucket:edit_alias", scopeBucket(cid, id)); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "bucket:edit_alias", scopeBucket(cid, id)); !ok {
+		return
 	}
 
 	var update driver.BucketUpdate
@@ -208,10 +212,12 @@ func (s *Server) armDeleteBucketHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "bucket:delete", scopeBucket(cid, id)); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "bucket:delete", scopeBucket(cid, id)); !ok {
+		return
 	}
 
 	// Confirm the bucket exists before issuing a token. Avoids handing
@@ -260,10 +266,12 @@ func (s *Server) deleteBucketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "bucket:delete", scopeBucket(cid, id)); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "bucket:delete", scopeBucket(cid, id)); !ok {
+		return
 	}
 
 	confirm := r.Header.Get("X-Confirm-Delete")

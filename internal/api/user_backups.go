@@ -115,15 +115,11 @@ func (s *Server) userCreateBackupHandler(w http.ResponseWriter, r *http.Request)
 	// own path (no need for a separate parser exposure on the public
 	// API) — we just attempt a dry-run Add against a zero-value
 	// Backup to surface the parser error in a 400.
-	if req.Schedule != backup.ScheduleManual {
-		if err := s.backupSched.Add(backup.Backup{ID: "__dryrun__", Schedule: req.Schedule}); err != nil {
-			s.backupSched.Remove("__dryrun__")
-			writeErrorSimple(w, http.StatusBadRequest, "INVALID_SCHEDULE", err.Error())
-			return
-		}
-		// Drop the dry-run entry — the real one is added below
-		// after the store persists the record.
-		s.backupSched.Remove("__dryrun__")
+	// Validate the cron schedule statelessly (no shared __dryrun__ entry to
+	// race concurrent requests).
+	if err := s.backupSched.ValidateSchedule(req.Schedule); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_SCHEDULE", err.Error())
+		return
 	}
 
 	b := backup.Backup{
@@ -215,13 +211,9 @@ func (s *Server) userUpdateBackupHandler(w http.ResponseWriter, r *http.Request)
 		writeErrorSimple(w, http.StatusBadRequest, code, msg)
 		return
 	}
-	if req.Schedule != backup.ScheduleManual {
-		if err := s.backupSched.Add(backup.Backup{ID: "__dryrun__", Schedule: req.Schedule}); err != nil {
-			s.backupSched.Remove("__dryrun__")
-			writeErrorSimple(w, http.StatusBadRequest, "INVALID_SCHEDULE", err.Error())
-			return
-		}
-		s.backupSched.Remove("__dryrun__")
+	if err := s.backupSched.ValidateSchedule(req.Schedule); err != nil {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_SCHEDULE", err.Error())
+		return
 	}
 
 	patch := backup.Backup{

@@ -25,7 +25,12 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useUser } from "@/shared/auth/useUser";
-import { useAuthMode, useSetAuthMode, type AuthMode } from "@/shared/auth/mode";
+import {
+  computeNextStateOnDowngrade,
+  useAuthMode,
+  useSetAuthMode,
+  type AuthMode,
+} from "@/shared/auth/mode";
 
 export function AuthModeHydrator() {
   const { data: user } = useUser();
@@ -76,11 +81,24 @@ export function AuthModeHydrator() {
         ? user.modeExpiresAt * 1000
         : 0;
 
-    if (current.mode === serverMode && current.expiresAt === serverExpiresMs) {
+    // Re-apply the expiry downgrade rule to the SERVER payload before
+    // seeding. /auth/me reads the JWT cookie claims, which can still carry
+    // mode=elevated with an already-past modeExpiresAt (the cookie hasn't
+    // rotated yet). Seeding that verbatim would re-promote the user into an
+    // expired privileged mode — then the provider's 1Hz ticker downgrades
+    // it, invalidates /auth/me, refetches the same stale cookie, and we
+    // re-promote again: a flap that flashes privileged UI every second.
+    // Normalising here makes the hydrator agree with the ticker.
+    const next = computeNextStateOnDowngrade(
+      { mode: serverMode, expiresAt: serverExpiresMs },
+      Date.now(),
+    );
+
+    if (current.mode === next.mode && current.expiresAt === next.expiresAt) {
       return;
     }
 
-    setMode({ mode: serverMode, expiresAt: serverExpiresMs });
+    setMode(next);
   }, [user, current.mode, current.expiresAt, setMode]);
 
   return null;

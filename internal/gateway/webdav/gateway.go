@@ -181,8 +181,8 @@ func (g *Gateway) Start(_ context.Context) error {
 
 // Stop tears the gateway down. Sets running to false; the chi mount
 // continues to dispatch requests after Stop, so we don't try to tear
-// down the mount itself. Future enhancement: refuse requests when
-// !running.
+// down the mount itself. ServeHTTP reads this flag and refuses new
+// requests with a 503 once !running (drain guard).
 func (g *Gateway) Stop(_ context.Context) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()

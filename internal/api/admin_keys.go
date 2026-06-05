@@ -68,10 +68,12 @@ func (s *Server) createKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "key:create", "key:"+cid+":*"); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "key:create", "key:"+cid+":*"); !ok {
+		return
 	}
 
 	drv, err := s.driverForRouteCluster(r)
@@ -135,10 +137,12 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "key:edit_permissions", "key:"+cid+":"+id); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "key:edit_permissions", "key:"+cid+":"+id); !ok {
+		return
 	}
 
 	var body struct {
@@ -201,10 +205,12 @@ func (s *Server) armDeleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "key:delete", "key:"+cid+":"+id); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "key:delete", "key:"+cid+":"+id); !ok {
+		return
 	}
 
 	// Confirm the key exists before issuing a token. Avoids handing
@@ -254,10 +260,12 @@ func (s *Server) deleteKeyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cid := chi.URLParam(r, "cid")
-	if cid != "" {
-		if _, ok := s.requireCapability(w, r, "key:delete", "key:"+cid+":"+id); !ok {
-			return
-		}
+	if cid == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "key:delete", "key:"+cid+":"+id); !ok {
+		return
 	}
 
 	confirm := r.Header.Get("X-Confirm-Delete")

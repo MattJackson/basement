@@ -63,7 +63,11 @@ func applyBootstrap(cfg *Config) error {
 	// existing main.go warn-not-exit path will surface that diagnostic
 	// after Load returns; bootstrap silently degrades to "no auto-gen"
 	// rather than failing the whole boot.
-	if err := os.MkdirAll(cfg.DataDir, 0755); err != nil {
+	//
+	// 0700 (not 0755): DataDir holds the JWT signing secret and the
+	// initial admin password file. Other local users have no business
+	// listing or traversing it.
+	if err := os.MkdirAll(cfg.DataDir, 0700); err != nil {
 		slog.Warn("bootstrap: data dir not creatable — auto-bootstrap disabled, basement will refuse to start unless env vars are set explicitly", "dir", cfg.DataDir, "error", err)
 		return nil
 	}
@@ -122,7 +126,14 @@ func bootstrapJWTSecret(cfg *Config) error {
 // priority order: explicit hash > plaintext convenience > full auto-gen.
 func bootstrapAdminPassword(cfg *Config) error {
 	if cfg.Admin.PasswordHash != "" {
-		// Operator set the hash explicitly — nothing to do.
+		// Operator set the hash explicitly. Validate it actually parses
+		// as a bcrypt hash — a malformed BASEMENT_ADMIN_PASSWORD_HASH
+		// (e.g. a plaintext password pasted by mistake, or a truncated
+		// copy) would otherwise lock the operator out silently, since
+		// bcrypt.CompareHashAndPassword can never match a non-hash.
+		if _, err := bcrypt.Cost([]byte(cfg.Admin.PasswordHash)); err != nil {
+			return fmt.Errorf("bootstrap: BASEMENT_ADMIN_PASSWORD_HASH is not a valid bcrypt hash: %w", err)
+		}
 		return nil
 	}
 
@@ -188,13 +199,41 @@ func bootstrapAdminPassword(cfg *Config) error {
 }
 
 // writeSecret atomically writes data to path with 0600 perms. Uses a
-// tmp+rename so a crash mid-write can't leave a half-written file.
+// tmp+fsync+rename so a crash mid-write can't leave a half-written file,
+// and the data is durably on disk before the rename publishes it (a bare
+// WriteFile+Rename can survive a crash with the rename committed but the
+// file's contents still in the page cache, yielding a zero-length secret).
 func writeSecret(path string, data []byte) error {
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	// fsync the parent directory so the rename itself is durable —
+	// otherwise a crash right after rename can lose the directory entry.
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
 }
 
 // bcryptHash wraps bcrypt.GenerateFromPassword to keep call sites tidy.

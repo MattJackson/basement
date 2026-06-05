@@ -153,6 +153,21 @@ func (s *Scheduler) Add(b Backup) error {
 	return nil
 }
 
+// ValidateSchedule parses a cron schedule WITHOUT registering anything —
+// for input validation on create/update. Stateless, so concurrent
+// validations don't collide (the old "dry-run Add against a fixed
+// __dryrun__ id then Remove" pattern raced between concurrent requests).
+// A manual/empty schedule is always valid.
+func (s *Scheduler) ValidateSchedule(schedule string) error {
+	if schedule == "" || schedule == ScheduleManual {
+		return nil
+	}
+	if _, err := s.parser.Parse(schedule); err != nil {
+		return fmt.Errorf("invalid cron expression %q: %w", schedule, err)
+	}
+	return nil
+}
+
 // Remove drops the cron entry for a Backup. Safe to call on a
 // Backup that was never scheduled (no-op).
 func (s *Scheduler) Remove(backupID string) {

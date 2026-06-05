@@ -172,7 +172,7 @@ func TestBootstrap_ExplicitEnvVars_NoOp(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
 	t.Setenv("BASEMENT_DATA_DIR", dataDir)
 	t.Setenv("BASEMENT_ADMIN_USER", "operator")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -182,7 +182,7 @@ func TestBootstrap_ExplicitEnvVars_NoOp(t *testing.T) {
 	if cfg.Admin.User != "operator" {
 		t.Errorf("Admin.User=%q, want \"operator\" (env var not overridden)", cfg.Admin.User)
 	}
-	if cfg.Admin.PasswordHash != "$2a$12$abcdefghijklmnopqrstuv" {
+	if cfg.Admin.PasswordHash != "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu" {
 		t.Error("PasswordHash was rewritten despite env var")
 	}
 	// Neither bootstrap file should have been created.

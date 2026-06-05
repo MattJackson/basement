@@ -30,8 +30,9 @@ export function safeHref(url: string | undefined): string | null {
 
 // Webfont stylesheet URLs must be https.
 const HTTPS_RE = /^https:\/\//i;
-// CSS length for border-radius (e.g. 8px, 0.5rem).
-const CSS_LEN_RE = /^\d+(\.\d+)?(px|rem|em|%)$/;
+// CSS length for border-radius (e.g. 8px, 0.5rem). Bare "0" is a valid
+// unitless CSS length and is accepted; the server mirrors this shape.
+const CSS_LEN_RE = /^(0|\d+(\.\d+)?(px|rem|em|%))$/;
 // font-family stack: letters/digits/space/comma/quotes/dash/underscore only —
 // rejects ( ) ; { } / which would break out of the declaration or inject url().
 const SAFE_FONT_RE = /^[a-zA-Z0-9 ,_'"-]+$/;
