@@ -67,7 +67,11 @@ export function useUser() {
         oidcUser: userData.oidcUser ?? false,
       } as UserResponseType;
     },
-    staleTime: 5 * 60 * 1000,
+    // /auth/me carries privilege state: role, uiAdmin, active role, and the
+    // sudo mode + expiry. A long staleTime lets a demotion (or an expired
+    // elevation) keep stale privileged UI on screen for minutes. 30s matches
+    // the other auth-sensitive queries and bounds that window tightly.
+    staleTime: 30 * 1000,
     retry: (failureCount, error) => {
       if (error instanceof Error && error.message.includes("status 401")) return false;
       return failureCount < 2;

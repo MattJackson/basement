@@ -266,6 +266,12 @@ func buildGateway(t *testing.T) (*Gateway, *fakeBackend) {
 		Backend: be,
 		Audit:   audit.NewNoop(),
 	})
+	// Request-serving tests exercise a live gateway; Start flips the
+	// drain guard's running flag on so ServeHTTP dispatches instead of
+	// returning 503. Lifecycle-specific tests build their own gateway.
+	if err := g.Start(context.Background()); err != nil {
+		t.Fatalf("buildGateway Start: %v", err)
+	}
 	return g, be
 }
 
@@ -325,7 +331,9 @@ func TestImplementsGatewayInterface(t *testing.T) {
 }
 
 func TestStartStop_FlipsRunning(t *testing.T) {
-	g, _ := buildGateway(t)
+	// Build directly (not via buildGateway, which auto-Starts) so we can
+	// assert the pre-Start state.
+	g := New(Deps{Audit: audit.NewNoop()})
 	if g.Status().Running {
 		t.Errorf("pre-Start: want Running=false")
 	}
@@ -340,6 +348,22 @@ func TestStartStop_FlipsRunning(t *testing.T) {
 	}
 	if g.Status().Running {
 		t.Errorf("post-Stop: want Running=false")
+	}
+}
+
+// TestDrainGuard_503AfterStop verifies the drain guard: once Stop has
+// flipped running=false, new requests get a 503 instead of being
+// dispatched against a torn-down backend.
+func TestDrainGuard_503AfterStop(t *testing.T) {
+	g, _ := buildGateway(t) // started
+	if err := g.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	w := do(t, g, "PROPFIND", "/webdav/home/", map[string]string{
+		"Authorization": basic("alice", "pw"),
+	}, nil)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("post-Stop PROPFIND: want 503 got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

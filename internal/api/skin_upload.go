@@ -34,6 +34,23 @@ import (
 
 var skinNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
 
+// Server-side mirrors of the SkinInjector/useSkin FE guards (r13). A skin
+// file is untrusted input that gets interpolated into live CSS — including
+// on the PRE-AUTH login page — so we reject malformed values at upload
+// instead of relying solely on the renderer to skip them.
+//
+//   - skinHSLRe: palette colors are written as `hsl(<value>)`, so a value
+//     must be a bare "H S% L%" token; anything else could break out of the
+//     hsl() and inject rules ("0 0% 0%) } body{background:url(//evil)").
+//   - skinFontRe: font-family stacks reject ( ) ; { } / which would escape
+//     the declaration or smuggle url().
+//   - skinCSSLenRe: border-radius must be a plain CSS length.
+var (
+	skinHSLRe    = regexp.MustCompile(`^\d{1,3}(\.\d+)?\s+\d{1,3}(\.\d+)?%\s+\d{1,3}(\.\d+)?%$`)
+	skinFontRe   = regexp.MustCompile(`^[a-zA-Z0-9 ,_'"-]+$`)
+	skinCSSLenRe = regexp.MustCompile(`^(0|\d+(\.\d+)?(px|rem|em|%))$`)
+)
+
 // SkinPolicy is the visibility + CORS configuration for a user-uploaded skin.
 type SkinPolicy struct {
 	// Public determines whether this skin appears in the public registry
@@ -84,6 +101,47 @@ func validateSkinJSON(data []byte) (*skin.Skin, error) {
 	// Ensure palettes are populated
 	if s.Palette.Light.Primary == "" || s.Palette.Dark.Primary == "" {
 		return nil, errors.New("palette must have primary colors for both light and dark modes")
+	}
+
+	// Every non-empty palette color must be a bare "H S% L%" token (it is
+	// interpolated into hsl(...) by the renderer). Validate both modes.
+	for _, set := range []struct {
+		mode    string
+		palette skin.Palette
+	}{
+		{"light", s.Palette.Light},
+		{"dark", s.Palette.Dark},
+	} {
+		for _, c := range []struct{ name, val string }{
+			{"primary", set.palette.Primary},
+			{"bg", set.palette.Background},
+			{"fg", set.palette.Foreground},
+			{"muted", set.palette.Muted},
+			{"accent", set.palette.Accent},
+			{"destructive", set.palette.Destructive},
+			{"warning", set.palette.Warning},
+			{"success", set.palette.Success},
+			{"info", set.palette.Info},
+		} {
+			if c.val == "" {
+				continue
+			}
+			if !skinHSLRe.MatchString(strings.TrimSpace(c.val)) {
+				return nil, fmt.Errorf("palette.%s.%s must be an \"H S%% L%%\" HSL token, got %q", set.mode, c.name, c.val)
+			}
+		}
+	}
+
+	// Typography font stacks render into a CSS font-family declaration;
+	// border-radius into a CSS length. Mirror the FE's strict shapes.
+	if s.Typography.Sans != "" && !skinFontRe.MatchString(s.Typography.Sans) {
+		return nil, errors.New("typography.sans contains characters not allowed in a font-family stack")
+	}
+	if s.Typography.Mono != "" && !skinFontRe.MatchString(s.Typography.Mono) {
+		return nil, errors.New("typography.mono contains characters not allowed in a font-family stack")
+	}
+	if s.BorderRadius != "" && !skinCSSLenRe.MatchString(s.BorderRadius) {
+		return nil, fmt.Errorf("borderRadius must be a CSS length (e.g. 8px, 0.5rem), got %q", s.BorderRadius)
 	}
 
 	// Content injection guards (server-side defense in depth — these fields

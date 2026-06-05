@@ -123,6 +123,9 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid BASEMENT_SESSION_TTL: %w", err)
 		}
+		if parsed <= 0 {
+			return nil, fmt.Errorf("invalid BASEMENT_SESSION_TTL: must be positive, got %q", sessionTTLEnv)
+		}
 		cfg.SessionTTL = parsed
 	}
 
@@ -132,6 +135,9 @@ func Load() (*Config, error) {
 		days, err := strconv.Atoi(auditDaysEnv)
 		if err != nil {
 			return nil, fmt.Errorf("invalid BASEMENT_AUDIT_RETENTION_DAYS: %w", err)
+		}
+		if days <= 0 {
+			return nil, fmt.Errorf("invalid BASEMENT_AUDIT_RETENTION_DAYS: must be positive, got %q", auditDaysEnv)
 		}
 		cfg.AuditRetention = time.Duration(days) * 24 * time.Hour
 	}

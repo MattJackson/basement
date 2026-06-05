@@ -311,11 +311,19 @@ func (s *Server) shareListHandler(w http.ResponseWriter, r *http.Request) {
 			cleanedObjects = append(cleanedObjects, obj)
 		}
 	}
+	// Apply the same prefix filter to CommonPrefixes — a misbehaving driver
+	// must not leak directory names outside the share's scope.
+	cleanedPrefixes := []string{}
+	for _, cp := range page.CommonPrefixes {
+		if strings.HasPrefix(cp, sh.Prefix) {
+			cleanedPrefixes = append(cleanedPrefixes, cp)
+		}
+	}
 
 	resp := shareListResponse{
 		Objects:        cleanedObjects,
 		IsTruncated:    page.IsTruncated,
-		CommonPrefixes: page.CommonPrefixes,
+		CommonPrefixes: cleanedPrefixes,
 	}
 	if page.NextContinuation != "" {
 		resp.NextContinuation = page.NextContinuation

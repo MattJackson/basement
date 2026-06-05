@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -69,6 +70,29 @@ func (u *User) UnmarshalJSON(data []byte) error {
 		u.Created = t
 	}
 	return nil
+}
+
+// LogValue implements slog.LogValuer so a User passed to a structured
+// logger never spills its bcrypt PasswordHash. Every other secret in
+// this codebase is deliberately never logged; this closes the one path
+// where an `slog.Info("...", "user", u)` would otherwise serialize the
+// whole struct (hash included) into docker logs / journald / a log
+// aggregator. The hash is replaced with a fixed marker; the rest of the
+// identifying fields are kept so the log line stays useful.
+func (u User) LogValue() slog.Value {
+	hash := ""
+	if u.PasswordHash != "" {
+		hash = "REDACTED"
+	}
+	return slog.GroupValue(
+		slog.String("id", u.ID),
+		slog.String("username", u.Username),
+		slog.String("password_hash", hash),
+		slog.String("role", u.Role),
+		slog.Bool("uiAdmin", u.UIAdmin),
+		slog.String("provider", u.Provider),
+		slog.String("email", u.Email),
+	)
 }
 
 // Users returns a deep copy of all users. Callers can mutate the returned slice freely.

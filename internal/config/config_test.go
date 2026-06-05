@@ -11,7 +11,7 @@ func TestLoad_AllRequiredPresent(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq") // 32 bytes base64
 
 	cfg, err := Load()
@@ -59,7 +59,7 @@ func TestLoad_AllRequiredPresent(t *testing.T) {
 // name is empty.
 func TestLoad_MissingDriver_NowOptional(t *testing.T) {
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -75,7 +75,7 @@ func TestLoad_MissingDriverGarageAdminURL(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "garage")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -91,7 +91,7 @@ func TestLoad_MissingDriverGarageAdminToken(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "garage")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -107,7 +107,7 @@ func TestLoad_MissingAdminUser(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "garage")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -152,7 +152,7 @@ func TestLoad_MissingJWTSecret_BootstrapsInstead(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_DATA_DIR", t.TempDir())
 
 	cfg, err := Load()
@@ -169,7 +169,7 @@ func TestLoad_InvalidSessionTTL(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_SESSION_TTL", "invalid")
 
@@ -187,7 +187,7 @@ func TestLoad_InvalidJWTSecretBase64(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "not-valid-base64!!!")
 
 	_, err := Load()
@@ -204,7 +204,7 @@ func TestLoad_TOOShortJWTSecret(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	// Only 8 bytes base64 encoded = "dGVzdDEyMw=="
 	t.Setenv("BASEMENT_JWT_SECRET", "dGVzdDEyMw==")
 
@@ -222,7 +222,7 @@ func TestLoad_UnknownDriverName(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -239,7 +239,7 @@ func TestLoad_InvalidLogLevel(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_LOG_LEVEL", "debugg")
 
@@ -260,7 +260,7 @@ func TestLoad_LogFormatDefaultsToJSON(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -279,7 +279,7 @@ func TestLoad_LogFormatAcceptsText(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_LOG_FORMAT", "text")
 
@@ -299,7 +299,7 @@ func TestLoad_InvalidLogFormat(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_LOG_FORMAT", "yaml")
 
@@ -319,7 +319,7 @@ func TestLoad_MetricsTokenReadFromEnv(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_METRICS_TOKEN", "scrape-s3cr3t")
 
@@ -337,7 +337,7 @@ func TestLoad_CustomSessionTTL(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_SESSION_TTL", "2h30m")
 
@@ -357,7 +357,7 @@ func TestLoad_CustomAuditRetentionDays(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_AUDIT_RETENTION_DAYS", "30")
 
@@ -377,7 +377,7 @@ func TestLoad_OIDCAutoProvision(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
 	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
@@ -412,7 +412,7 @@ func TestLoad_OIDCRedirectURLDerivedFromPublicURL(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_PUBLIC_URL", "https://basement.example.com/")
 	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
@@ -435,7 +435,7 @@ func TestLoad_OIDCMissingClientID(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
 	t.Setenv("BASEMENT_OIDC_CLIENT_SECRET", "secret456")
@@ -455,7 +455,7 @@ func TestLoad_OIDCMissingClientSecret(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
 	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
@@ -475,7 +475,7 @@ func TestLoad_OIDCMissingRedirectURL(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_OIDC_ISSUER", "https://oidc.example.com")
 	t.Setenv("BASEMENT_OIDC_CLIENT_ID", "client123")
@@ -496,7 +496,7 @@ func TestLoad_OIDCDisabledByDefault(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -516,7 +516,7 @@ func TestLoad_OIDCAutoProvisionInvalid(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_OIDC_AUTO_PROVISION", "maybe")
 
@@ -562,7 +562,7 @@ func TestLoad_InvalidAuditRetentionDays(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 	t.Setenv("BASEMENT_AUDIT_RETENTION_DAYS", "not-a-number")
 
@@ -580,7 +580,7 @@ func TestLoad_Defaults(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "testtoken123")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -620,7 +620,7 @@ func TestLoad_AwsS3Driver_Happy(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "secret/test")
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_ENDPOINT", "https://s3.example.com")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -650,7 +650,7 @@ func TestLoad_AwsS3Driver_MissingRegion(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "k")
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "s")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -668,7 +668,7 @@ func TestLoad_AwsS3Driver_MissingAccessKey(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_REGION", "us-east-1")
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "s")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -686,7 +686,7 @@ func TestLoad_AwsS3Driver_MissingSecretKey(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_REGION", "us-east-1")
 	t.Setenv("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "k")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	_, err := Load()
@@ -705,7 +705,7 @@ func TestLoad_GarageV1Driver(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage-v1:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -722,7 +722,7 @@ func TestLoad_GarageV1Driver(t *testing.T) {
 func TestLoad_MinioDriver(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "minio")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -743,7 +743,7 @@ func TestLoad_CustomListenAndDataDir(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 	t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
-	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 	cfg, err := Load()
@@ -770,7 +770,7 @@ func TestLoad_LogLevelVariants(t *testing.T) {
 			t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_URL", "http://garage:3903")
 			t.Setenv("BASEMENT_DRIVER_GARAGE_ADMIN_TOKEN", "tok")
 			t.Setenv("BASEMENT_ADMIN_USER", "admin")
-			t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$abcdefghijklmnopqrstuv")
+			t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 			t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
 
 			cfg, err := Load()
