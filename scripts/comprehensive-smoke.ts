@@ -13,9 +13,9 @@
 // SAFETY GUARANTEES
 // =========================================================================
 //
-// This script runs against PRODUCTION (basement.example.com) by default. To
-// avoid the obvious failure mode — overwriting or deleting matthew's
-// real data — destructive coverage uses ONLY ephemeral resources
+// This script runs against the configured deploy (BASE_URL). To
+// avoid the obvious failure mode — overwriting or deleting the
+// operator's real data — destructive coverage uses ONLY ephemeral resources
 // tagged with the run's timestamp + a random nonce, so a cleanup
 // failure leaves obvious garbage that's easy to find and reap by hand.
 //
@@ -103,7 +103,7 @@ if (existsSync(AXE_INDEX)) {
 }
 
 // ---------- config ----------
-const BASE_URL = (process.env.BASE_URL ?? "https://basement.example.com").replace(/\/$/, "");
+const BASE_URL = (process.env.BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 const USERNAME = process.env.BUI_USERNAME ?? process.env.BASEMENT_USERNAME ?? "matthew";
 const PASSWORD = process.env.BUI_PASSWORD ?? process.env.BASEMENT_PASSWORD ?? process.env.PASSWORD ?? "password";
 

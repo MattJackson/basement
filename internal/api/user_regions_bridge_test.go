@@ -291,7 +291,7 @@ func TestRegionBuckets_NonGarageAdmin_SkipsBridge(t *testing.T) {
 }
 
 // TestRegionBuckets_BridgeEndpointCanonicalization — an admin
-// Connection registered with a styled URL ("HTTPS://S3.example.com:443/")
+// Connection registered with a styled URL ("HTTPS://S3.EXAMPLE.COM:443/")
 // matches a UserRegion whose endpoint was input differently
 // ("https://s3.example.com") because NormalizeEndpoint folds both to the
 // same canonical form.
@@ -301,7 +301,7 @@ func TestRegionBuckets_BridgeEndpointCanonicalization(t *testing.T) {
 	env.bindAdminDriver()
 	defer func() { bridgeFactoryCurrent = nil }()
 
-	env.seedAdminConnection("conn-garage-prod", store.DriverGarageV1, "s3_endpoint", "HTTPS://S3.example.com:443/")
+	env.seedAdminConnection("conn-garage-prod", store.DriverGarageV1, "s3_endpoint", "HTTPS://S3.EXAMPLE.COM:443/")
 
 	env.adminDrv.listBucketsFunc = func(_ context.Context) ([]driver.Bucket, error) {
 		return []driver.Bucket{{ID: "canonical", Aliases: []string{"canonical"}}}, nil

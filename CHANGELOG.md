@@ -7,7 +7,7 @@ write-up; this file is the at-a-glance index.
 ## v1.13.32 → v1.13.40 — 2026-05-25 (operator live-smoke burst)
 
 12 patch tags from a single-day live-bug session as the operator
-exercised the v2.0.0-beta.3 build at basement.example.com. The PATCH
+exercised the v2.0.0-beta.3 build at the live deploy. The PATCH
 `/admin/system` merge fix (v1.13.39) is the highest-impact entry —
 it cures the underlying cause of "Settings save inconsistency"
 reports. The rest are surgical UX fixes.
@@ -600,7 +600,7 @@ Mobile UI audit + inline fixes for the obvious phone-viewport bugs.
   summary at `docs/mobile-audit-{YYYY-MM-DD}.md`. Wrapper:
   `scripts/mobile-audit.sh`.
 - **First audit, baseline findings** — `docs/mobile-audit-2026-05-23.md`
-  captures the v1.11.0.15 baseline against `basement.example.com`. iPad Mini
+  captures the v1.11.0.15 baseline against the live deploy. iPad Mini
   passes every route. Phone viewports surfaced 51 MAJOR horizontal-
   scroll findings (one per admin route, all the same root cause: the
   AppShell header) plus 100 MINOR tap-target findings for default
@@ -637,7 +637,7 @@ Touched: `scripts/mobile-audit.ts` (new), `scripts/mobile-audit.sh`
 `frontend/src/components/ui/input.tsx`,
 `frontend/src/routes/admin/service-accounts/new.tsx`, `CHANGELOG.md`.
 
-Follow-up cycles: re-audit against basement.example.com after this tag rolls
+Follow-up cycles: re-audit against the live deploy after this tag rolls
 to confirm the AppShell + Button + Input fixes drop the MAJOR count
 to ~0 on phone viewports; table-as-cards layout below 640px for
 `/admin/audit`, `/admin/service-accounts`, `/admin/clusters/{cid}/layout`,
@@ -1034,7 +1034,7 @@ Touched: `scripts/feature-smoke.ts` (new), `scripts/feature-smoke.sh`
 ## v1.11.0.4 — 2026-05-23
 
 Federation engine no-op replication fix. Caught by hands-on Garage v2
-testing against basement.example.com: the polling tick ran (lag gauges
+testing against the live deploy: the polling tick ran (lag gauges
 advanced, tick logs fired) but `federation:replicate_object` audit
 events never emitted and `basement_federation_replicate_total` stayed
 absent. Replicas stayed empty while the health endpoint falsely
@@ -1229,7 +1229,7 @@ story" without reading source:
 
 - **`SECURITY.md`** at the repo root. GitHub auto-detects and
   surfaces this in the Security tab. Documents the security contact
-  (`basement-security@users.noreply.github.com`), best-effort 48-hour initial-response SLA,
+  (GitHub Security Advisories), best-effort 48-hour initial-response SLA,
   supported-versions policy (current minor + previous minor),
   90-day responsible-disclosure window, and an accurate threat
   model that names what basement actually trusts (`DATA_DIR`,
@@ -1858,7 +1858,7 @@ rebranded `basement-ui` → `basement` (Go module
 `github.com/mattjackson/basement`, Docker image
 `ghcr.io/mattjackson/basement`, OpenAPI spec `basement.yaml`) and
 relicensed MIT → AGPLv3 with commercial-license escape hatch
-(contact basement-security@users.noreply.github.com). The v1.8.0a `basement` CLI binary was
+(contact via GitHub Discussions). The v1.8.0a `basement` CLI binary was
 deleted in v1.8.0d before it could ship — aws-cli + web UI + MCP
 cover the matrix.
 
@@ -2010,7 +2010,7 @@ renamed; Docker image moved from `ghcr.io/mattjackson/basement-ui`
 to `ghcr.io/mattjackson/basement`; `cmd/basement-server` keeps its
 name (already correct since v0.x). License simultaneously switched
 from MIT to AGPLv3 with a commercial-license escape hatch (contact
-basement-security@users.noreply.github.com) for proprietary embedding / hosted SaaS scenarios.
+via GitHub Discussions) for proprietary embedding / hosted SaaS scenarios.
 Operators using Watchtower against the old image repo will stop
 receiving updates until they update the image string; compose / k8s
 manifests need the rename. Data dir (`BASEMENT_DATA_DIR`) and env

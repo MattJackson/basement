@@ -13,8 +13,8 @@ same terms as the rest of the codebase.
 
 ### Commercial dual-licensing path
 
-The project maintainer (Matthew Jackson, `basement-security@users.noreply.github.com`) reserves
-the right to grant **commercial licenses** to basement for
+The project maintainer (Matthew Jackson, `@MattJackson` on GitHub)
+reserves the right to grant **commercial licenses** to basement for
 proprietary embedding, hosted SaaS deployments, or other use cases
 the AGPL's copyleft does not suit. This requires the maintainer to
 hold (or be permitted to relicense) the copyright on every
@@ -149,7 +149,7 @@ exhaustive:
 4. **UI smoke** — `pnpm -C frontend smoke` (curated, ~70 checks) and
    `pnpm -C frontend smoke:full` (comprehensive walk, every route +
    axe-core a11y pass). Both target the live deploy
-   (`basement.example.com`) using the matthew/password credentials.
+   (the live deploy) using the operator's credentials.
 
 5. **Fuzz** — `go test -fuzz=FuzzMatchFilter -fuzztime=30s
    ./internal/audit/...` (cycle v1.11.0.12 starter). Pure-function
@@ -208,8 +208,8 @@ exhaustive:
 - **Bug reports**, **feature requests**, and **questions** all have
   GitHub Issue Forms under `.github/ISSUE_TEMPLATE/`. Please use
   them — they prompt for the context reviewers need.
-- **Security reports** go to `basement-security@users.noreply.github.com`, not the public
-  issue tracker. See [`SECURITY.md`](./SECURITY.md).
+- **Security reports** go to GitHub Security Advisories, not the
+  public issue tracker. See [`SECURITY.md`](./SECURITY.md).
 - Blank issues are disabled (`.github/ISSUE_TEMPLATE/config.yml`)
   so reports land in the right template.
 
@@ -247,6 +247,6 @@ one we will adopt the Contributor Covenant.
 
 ## Contact
 
-- GitHub issues + discussions: `https://github.com/mattjackson/basement`
-- Email: `basement-security@users.noreply.github.com`
-- Commercial licensing: `basement-security@users.noreply.github.com`
+- GitHub issues + discussions: `https://github.com/MattJackson/basement`
+- Maintainer: Matthew Jackson (`@MattJackson` on GitHub)
+- Commercial licensing: open a [GitHub Discussion](https://github.com/MattJackson/basement/discussions)

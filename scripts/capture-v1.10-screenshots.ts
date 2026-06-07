@@ -42,7 +42,7 @@ if (!existsSync(PLAYWRIGHT_INDEX)) {
 const PLAYWRIGHT_ENTRY = pathToFileURL(PLAYWRIGHT_INDEX).href;
 const { chromium } = (await import(PLAYWRIGHT_ENTRY)) as { chromium: typeof ChromiumApi };
 
-const BASE_URL = (process.env.BASE_URL ?? "https://basement.example.com").replace(/\/$/, "");
+const BASE_URL = (process.env.BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 const USERNAME = process.env.BUI_USERNAME ?? process.env.BASEMENT_USERNAME ?? "matthew";
 const PASSWORD = process.env.BUI_PASSWORD ?? process.env.BASEMENT_PASSWORD ?? process.env.PASSWORD ?? "password";
 

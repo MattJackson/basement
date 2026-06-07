@@ -172,4 +172,4 @@ CHANGELOG.md lists every release. Use the `latest` Docker tag for the rolling li
 
 GNU Affero General Public License v3.0 — see [LICENSE](./LICENSE).
 
-For commercial dual-licensing (proprietary embedding, hosted SaaS without source disclosure, modifying without publishing changes): contact basement-security@users.noreply.github.com.
+For commercial dual-licensing (proprietary embedding, hosted SaaS without source disclosure, modifying without publishing changes): open a [GitHub Discussion](https://github.com/MattJackson/basement/discussions).

@@ -1348,4 +1348,3 @@ func TestUserRegions_DeleteObject_OtherUser404(t *testing.T) {
 		t.Errorf("expected 404 for non-owner delete, got %d (body=%s)", rr.Code, rr.Body.String())
 	}
 }
-

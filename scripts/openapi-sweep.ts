@@ -49,7 +49,7 @@ class CookieJar {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPEC = resolve(__dirname, "..", "openapi", "basement.yaml");
 
-const BASE_URL = process.env.BASE_URL ?? "https://basement.example.com";
+const BASE_URL = process.env.BASE_URL ?? "http://localhost:8080";
 const USERNAME = process.env.BUI_USERNAME ?? "matthew";
 const PASSWORD = process.env.BUI_PASSWORD ?? "password";
 const ALLOW_WRITES = process.argv.includes("--writes");

@@ -47,7 +47,7 @@ Key failures:
 **Diagnosis:** React version mismatch or invalid hook calls in test setup. These are pre-existing issues from v1.13.x skin system changes, not regressions from this cycle.
 
 ### 4. Postdeploy UI Smoke (`postdeploy-ui-smoke.sh`)
-🔄 **RUNNING** - Still executing against live basement.example.com  
+🔄 **RUNNING** - Still executing against the live deploy  
 Started: ~12:39 AM | PID: 65468 (opencode subprocess)  
 This is a Playwright-based 84-check suite; expected runtime ~30-45min.
 

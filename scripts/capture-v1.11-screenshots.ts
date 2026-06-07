@@ -37,7 +37,7 @@ if (!existsSync(PLAYWRIGHT_INDEX)) {
 
 const { chromium } = (await import(pathToFileURL(PLAYWRIGHT_INDEX).href)) as { chromium: typeof ChromiumApi };
 
-const BASE_URL = (process.env.BASE_URL ?? "https://basement.example.com").replace(/\/$/, "");
+const BASE_URL = (process.env.BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 const USERNAME = process.env.BUI_USERNAME ?? process.env.BASEMENT_USERNAME ?? "matthew";
 const PASSWORD = process.env.BUI_PASSWORD ?? process.env.BASEMENT_PASSWORD ?? process.env.PASSWORD ?? "password";
 

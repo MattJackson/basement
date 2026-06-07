@@ -57,7 +57,7 @@ capability flag (`allowUserBackends`, already in store/org_capabilities.go):
   - Host Admin curates the cluster list. Users can't add their own.
   - Users see exactly the buckets they've been granted on
     Host-Admin-approved clusters.
-  - This is basement.example.com's posture.
+  - This is the live deploy's posture.
 
 - **Multi-tenant mode** (`allowUserBackends=true`):
   - Users can BYO clusters (really: BYO buckets via S3 keys) using
@@ -154,7 +154,7 @@ When a Host Admin invites a user at `/admin/users/new`:
   to browse `lsi`. Post-refactor, he needs to grant himself a
   specific key for that bucket via the new Grant flow. Senior to
   ship a migration helper for the single-cluster, single-user
-  deployment (basement.example.com).
+  deployment (the live deploy).
 - Per-user encrypted key storage is new infrastructure — must NOT
   go to disk unencrypted. v0.9.x ships with HMAC-protected at-rest
   encryption using the JWT secret as the key (acceptable for

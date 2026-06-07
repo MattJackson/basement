@@ -65,7 +65,7 @@ a message like:
 
 ### Usage
 
-Defaults to `https://basement.example.com` with `matthew/password`:
+Defaults to `http://localhost:8080` with the operator's credentials:
 
 ```bash
 ./scripts/postdeploy-smoke.sh
@@ -166,7 +166,7 @@ failure, `2` on bad setup (missing dep, missing browser binary).
 
 ### Usage
 
-Defaults to `https://basement.example.com` with `matthew/password`:
+Defaults to `http://localhost:8080` with the operator's credentials:
 
 ```bash
 ./scripts/postdeploy-ui-smoke.sh

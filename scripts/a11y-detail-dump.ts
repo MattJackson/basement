@@ -19,7 +19,7 @@ const AXE = join(FRONTEND_NM, "@axe-core", "playwright", "dist", "index.js");
 const { chromium } = (await import(pathToFileURL(PLAYWRIGHT).href)) as { chromium: typeof ChromiumApi };
 const { default: AxeBuilder } = (await import(pathToFileURL(AXE).href)) as { default: any };
 
-const BASE_URL = process.env.BASE_URL ?? "https://basement.example.com";
+const BASE_URL = process.env.BASE_URL ?? "http://localhost:8080";
 const USERNAME = process.env.BUI_USERNAME ?? "matthew";
 const PASSWORD = process.env.BUI_PASSWORD ?? "password";
 

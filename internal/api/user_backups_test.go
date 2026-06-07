@@ -342,8 +342,8 @@ func TestCreateBackup_SnapshotModeDefaultsRetention(t *testing.T) {
 		"name":        "snapshot default",
 		"srcRegionId": "r1", "srcBucket": "b1",
 		"dstRegionId": "r2", "dstBucket": "b2",
-		"schedule":    backup.ScheduleManual,
-		"mode":        "snapshot",
+		"schedule": backup.ScheduleManual,
+		"mode":     "snapshot",
 	}
 	req := newJSONRequest("/api/v1/user/backups", body)
 	req.AddCookie(userCookie(t, "matthew"))
@@ -371,9 +371,9 @@ func TestCreateBackup_SnapshotModeCustomRetention(t *testing.T) {
 		"name":        "custom retention",
 		"srcRegionId": "r1", "srcBucket": "b1",
 		"dstRegionId": "r2", "dstBucket": "b2",
-		"schedule":    backup.ScheduleManual,
-		"mode":        "snapshot",
-		"retention":   map[string]int{"keepDaily": 3, "keepWeekly": 2, "keepMonthly": 1},
+		"schedule":  backup.ScheduleManual,
+		"mode":      "snapshot",
+		"retention": map[string]int{"keepDaily": 3, "keepWeekly": 2, "keepMonthly": 1},
 	}
 	req := newJSONRequest("/api/v1/user/backups", body)
 	req.AddCookie(userCookie(t, "matthew"))
@@ -398,8 +398,8 @@ func TestCreateBackup_InvalidMode(t *testing.T) {
 		"name":        "bad mode",
 		"srcRegionId": "r1", "srcBucket": "b1",
 		"dstRegionId": "r2", "dstBucket": "b2",
-		"schedule":    backup.ScheduleManual,
-		"mode":        "incremental",
+		"schedule": backup.ScheduleManual,
+		"mode":     "incremental",
 	}
 	req := newJSONRequest("/api/v1/user/backups", body)
 	req.AddCookie(userCookie(t, "matthew"))
@@ -418,9 +418,9 @@ func TestCreateBackup_NegativeRetentionRejected(t *testing.T) {
 		"name":        "negative",
 		"srcRegionId": "r1", "srcBucket": "b1",
 		"dstRegionId": "r2", "dstBucket": "b2",
-		"schedule":    backup.ScheduleManual,
-		"mode":        "snapshot",
-		"retention":   map[string]int{"keepDaily": -1},
+		"schedule":  backup.ScheduleManual,
+		"mode":      "snapshot",
+		"retention": map[string]int{"keepDaily": -1},
 	}
 	req := newJSONRequest("/api/v1/user/backups", body)
 	req.AddCookie(userCookie(t, "matthew"))

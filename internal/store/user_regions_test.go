@@ -192,8 +192,8 @@ func TestUserRegions_NormalizeEndpoint(t *testing.T) {
 	}{
 		{"plain https", "https://s3.example.com", "https://s3.example.com", true},
 		{"trailing slash", "https://s3.example.com/", "https://s3.example.com", true},
-		{"uppercase host", "https://S3.example.com", "https://s3.example.com", true},
-		{"mixed-case host + trailing slash", "https://S3.example.com/", "https://s3.example.com", true},
+		{"uppercase host", "https://S3.EXAMPLE.COM", "https://s3.example.com", true},
+		{"mixed-case host + trailing slash", "https://S3.EXAMPLE.COM/", "https://s3.example.com", true},
 		{"default https port", "https://s3.example.com:443", "https://s3.example.com", true},
 		{"default https port + trailing slash", "https://s3.example.com:443/", "https://s3.example.com", true},
 		{"uppercase scheme", "HTTPS://s3.example.com", "https://s3.example.com", true},
@@ -298,7 +298,7 @@ func TestUserRegions_UniquePerUserEndpointAlias(t *testing.T) {
 	// collides because NormalizeEndpoint folds them.
 	stylistic := sampleRegion()
 	stylistic.Alias = "home"
-	stylistic.Endpoint = "https://S3.example.com:443/"
+	stylistic.Endpoint = "https://S3.EXAMPLE.COM:443/"
 	if _, err := r.Create(ctx, stylistic); !errors.Is(err, ErrUserRegionDuplicate) {
 		t.Fatalf("expected ErrUserRegionDuplicate after canonicalization, got %v", err)
 	}
@@ -332,7 +332,7 @@ func TestUserRegions_GetByUserEndpoint(t *testing.T) {
 	}
 
 	// Found via a stylistic variant that canonicalizes to the same thing.
-	got2, err := r.GetByUserEndpoint(ctx, in.UserID, "https://S3.example.com:443/")
+	got2, err := r.GetByUserEndpoint(ctx, in.UserID, "https://S3.EXAMPLE.COM:443/")
 	if err != nil {
 		t.Fatalf("GetByUserEndpoint (variant): %v", err)
 	}

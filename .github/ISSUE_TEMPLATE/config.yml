@@ -1,8 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/mattjackson/basement/blob/main/SECURITY.md
-    about: Please report security issues privately to basement-security@users.noreply.github.com. Do not open a public issue.
+    url: https://github.com/MattJackson/basement/security/advisories/new
+    about: Please report security issues privately via GitHub Security Advisories. Do not open a public issue.
+  - name: Security disclosure policy
+    url: https://github.com/MattJackson/basement/blob/main/SECURITY.md
+    about: Full disclosure policy, response SLA, and threat model (SECURITY.md).
   - name: Commercial licensing
-    url: https://github.com/mattjackson/basement/blob/main/CONTRIBUTING.md
-    about: For proprietary embedding / hosted SaaS / AGPL escape-hatch enquiries, email basement-security@users.noreply.github.com.
+    url: https://github.com/MattJackson/basement/discussions
+    about: For proprietary embedding / hosted SaaS / AGPL escape-hatch enquiries, open a GitHub Discussion.

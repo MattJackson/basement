@@ -11,8 +11,8 @@ body:
         provide, the faster we can reproduce and fix it.
 
         For **security vulnerabilities**, please **do not** file a
-        public issue — email `basement-security@users.noreply.github.com`. See
-        [SECURITY.md](../blob/main/SECURITY.md).
+        public issue — report privately via GitHub Security
+        Advisories. See [SECURITY.md](../blob/main/SECURITY.md).
 
   - type: input
     id: version
@@ -87,5 +87,5 @@ body:
       options:
         - label: I have searched existing issues for duplicates.
           required: true
-        - label: This is not a security vulnerability (those go to basement-security@users.noreply.github.com).
+        - label: This is not a security vulnerability (those go to GitHub Security Advisories).
           required: true

@@ -70,5 +70,6 @@ under the indicated open-source license, and the open-source license
 in question is AGPL-3.0 alongside the project's dual-licensing
 practice).
 
-If you cannot agree to that addendum, please reach out at
-`basement-security@users.noreply.github.com` before opening a PR so we can find a workable path.
+If you cannot agree to that addendum, please reach out to the
+maintainer (Matthew Jackson, @MattJackson on GitHub) before opening
+a PR so we can find a workable path.

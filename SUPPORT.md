@@ -33,11 +33,13 @@ If you have a usage question:
 
 **Do not file security issues in public.** See [`SECURITY.md`](./SECURITY.md).
 
-Send reports to `basement-security@users.noreply.github.com`. We'll acknowledge receipt within 48 hours and
-provide an update timeline for triage, fix, and disclosure.
+Report privately via [GitHub Security Advisories](https://github.com/MattJackson/basement/security/advisories/new).
+We'll acknowledge receipt within 48 hours and provide an update timeline for
+triage, fix, and disclosure.
 
 ## Commercial / Dual-Licensing
 
 For proprietary embedding, hosted SaaS without source disclosure, or other use
-cases the AGPL's copyleft doesn't suit: contact `basement-security@users.noreply.github.com`. The maintainer
-reserves the right to grant commercial licenses on a case-by-case basis.
+cases the AGPL's copyleft doesn't suit: open a [GitHub Discussion](https://github.com/MattJackson/basement/discussions).
+The maintainer reserves the right to grant commercial licenses on a
+case-by-case basis.

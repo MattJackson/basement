@@ -60,7 +60,7 @@ const PLAYWRIGHT_ENTRY = pathToFileURL(PLAYWRIGHT_INDEX).href;
 const { chromium } = (await import(PLAYWRIGHT_ENTRY)) as { chromium: typeof ChromiumApi };
 
 // ---------- config ----------
-const BASE_URL = (process.env.BASE_URL ?? "https://basement.example.com").replace(/\/$/, "");
+const BASE_URL = (process.env.BASE_URL ?? "http://localhost:8080").replace(/\/$/, "");
 // BUI_* prefix avoids collision with macOS's readonly USERNAME export.
 // USERNAME/PASSWORD remain accepted as fallbacks for CI environments
 // that have them set deliberately, but BUI_* takes precedence.

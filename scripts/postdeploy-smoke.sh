@@ -26,7 +26,7 @@
 set -euo pipefail
 
 # ---------- config ----------
-BASEMENT_URL="${BASEMENT_URL:-https://basement.example.com}"
+BASEMENT_URL="${BASEMENT_URL:-http://localhost:8080}"
 BASEMENT_URL="${BASEMENT_URL%/}" # strip trailing slash
 BASEMENT_USER="${BASEMENT_USER:-matthew}"
 BASEMENT_PASS="${BASEMENT_PASS:-password}"

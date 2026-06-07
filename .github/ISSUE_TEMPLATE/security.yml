@@ -10,7 +10,8 @@ body:
         # Stop — do not file a public security issue.
 
         Security vulnerabilities in basement should be reported
-        **privately** to `basement-security@users.noreply.github.com`.
+        **privately via GitHub Security Advisories**:
+        https://github.com/MattJackson/basement/security/advisories/new
 
         See [SECURITY.md](../blob/main/SECURITY.md) for the full
         disclosure policy, response SLA, threat model, and what to
@@ -18,13 +19,13 @@ body:
 
         If you proceed with this public form, the maintainer will
         close the issue without disclosure and ask you to re-send
-        the report by email. This protects you and protects other
-        operators running affected versions.
+        the report via GitHub Security Advisories. This protects you
+        and protects other operators running affected versions.
 
   - type: checkboxes
     id: confirm
     attributes:
       label: I understand
       options:
-        - label: I have read SECURITY.md and understand security reports go to basement-security@users.noreply.github.com, not this tracker.
+        - label: I have read SECURITY.md and understand security reports go to GitHub Security Advisories, not this tracker.
           required: true

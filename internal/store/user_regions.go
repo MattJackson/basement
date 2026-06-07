@@ -141,7 +141,7 @@ var ErrUserRegionDuplicate = errors.New("duplicate user+endpoint+alias")
 const touchDebounce = time.Minute
 
 // NormalizeEndpoint canonicalizes an S3 endpoint URL so equivalent
-// inputs ("https://S3.example.com:443/", "https://s3.example.com") fold to the
+// inputs ("https://S3.EXAMPLE.COM:443/", "https://s3.example.com") fold to the
 // same key for uniqueness checks and lookups.
 //
 // Rules:

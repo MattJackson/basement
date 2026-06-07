@@ -112,7 +112,7 @@ Fix (v1.11.0.6): better than the proposed degradation — the snapshot lister no
 
 #### BUG06 — webdav-propfind-edge: PROPFIND `/webdav/` returns 405 (blocked by Caddy edge)
 
-The reverse-proxy in front of basement strips non-standard verbs (PROPFIND, PROPPATCH, MKCOL, MOVE, COPY, LOCK, UNLOCK). The basement WebDAV gateway speaks them all, but external clients hitting basement.example.com never reach the handler. Workaround: hit basement directly on its internal port (not through Caddy), or extend the Caddyfile to whitelist WebDAV verbs.
+The reverse-proxy in front of basement strips non-standard verbs (PROPFIND, PROPPATCH, MKCOL, MOVE, COPY, LOCK, UNLOCK). The basement WebDAV gateway speaks them all, but external clients hitting the live deploy never reach the handler. Workaround: hit basement directly on its internal port (not through Caddy), or extend the Caddyfile to whitelist WebDAV verbs.
 
 Repro: `PROPFIND https://basement.example.com/webdav/` with `Depth: 0` and Basic auth → 405 from edge.
 

@@ -41,5 +41,5 @@ body:
       options:
         - label: I have checked README.md, docs/configuration.md, and the relevant docs/release-notes/ entry.
           required: true
-        - label: This is not a security report (those go to basement-security@users.noreply.github.com).
+        - label: This is not a security report (those go to GitHub Security Advisories).
           required: true

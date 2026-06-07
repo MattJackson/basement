@@ -7,7 +7,8 @@ ship fixes quickly.
 
 ## Reporting a vulnerability
 
-**Email**: basement-security@users.noreply.github.com
+Report privately via **GitHub Security Advisories**:
+https://github.com/MattJackson/basement/security/advisories/new
 
 Please include:
 
@@ -19,9 +20,8 @@ Please include:
   data disclosure, RCE).
 - Any proposed mitigation or patch.
 
-We do not currently publish a PGP key. If you need encrypted
-transport, mention it in your initial mail and we will agree on a
-channel.
+GitHub Security Advisories provide an encrypted private channel, so
+no separate PGP arrangement is required.
 
 Please do **not** open a public GitHub issue for security reports.
 The `.github/ISSUE_TEMPLATE/security.yml` form redirects to this
@@ -40,8 +40,9 @@ reports. After triage we will:
    credits the reporter (unless they request anonymity).
 
 "Best effort" is honest: this is a single-maintainer project. If
-the maintainer is travelling or otherwise away, the 48-hour clock
-may slip. We will not silently ghost a report.
+the maintainer (Matthew Jackson, @MattJackson on GitHub) is
+travelling or otherwise away, the 48-hour clock may slip. We will
+not silently ghost a report.
 
 ## Supported versions
 

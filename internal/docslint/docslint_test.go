@@ -18,7 +18,12 @@ import (
 	"testing"
 )
 
-const securityEmail = "basement-security@users.noreply.github.com"
+// Security reports are funnelled through GitHub Security Advisories
+// rather than a maintainer email; docs must advertise that channel.
+const securityAdvisoryURL = "https://github.com/MattJackson/basement/security/advisories/new"
+
+// Commercial / licensing enquiries are routed to GitHub Discussions.
+const licensingURL = "https://github.com/MattJackson/basement/discussions"
 
 // repoRoot walks upward from this test file's directory until it
 // finds the go.mod (the repo root). Keeps the test resilient to
@@ -77,7 +82,7 @@ func TestSecurityMD(t *testing.T) {
 	if len(text) < 500 {
 		t.Errorf("SECURITY.md: too short (%d bytes), expected substantive content", len(text))
 	}
-	mustContain(t, "SECURITY.md", text, securityEmail)
+	mustContain(t, "SECURITY.md", text, securityAdvisoryURL)
 	mustMatch(t, "SECURITY.md response SLA", text, `(?i)48[- ]hour`)
 	mustMatch(t, "SECURITY.md supported versions", text, `[Ss]upported versions`)
 	mustMatch(t, "SECURITY.md disclosure window", text, `90[- ]day`)
@@ -118,7 +123,7 @@ func TestContributingMD(t *testing.T) {
 	mustMatch(t, "CONTRIBUTING.md eslint", text, `(?i)eslint`)
 	mustMatch(t, "CONTRIBUTING.md prettier", text, `(?i)prettier`)
 	// Commercial licensing contact.
-	mustContain(t, "CONTRIBUTING.md commercial contact", text, securityEmail)
+	mustContain(t, "CONTRIBUTING.md commercial contact", text, licensingURL)
 }
 
 func TestDCOMD(t *testing.T) {
@@ -163,7 +168,7 @@ func TestIssueTemplates(t *testing.T) {
 		text := readFile(t, root, ".github/ISSUE_TEMPLATE/config.yml")
 		mustMatch(t, "config blank_issues_enabled", text, `blank_issues_enabled:\s*false`)
 		mustContain(t, "config links SECURITY.md", text, "SECURITY.md")
-		mustContain(t, "config publishes security email", text, securityEmail)
+		mustContain(t, "config publishes security advisory channel", text, securityAdvisoryURL)
 	})
 
 	t.Run("bug_report form lists all 4 drivers", func(t *testing.T) {
@@ -188,7 +193,7 @@ func TestIssueTemplates(t *testing.T) {
 	t.Run("security redirect form points at SECURITY.md", func(t *testing.T) {
 		text := readFile(t, root, ".github/ISSUE_TEMPLATE/security.yml")
 		mustContain(t, "security form links SECURITY.md", text, "SECURITY.md")
-		mustContain(t, "security form publishes contact email", text, securityEmail)
+		mustContain(t, "security form publishes contact channel", text, securityAdvisoryURL)
 	})
 }
 
