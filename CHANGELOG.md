@@ -52,6 +52,140 @@ reports. The rest are surgical UX fixes.
 - v2.0.0-beta.4 (full app i18n extraction) is WIP-paused on branch `wip/v2.0.0-beta.4-2026-05-25` (12 files modified, ~100s of strings to extract still pending). Resume by checking out the branch and either redispatching the freshman with `prompts/v2.0.0-beta.4_full_i18n_extraction_2026-05-25.md` or finishing the extraction as senior.
 - v2.0.0-beta.5 (mass language pour to ~25-30 LTR locales) is the natural next freshman target post-beta.4.
 
+## v2.0.0-rc.4 — 2026-06-07
+
+Hardening release candidate. A **dual-model (Opus 4.8 + Sonnet 4.6) full-spectrum
+audit** of the entire codebase — backend, frontend, and dependencies — across
+security, correctness, concurrency, performance, technique, dead code, and tests,
+run slice-by-slice as verify → fix → re-audit, then validated by a dual-model
+file-by-file review of the whole `rc.3..HEAD` diff before tagging. Goal: make the
+RC ready for public consumption, usage, and scrutiny. `go build/vet/test ./...`,
+`golangci-lint`, and the frontend `tsc` + `vitest` (475 tests) + production build
+all green.
+
+### Security
+
+- **Service accounts** — minted capabilities/scopes are now intersected with the
+  creating admin's own effective capabilities on both create and update; SA
+  authority previously derived solely from stored caps, allowing a
+  `host:manage_users` holder to mint an SA carrying caps they lack (a durable
+  escalation token surviving the owner's later downgrade). (`internal/api/admin_service_accounts.go`)
+- **OIDC-user elevation** — fixed: the elevation path looked users up by username
+  while OIDC sessions carry a UUID subject and the store had no `UserByID`, so
+  OIDC users could never elevate (failed closed). Added `Store.UserByID`. (`internal/api/auth_elevate.go`, `internal/store/users.go`)
+- **Elevation-expiry bypass** — `activeRoleHandler` read the raw `claims.Mode`
+  instead of the expiry-aware `currentMode(r)`, treating an expired admin window as
+  still elevated. (`internal/api/auth.go`)
+- **User-region SSRF** — user-supplied region endpoints are now dialed through the
+  same DNS-rebind-safe guard used for webhooks (blocks loopback/RFC-1918/link-local/
+  cloud-metadata); previously a user region could point at `169.254.169.254` etc.
+  and exfil via the version-get stream. (`internal/driver`, `internal/webhook`)
+- **Cluster-secret (CSK)** — fixed a data race + crypto-corruption window where the
+  in-memory CSK slice was used in AES-GCM after the read lock was released while
+  `Lock`/`LockAll` zeroed it; and a `PutWrappedCSK` rollback deadlock. (`internal/clustersecret`)
+- **Frontend open-redirect** — the login `?next=` guard accepted `//evil.com` and
+  `/\evil.com`; now rejects protocol-relative / off-origin targets. (`frontend/src/shared/lib/safeNext.ts`)
+- **Hardening** — `crypto/subtle` replaces a home-grown constant-time compare;
+  removed dead role-kind authz helpers (the ADR-0009-forbidden shortcut pattern);
+  fail-closed cluster gate in `ActiveRoleMiddleware`; skin `{id}` path-traversal
+  validation; admin-user invite no longer leaks a bcrypt token hash; user-facing
+  share responses no longer serialize `passwordHash`; clustersecret Argon2 param
+  guard + atomic first-admin bootstrap; MCP server rejects tool calls before the
+  initialize handshake.
+
+### Fixed (correctness / concurrency)
+
+- **Sync engine** — etag-matched "skip" actions were re-streamed in full
+  (incremental sync was a no-op); `Pause` mutated a disconnected disk copy and never
+  stopped the live run; `Resume` ran on the request context and died on handler
+  return. (`internal/sync/engine.go`)
+- **Backup scheduler** — added an overlap guard (no concurrent self-runs racing the
+  destination + retention), released the mutex across `cron.Stop()` drain, and
+  bounded each fire with a timeout. (`internal/backup/scheduler.go`)
+- **Store durability** — `OrgCapabilitiesStore.Save()` is now atomic (tmp+fsync+
+  rename) instead of a torn-write-prone `os.WriteFile`; `saveJSON` fsyncs the parent
+  directory so the rename is crash-durable. Deep-copy of `ConfigEnc`/`SecretKeyEnc`;
+  audit-cleanup off-by-one-day cutoff. (`internal/store`)
+- **Storage drivers** — `ForUserGrant` now sets the credential under every config-key
+  variant so per-user grants override the connection's admin key for aws-s3/minio
+  (not only garage); transport/timeout errors no longer masquerade as
+  `ErrUnauthenticated`; admin response bodies are size-capped (`io.LimitReader`);
+  S3 client construction threads a real context. (`internal/driver`, `internal/drivers`)
+- **Frontend** — `UploadDialog` completion/retry read live state (stale-closure fix
+  so `onSuccess` fires); render-phase `navigate()` moved into effects (React purity);
+  typed `validateSearch` for the object-browser prefix param; `handleAliasSave`
+  replaces the edited alias by index (was dropping aliases by value); query-cache key
+  isolation + missing invalidations; `useUserSyncs` polls only while a job is active;
+  all client fetches honor `VITE_API_BASE`.
+
+### Changed (operator-visible)
+
+- **Audit-log file permissions tightened** — the audit log directory is now `0700`
+  and daily log files `0600` (were `0755`/`0644`). Events carry actor / IP /
+  user-agent / resource, so they are now owner-only. **If you run a log-aggregation
+  agent as a non-owner user, grant it group/ACL access or run it as the basement
+  user.** (`internal/audit`)
+- WebDAV/backup data-plane routes no longer inherit the shared 15s write timeout
+  (large up/downloads were severed); slowloris protection (header + idle timeouts)
+  retained. WebDAV PUT is capped at 1 GiB by default to bound memory.
+
+### Cleanup / public hygiene
+
+- Removed internal dev scaffolding from the published tree: `prompts/` (68
+  freshman/agent task prompts), `SESSION_KICKOFF.md`, dead `frontend/src/App.tsx`,
+  stale root build artifacts. `scratch/` + `operator-log.md` + compiled test
+  binaries are now git-ignored. Pruned 127 stale `worktree-agent-*` branches and
+  128 dead worktree registrations. Removed assorted dead code across the backend
+  and frontend (proven unreferenced).
+
+### Dependencies
+
+- Removed 5 unreferenced npm packages (`@fontsource-variable/geist`,
+  `tw-animate-css`, `i18next-resources-to-backend`, `workbox-build`,
+  `workbox-window`). Upgraded Go `goldmark` v1.5.4 → v1.8.2 (markdown renderer for
+  user/doc content).
+
+### Known limitations / flagged for a focused pass
+
+- **Federation engine** design issues (auto-failover split-brain without fencing,
+  never-synced-replica promotion, delete-advances-`LastSync` data loss, and a
+  `computeDiff` 100-object/tick cap that can strand objects 101+) remain flagged for
+  a dedicated design pass; only safe, scoped fixes (event-path timeout, store write
+  rollback) were applied this cycle.
+- `store/crypto.go` at-rest KDF (`sha256(jwtSecret)`) still awaits a
+  versioned-ciphertext migration decision.
+- `MigrateBucketUserAssignments` / `MigrateLegacyUsers` remain unwired at boot
+  (comments corrected); wire-up vs removal is an operator decision.
+- ADR-0009 Phase D/E (frontend `useCan`) is still parked; UI-Admins land on a
+  cluster-detail page with an empty nav rail (UX only — the backend enforces).
+
+## v2.0.0-rc.3 — 2026-06-04
+
+Final pass of the 3-model (Opus + Sonnet + Qwen) security audit drive —
+lower-severity leftovers across rounds.
+
+### Fixed / Security
+
+- `public_shares` CommonPrefixes prefix-filter; `user_syncs` goroutine snapshots a
+  job-ID copy; stateless `ValidateSchedule()` (removed the `__dryrun__` shared-state
+  race); `admin_buckets`/`admin_keys` cluster-id guards inverted to fail-closed
+  (empty cid → 400).
+- WebDAV gateway: drain guard (503 once Stopped), real audit result via a wrapped
+  ResponseWriter, IPv6 client-IP via `net.SplitHostPort`.
+- Config: reject non-positive `SESSION_TTL`/`AUDIT_RETENTION`; bcrypt-validate
+  `ADMIN_PASSWORD_HASH`; `writeSecret` fsync; `DataDir` `0700`.
+- `User.LogValue()` redacts `PasswordHash` from slog; skin upload gets server-side
+  validation mirroring the frontend guards (HSL palette / font / CSS length).
+- Frontend: `useUser` `/auth/me` staleTime 5m→30s; `AuthModeHydrator` re-applies the
+  expiry downgrade to the server payload (no stale-elevated re-promotion flap).
+
+## v2.0.0-rc.2 — 2026-05-27
+
+### Fixed
+
+- M1 mobile layout fix; OpenAPI sweep tooling; `/admin` error-detail + nil guard
+  (B10); spec alignment (B11/B12); `.gitkeep` CI fix for the embedded `dist/` dir.
+
 ## v2.0.0-rc.1 — 2026-05-27
 
 Release candidate for v2.0.0. Bundles beta.5 → beta.16 fixes.
