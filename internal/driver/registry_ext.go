@@ -196,6 +196,15 @@ func (r *Registry) ForUserGrant(ctx context.Context, connID, accessKeyID, secret
 	}
 	cfg["access_key_id"] = accessKeyID
 	cfg["secret_key"] = secretKey
+	// The aws_s3 and minio drivers read cfg["access_key"] (not
+	// access_key_id) for the S3 access-key ID — see
+	// internal/drivers/{aws_s3,minio}/client.go newS3Client. Without this
+	// override the per-user grant silently falls back to the connection's
+	// stored admin key for those drivers, defeating ADR-0001's per-user
+	// credential attribution. Set it alongside access_key_id so the user
+	// grant's key wins for EVERY driver regardless of which config-key
+	// variant it reads.
+	cfg["access_key"] = accessKeyID
 	// Legacy alias the garage_v1 driver may still consult on some
 	// branches — copy through so an older config map keeps working.
 	cfg["s3_access_key"] = accessKeyID

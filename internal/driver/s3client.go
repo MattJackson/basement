@@ -56,7 +56,7 @@ const (
 // SDK's default AWS endpoint resolution applies (production AWS S3
 // usage). When region is empty it defaults to "us-east-1" — Garage and
 // MinIO ignore region but the SDK refuses to load a config without one.
-func NewS3PathStyleClient(endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
+func NewS3PathStyleClient(ctx context.Context, endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
 	if accessKey == "" {
 		return nil, fmt.Errorf("NewS3PathStyleClient: empty accessKey")
 	}
@@ -86,7 +86,7 @@ func NewS3PathStyleClient(endpoint, accessKey, secretKey, region string) (*s3.Cl
 		})))
 	}
 
-	cfgLoaded, err := config.LoadDefaultConfig(context.TODO(), opts...)
+	cfgLoaded, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("NewS3PathStyleClient: load aws config: %w", err)
 	}
@@ -112,7 +112,7 @@ func NewS3PathStyleClient(endpoint, accessKey, secretKey, region string) (*s3.Cl
 // Per the v1.3.0c smart-default: if endpoint hostname is an IP literal
 // the caller should fall back to path-style regardless of this
 // constructor — see BuildS3Client.
-func NewS3VirtualHostClient(endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
+func NewS3VirtualHostClient(ctx context.Context, endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
 	if accessKey == "" {
 		return nil, fmt.Errorf("NewS3VirtualHostClient: empty accessKey")
 	}
@@ -142,7 +142,7 @@ func NewS3VirtualHostClient(endpoint, accessKey, secretKey, region string) (*s3.
 		})))
 	}
 
-	cfgLoaded, err := config.LoadDefaultConfig(context.TODO(), opts...)
+	cfgLoaded, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("NewS3VirtualHostClient: load aws config: %w", err)
 	}
@@ -194,9 +194,9 @@ func EndpointHostIsIP(endpoint string) bool {
 //   - any other addressingStyle value → path-style (defensive default;
 //     a future "auto" or "global_endpoint" toggle can extend this here
 //     without touching every call site)
-func BuildS3Client(endpoint, accessKey, secretKey, region, addressingStyle string) (*s3.Client, error) {
+func BuildS3Client(ctx context.Context, endpoint, accessKey, secretKey, region, addressingStyle string) (*s3.Client, error) {
 	if addressingStyle == AddressingStyleVirtualHost && !EndpointHostIsIP(endpoint) {
-		return NewS3VirtualHostClient(endpoint, accessKey, secretKey, region)
+		return NewS3VirtualHostClient(ctx, endpoint, accessKey, secretKey, region)
 	}
-	return NewS3PathStyleClient(endpoint, accessKey, secretKey, region)
+	return NewS3PathStyleClient(ctx, endpoint, accessKey, secretKey, region)
 }

@@ -27,7 +27,7 @@ type s3Client struct {
 // (required by Garage — see helper doc) lives in one place across all
 // four drivers. Region defaults to us-east-1 inside the helper; Garage
 // ignores the signed region.
-func newS3Client(cfg map[string]string) (*s3Client, error) {
+func newS3Client(ctx context.Context, cfg map[string]string) (*s3Client, error) {
 	endpoint := cfg["s3_endpoint"]
 	if endpoint == "" {
 		return nil, fmt.Errorf("missing required config key: s3_endpoint")
@@ -57,7 +57,7 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 	// user-region tier where the underlying backend may be MinIO / AWS
 	// reached via wildcard DNS at the operator's endpoint host.
 	addressingStyle := cfg["addressing_style"]
-	client, err := driverpkg.BuildS3Client(endpoint, accessKey, secretKey, region, addressingStyle)
+	client, err := driverpkg.BuildS3Client(ctx, endpoint, accessKey, secretKey, region, addressingStyle)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", endpoint, err)
 	}

@@ -42,7 +42,7 @@ func TestClientDo_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-cfg := map[string]string{
+	cfg := map[string]string{
 		"admin_url":   ts.URL,
 		"admin_token": "test-token",
 	}
@@ -134,7 +134,7 @@ func TestClientDo_404(t *testing.T) {
 	c := newClient(cfg)
 
 	var got string
-err := c.do(context.Background(), "TestOp", "/", nil, &got)
+	err := c.do(context.Background(), "TestOp", "/", nil, &got)
 
 	if err == nil {
 		t.Fatal("expected error for 404")
@@ -173,5 +173,50 @@ func TestClientDo_5xx(t *testing.T) {
 	var driverErr *driverpkg.Error
 	if !errors.As(err, &driverErr) {
 		t.Fatalf("error is not a driver.Error: %v", err)
+	}
+}
+
+// TestClientDo_TransportError is the regression guard for the bug where any
+// transport-level failure (here: connection refused against a closed server)
+// was mapped to ErrUnauthenticated, making an unreachable backend look like a
+// bad admin token. It must now map to ErrUnreachable and explicitly NOT to
+// ErrUnauthenticated.
+func TestClientDo_TransportError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := ts.URL
+	ts.Close()
+
+	c := newClient(map[string]string{"admin_url": url, "admin_token": "x"})
+	err := c.do(context.Background(), "GET", "/", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for connection refused")
+	}
+	if errors.Is(err, driverpkg.ErrUnauthenticated) {
+		t.Errorf("transport failure must NOT map to ErrUnauthenticated, got: %v", err)
+	}
+	if !errors.Is(err, driverpkg.ErrUnreachable) {
+		t.Errorf("expected ErrUnreachable, got: %v", err)
+	}
+}
+
+// TestClientDo_ContextCanceled verifies that a caller-cancelled context is
+// surfaced as context.Canceled (returned as-is), never as ErrUnauthenticated.
+func TestClientDo_ContextCanceled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer ts.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	c := newClient(map[string]string{"admin_url": ts.URL, "admin_token": "x"})
+	err := c.do(ctx, "GET", "/", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for cancelled context")
+	}
+	if errors.Is(err, driverpkg.ErrUnauthenticated) {
+		t.Errorf("cancelled context must NOT map to ErrUnauthenticated, got: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
 	}
 }

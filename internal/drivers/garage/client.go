@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,10 @@ func newClient(cfg driverpkg.Config) *client {
 //	404          -> ErrNotFound
 //	409          -> ErrConflict
 //	400, 405, 422-> ErrInvalid
-//	5xx          -> raw "HTTP <code>: <body>" (no sentinel)
+//	5xx          -> "HTTP <code>" (no sentinel; body in Message)
+//
+// Transport-level failures (DNS, connection refused, TLS, timeout) map to
+// ErrUnreachable; context cancellation/deadline are returned as-is.
 func (c *client) do(ctx context.Context, method, path string, body, out any) error {
 	if c.token == "" {
 		return &driverpkg.Error{
@@ -91,7 +95,7 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 		return &driverpkg.Error{
 			Op:      method,
 			Driver:  driverName,
-			Err:     driverpkg.ErrUnauthenticated,
+			Err:     transportErr(err),
 			Message: fmt.Sprintf("HTTP request failed: %v", err),
 		}
 	}
@@ -149,6 +153,20 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 		Err:     mappedErr,
 		Message: truncateBody(respBody),
 	}
+}
+
+// transportErr maps a *http.Client.Do transport-level failure to a driver
+// sentinel. Context cancellation/deadline are returned as-is so callers can
+// distinguish caller-initiated abort/timeout; every other transport failure
+// (DNS error, connection refused, TLS handshake failure, read timeout) maps to
+// ErrUnreachable. ErrUnauthenticated is reserved for an actual HTTP 401/403
+// (handled in the status switch), so a down/slow backend no longer masquerades
+// as a bad admin token.
+func transportErr(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return driverpkg.ErrUnreachable
 }
 
 // maxAdminRespBytes bounds how much of an admin API response body we read

@@ -17,6 +17,13 @@ var (
 	ErrUnauthenticated = errors.New("driver: not authenticated")
 	// ErrMissingAdminToken is returned when a garage driver is used without admin_token configured.
 	ErrMissingAdminToken = errors.New("driver: missing admin token for garage driver")
+	// ErrUnreachable is returned when a transport-level failure (DNS error,
+	// connection refused, TLS handshake failure, read/connect timeout)
+	// prevents the request from reaching the backend at all. Distinct from
+	// ErrUnauthenticated, which is reserved for an actual HTTP 401/403 from a
+	// reachable backend — conflating the two makes a down/slow backend look
+	// like a bad admin token and prompts a pointless credential re-entry.
+	ErrUnreachable = errors.New("driver: backend unreachable")
 )
 
 // Error wraps a sentinel error with backend-specific context.

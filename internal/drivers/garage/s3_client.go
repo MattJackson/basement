@@ -31,7 +31,7 @@ type s3Client struct {
 // Delegates to driver.NewS3PathStyleClient so the path-style guarantee
 // (required by Garage — see helper doc) lives in one place across all
 // four drivers.
-func newS3Client(cfg map[string]string) (*s3Client, error) {
+func newS3Client(ctx context.Context, cfg map[string]string) (*s3Client, error) {
 	endpoint := cfg["s3_endpoint"]
 	if endpoint == "" {
 		return nil, fmt.Errorf("missing required config key: s3_endpoint")
@@ -47,7 +47,7 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 		return nil, fmt.Errorf("missing required config key: secret_key")
 	}
 
-	client, err := driverpkg.NewS3PathStyleClient(endpoint, accessKey, secretKey, cfg["region"])
+	client, err := driverpkg.NewS3PathStyleClient(ctx, endpoint, accessKey, secretKey, cfg["region"])
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", endpoint, err)
 	}
@@ -187,5 +187,3 @@ func (c *s3Client) deleteObject(ctx context.Context, bucket, key string) error {
 	})
 	return err
 }
-
-

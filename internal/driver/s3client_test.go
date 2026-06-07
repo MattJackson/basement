@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,7 @@ func TestNewS3PathStyleClient_ForcesPathStyle(t *testing.T) {
 	t.Parallel()
 
 	client, err := NewS3PathStyleClient(
+		context.Background(),
 		"http://10.1.7.10:3902",
 		"GK000000000000000000",
 		"00000000000000000000000000000000",
@@ -40,6 +42,7 @@ func TestNewS3PathStyleClient_DefaultsRegion(t *testing.T) {
 	t.Parallel()
 
 	client, err := NewS3PathStyleClient(
+		context.Background(),
 		"http://10.1.7.10:3902",
 		"GK000000000000000000",
 		"00000000000000000000000000000000",
@@ -61,6 +64,7 @@ func TestNewS3PathStyleClient_EmptyEndpointSkipsResolver(t *testing.T) {
 	t.Parallel()
 
 	client, err := NewS3PathStyleClient(
+		context.Background(),
 		"",
 		"AKIA0000000000000000",
 		"0000000000000000000000000000000000000000",
@@ -83,6 +87,7 @@ func TestNewS3VirtualHostClient_LeavesPathStyleFalse(t *testing.T) {
 	t.Parallel()
 
 	client, err := NewS3VirtualHostClient(
+		context.Background(),
 		"https://s3.example.com",
 		"GK000000000000000000",
 		"00000000000000000000000000000000",
@@ -106,7 +111,7 @@ func TestNewS3VirtualHostClient_LeavesPathStyleFalse(t *testing.T) {
 func TestBuildS3Client_PathStyleByDefault(t *testing.T) {
 	t.Parallel()
 
-	client, err := BuildS3Client("https://s3.example.com", "AK", "SK", "us-east-1", "")
+	client, err := BuildS3Client(context.Background(), "https://s3.example.com", "AK", "SK", "us-east-1", "")
 	if err != nil {
 		t.Fatalf("BuildS3Client empty style: %v", err)
 	}
@@ -121,7 +126,7 @@ func TestBuildS3Client_PathStyleByDefault(t *testing.T) {
 func TestBuildS3Client_VirtualHostOnDNSEndpoint(t *testing.T) {
 	t.Parallel()
 
-	client, err := BuildS3Client("https://s3.example.com", "AK", "SK", "us-east-1", AddressingStyleVirtualHost)
+	client, err := BuildS3Client(context.Background(), "https://s3.example.com", "AK", "SK", "us-east-1", AddressingStyleVirtualHost)
 	if err != nil {
 		t.Fatalf("BuildS3Client virtual_host on DNS: %v", err)
 	}
@@ -147,7 +152,7 @@ func TestBuildS3Client_IPEndpointForcesPathStyle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			client, err := BuildS3Client(tc.endpoint, "AK", "SK", "garage", AddressingStyleVirtualHost)
+			client, err := BuildS3Client(context.Background(), tc.endpoint, "AK", "SK", "garage", AddressingStyleVirtualHost)
 			if err != nil {
 				t.Fatalf("BuildS3Client virtual_host + IP endpoint %q: %v", tc.endpoint, err)
 			}
@@ -199,7 +204,7 @@ func TestNewS3PathStyleClient_RejectsEmptyCreds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewS3PathStyleClient("http://x:1", tc.ak, tc.sk, "us-east-1")
+			_, err := NewS3PathStyleClient(context.Background(), "http://x:1", tc.ak, tc.sk, "us-east-1")
 			if err == nil {
 				t.Fatalf("expected error for %s, got nil", tc.name)
 			}

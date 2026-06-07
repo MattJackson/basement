@@ -2,6 +2,7 @@
 package garage
 
 import (
+	"context"
 	"fmt"
 
 	driverpkg "github.com/mattjackson/basement/internal/driver"
@@ -50,7 +51,10 @@ func newDriver(cfg driverpkg.Config) (driverpkg.Driver, error) {
 	// Mirrors the v1 driver gate (internal/drivers/garage_v1/garage.go).
 	if d.s3Endpoint != "" && d.accessKey != "" && d.secretKey != "" {
 		var err error
-		d.s3Client, err = newS3Client(cfg)
+		// Construction runs inside the registry Factory; no caller context
+		// is available, so pass Background. The ctx parameter exists so the
+		// SDK config load is cancellation-aware where a context can flow.
+		d.s3Client, err = newS3Client(context.Background(), cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", d.s3Endpoint, err)
 		}

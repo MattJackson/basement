@@ -88,7 +88,7 @@ func TestListBuckets_S3Fallback_Garage404_ReturnsEmpty(t *testing.T) {
 		client:     &client{baseURL: "", http: &http.Client{}},
 		s3Endpoint: ts.URL,
 	}
-	s3c, err := newS3Client(map[string]string{
+	s3c, err := newS3Client(context.Background(), map[string]string{
 		"s3_endpoint":   ts.URL,
 		"access_key_id": "AK",
 		"secret_key":    "SK",
@@ -137,7 +137,7 @@ func TestListBuckets_S3Fallback_ADR0002(t *testing.T) {
 		client:     &client{baseURL: "", http: &http.Client{}},
 		s3Endpoint: ts.URL,
 	}
-	s3c, err := newS3Client(map[string]string{
+	s3c, err := newS3Client(context.Background(), map[string]string{
 		"s3_endpoint":   ts.URL,
 		"access_key_id": "AK",
 		"secret_key":    "SK",
@@ -205,7 +205,7 @@ func TestGetBucket(t *testing.T) {
 	if b.UnfinishedUploads != 3 {
 		t.Errorf("UnfinishedUploads = %d, want 3", b.UnfinishedUploads)
 	}
-if len(b.Keys) != 1 {
+	if len(b.Keys) != 1 {
 		t.Fatalf("Keys length = %d, want 1", len(b.Keys))
 	}
 	if b.Keys[0].KeyID != "key-abc" || b.Keys[0].Read != true || b.Keys[0].Write != false || b.Keys[0].Owner != false {
@@ -545,8 +545,8 @@ func TestUpdateBucket_NotFound(t *testing.T) {
 //   - Final GET to return the canonical post-update bucket
 func TestUpdateBucket_Aliases_Diff(t *testing.T) {
 	var (
-		getCount      int
-		putAliasHit   string
+		getCount       int
+		putAliasHit    string
 		deleteAliasHit string
 	)
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

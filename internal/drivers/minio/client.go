@@ -27,7 +27,7 @@ type s3Client struct {
 // (see helper doc) lives in one place across all four drivers. MinIO
 // recommends path-style and IP-addressed deploys *require* it — there
 // is no DNS wildcard for "bucket.10.x.y.z:9000".
-func newS3Client(cfg map[string]string) (*s3Client, error) {
+func newS3Client(ctx context.Context, cfg map[string]string) (*s3Client, error) {
 	region := cfg["region"]
 	if region == "" {
 		return nil, fmt.Errorf("missing required config key: region")
@@ -43,7 +43,7 @@ func newS3Client(cfg map[string]string) (*s3Client, error) {
 		return nil, fmt.Errorf("missing required config key: secret_key")
 	}
 
-	client, err := driverpkg.NewS3PathStyleClient(cfg["endpoint"], accessKey, secretKey, region)
+	client, err := driverpkg.NewS3PathStyleClient(ctx, cfg["endpoint"], accessKey, secretKey, region)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 client: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,10 +55,12 @@ func newClient(cfg driverpkg.Config) *client {
 //	404          -> ErrNotFound
 //	409          -> ErrConflict
 //	400, 405, 422-> ErrInvalid
-//	5xx          -> raw "HTTP <code>: <body>" (no sentinel)
+//	5xx          -> "HTTP <code>" (no sentinel; body in Message)
 //
-// The response body is preserved verbatim in *driver.Error.Message so callers
-// can surface Garage's diagnostic text upstream.
+// Transport-level failures (DNS, connection refused, TLS, timeout) map to
+// ErrUnreachable; context cancellation/deadline are returned as-is. The
+// (truncated) response body is surfaced in *driver.Error.Message so callers
+// can show Garage's diagnostic text upstream.
 func (c *client) do(ctx context.Context, method, path string, body, out any) error {
 	if c.token == "" {
 		return &driverpkg.Error{
@@ -94,24 +97,29 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	// Token presence already validated at the top of do(); set unconditionally
+	// (mirrors the v2 driver — the two do() implementations are kept identical).
+	req.Header.Set("Authorization", "Bearer "+c.token)
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		// Mirror the v2 driver: transport-level failure maps to
-		// ErrUnauthenticated (operator-visible "can't reach"/"no creds").
+		// Transport-level failure: context cancel/deadline are returned
+		// as-is; other transport errors (DNS, connection refused, TLS,
+		// timeout) map to ErrUnreachable. ErrUnauthenticated is reserved
+		// for an actual HTTP 401/403 below, so a down/slow backend no
+		// longer masquerades as a bad admin token. (Mirrors v2 driver.)
 		return &driverpkg.Error{
 			Op:      method,
 			Driver:  driverName,
-			Err:     driverpkg.ErrUnauthenticated,
+			Err:     transportErr(err),
 			Message: fmt.Sprintf("HTTP request failed: %v", err),
 		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	// Bound the admin response read so a malfunctioning/compromised backend
+	// can't return an unbounded body and exhaust memory (mirrors v2 driver).
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxAdminRespBytes))
 	if err != nil {
 		return &driverpkg.Error{
 			Op:      method,
@@ -148,21 +156,45 @@ func (c *client) do(ctx context.Context, method, path string, body, out any) err
 	case http.StatusBadRequest, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
 		mappedErr = driverpkg.ErrInvalid
 	default:
-		if resp.StatusCode >= 500 {
-			mappedErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
-		} else {
-			mappedErr = &driverpkg.Error{
-				Driver:  driverName,
-				Err:     driverpkg.ErrInvalid,
-				Message: fmt.Sprintf("unexpected status: %d", resp.StatusCode),
-			}
-		}
+		// 5xx and other unexpected statuses: no sentinel. Keep the wrapped
+		// error generic ("HTTP <code>") and surface a single, truncated copy
+		// of the body via Message — don't embed the (now bounded but still
+		// potentially large) backend body into BOTH Err and Message, which
+		// bloats error strings that reach logging. (Mirrors v2 driver.)
+		mappedErr = fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
 	return &driverpkg.Error{
 		Op:      method,
 		Driver:  driverName,
 		Err:     mappedErr,
-		Message: string(respBody),
+		Message: truncateBody(respBody),
 	}
+}
+
+// transportErr maps a *http.Client.Do transport-level failure to a driver
+// sentinel. Context cancellation/deadline are returned as-is; every other
+// transport failure (DNS error, connection refused, TLS handshake failure,
+// read timeout) maps to ErrUnreachable. ErrUnauthenticated is reserved for an
+// actual HTTP 401/403. (Identical to the v2 driver's transportErr.)
+func transportErr(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return driverpkg.ErrUnreachable
+}
+
+// maxAdminRespBytes bounds how much of an admin API response body we read
+// into memory (success decode + error surfacing). Identical to the v2 driver.
+const maxAdminRespBytes = 8 << 20 // 8 MiB
+
+// truncateBody renders a (possibly large) backend response body for an error
+// Message, capped so a verbose backend can't bloat the error surface.
+// Identical to the v2 driver.
+func truncateBody(b []byte) string {
+	const max = 512
+	if len(b) > max {
+		return string(b[:max]) + "…(truncated)"
+	}
+	return string(b)
 }

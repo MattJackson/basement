@@ -134,6 +134,78 @@ func TestRegistryForCaches(t *testing.T) {
 	}
 }
 
+// TestForUserGrantInjectsCredsAllKeyVariants is the regression guard for
+// the credential-attribution bug (ADR-0001): ForUserGrant must override the
+// connection's stored admin creds for EVERY driver, regardless of which
+// config-key variant that driver reads for the S3 access-key ID. The
+// aws_s3/minio drivers read cfg["access_key"], the garage drivers read
+// cfg["access_key_id"], and legacy maps may carry cfg["s3_access_key"]. If
+// any of these keeps the connection's admin key, the per-user grant silently
+// signs as the cluster admin and backend audit logs mis-attribute the caller.
+func TestForUserGrantInjectsCredsAllKeyVariants(t *testing.T) {
+	const (
+		adminAK = "GKADMIN00000000000000"
+		adminSK = "adminsecret00000000000000000000000000000"
+		userAK  = "GKUSER000000000000000"
+		userSK  = "usersecret0000000000000000000000000000000"
+	)
+
+	var captured Config
+	Register("test-usergrant-capture", func(cfg Config) (Driver, error) {
+		// Snapshot the config the factory was handed.
+		captured = make(Config, len(cfg))
+		for k, v := range cfg {
+			captured[k] = v
+		}
+		return &mockDriver{}, nil
+	})
+
+	mockStore := newMockConnStore()
+	conn := store.Connection{
+		ID:     "usergrant-conn",
+		Driver: "test-usergrant-capture",
+		Config: map[string]string{
+			// Legacy admin creds still present on the stored record under
+			// every variant — the user grant must override all of them.
+			"access_key":    adminAK,
+			"access_key_id": adminAK,
+			"s3_access_key": adminAK,
+			"secret_key":    adminSK,
+			"s3_secret_key": adminSK,
+		},
+		Owner: "org",
+	}
+	if _, err := mockStore.Create(context.Background(), conn); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	reg := NewRegistry(mockStore)
+	if _, err := reg.ForUserGrant(context.Background(), "usergrant-conn", userAK, userSK); err != nil {
+		t.Fatalf("ForUserGrant: %v", err)
+	}
+
+	// Every access-key-ID variant any driver might read must carry the
+	// user grant's key, not the connection's admin key.
+	for _, k := range []string{"access_key", "access_key_id", "s3_access_key"} {
+		if got := captured[k]; got != userAK {
+			t.Errorf("cfg[%q] = %q, want user grant key %q (NOT admin key %q)", k, got, userAK, adminAK)
+		}
+	}
+	// Both secret-key variants must carry the user grant's secret.
+	for _, k := range []string{"secret_key", "s3_secret_key"} {
+		if got := captured[k]; got != userSK {
+			t.Errorf("cfg[%q] = %q, want user grant secret (NOT admin secret)", k, got)
+		}
+	}
+
+	// Sanity: the stored connection record must remain unmutated — the
+	// override clones the config map.
+	stored, _ := mockStore.Get(context.Background(), "usergrant-conn")
+	if stored.Config["access_key_id"] != adminAK {
+		t.Errorf("stored connection config was mutated: access_key_id = %q, want %q", stored.Config["access_key_id"], adminAK)
+	}
+}
+
 // TestRegistryInvalidateEvicts verifies that Invalidate() removes cached instances.
 func TestRegistryInvalidateEvicts(t *testing.T) {
 	Register("test-mock-2", func(cfg Config) (Driver, error) {
@@ -334,4 +406,3 @@ func TestRegistryInvalidateUnknownConnIsNoop(t *testing.T) {
 	reg.Invalidate("never-was-here")
 	reg.Invalidate("")
 }
-

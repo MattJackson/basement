@@ -12,6 +12,8 @@
 package minio
 
 import (
+	"context"
+
 	driverpkg "github.com/mattjackson/basement/internal/driver"
 )
 
@@ -34,7 +36,11 @@ type driver struct {
 //   - "secret_key": AWS secret access key
 //   - "endpoint": optional S3-compatible endpoint URL
 func newDriver(cfg driverpkg.Config) (driverpkg.Driver, error) {
-	s3Client, err := newS3Client(cfg)
+	// Driver construction happens inside the registry Factory (no caller
+	// context available here); pass Background. The ctx parameter exists so
+	// the SDK config load is cancellation-aware where a context can be
+	// threaded.
+	s3Client, err := newS3Client(context.Background(), cfg)
 	if err != nil {
 		return nil, &driverpkg.Error{
 			Op:      "newDriver",
