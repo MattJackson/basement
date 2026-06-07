@@ -175,7 +175,7 @@ function BucketRow({
   // a full-page reload — refetches the whole shell and defeats the
   // router's defaultPreload:"intent" hover prefetch).
   const onNavigate = () => {
-    navigate({ to: "/files/$regionId/b/$bid", params: { regionId, bid: bucketId } });
+    navigate({ to: "/files/$regionId/b/$bid", params: { regionId, bid: bucketId }, search: { prefix: "" } });
   };
 
   // ADR-0002 deliberately drops the per-bucket "stat me" hydration

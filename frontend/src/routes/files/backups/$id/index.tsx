@@ -325,7 +325,7 @@ function SnapshotRow({ s, backup }: { s: BackupSnapshotEntry; backup: Backup }) 
         <Link
           to="/files/$regionId/b/$bid"
           params={{ regionId: backup.dstRegionId, bid: backup.dstBucket }}
-          search={{ prefix: s.prefix, token: "" }}
+          search={{ prefix: s.prefix }}
           className="text-primary hover:underline mr-3"
         >
           Browse →
