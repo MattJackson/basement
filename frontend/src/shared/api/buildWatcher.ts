@@ -31,9 +31,16 @@ function checkBuild(res: Response): void {
   const serverBuild = res.headers.get("x-build");
   if (!serverBuild || SKIP_VALUES.has(serverBuild)) return;
   
-  // Use globalThis for test compatibility
-  const clientBuild = typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : (globalThis as any).__BUILD_COMMIT__;
-  if (SKIP_VALUES.has(clientBuild)) return;
+  // Use globalThis for test compatibility (tests inject the build via a
+  // global instead of the Vite define).
+  const clientBuild =
+    typeof __BUILD_COMMIT__ !== "undefined"
+      ? __BUILD_COMMIT__
+      : (globalThis as { __BUILD_COMMIT__?: string }).__BUILD_COMMIT__;
+  // Note: an undefined clientBuild (no Vite define and no test global)
+  // is intentionally NOT skipped — it can't equal serverBuild, so it
+  // trips the mismatch banner (treats "unknown client build" as stale).
+  if (clientBuild !== undefined && SKIP_VALUES.has(clientBuild)) return;
   if (serverBuild === clientBuild) return;
   
   mismatched = true;
@@ -94,11 +101,6 @@ export function subscribe(fn: (state: { mismatched: boolean; serverVersion?: str
       stopHeartbeat();
     }
   };
-}
-
-export function getBuildCommit(): string {
-  // Use globalThis for test compatibility
-  return typeof __BUILD_COMMIT__ !== "undefined" ? __BUILD_COMMIT__ : ((globalThis as any).__BUILD_COMMIT__ || "");
 }
 
 // Exposed for tests

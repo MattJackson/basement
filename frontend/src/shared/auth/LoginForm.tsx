@@ -24,6 +24,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { LoginHeroDisplay } from "@/shared/components/SkinInjector";
+import { sanitizeNextPath } from "@/shared/lib/safeNext";
 
 // v2.0.0-beta.4: zod schema lives at module load — useTranslation
 // is a React hook and can't be called here. Keep the validation
@@ -55,7 +56,10 @@ export function LoginForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { t } = useTranslation("pages");
 
-  const nextPath = typeof search.next === "string" && search.next.startsWith("/") ? search.next : "/files";
+  // Open-redirect guard: only honour an in-app `next` path. `//evil.com`
+  // and `/\evil.com` both pass a naive startsWith("/") check but resolve
+  // off-origin via navigate({to}), so sanitizeNextPath rejects them.
+  const nextPath = sanitizeNextPath(search.next) ?? "/files";
 
   const {
     register,

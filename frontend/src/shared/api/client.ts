@@ -5,8 +5,15 @@ import { promptElevationFromAnywhere } from "@/shared/auth/elevation";
 import { promptUnlockFromAnywhere } from "@/shared/auth/clusterUnlock";
 import type { AuthMode } from "@/shared/auth/mode";
 
+// Single source of truth for the API prefix. Bare-`fetch` call sites
+// (paths not present in the generated openapi types) MUST use this so
+// they honour the VITE_API_BASE override the same way the typed client
+// does — otherwise they silently hit the wrong origin in any deploy
+// that overrides the base.
+export const API_BASE = import.meta.env.VITE_API_BASE ?? "/api/v1";
+
 export const client = createClient<paths>({
-  baseUrl: import.meta.env.VITE_API_BASE ?? "/api/v1",
+  baseUrl: API_BASE,
   credentials: "include",
   headers: {
     Accept: "application/json",

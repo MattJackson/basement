@@ -30,6 +30,10 @@ vi.mock("@/shared/api/client", () => ({
     PATCH: vi.fn(),
     DELETE: vi.fn(),
   },
+  // queries.ts now builds bare-fetch URLs from API_BASE (so they honour
+  // VITE_API_BASE). The mock must export it; "/api/v1" matches the
+  // default and keeps the asserted URLs unchanged.
+  API_BASE: "/api/v1",
 }));
 
 import {

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { client } from "@/shared/api/client";
+import { client, API_BASE } from "@/shared/api/client";
+import { apiError } from "@/shared/api/apiError";
 import type { components } from "@/shared/api/types.gen";
 import { useNavigate } from "@tanstack/react-router";
 
@@ -23,29 +24,6 @@ export interface UserResponse {
     cluster?: string;
   }>;
   oidcUser?: boolean;
-}
-
-/**
- * apiError builds a user-presentable Error from a non-2xx response.
- * Uses the uniform error shape from design.md (`{error:{code,message,details}}`)
- * so screens can show the upstream cause instead of a generic message.
- */
-function apiError(
-  resource: string,
-  status: number,
-  body: unknown,
-): Error {
-  let code = `HTTP_${status}`;
-  let message = `${resource} failed (HTTP ${status})`;
-  if (body && typeof body === "object" && "error" in body) {
-    const e = (body as { error?: { code?: string; message?: string } }).error;
-    if (e?.code) code = e.code;
-    if (e?.message) message = e.message;
-  }
-  const err = new Error(`${code}: ${message}`);
-  (err as Error & { code?: string; status?: number }).code = code;
-  (err as Error & { code?: string; status?: number }).status = status;
-  return err;
 }
 
 // Buckets are now connection-scoped. All bucket mutations thread cid
@@ -154,7 +132,8 @@ export function useCreateKey() {
       return data;
     },
     onSuccess: (_, { cid }) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
+      // v1.11.0.15: the global /admin/keys aggregate was removed; keys
+      // are per-cluster now. Only the per-cluster key list exists.
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys"] });
       // No navigate — caller surfaces secretAccessKey first.
     },
@@ -177,7 +156,7 @@ export function useUpdateKeyPermissions() {
       return data;
     },
     onSuccess: (_, { cid, id }) => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
+      // v1.11.0.15: per-cluster keys only — no global [admin, keys] query.
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys", id] });
       // Per-cluster key list (count + access-bucket badges per row).
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "keys"] });
@@ -223,7 +202,6 @@ export function useDeleteKey() {
       // /admin/clusters/{cid}/keys/ index route — the cluster
       // detail IS the canonical "all keys for this cluster" view.
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", variables.cid, "keys"] });
-      queryClient.invalidateQueries({ queryKey: ["admin", "keys"] });
       navigate({ to: "/admin/clusters/$cid", params: { cid: variables.cid } });
     },
   });
@@ -385,7 +363,11 @@ export function useSwitchActiveRole() {
   const queryClient = useQueryClient();
   return useMutation<UserResponse, Error, SwitchActiveRoleRequest>({
     mutationFn: async (req) => {
-      const res = await fetch("/api/v1/auth/active-role", {
+      // NOTE: PUT /auth/active-role is not present in the generated
+      // openapi types, so we cannot use the typed `client.PUT`. We still
+      // route through API_BASE so the VITE_API_BASE override is honoured
+      // exactly like the typed client (previously hardcoded "/api/v1").
+      const res = await fetch(`${API_BASE}/auth/active-role`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -398,8 +380,13 @@ export function useSwitchActiveRole() {
       return (await res.json()) as UserResponse;
     },
     onSuccess: (user) => {
+      // Write the server response straight into the cache, then mark it
+      // stale for a background reconcile. We intentionally do NOT pair
+      // setQueryData with an immediate invalidate that discards it — the
+      // optimistic write seeds the UI instantly, and the background
+      // refetch confirms it against the canonical /auth/me.
       queryClient.setQueryData(["auth", "me"], user);
-      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"], refetchType: "none" });
     },
   });
 }

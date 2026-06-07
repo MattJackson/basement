@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { client } from "@/shared/api/client";
+import { client, API_BASE } from "@/shared/api/client";
+import { apiError } from "@/shared/api/apiError";
 import type { components } from "@/shared/api/types.gen";
 
 type Node = components["schemas"]["Node"];
@@ -63,38 +64,6 @@ type Bucket = components["schemas"]["Bucket"];
 type Key = components["schemas"]["Key"];
 type Connection = components["schemas"]["Connection"];
 
-/**
- * apiError builds a user-presentable Error from a non-2xx response.
- * Uses the uniform error shape from design.md (`{error:{code,message,details}}`)
- * so screens can show the upstream cause instead of a generic message.
- *
- * `details` is forwarded onto the Error object so screens that need a
- * structured payload (e.g. NO_ADMIN_BRIDGE surfacing the offending
- * endpoint + field) can read it without re-fetching.
- */
-function apiError(
-  resource: string,
-  status: number,
-  body: unknown,
-): Error {
-  let code = `HTTP_${status}`;
-  let message = `${resource} failed (HTTP ${status})`;
-  let details: Record<string, unknown> | undefined;
-  if (body && typeof body === "object" && "error" in body) {
-    const e = (body as { error?: { code?: string; message?: string; details?: Record<string, unknown> } }).error;
-    if (e?.code) code = e.code;
-    if (e?.message) message = e.message;
-    if (e?.details) details = e.details;
-  }
-  const err = new Error(`${code}: ${message}`);
-  (err as Error & { code?: string; status?: number; details?: Record<string, unknown> }).code = code;
-  (err as Error & { code?: string; status?: number; details?: Record<string, unknown> }).status = status;
-  if (details) {
-    (err as Error & { code?: string; status?: number; details?: Record<string, unknown> }).details = details;
-  }
-  return err;
-}
-
 // v1.3.0b — per-driver endpoint placeholder + hint catalogue served
 // from GET /api/v1/system/driver-defaults. Public (no auth) and the
 // payload is static for a given binary, so we cache forever — the
@@ -114,7 +83,7 @@ export function useDriverDefaults() {
   return useQuery<DriverDefaults[]>({
     queryKey: ["system", "driver-defaults"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/system/driver-defaults");
+      const res = await fetch(`${API_BASE}/system/driver-defaults`);
       if (!res.ok) throw new Error(`driver-defaults fetch ${res.status}`);
       return (await res.json()) as DriverDefaults[];
     },
@@ -128,7 +97,7 @@ export function useVersion() {
   return useQuery<{ version: string; commit: string; builtAt: string }>({
     queryKey: ["version"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/version");
+      const res = await fetch(`${API_BASE}/version`);
       if (!res.ok) throw new Error(`version fetch ${res.status}`);
       return res.json();
     },
@@ -228,17 +197,6 @@ export function useClusterKeys(cid: string) {
     staleTime: 30 * 1000,
     retry: 1,
   });
-}
-
-export function useBucketsFlat() {
-  const query = useBuckets();
-  if (query.data) {
-    return {
-      ...query,
-      data: query.data.buckets,
-    };
-  }
-  return query;
 }
 
 export function useBucket(cid: string, id: string) {
@@ -360,7 +318,7 @@ export function useUserRegions() {
   return useQuery<UserRegion[]>({
     queryKey: ["user", "regions"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/user/regions", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/user/regions`, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("user/regions", res.status, body);
       return (body as UserRegion[]) ?? [];
@@ -376,7 +334,7 @@ export function useUserRegion(id: string | null) {
     queryKey: ["user", "regions", id],
     queryFn: async () => {
       if (!id) throw new Error("Region id required");
-      const res = await fetch(`/api/v1/user/regions/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/user/regions/${encodeURIComponent(id)}`, {
         credentials: "include",
       });
       const body = await res.json().catch(() => null);
@@ -406,7 +364,7 @@ export function useUserRegionBuckets(regionId: string | null) {
     queryFn: async () => {
       if (!regionId) throw new Error("Region id required");
       const res = await fetch(
-        `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets`,
+        `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets`,
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -417,31 +375,6 @@ export function useUserRegionBuckets(regionId: string | null) {
       };
     },
     enabled: !!regionId,
-    staleTime: 30 * 1000,
-    retry: 1,
-  });
-}
-
-export function useUserRegionObjects(
-  regionId: string | null,
-  bid: string | null,
-  prefix: string = "",
-  token: string = "",
-) {
-  return useQuery<components["schemas"]["ObjectPage"]>({
-    queryKey: ["user", "regions", regionId, "buckets", bid, "objects", prefix, token],
-    queryFn: async () => {
-      const params: Record<string, string> = {};
-      if (prefix) params.prefix = prefix;
-      if (token) params.token = token;
-      const qs = new URLSearchParams(params).toString();
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId!)}/buckets/${encodeURIComponent(bid!)}/objects${qs ? `?${qs}` : ""}`;
-      const res = await fetch(url, { credentials: "include" });
-      const body = await res.json().catch(() => null);
-      if (!res.ok) throw apiError(`user/regions/${regionId}/buckets/${bid}/objects`, res.status, body);
-      return body as components["schemas"]["ObjectPage"];
-    },
-    enabled: !!regionId && !!bid,
     staleTime: 30 * 1000,
     retry: 1,
   });
@@ -466,7 +399,7 @@ export function useUserRegionObjectsInfinite(
       if (prefix) params.prefix = prefix;
       if (pageParam) params.token = pageParam as string;
       const qs = new URLSearchParams(params).toString();
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId!)}/buckets/${encodeURIComponent(bid!)}/objects${qs ? `?${qs}` : ""}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId!)}/buckets/${encodeURIComponent(bid!)}/objects${qs ? `?${qs}` : ""}`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/regions/${regionId}/buckets/${bid}/objects`, res.status, body);
@@ -507,7 +440,7 @@ export function useCreateUserKey() {
   const queryClient = useQueryClient();
   return useMutation<UserRegion, Error, CreateUserKeyRequest>({
     mutationFn: async (input) => {
-      const res = await fetch("/api/v1/user/regions", {
+      const res = await fetch(`${API_BASE}/user/regions`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -552,7 +485,7 @@ export function useBulkCreateUserKeys() {
   const queryClient = useQueryClient();
   return useMutation<BulkCreateUserKeyResponse, Error, BulkCreateUserKeyRow[]>({
     mutationFn: async (rows) => {
-      const res = await fetch("/api/v1/user/regions/bulk", {
+      const res = await fetch(`${API_BASE}/user/regions/bulk`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -584,7 +517,7 @@ export function useRotateUserRegion() {
   return useMutation<UserRegion, Error, RotateUserRegionRequest>({
     mutationFn: async ({ regionId, accessKeyId, secretKey }) => {
       const res = await fetch(
-        `/api/v1/user/regions/${encodeURIComponent(regionId)}/rotate`,
+        `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/rotate`,
         {
           method: "POST",
           credentials: "include",
@@ -613,7 +546,7 @@ export function useDeleteUserRegion() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
-      const res = await fetch(`/api/v1/user/regions/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/user/regions/${encodeURIComponent(id)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -634,7 +567,7 @@ export function useUserRegionPresignGet(regionId: string | null, bid: string | n
     mutationFn: async ({ key, ttl }: { key: string; ttl?: number }) => {
       if (!regionId || !bid || !key) throw new Error("Missing required parameters");
       const params = new URLSearchParams({ ttl: String(ttl ?? 3600) });
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}/presign-get?${params.toString()}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}/presign-get?${params.toString()}`;
       // Backend route is registered as GET in v1.1.0b; native fetch keeps
       // us off the OpenAPI template that doesn't yet know the route.
       const res = await fetch(url, { method: "GET", credentials: "include" });
@@ -650,7 +583,7 @@ export function useUserRegionPresignPut(regionId: string | null, bid: string | n
     mutationFn: async ({ key, contentType, ttl }: { key: string; contentType?: string; ttl?: number }) => {
       if (!regionId || !bid || !key) throw new Error("Missing required parameters");
       const params = new URLSearchParams({ ttl: String(ttl ?? 3600) });
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}/presign-put?${params.toString()}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}/presign-put?${params.toString()}`;
       const res = await fetch(url, {
         method: "POST",
         credentials: "include",
@@ -668,7 +601,7 @@ export function useUserRegionMultipartInit(regionId: string | null, bid: string 
   return useMutation({
     mutationFn: async ({ key, contentType }: { key: string; contentType?: string }) => {
       if (!regionId || !bid || !key) throw new Error("Missing required parameters");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/init`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/init`;
       const res = await fetch(url, {
         method: "POST",
         credentials: "include",
@@ -691,7 +624,7 @@ export function useUserRegionMultipartPartPresign(
     mutationFn: async ({ partNumber, ttl }: { partNumber: number; ttl?: number }) => {
       if (!regionId || !bid || !uploadId) throw new Error("Missing required parameters");
       const params = new URLSearchParams({ ttl: String(ttl ?? 3600) });
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign?${params.toString()}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign?${params.toString()}`;
       const res = await fetch(url, { method: "POST", credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`user/regions/${regionId}/multipart/${uploadId}/part/${partNumber}`, res.status, body);
@@ -705,7 +638,7 @@ export function useUserRegionMultipartComplete(regionId: string | null, bid: str
   return useMutation({
     mutationFn: async ({ uploadId, parts }: { uploadId: string; parts: { partNumber: number; etag: string }[] }) => {
       if (!regionId || !bid || !uploadId) throw new Error("Missing required parameters");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}/complete`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}/complete`;
       const res = await fetch(url, {
         method: "POST",
         credentials: "include",
@@ -734,7 +667,7 @@ export function useUserRegionMultipartAbort(regionId: string | null, bid: string
   return useMutation({
     mutationFn: async ({ uploadId, key }: { uploadId: string; key: string }) => {
       if (!regionId || !bid || !uploadId || !key) throw new Error("Missing required parameters");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}?key=${encodeURIComponent(key)}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/multipart/${encodeURIComponent(uploadId)}?key=${encodeURIComponent(key)}`;
       const res = await fetch(url, { method: "DELETE", credentials: "include" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -749,7 +682,7 @@ export function useDeleteUserRegionObject(regionId: string | null, bid: string |
   return useMutation({
     mutationFn: async (key: string) => {
       if (!regionId || !bid || !key) throw new Error("Missing required parameters");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bid)}/objects/${encodeURIComponent(key)}`;
       const res = await fetch(url, { method: "DELETE", credentials: "include" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -787,7 +720,7 @@ export function useOrgCapabilities() {
   return useQuery<UserVisibleOrgCapabilities>({
     queryKey: ["org-capabilities"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/auth/org-capabilities");
+      const res = await fetch(`${API_BASE}/auth/org-capabilities`);
       if (!res.ok) throw new Error(`org-capabilities ${res.status}`);
       return res.json();
     },
@@ -802,7 +735,7 @@ export function useSetActiveSkin() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (skinName: string) => {
-      const res = await fetch("/api/v1/user/skin", {
+      const res = await fetch(`${API_BASE}/user/skin`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -834,7 +767,7 @@ export function useOnboardingState(opts: { enabled?: boolean } = {}) {
   return useQuery<OnboardingState>({
     queryKey: ["admin", "onboarding", "state"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/onboarding/state", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/admin/onboarding/state`, { credentials: "include" });
       if (!res.ok) throw new Error(`onboarding/state ${res.status}`);
       return res.json();
     },
@@ -903,11 +836,14 @@ export function useRevokeUserShare() {
 
 export function useShareInfo(token: string | null) {
   return useQuery<components["schemas"]["ShareInfoResponse"] | null>({
-    queryKey: ["share", token ?? "null"],
+    // Disjoint namespace from useShareList ("info" vs "list") so a coarse
+    // ["share", token] invalidation can't accidentally sweep the other,
+    // and the token is normalized the same way in both keys.
+    queryKey: ["share", token ?? "null", "info"],
     queryFn: async () => {
       if (!token) throw new Error("Token required");
 
-      const res = await fetch(`/api/v1/share/${encodeURIComponent(token)}/info`);
+      const res = await fetch(`${API_BASE}/share/${encodeURIComponent(token)}/info`);
       if (!res.ok && res.status !== 404) {
         const body = await res.json().catch(() => ({}));
         throw apiError(`share/info/${token}`, res.status, body);
@@ -930,7 +866,7 @@ export function useShareInfo(token: string | null) {
 export function useShareAuth() {
   return useMutation({
     mutationFn: async ({ token, password }: { token: string; password: string }) => {
-      const res = await fetch(`/api/v1/share/${encodeURIComponent(token)}/auth`, {
+      const res = await fetch(`${API_BASE}/share/${encodeURIComponent(token)}/auth`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
@@ -948,14 +884,14 @@ export function useShareAuth() {
 
 export function useShareList(token: string | null, prefix: string = "") {
   return useQuery<components["schemas"]["ObjectPage"]>({
-    queryKey: ["share", token, "list", prefix],
+    queryKey: ["share", token ?? "null", "list", prefix],
     queryFn: async () => {
       if (!token) throw new Error("Token required");
 
       const params: Record<string, string> = {};
       if (prefix) params.prefix = prefix;
 
-      let url = `/api/v1/share/${encodeURIComponent(token)}/list`;
+      let url = `${API_BASE}/share/${encodeURIComponent(token)}/list`;
       const qs = new URLSearchParams(params).toString();
       if (qs) url += `?${qs}`;
 
@@ -985,7 +921,16 @@ export function useUserSyncs() {
       return (data as unknown[]) as components["schemas"]["SyncJob"][];
     },
     staleTime: 5 * 1000, // Refresh every 5 seconds for active jobs
-    refetchInterval: 2000, // Poll every 2s while job is running/queued
+    // Gate polling: only poll every 2s while at least one job is
+    // running/queued. With no active jobs the list is static, so don't
+    // burn 30 req/min (matches the per-job useUserSync interval logic).
+    refetchInterval: (query) => {
+      const jobs = query.state.data;
+      const active = Array.isArray(jobs)
+        ? jobs.some((j) => j.state === "running" || j.state === "queued")
+        : false;
+      return active ? 2000 : false;
+    },
     retry: 1,
   });
 }
@@ -1283,7 +1228,7 @@ export function usePolicies() {
   return useQuery<PoliciesResponse>({
     queryKey: ["admin", "policies"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/policies", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/admin/policies`, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("admin/policies", res.status, body);
       return body as PoliciesResponse;
@@ -1296,7 +1241,7 @@ export function useUpsertRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (role: Omit<PolicyRole, "seed" | "deprecated"> & { seed?: boolean; deprecated?: boolean }) => {
-      const res = await fetch("/api/v1/admin/policies/roles", {
+      const res = await fetch(`${API_BASE}/admin/policies/roles`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1316,7 +1261,7 @@ export function useDeleteRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/v1/admin/policies/roles/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/admin/policies/roles/${encodeURIComponent(id)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -1336,7 +1281,7 @@ export function useAssignRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (assignment: PolicyAssignment) => {
-      const res = await fetch("/api/v1/admin/policies/assignments", {
+      const res = await fetch(`${API_BASE}/admin/policies/assignments`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1365,7 +1310,7 @@ export function useUnassignRole() {
         roleId: a.roleId,
         scope: a.scope,
       });
-      const res = await fetch(`/api/v1/admin/policies/assignments?${params.toString()}`, {
+      const res = await fetch(`${API_BASE}/admin/policies/assignments?${params.toString()}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -1408,7 +1353,7 @@ export function useClusterAdmins(cid: string) {
     queryKey: ["admin", "clusters", cid, "admins"],
     queryFn: async () => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/admins`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/admins`,
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -1441,7 +1386,7 @@ export type SimulateResponse = {
 export function useSimulatePolicy() {
   return useMutation({
     mutationFn: async (req: SimulateRequest) => {
-      const res = await fetch("/api/v1/admin/policies/simulate", {
+      const res = await fetch(`${API_BASE}/admin/policies/simulate`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1476,7 +1421,7 @@ export function useOIDCGroupMappings() {
   return useQuery<OIDCGroupMappingsResponse>({
     queryKey: ["admin", "oidc-group-mappings"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/oidc-group-mappings", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/admin/oidc-group-mappings`, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("admin/oidc-group-mappings", res.status, body);
       return body as OIDCGroupMappingsResponse;
@@ -1489,7 +1434,7 @@ export function useUpdateOIDCGroupMappings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (mappings: OIDCGroupMapping[]) => {
-      const res = await fetch("/api/v1/admin/oidc-group-mappings", {
+      const res = await fetch(`${API_BASE}/admin/oidc-group-mappings`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1541,7 +1486,7 @@ export function useBucketLifecycle(cid: string, bid: string) {
   return useQuery<LifecycleResponse>({
     queryKey: ["admin", "clusters", cid, "buckets", bid, "lifecycle"],
     queryFn: async () => {
-      const url = `/api/v1/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
+      const url = `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError(`bucket-lifecycle/${cid}/${bid}`, res.status, body);
@@ -1562,7 +1507,7 @@ export function usePutBucketLifecycle(cid: string, bid: string) {
   const queryClient = useQueryClient();
   return useMutation<LifecycleResponse, Error, { rules: LifecycleRule[] }>({
     mutationFn: async ({ rules }) => {
-      const url = `/api/v1/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
+      const url = `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/buckets/${encodeURIComponent(bid)}/lifecycle`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -1633,7 +1578,7 @@ export function useUsageOverview() {
   return useQuery<UsageOverviewResponse>({
     queryKey: ["admin", "usage", "overview"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/usage/overview", {
+      const res = await fetch(`${API_BASE}/admin/usage/overview`, {
         credentials: "include",
       });
       const body = await res.json().catch(() => null);
@@ -1687,7 +1632,7 @@ export function useUsageSeries(
         params.set("to", to.toISOString());
       }
       const res = await fetch(
-        "/api/v1/admin/usage/series?" + params.toString(),
+        `${API_BASE}/admin/usage/series?` + params.toString(),
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -1751,7 +1696,7 @@ export function useAudit(filter: AuditFilter) {
           params.set(k, String(v));
         }
       }
-      const url = "/api/v1/admin/audit" + (params.toString() ? "?" + params.toString() : "");
+      const url = `${API_BASE}/admin/audit` + (params.toString() ? "?" + params.toString() : "");
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("admin/audit", res.status, body);
@@ -1784,7 +1729,7 @@ export function useInvites() {
   return useQuery<InvitePublic[]>({
     queryKey: ["admin", "invites"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/invites", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/admin/invites`, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("admin/invites", res.status, body);
       return body as InvitePublic[];
@@ -1797,7 +1742,7 @@ export function useCreateInvite() {
   const queryClient = useQueryClient();
   return useMutation<InviteCreateResponse, Error, { label?: string; ttlHours?: number }>({
     mutationFn: async (input) => {
-      const res = await fetch("/api/v1/admin/invites", {
+      const res = await fetch(`${API_BASE}/admin/invites`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1817,7 +1762,7 @@ export function useRevokeInvite() {
   const queryClient = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
-      const res = await fetch(`/api/v1/admin/invites/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/admin/invites/${encodeURIComponent(id)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -1836,7 +1781,7 @@ export function useRotateInvite() {
   const queryClient = useQueryClient();
   return useMutation<InviteCreateResponse, Error, { id: string; ttlHours?: number }>({
     mutationFn: async ({ id, ttlHours }) => {
-      const res = await fetch(`/api/v1/admin/invites/${encodeURIComponent(id)}/rotate`, {
+      const res = await fetch(`${API_BASE}/admin/invites/${encodeURIComponent(id)}/rotate`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1884,7 +1829,7 @@ export function useClusterScrub(cid: string) {
     queryKey: ["admin", "clusters", cid, "scrub"],
     queryFn: async () => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/scrub`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/scrub`,
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -1906,7 +1851,7 @@ export function useStartClusterScrub(cid: string) {
   return useMutation<ScrubResponse, Error, void>({
     mutationFn: async () => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/scrub`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/scrub`,
         {
           method: "POST",
           credentials: "include",
@@ -1992,7 +1937,7 @@ export function useFederations() {
   return useQuery<FederatedBucket[]>({
     queryKey: ["user", "federations"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/user/federated-buckets", {
+      const res = await fetch(`${API_BASE}/user/federated-buckets`, {
         credentials: "include",
       });
       const body = await res.json().catch(() => null);
@@ -2011,7 +1956,7 @@ export function useFederation(id: string | null) {
     queryFn: async () => {
       if (!id) throw new Error("Federation ID required");
       const res = await fetch(
-        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}`,
+        `${API_BASE}/user/federated-buckets/${encodeURIComponent(id)}`,
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -2029,7 +1974,7 @@ export function useCreateFederation() {
   const queryClient = useQueryClient();
   return useMutation<FederatedBucket, Error, FederatedBucketCreateRequest>({
     mutationFn: async (body) => {
-      const res = await fetch("/api/v1/user/federated-buckets", {
+      const res = await fetch(`${API_BASE}/user/federated-buckets`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2054,7 +1999,7 @@ export function useUpdateFederation() {
   return useMutation<FederatedBucket, Error, { id: string; body: FederatedBucketCreateRequest }>({
     mutationFn: async ({ id, body }) => {
       const res = await fetch(
-        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}`,
+        `${API_BASE}/user/federated-buckets/${encodeURIComponent(id)}`,
         {
           method: "PUT",
           credentials: "include",
@@ -2079,7 +2024,7 @@ export function useDeleteFederation() {
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}`,
+        `${API_BASE}/user/federated-buckets/${encodeURIComponent(id)}`,
         { method: "DELETE", credentials: "include" },
       );
       if (!res.ok) {
@@ -2100,7 +2045,7 @@ export function useFailoverFederation() {
   return useMutation<FederatedBucket, Error, { id: string; body: FederationFailoverRequest }>({
     mutationFn: async ({ id, body }) => {
       const res = await fetch(
-        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}/failover`,
+        `${API_BASE}/user/federated-buckets/${encodeURIComponent(id)}/failover`,
         {
           method: "POST",
           credentials: "include",
@@ -2141,7 +2086,7 @@ export function useFederationByTarget(
     queryKey: ["federation-by-target", regionId, bucket],
     queryFn: async () => {
       if (!bucket) return null;
-      const url = `/api/v1/user/federated-buckets/by-target?regionId=${encodeURIComponent(regionId)}&bucket=${encodeURIComponent(bucket)}`;
+      const url = `${API_BASE}/user/federated-buckets/by-target?regionId=${encodeURIComponent(regionId)}&bucket=${encodeURIComponent(bucket)}`;
       const res = await fetch(url, { credentials: "include" });
       if (res.status === 204) return null;
       if (!res.ok) {
@@ -2161,7 +2106,7 @@ export function useResyncFederation() {
   return useMutation<{ id: string; status: string }, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/user/federated-buckets/${encodeURIComponent(id)}/resync`,
+        `${API_BASE}/user/federated-buckets/${encodeURIComponent(id)}/resync`,
         {
           method: "POST",
           credentials: "include",
@@ -2227,7 +2172,7 @@ export function useServiceAccounts() {
   return useQuery<ServiceAccount[]>({
     queryKey: ["admin", "service-accounts"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/service-accounts", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/admin/service-accounts`, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("admin/service-accounts", res.status, body);
       return (body as ServiceAccount[] | null) ?? [];
@@ -2240,7 +2185,7 @@ export function useServiceAccount(id: string | null) {
   return useQuery<ServiceAccount>({
     queryKey: ["admin", "service-accounts", id],
     queryFn: async () => {
-      const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id!)}`, {
+      const res = await fetch(`${API_BASE}/admin/service-accounts/${encodeURIComponent(id!)}`, {
         credentials: "include",
       });
       const body = await res.json().catch(() => null);
@@ -2256,7 +2201,7 @@ export function useCreateServiceAccount() {
   const queryClient = useQueryClient();
   return useMutation<ServiceAccountWithSecret, Error, CreateServiceAccountRequest>({
     mutationFn: async (req) => {
-      const res = await fetch("/api/v1/admin/service-accounts", {
+      const res = await fetch(`${API_BASE}/admin/service-accounts`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2276,7 +2221,7 @@ export function useUpdateServiceAccount() {
   const queryClient = useQueryClient();
   return useMutation<ServiceAccount, Error, { id: string; patch: UpdateServiceAccountRequest }>({
     mutationFn: async ({ id, patch }) => {
-      const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/admin/service-accounts/${encodeURIComponent(id)}`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2297,7 +2242,7 @@ export function useDeleteServiceAccount() {
   const queryClient = useQueryClient();
   return useMutation<null, Error, string>({
     mutationFn: async (id) => {
-      const res = await fetch(`/api/v1/admin/service-accounts/${encodeURIComponent(id)}`, {
+      const res = await fetch(`${API_BASE}/admin/service-accounts/${encodeURIComponent(id)}`, {
         method: "DELETE",
         credentials: "include",
       });
@@ -2319,7 +2264,7 @@ export function useRotateServiceAccount() {
   return useMutation<ServiceAccountWithSecret, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/admin/service-accounts/${encodeURIComponent(id)}/rotate`,
+        `${API_BASE}/admin/service-accounts/${encodeURIComponent(id)}/rotate`,
         {
           method: "POST",
           credentials: "include",
@@ -2435,7 +2380,7 @@ export function useWebhooks() {
   return useQuery<Webhook[]>({
     queryKey: ["user", "webhooks"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/user/webhooks", { credentials: "include" });
+      const res = await fetch(`${API_BASE}/user/webhooks`, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) throw apiError("user/webhooks", res.status, body);
       return (body as Webhook[]) ?? [];
@@ -2452,7 +2397,7 @@ export function useWebhook(id: string | null) {
     queryFn: async () => {
       if (!id) throw new Error("Webhook ID required");
       const res = await fetch(
-        `/api/v1/user/webhooks/${encodeURIComponent(id)}`,
+        `${API_BASE}/user/webhooks/${encodeURIComponent(id)}`,
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -2470,7 +2415,7 @@ export function useCreateWebhook() {
   const queryClient = useQueryClient();
   return useMutation<WebhookMintResponse, Error, WebhookCreateRequest>({
     mutationFn: async (body) => {
-      const res = await fetch("/api/v1/user/webhooks", {
+      const res = await fetch(`${API_BASE}/user/webhooks`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -2500,7 +2445,7 @@ export function useUpdateWebhook() {
   >({
     mutationFn: async ({ id, body }) => {
       const res = await fetch(
-        `/api/v1/user/webhooks/${encodeURIComponent(id)}`,
+        `${API_BASE}/user/webhooks/${encodeURIComponent(id)}`,
         {
           method: "PUT",
           credentials: "include",
@@ -2524,7 +2469,7 @@ export function useDeleteWebhook() {
   return useMutation<void, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/user/webhooks/${encodeURIComponent(id)}`,
+        `${API_BASE}/user/webhooks/${encodeURIComponent(id)}`,
         { method: "DELETE", credentials: "include" },
       );
       if (!res.ok) {
@@ -2547,7 +2492,7 @@ export function useTestWebhook() {
   return useMutation<{ id: string; status: string; event: string }, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/user/webhooks/${encodeURIComponent(id)}/test`,
+        `${API_BASE}/user/webhooks/${encodeURIComponent(id)}/test`,
         {
           method: "POST",
           credentials: "include",
@@ -2569,7 +2514,7 @@ export function useEnableWebhook() {
   return useMutation<Webhook, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/user/webhooks/${encodeURIComponent(id)}/enable`,
+        `${API_BASE}/user/webhooks/${encodeURIComponent(id)}/enable`,
         {
           method: "POST",
           credentials: "include",
@@ -2592,7 +2537,7 @@ export function useDisableWebhook() {
   return useMutation<Webhook, Error, string>({
     mutationFn: async (id) => {
       const res = await fetch(
-        `/api/v1/user/webhooks/${encodeURIComponent(id)}/disable`,
+        `${API_BASE}/user/webhooks/${encodeURIComponent(id)}/disable`,
         {
           method: "POST",
           credentials: "include",
@@ -2616,7 +2561,7 @@ export function useActiveSkin() {
   return useQuery<Skin>({
     queryKey: ["skin", "active"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/skins/active");
+      const res = await fetch(`${API_BASE}/skins/active`);
       if (!res.ok) throw new Error(`active skin ${res.status}`);
       const data = (await res.json()) as Skin;
       return data;
@@ -2630,7 +2575,7 @@ export function useSkinRegistry() {
   return useQuery<Skin[]>({
     queryKey: ["skin", "registry"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/skins");
+      const res = await fetch(`${API_BASE}/skins`);
       if (!res.ok) throw new Error(`skin registry ${res.status}`);
       const data = (await res.json()) as Skin[];
       return data;
@@ -2684,7 +2629,7 @@ export function useGatewaysRegistry() {
   return useQuery<GatewayInfo[]>({
     queryKey: ["admin", "gateways"],
     queryFn: async () => {
-      const res = await fetch("/api/v1/admin/gateways", {
+      const res = await fetch(`${API_BASE}/admin/gateways`, {
         credentials: "include",
       });
       const body = await res.json().catch(() => null);
@@ -2738,7 +2683,7 @@ export function useBucketVersioning(
     queryKey: ["user", "regions", regionId, "buckets", bucket, "versioning"],
     queryFn: async () => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/versioning`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/versioning`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -2768,7 +2713,7 @@ export function usePutBucketVersioning(
   return useMutation<VersioningStatusResponse, Error, { status: "enabled" | "suspended" }>({
     mutationFn: async ({ status }) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/versioning`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/versioning`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -2833,7 +2778,7 @@ export function useObjectVersions(
       if (!regionId || !bucket || !key) {
         throw new Error("Region id, bucket, and key required");
       }
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -2859,7 +2804,7 @@ export function objectVersionDownloadURL(
   key: string,
   versionId: string,
 ): string {
-  return `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions/${encodeURIComponent(versionId)}`;
+  return `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions/${encodeURIComponent(versionId)}`;
 }
 
 // useDeleteObjectVersion permanently removes a single version row,
@@ -2874,7 +2819,7 @@ export function useDeleteObjectVersion(
   return useMutation<void, Error, { key: string; versionId: string }>({
     mutationFn: async ({ key, versionId }) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions/${encodeURIComponent(versionId)}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/versions/${encodeURIComponent(versionId)}`;
       const res = await fetch(url, { method: "DELETE", credentials: "include" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
@@ -2940,7 +2885,7 @@ export function useObjectLockConfig(
     queryKey: ["user", "regions", regionId, "buckets", bucket, "object-lock"],
     queryFn: async () => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/object-lock`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/object-lock`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -2962,7 +2907,7 @@ export function usePutObjectLockConfig(
   return useMutation<ObjectLockConfigResponse, Error, ObjectLockConfigRequest>({
     mutationFn: async (req) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/object-lock`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/object-lock`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -3004,7 +2949,7 @@ export function useObjectRetention(
       if (!regionId || !bucket || !key || !versionId) {
         throw new Error("Region id, bucket, key, versionId required");
       }
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/retention?versionId=${encodeURIComponent(versionId)}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/retention?versionId=${encodeURIComponent(versionId)}`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -3037,7 +2982,7 @@ export function usePutObjectRetention(
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
       const params = new URLSearchParams({ versionId });
       if (bypassGovernance) params.set("bypassGovernance", "true");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/retention?${params.toString()}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/retention?${params.toString()}`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -3075,7 +3020,7 @@ export function useObjectLegalHold(
       if (!regionId || !bucket || !key || !versionId) {
         throw new Error("Region id, bucket, key, versionId required");
       }
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/legal-hold?versionId=${encodeURIComponent(versionId)}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/legal-hold?versionId=${encodeURIComponent(versionId)}`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -3101,7 +3046,7 @@ export function usePutObjectLegalHold(
   >({
     mutationFn: async ({ key, versionId, on }) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/legal-hold?versionId=${encodeURIComponent(versionId)}`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/o/${encodeURIComponent(key)}/legal-hold?versionId=${encodeURIComponent(versionId)}`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -3165,7 +3110,7 @@ export function useBucketEncryption(
     queryKey: ["user", "regions", regionId, "buckets", bucket, "encryption"],
     queryFn: async () => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
       const res = await fetch(url, { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -3187,7 +3132,7 @@ export function usePutBucketEncryption(
   return useMutation<BucketEncryptionResponse, Error, BucketEncryptionRequest>({
     mutationFn: async (req) => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
       const res = await fetch(url, {
         method: "PUT",
         credentials: "include",
@@ -3216,7 +3161,7 @@ export function useDeleteBucketEncryption(
   return useMutation<BucketEncryptionResponse, Error, void>({
     mutationFn: async () => {
       if (!regionId || !bucket) throw new Error("Region id and bucket required");
-      const url = `/api/v1/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
+      const url = `${API_BASE}/user/regions/${encodeURIComponent(regionId)}/buckets/${encodeURIComponent(bucket)}/encryption`;
       const res = await fetch(url, { method: "DELETE", credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
@@ -3256,7 +3201,7 @@ export function useClusterLockStatus(cid: string) {
     queryKey: ["admin", "clusters", cid, "lock-status"],
     queryFn: async () => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/lock-status`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/lock-status`,
         { credentials: "include" },
       );
       const body = await res.json().catch(() => null);
@@ -3293,7 +3238,7 @@ export function useUnlockCluster(cid: string) {
   return useMutation<{ unlocked: true }, Error, { password: string }>({
     mutationFn: async ({ password }) => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/unlock`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/unlock`,
         {
           method: "POST",
           credentials: "include",
@@ -3319,7 +3264,7 @@ export function useLockCluster(cid: string) {
   return useMutation<void, Error, void>({
     mutationFn: async () => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/lock`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/lock`,
         { method: "POST", credentials: "include" },
       );
       if (!res.ok) {
@@ -3348,7 +3293,7 @@ export function useAddClusterAdmin(cid: string) {
   >({
     mutationFn: async ({ adminUserId, password }) => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/admins`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/admins`,
         {
           method: "POST",
           credentials: "include",
@@ -3362,6 +3307,8 @@ export function useAddClusterAdmin(cid: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "lock-status"] });
+      // Adding an admin changes the admins list (useClusterAdmins).
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "admins"] });
     },
   });
 }
@@ -3374,7 +3321,7 @@ export function useRemoveClusterAdmin(cid: string) {
   return useMutation<void, Error, { adminUserId: string }>({
     mutationFn: async ({ adminUserId }) => {
       const res = await fetch(
-        `/api/v1/admin/clusters/${encodeURIComponent(cid)}/admins/${encodeURIComponent(adminUserId)}`,
+        `${API_BASE}/admin/clusters/${encodeURIComponent(cid)}/admins/${encodeURIComponent(adminUserId)}`,
         { method: "DELETE", credentials: "include" },
       );
       if (!res.ok) {
@@ -3384,6 +3331,8 @@ export function useRemoveClusterAdmin(cid: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "lock-status"] });
+      // Removing an admin changes the admins list (useClusterAdmins).
+      queryClient.invalidateQueries({ queryKey: ["admin", "clusters", cid, "admins"] });
     },
   });
 }
