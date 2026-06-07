@@ -53,3 +53,11 @@ data/
 /basement
 /basement-mcp
 /basement-server
+
+# `go test -c` / ad-hoc compiled test binaries dropped in the repo root
+/api.test
+/*.test
+
+# Local operator/agent scratch + working notes — never ship in a public release
+scratch/
+operator-log.md
