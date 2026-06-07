@@ -59,7 +59,12 @@ export function UserMenu() {
     try {
       await client.POST("/auth/logout");
     } catch (error) {
-      console.error("logout request failed:", error);
+      // Logout proceeds regardless (cache cleared + navigate below), so a
+      // failed request is non-fatal. Only surface it in dev to avoid
+      // leaking error detail to the prod browser console.
+      if (import.meta.env.DEV) {
+        console.error("logout request failed:", error);
+      }
     }
     // Clear cached user state so ProtectedRoute sees "logged out" and
     // redirects on the next render.

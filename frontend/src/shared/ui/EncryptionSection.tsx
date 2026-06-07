@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,8 +55,17 @@ export function EncryptionSection({
   const [kmsKeyId, setKmsKeyId] = useState("");
   const [bucketKey, setBucketKey] = useState(false);
 
+  // Seed the form from the server ONCE, on the first non-null payload.
+  // TanStack Query refetches on window refocus / invalidation; re-seeding
+  // on every `data` change would clobber an operator's in-flight edits when
+  // a background refetch lands. (Mirrors LifecycleRuleEditor's seed-once
+  // pattern.) A successful PUT invalidates the query, but the echoed-back
+  // values match what the operator just submitted, so not re-seeding is
+  // safe there too.
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (!data) return;
+    if (!data || seededRef.current) return;
+    seededRef.current = true;
     if (data.enabled && data.algorithm) {
       setAlgorithm(data.algorithm);
       setKmsKeyId(data.kmsKeyId ?? "");

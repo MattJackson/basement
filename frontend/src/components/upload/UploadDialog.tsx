@@ -30,6 +30,11 @@ function uploadBaseFor(opts: { regionId: string; bid: string }): string {
   return `/api/v1/user/regions/${encodeURIComponent(opts.regionId)}/buckets/${encodeURIComponent(opts.bid)}`;
 }
 
+// Per-part retry budget on a retryable (5xx/429) PUT status. Each retry
+// re-presigns the part URL — presigned URLs can be single-use, so reusing
+// the same URL across attempts is unsafe.
+const PART_MAX_RETRIES = 1;
+
 // Simple upload implementation inline to avoid complex hook state management.
 // `base` is the per-bucket URL prefix — /api/v1/user/regions/{regionId}/buckets/{bid}.
 async function doUpload(
@@ -37,7 +42,7 @@ async function doUpload(
   base: string,
   key: string,
   contentType: string,
-  onProgress: (event: { type: "progress" | "done" | "error"; fileId: string; percent?: number; error?: string }) => void,
+  onProgress: (event: { type: "progress" | "done" | "error"; percent?: number; error?: string }) => void,
   uploadId: string | null = null
 ): Promise<void> {
   const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -63,7 +68,7 @@ async function doUpload(
 
       const presign: { url: string } = await presignRes.json();
 
-      onProgress({ type: "progress", fileId: `${key}-${Date.now()}`, percent: 0 });
+      onProgress({ type: "progress", percent: 0 });
 
       const putRes = await fetch(presign.url, {
         method: "PUT",
@@ -75,8 +80,8 @@ async function doUpload(
         throw new Error(`Upload failed: ${putRes.status}`);
       }
 
-      onProgress({ type: "progress", fileId: `${key}-${Date.now()}`, percent: 100 });
-      onProgress({ type: "done", fileId: `${key}-${Date.now()}` });
+      onProgress({ type: "progress", percent: 100 });
+      onProgress({ type: "done" });
       return;
     }
 
@@ -108,27 +113,30 @@ async function doUpload(
       const chunkSize = Math.min(CHUNK_SIZE, fileSize - currentOffset);
       const chunk = file.slice(currentOffset, currentOffset + chunkSize);
 
-      // Get presigned URL for this part
-      const presignRes = await fetch(
-        `${base}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign?ttl=3600`,
-        {
-          method: "POST",
-          credentials: "include",
-        }
-      );
-
-      if (!presignRes.ok) {
-        const err = await presignRes.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Part ${partNumber} presign failed: ${presignRes.status}`);
-      }
-
-      const presign: { url: string; expires: string } = await presignRes.json();
-
-      // Upload chunk with retry logic
+      // Upload chunk with retry logic. Each attempt re-presigns the part:
+      // presigned URLs can be single-use, so reusing one across a retry can
+      // fail or upload nothing. Re-presigning per attempt keeps the retry
+      // honest.
       let retries = 0;
       let partSuccess = false;
 
-      while (!partSuccess && retries <= 1) {
+      while (!partSuccess && retries <= PART_MAX_RETRIES) {
+        // Get a fresh presigned URL for this part on every attempt.
+        const presignRes = await fetch(
+          `${base}/multipart/${encodeURIComponent(uploadId)}/part/${partNumber}/presign?ttl=3600`,
+          {
+            method: "POST",
+            credentials: "include",
+          }
+        );
+
+        if (!presignRes.ok) {
+          const err = await presignRes.json().catch(() => ({}));
+          throw new Error(err.error?.message || `Part ${partNumber} presign failed: ${presignRes.status}`);
+        }
+
+        const presign: { url: string; expires: string } = await presignRes.json();
+
         const putRes = await fetch(presign.url, {
           method: "PUT",
           body: chunk,
@@ -174,7 +182,7 @@ async function doUpload(
       partNumber++;
 
       const percent = Math.min(99, Math.round((currentOffset / fileSize) * 100));
-      onProgress({ type: "progress", fileId: `${key}-${Date.now()}`, percent });
+      onProgress({ type: "progress", percent });
     }
 
     // Complete multipart upload
@@ -193,11 +201,11 @@ async function doUpload(
       throw new Error(err.error?.message || `Complete failed: ${completeRes.status}`);
     }
 
-    onProgress({ type: "progress", fileId: `${key}-${Date.now()}`, percent: 100 });
-    onProgress({ type: "done", fileId: `${key}-${Date.now()}` });
+    onProgress({ type: "progress", percent: 100 });
+    onProgress({ type: "done" });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    onProgress({ type: "error", fileId: key, error: errorMessage });
+    onProgress({ type: "error", error: errorMessage });
     throw err;
   }
 }
@@ -207,6 +215,15 @@ export function UploadDialog({ open, onOpenChange, regionId, bid, prefix, onSucc
   const [files, setFiles] = useState<FileUpload[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
+
+  // filesRef mirrors `files` so the upload-orchestration callbacks
+  // (startUploads / retryUpload / retryFailed) can read the CURRENT row
+  // set synchronously. Reading the `files` state variable directly would
+  // capture a stale render snapshot (the bug the audit flagged: allDone /
+  // retry computed against pre-upload state). We keep it in lockstep by
+  // assigning on each render.
+  const filesRef = useRef(files);
+  filesRef.current = files;
 
   const generateFileKey = (file: File): string => {
     return `${prefix}${file.name}`.replace(/\/+/g, "/");
@@ -258,77 +275,88 @@ export function UploadDialog({ open, onOpenChange, regionId, bid, prefix, onSucc
     e.target.value = "";
   }, [handleFiles]);
 
-  const uploadOneFile = async (upload: FileUpload): Promise<void> => {
-    await doUpload(
-      upload.file,
-      base,
-      upload.key,
-      upload.file.type,
-      (event) => {
-        setFiles(prev => prev.map(f => 
-          f.fileId === upload.fileId ? { 
-            ...f, 
-            progress: event.type === "progress" ? (event.percent ?? 0) : f.progress,
-            status: event.type === "done" ? "done" : event.type === "error" ? "error" : f.status,
-            error: event.error
-          } : f
-        ));
-      }
-    );
-  };
+  // uploadOneFile runs a single upload and resolves to true on success,
+  // false on failure. It marks the row "uploading" up front and tracks
+  // progress/done/error via the onProgress callback. Returning a boolean
+  // (instead of relying on a post-await read of `files`, which would be a
+  // stale closure) lets the caller compute completion from the resolved
+  // promise results directly.
+  const uploadOneFile = useCallback(async (upload: FileUpload): Promise<boolean> => {
+    setFiles(prev => prev.map(f =>
+      f.fileId === upload.fileId ? { ...f, status: "uploading", progress: 0, error: undefined } : f
+    ));
+    try {
+      await doUpload(
+        upload.file,
+        base,
+        upload.key,
+        upload.file.type,
+        (event) => {
+          setFiles(prev => prev.map(f =>
+            f.fileId === upload.fileId ? {
+              ...f,
+              progress: event.type === "progress" ? (event.percent ?? 0) : f.progress,
+              status: event.type === "done" ? "done" : event.type === "error" ? "error" : f.status,
+              error: event.error ?? f.error,
+            } : f
+          ));
+        }
+      );
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setFiles(prev => prev.map(f =>
+        f.fileId === upload.fileId ? { ...f, status: "error", error: message } : f
+      ));
+      return false;
+    }
+  }, [base]);
 
   const cancelUpload = useCallback((fileId: string) => {
-    setFiles(prev => prev.map(f => 
+    setFiles(prev => prev.map(f =>
       f.fileId === fileId ? { ...f, status: "cancelled", progress: 0 } : f
     ));
   }, []);
 
-  const retryUpload = useCallback(async (fileId: string) => {
-    setFiles(prev => 
-      prev.map(f => 
-        f.fileId === fileId ? ({ ...f, status: "pending" as const, progress: 0, error: undefined }) : f
-      ) as FileUpload[]
-    );
-    
-    // Small delay to allow state update before retrying
-    await new Promise(resolve => setTimeout(resolve, 10));
-    
-    const upload = files.find(f => f.fileId === fileId);
-    if (upload && (upload.status === "error" || upload.status === "cancelled")) {
-      await uploadOneFile(upload as FileUpload);
+  // retryUpload re-runs a single failed/cancelled upload. We resolve the
+  // target row from the functional setFiles updater (current state) rather
+  // than a closed-over `files` snapshot, then kick the upload directly with
+  // the known FileUpload object — no setTimeout round-trip.
+  const retryUpload = useCallback((fileId: string) => {
+    const target = filesRef.current.find(f => f.fileId === fileId);
+    if (target && (target.status === "error" || target.status === "cancelled")) {
+      void uploadOneFile(target);
     }
-  }, [files]);
+  }, [uploadOneFile]);
 
   const cancelAll = useCallback(() => {
-    setFiles(prev => prev.map(f => 
+    setFiles(prev => prev.map(f =>
       f.status === "pending" || f.status === "uploading" ? { ...f, status: "cancelled", progress: 0 } : f
     ));
   }, []);
 
-  const startUploads = async () => {
-    const pendingFiles = files.filter(f => f.status === "pending");
+  // retryFailed re-runs every errored row. Reads current state via the
+  // functional updater so it captures the live `files`, not a stale closure.
+  const retryFailed = useCallback(() => {
+    const failed = filesRef.current.filter(f => f.status === "error");
+    for (const upload of failed) {
+      void uploadOneFile(upload);
+    }
+  }, [uploadOneFile]);
+
+  const startUploads = useCallback(async () => {
+    const pendingFiles = filesRef.current.filter(f => f.status === "pending");
     if (pendingFiles.length === 0) return;
 
-    setFiles(prev => prev.map(f => 
-      f.status === "pending" ? { ...f, status: "uploading" } : f
-    ));
+    // Upload all pending files in parallel. uploadOneFile resolves to a
+    // boolean; completion is computed from the resolved results, not from a
+    // stale post-await read of `files`.
+    const results = await Promise.all(pendingFiles.map(upload => uploadOneFile(upload)));
 
-    // Upload all pending files in parallel
-    const uploadPromises = pendingFiles.map(upload => 
-      uploadOneFile(upload).catch(err => {
-        setFiles(prev => prev.map(f => 
-          f.fileId === upload.fileId ? { ...f, status: "error", error: err.message } : f
-        ));
-      })
-    );
-
-    await Promise.all(uploadPromises);
-
-    const allDone = files.every(f => f.status === "done" || f.status === "cancelled");
-    if (allDone && onSuccess) {
+    if (results.every(Boolean) && onSuccess) {
       onSuccess();
     }
-  };
+  }, [uploadOneFile, onSuccess]);
 
   const hasPendingOrUploading = files.some(f => f.status === "pending" || f.status === "uploading");
   const hasError = files.some(f => f.status === "error");
@@ -459,10 +487,10 @@ export function UploadDialog({ open, onOpenChange, regionId, bid, prefix, onSucc
 
           <div className="flex gap-2">
             {hasError && (
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 size="sm"
-                onClick={() => setFiles(prev => prev.filter(f => f.status !== "cancelled"))}
+                onClick={retryFailed}
               >
                 Retry Failed
               </Button>

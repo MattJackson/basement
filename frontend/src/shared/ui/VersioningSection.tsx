@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,8 +47,15 @@ export function VersioningSection({
   // status whenever it changes (e.g. a successful PUT echoes the new
   // state back); the operator can then flip it and hit Save to commit.
   const [pending, setPending] = useState<VersioningStatus | null>(null);
+  // Seed the select from the wire status ONCE so a background refetch (or a
+  // post-PUT invalidation) doesn't reset an operator's in-flight choice.
+  // `dirty` is computed against the live wire status, so the Save button
+  // still tracks correctly after the seed. Mirrors LifecycleRuleEditor.
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (data?.status) setPending(data.status);
+    if (seededRef.current || !data?.status) return;
+    seededRef.current = true;
+    setPending(data.status);
   }, [data?.status]);
 
   if (isLoading) {

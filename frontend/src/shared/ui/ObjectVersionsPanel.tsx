@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -504,6 +504,29 @@ function SetRetentionDialog({
   const [mode, setMode] = useState<ObjectLockMode>(existingMode ?? "GOVERNANCE");
   const [days, setDays] = useState(initialDays);
   const [bypass, setBypass] = useState(false);
+
+  // Re-seed the form from the current props each time the dialog opens.
+  // The dialog is mounted per-row (open=false initially) and the same
+  // instance is reused across openings, so the lazy useState initialisers
+  // only run once — without this, the second time an operator opens the
+  // dialog (or after the per-version retention query resolves) they'd see
+  // the previous row's days/mode instead of this version's actual values.
+  useEffect(() => {
+    if (!open) return;
+    setMode(existingMode ?? "GOVERNANCE");
+    setDays(
+      existingDate
+        ? Math.max(
+            1,
+            Math.round(
+              (new Date(existingDate).getTime() - Date.now()) /
+                (24 * 60 * 60 * 1000),
+            ),
+          )
+        : 30,
+    );
+    setBypass(false);
+  }, [open, existingDate, existingMode]);
 
   // Detect reduction vs extension when re-rendering. Used to surface
   // the bypass requirement before the operator clicks Save.

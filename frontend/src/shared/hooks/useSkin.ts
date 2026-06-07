@@ -12,7 +12,6 @@ export { _useSkinRegistry as useSkinRegistry };
  * Provides computed density tokens and border radius for CSS consumption.
  */
 export function useSkin() {
-  const setActiveSkin = _useSetActiveSkin();
   const { data: skin, isLoading, error } = useActiveSkin();
 
   // Fallback values per ADR-0008 spec
@@ -56,10 +55,6 @@ export function useSkin() {
         return { padding: "8px", gap: "12px" };
     }
   }, [computedSkin?.density]);
-
-  const setSelectedSkin = async (skinName: string) => {
-    await setActiveSkin.mutateAsync(skinName);
-  };
 
   // v1.13.20: ACTUALLY apply the skin's palette to the document.
   // v1.13.0a wired the --basement-* CSS variables in index.css, and
@@ -133,6 +128,5 @@ export function useSkin() {
     error,
     densityTokens,
     borderRadius: computedSkin?.borderRadius || defaultBorderRadius,
-    setSelectedSkin,
   };
 }

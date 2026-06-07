@@ -21,7 +21,7 @@ interface LogoProps {
  * with tight tracking and semibold weight — the same restraint Linear
  * / Vercel use.
  */
-export function Logo({ href = "/", iconOnly = false, className = "" }: LogoProps) {
+export function Logo({ href = "/admin", iconOnly = false, className = "" }: LogoProps) {
   return (
     // v1.10.0.1 — added `min-h-[44px] min-w-[44px]` so the lockup
     // hits the WCAG/iOS HIG 44×44 tap-target threshold on mobile.

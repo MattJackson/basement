@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,8 +50,13 @@ export function ObjectLockSection({
   const [mode, setMode] = useState<ObjectLockMode>("GOVERNANCE");
   const [days, setDays] = useState<number>(30);
 
+  // Seed the form from the server ONCE (first non-null payload). Re-seeding
+  // on every `data` change would clobber in-flight operator edits when a
+  // TanStack background refetch lands. Mirrors LifecycleRuleEditor.
+  const seededRef = useRef(false);
   useEffect(() => {
-    if (!data) return;
+    if (!data || seededRef.current) return;
+    seededRef.current = true;
     if (data.defaultRetention) {
       setDefaultRetentionEnabled(true);
       setMode(data.defaultRetention.mode);

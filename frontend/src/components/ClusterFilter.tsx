@@ -33,10 +33,12 @@ export function ClusterFilter({ selectedClusterId, onFilterChange }: ClusterFilt
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger>
-        <Button variant="outline" size="sm">
-          {selectedLabel}
-        </Button>
+      {/* render the Button AS the trigger element (base-ui `render` prop)
+          rather than nesting <Button> inside <DropdownMenuTrigger> — the
+          trigger renders its own <button>, so nesting produced an invalid
+          <button><button> with a double tab stop. */}
+      <DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>
+        {selectedLabel}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuItem

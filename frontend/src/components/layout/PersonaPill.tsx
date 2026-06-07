@@ -29,7 +29,7 @@
 // pill back to ADMIN from a stale React Query cache. v1.9.0e.2:
 // also navigate to /files — under the tight coupling, drop = go user.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -111,7 +111,7 @@ export function PersonaPill() {
   const switchActiveRoleMutation = useSwitchActiveRole();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const handleRoleChange = async (roleKey: string) => {
+  const handleRoleChange = useCallback(async (roleKey: string) => {
     if (!user?.activeRole || !availableRoles.length) return;
 
     const selectedRole = availableRoles.find(r => r.kind === roleKey.split(":")[0] && (!r.cluster || r.cluster === roleKey.split(":")[1]));
@@ -119,12 +119,9 @@ export function PersonaPill() {
 
     setMenuOpen(false);
 
-    try {
-      await switchActiveRoleMutation.mutateAsync({
-        kind: selectedRole.kind,
-        cluster: selectedRole.cluster,
-      });
-      
+    // Where to land after a successful role switch — shared by the
+    // happy path and the post-elevation retry below.
+    const navigateForRole = async () => {
       if (selectedRole.kind === "user") {
         await navigate({ to: "/files" });
       } else if (selectedRole.kind === "cluster-admin" && selectedRole.cluster) {
@@ -132,33 +129,36 @@ export function PersonaPill() {
       } else if (selectedRole.kind === "ui-admin") {
         await navigate({ to: "/admin/system" });
       }
-     } catch (error: any) {
-    if (error?.status === 423) {
-      try {
-        setMenuOpen(false);
-        const prompt = "Switching to this role requires admin re-authentication.";
-        await promptElevationFromAnywhere("admin", prompt);
-          
+    };
+
+    try {
+      await switchActiveRoleMutation.mutateAsync({
+        kind: selectedRole.kind,
+        cluster: selectedRole.cluster,
+      });
+      await navigateForRole();
+    } catch (error) {
+      const status = (error as { status?: number } | null)?.status;
+      const message = (error as { message?: string } | null)?.message;
+      if (status === 423) {
+        try {
+          setMenuOpen(false);
+          const prompt = "Switching to this role requires admin re-authentication.";
+          await promptElevationFromAnywhere("admin", prompt);
+
           await switchActiveRoleMutation.mutateAsync({
             kind: selectedRole.kind,
             cluster: selectedRole.cluster,
           });
-          
-          if (selectedRole.kind === "user") {
-            await navigate({ to: "/files" });
-          } else if (selectedRole.kind === "cluster-admin" && selectedRole.cluster) {
-            await navigate({ to: `/admin/clusters/${selectedRole.cluster}` });
-          } else if (selectedRole.kind === "ui-admin") {
-            await navigate({ to: "/admin/system" });
-          }
-        } catch (elevationError) {
+          await navigateForRole();
+        } catch {
           toast.error("Elevation required for this role and was cancelled");
         }
       } else {
-        toast.error(error?.message || "Failed to switch role");
+        toast.error(message || "Failed to switch role");
       }
     }
-  };
+  }, [user?.activeRole, availableRoles, switchActiveRoleMutation, navigate]);
 
   const [now, setNow] = useState<number>(() => Date.now());
   const [flashing, setFlashing] = useState(false);
@@ -369,7 +369,7 @@ export function PersonaPill() {
     );
 
     return pillContent;
-  }, [mode, flashing, inAmberWindow, inRedWindow, activeRole]);
+  }, [mode, flashing, inAmberWindow, inRedWindow, activeRole, availableRoles]);
 
   const roleSelector = useMemo(() => {
     if (availableRoles.length <= 1) return null;
@@ -419,6 +419,8 @@ export function PersonaPill() {
                     : "bg-muted/60 text-muted-foreground")
               }
               data-testid="persona-countdown"
+              aria-live="polite"
+              aria-atomic="true"
               aria-label={`Admin session ending in ${formatRemaining(remainingMs)}`}
             >
               {formatRemaining(remainingMs)} left
