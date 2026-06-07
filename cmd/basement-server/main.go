@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -244,6 +245,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// v2.0.0a in-place upgrade: a v1-era admin (Role=="admin") that predates
+	// the UIAdmin field must keep UI-admin access after upgrading. Idempotent;
+	// a save failure is non-fatal (the flag can be re-set via /admin/users).
+	if err := st.MigrateLegacyUsers(); err != nil {
+		slog.Warn("MigrateLegacyUsers failed (continuing)", "error", err)
+	}
+
 	// Per ADR-0002 (v1.1.0a): per-user S3 region keychain, AES-GCM
 	// encrypted at rest with a key derived from the JWT secret. The
 	// region-tier abstraction supersedes per-bucket grants at the user
@@ -317,7 +325,18 @@ func main() {
 	// dump can't recover them.
 	defer cskManager.LockAll()
 
-	// Per ADR-0001 (v0.9.0b/e): policy enforcer + matthew->host_admin
+	// v2.0.0a [[v2_clean_break]]: drop legacy bucket_user role-assignments
+	// from policies.json BEFORE the enforcer loads it, so in-memory state
+	// matches disk. Idempotent + atomic write; orphaned rows are inert
+	// (the enforcer ignores assignments to unknown roles) so a failure here
+	// is non-fatal.
+	if n, err := st.MigrateBucketUserAssignments(filepath.Join(cfg.DataDir, "policies.json")); err != nil {
+		slog.Warn("MigrateBucketUserAssignments failed (continuing)", "error", err)
+	} else if n > 0 {
+		slog.Info("dropped legacy bucket_user role-assignments at boot", "count", n)
+	}
+
+	// Per ADR-0001 (v0.9.0b/e): policy enforcer + env-admin->host_admin
 	// seed assignment. The user-tier "Add bucket access" endpoint and
 	// future RBAC gates depend on this being wired before Start.
 	enforcer, err := policy.Open(cfg.DataDir)

@@ -5,9 +5,19 @@
 // JWT signing secret via SHA-256 — single-server self-hosted threat
 // model. Revisit before multi-tenant SaaS (ADR-0002 candidate).
 //
+// Accepted tradeoff (see SECURITY.md "KDF design note"): the JWT secret
+// doubles as the at-rest key material and there is no per-value salt /
+// HKDF domain separation. Intentional for the single-server model — the
+// KDF input is a HIGH-ENTROPY secret, not a password, so plain SHA-256 is
+// adequate (the slow-KDF argument is for passwords). The real caveat is
+// key reuse across purposes; a multi-tenant/hostile-co-tenant deployment
+// should move to a dedicated data key + HKDF via a VERSIONED-ciphertext
+// migration. Do NOT swap the KDF in place — it would make every existing
+// ciphertext undecryptable without a version field.
+//
 // Wire format (per ciphertext value):
 //
-//   nonce(12) || gcm-ciphertext(plaintext + tag)
+//	nonce(12) || gcm-ciphertext(plaintext + tag)
 //
 // 12-byte nonce prepended; GCM auth tag is appended by the cipher. A
 // tampered byte anywhere in the blob causes Decrypt to error

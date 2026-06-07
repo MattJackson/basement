@@ -118,6 +118,21 @@ team) running it on infrastructure they own**. The trust boundaries:
 - **Cluster admin tokens** (Garage admin tokens etc.): AES-256-GCM,
   same scheme as the per-user S3 keys.
 
+> **KDF design note (accepted tradeoff).** The at-rest key is
+> `sha256(BASEMENT_JWT_SECRET)` — i.e. the JWT signing secret doubles as
+> the encryption-key material (no separate data key, no per-value salt,
+> no HKDF domain separation). This is **intentional** for the single-server
+> self-hosted threat model documented above, not an oversight:
+> the KDF input is a **high-entropy secret** (not a password), so a plain
+> SHA-256 derivation is cryptographically adequate — the Argon2/bcrypt
+> "slow KDF" argument applies to low-entropy passwords, which this is not.
+> The one real caveat is **key reuse across purposes** (signing + at-rest);
+> an attacker who can read the JSON store on disk can, in this threat model,
+> generally also read `BASEMENT_JWT_SECRET`, so the practical separation gain
+> is small. Multi-tenant / hostile-co-tenant deployments should revisit this
+> with a dedicated data key + HKDF (tracked for a future versioned-ciphertext
+> migration).
+
 ### What basement encrypts that you might think we do, but we don't
 
 - **KMS key IDs are stored plaintext.** A KMS key ID is a public
