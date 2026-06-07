@@ -1,5 +1,7 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useUser } from "@/shared/auth/useUser";
+import { useCan } from "@/shared/auth/useCan";
+import { CAP } from "@/shared/auth/capabilities";
 import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 
 // v1.13.35: root route is activeRole-aware. Operator was landing
@@ -25,6 +27,7 @@ import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 // useUser caches the response for 5 minutes (staleTime).
 function RootRouteRedirect() {
   const { data, isLoading, isError } = useUser();
+  const { can } = useCan();
 
   if (isLoading) {
     return <LoadingSpinner />;
@@ -38,11 +41,16 @@ function RootRouteRedirect() {
 
   const activeRole = data.activeRole;
 
-  if (activeRole?.kind === "ui-admin") {
+  // ADR-0009: landing surface follows capability. UI Admin (holds
+  // cluster.wiring.list) → the cross-cluster list overview.
+  if (can(CAP.CLUSTER_WIRING_LIST)) {
     return <Navigate to="/admin/clusters" replace />;
   }
 
-  if (activeRole?.kind === "cluster-admin" && activeRole.cluster) {
+  // Cluster-admin has a single cluster and no list page — route them
+  // straight to their cluster detail. The cluster id is surface-
+  // routing data (which cluster), read off the active role.
+  if (can(CAP.CLUSTER_CONTENTS_READ) && activeRole?.cluster) {
     return (
       <Navigate
         to="/admin/clusters/$cid"
@@ -52,9 +60,9 @@ function RootRouteRedirect() {
     );
   }
 
-  // Default: user shell. Covers activeRole.kind === "user", missing
-  // activeRole (pre-v1.13.18 sessions during the grace window), and
-  // unknown future kinds.
+  // Default: user shell. Covers the user role, a missing activeRole
+  // (pre-v1.13.18 sessions during the grace window), and any future
+  // role with no admin capability.
   return <Navigate to="/files" replace />;
 }
 

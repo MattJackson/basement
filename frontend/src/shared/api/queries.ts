@@ -167,7 +167,10 @@ export function useBuckets() {
 // Per-cluster bucket list — directly hits /admin/clusters/{cid}/buckets
 // rather than going through the aggregate fan-out. Used on the cluster
 // detail page and for bucket-count badges on the clusters list.
-export function useClusterBuckets(cid: string) {
+// ADR-0009: `enabled` lets the cluster-detail page suppress this
+// contents query for a UI Admin (who holds cluster.wiring.read but NOT
+// cluster.contents.read) so it never fires a 403 they can't satisfy.
+export function useClusterBuckets(cid: string, enabled = true) {
   return useQuery<Bucket[]>({
     queryKey: ["admin", "clusters", cid, "buckets"],
     queryFn: async () => {
@@ -177,13 +180,15 @@ export function useClusterBuckets(cid: string) {
       if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/buckets`, response.status, error);
       return data as Bucket[];
     },
-    enabled: !!cid,
+    enabled: !!cid && enabled,
     staleTime: 30 * 1000,
     retry: 1,
   });
 }
 
-export function useClusterKeys(cid: string) {
+// ADR-0009: see useClusterBuckets — `enabled` gates this on the
+// caller holding cluster.contents.read.
+export function useClusterKeys(cid: string, enabled = true) {
   return useQuery<Key[]>({
     queryKey: ["admin", "clusters", cid, "keys"],
     queryFn: async () => {
@@ -193,7 +198,7 @@ export function useClusterKeys(cid: string) {
       if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/keys`, response.status, error);
       return data as Key[];
     },
-    enabled: !!cid,
+    enabled: !!cid && enabled,
     staleTime: 30 * 1000,
     retry: 1,
   });
@@ -1348,7 +1353,9 @@ export type ClusterAdminsResponse = {
   assignments: ClusterAdminAssignment[];
 };
 
-export function useClusterAdmins(cid: string) {
+// ADR-0009: `enabled` gates this on cluster.contents.read so a UI
+// Admin viewing the cluster detail page doesn't fire it (403).
+export function useClusterAdmins(cid: string, enabled = true) {
   return useQuery<ClusterAdminsResponse>({
     queryKey: ["admin", "clusters", cid, "admins"],
     queryFn: async () => {
@@ -1361,7 +1368,7 @@ export function useClusterAdmins(cid: string) {
       return body as ClusterAdminsResponse;
     },
     staleTime: 30 * 1000,
-    enabled: !!cid,
+    enabled: !!cid && enabled,
   });
 }
 
@@ -3196,7 +3203,7 @@ export interface ClusterLockStatus {
  * cluster detail page show "locked" without a manual refresh after
  * another tab issued a lock/unlock.
  */
-export function useClusterLockStatus(cid: string) {
+export function useClusterLockStatus(cid: string, enabled = true) {
   return useQuery<ClusterLockStatus>({
     queryKey: ["admin", "clusters", cid, "lock-status"],
     queryFn: async () => {
@@ -3220,7 +3227,7 @@ export function useClusterLockStatus(cid: string) {
       }
       return body as ClusterLockStatus;
     },
-    enabled: !!cid,
+    enabled: !!cid && enabled,
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
     retry: 1,

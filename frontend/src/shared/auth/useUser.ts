@@ -25,6 +25,12 @@ type UserResponseData = {
     label: string;
     cluster?: string;
   }>;
+  // ADR-0009: flat capability list for the user's ACTIVE role.
+  // Drives useCan/<Can> and capability-based route gating. Source of
+  // truth is internal/auth/capabilities.go; mirror in
+  // shared/auth/capabilities.ts. Optional — older backends omit it and
+  // the FE default-denies (empty list).
+  capabilities?: string[];
   // ADR-0003 v1.2.0c: true when this account was provisioned via OIDC
   // (no local password). The elevation modal branches on this — OIDC-
   // only users get an "Elevate via SSO" button that kicks off
@@ -53,6 +59,7 @@ export function useUser() {
         modeExpiresAt?: number;
         activeRole?: { kind: string; cluster?: string };
         availableRoles?: Array<{ kind: string; label: string; cluster?: string }>;
+        capabilities?: string[];
         oidcUser?: boolean;
       };
       return {
@@ -64,6 +71,7 @@ export function useUser() {
         modeExpiresAt: userData.modeExpiresAt,
         activeRole: userData.activeRole,
         availableRoles: userData.availableRoles,
+        capabilities: userData.capabilities,
         oidcUser: userData.oidcUser ?? false,
       } as UserResponseType;
     },

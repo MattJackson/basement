@@ -3,6 +3,9 @@ import { useEffect } from "react";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useUser } from "./useUser";
+import { useCan } from "./useCan";
+import { resolveRequiredCapabilities } from "./route-capabilities";
+import { CAP } from "./capabilities";
 import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 
 interface ProtectedRouteProps {
@@ -10,19 +13,33 @@ interface ProtectedRouteProps {
 }
 
 /**
- * ProtectedRoute redirects to /login if the user isn't
- * authenticated, and to /files when the active role doesn't grant
- * access to an /admin/* route.
+ * ProtectedRoute (ADR-0009 Phase D) — capability-based route gate.
  *
- * v2.0.0-beta.6: B2 — /admin/clusters/new + /admin/clusters/{cid}/*
- * now allow UI Admin (org-level operations); cluster-admin remains
- * scoped to their assigned cluster. B4 — bounces fire a toast that
- * tells the user which role they need, so the redirect isn't silent.
+ * Replaces the old pathname-prefix / activeRole.kind switch with a
+ * single lookup in route-capabilities.ts. Behaviour:
+ *
+ *   - Unauthenticated → /login with a safe ?next= (admin paths preserve
+ *     the deep link; everything else falls back to /files).
+ *   - A protected /admin/* route the active role lacks the capability
+ *     for → toast + bounce to /files.
+ *   - Cluster-admin convenience redirects (surface-switching, NOT
+ *     permission enforcement — ADR-0009 keeps ar.Kind valid for "which
+ *     shell renders"):
+ *       · /admin/clusters list (needs cluster.wiring.list, which a
+ *         cluster-admin lacks) → silently route to their own cluster
+ *         detail instead of a denial toast.
+ *       · /admin/clusters/{other}/... → silently route to their own
+ *         cluster (cross-cluster deep link).
+ *       · bare /admin landing → route to the surface their role owns.
+ *
+ * Client gating is defense-in-depth; the backend enforces every
+ * capability independently.
  */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { data, isLoading } = useUser();
+  const { canAny } = useCan();
 
   useEffect(() => {
     if (isLoading) return;
@@ -36,86 +53,90 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       return;
     }
 
-    const activeRole = data.activeRole;
-
+    // Only /admin/* routes are capability-gated here; /files and the
+    // public surface are open to any authenticated session.
     if (!pathname.startsWith("/admin")) return;
 
-    const clusterSegMatch = pathname.match(/^\/admin\/clusters\/([^/]+)/);
-    const clusterSeg = clusterSegMatch ? clusterSegMatch[1] : null;
-    const isClusterNewRoute = pathname === "/admin/clusters/new";
-    const pathClusterId = clusterSeg && clusterSeg !== "new" ? clusterSeg : null;
-
-    const isUIAdminRoute =
-      pathname === "/admin/system" ||
-      pathname === "/admin/policies" ||
-      pathname.startsWith("/admin/skins") ||
-      pathname.startsWith("/admin/policies/") ||
-      pathname.startsWith("/admin/oidc") ||
-      pathname === "/admin/audit" ||
-      pathname.startsWith("/admin/users") ||
-      pathname.startsWith("/admin/service-accounts") ||
-      pathname.startsWith("/admin/gateways") ||
-      pathname.startsWith("/admin/onboarding") ||
-      isClusterNewRoute;
-
-    const isClusterScopedRoute = pathClusterId !== null;
+    const activeRole = data.activeRole;
+    const isClusterAdmin = activeRole?.kind === "cluster-admin";
+    const ownCluster = isClusterAdmin ? activeRole?.cluster : undefined;
 
     const bounceToFiles = (message: string) => {
       toast.info(message);
       navigate({ to: "/files" });
     };
 
-    if (isUIAdminRoute) {
-      if (!activeRole || activeRole.kind !== "ui-admin") {
-        bounceToFiles("Switch to UI Admin role to access this page.");
+    // ── Surface-switching convenience redirects ──────────────────────
+    // The bare /admin landing routes to the surface the active role
+    // owns (kind drives WHICH shell, not permission).
+    if (pathname === "/admin" || pathname === "/admin/") {
+      if (isClusterAdmin && ownCluster) {
+        navigate({ to: `/admin/clusters/${ownCluster}` });
         return;
       }
-      return;
-    }
-
-    if (isClusterScopedRoute) {
-      if (!activeRole || activeRole.kind === "user") {
-        bounceToFiles("Switch to an admin role to access this page.");
+      if (canAny(CAP.PLATFORM_SYSTEM_READ)) {
+        navigate({ to: "/admin/system" });
         return;
       }
-      if (activeRole.kind === "cluster-admin") {
-        if (pathClusterId && activeRole.cluster && pathClusterId !== activeRole.cluster) {
-          // Cross-cluster redirect — silent (auto-route to own cluster).
-          navigate({ to: `/admin/clusters/${activeRole.cluster}` });
-          return;
-        }
+      if (canAny(CAP.CLUSTER_WIRING_LIST)) {
+        navigate({ to: "/admin/clusters" });
+        return;
       }
-      return;
-    }
-
-    // Other /admin/* routes (the bare /admin landing, /admin/clusters list,
-    // /admin/buckets, /admin/migrate, /admin/usage, /admin/first-run).
-    if (!activeRole || activeRole.kind === "user") {
       bounceToFiles("Switch to an admin role to access this page.");
       return;
     }
 
-    // v2.0.0-beta.30 T3: Cluster admin only has ONE cluster — bounce them from the list
-    // page to their cluster's detail page so the 403 from the cross-cluster aggregate
-    // endpoint never surfaces.
-    if (pathname === "/admin/clusters" && activeRole.kind === "cluster-admin" && activeRole.cluster) {
-      navigate({ to: `/admin/clusters/${activeRole.cluster}` });
+    // A cluster-admin only has ONE cluster: the cross-cluster list
+    // page (cluster.wiring.list, which they lack) and any other
+    // cluster's detail page silently route to their own cluster so the
+    // backend 403 never surfaces. This runs BEFORE the capability gate
+    // so it wins over the denial toast.
+    if (isClusterAdmin && ownCluster) {
+      if (pathname === "/admin/clusters") {
+        navigate({ to: `/admin/clusters/${ownCluster}` });
+        return;
+      }
+      const clusterSeg = pathname.match(/^\/admin\/clusters\/([^/]+)/);
+      const targetCluster = clusterSeg ? clusterSeg[1] : null;
+      if (targetCluster && targetCluster !== "new" && targetCluster !== ownCluster) {
+        navigate({ to: `/admin/clusters/${ownCluster}` });
+        return;
+      }
+    }
+
+    // ── Capability gate ─────────────────────────────────────────────
+    const required = resolveRequiredCapabilities(pathname);
+    if (required === null) {
+      // Unmapped /admin/* route (e.g. a future page not yet in the
+      // map): require any admin capability so a plain user is still
+      // bounced, but don't over-restrict between the two admin roles.
+      const anyAdmin = canAny(
+        CAP.PLATFORM_SYSTEM_READ,
+        CAP.CLUSTER_WIRING_LIST,
+        CAP.CLUSTER_WIRING_READ,
+        CAP.CLUSTER_CONTENTS_READ,
+      );
+      if (!anyAdmin) {
+        bounceToFiles("Switch to an admin role to access this page.");
+      }
       return;
     }
 
-    if (pathname === "/admin" || pathname === "/admin/") {
-      if (activeRole.kind === "cluster-admin" && activeRole.cluster) {
-        navigate({ to: `/admin/clusters/${activeRole.cluster}` });
-        return;
-      }
-      if (activeRole.kind === "ui-admin") {
-        navigate({ to: "/admin/system" });
-        return;
-      }
-      navigate({ to: "/admin/clusters" });
+    if (!canAny(...required)) {
+      // Tailor the toast: platform/wiring caps are UI-Admin territory;
+      // everything else just needs "an admin role".
+      const platformOrWiring = required.some(
+        (c) => c.startsWith("platform.") || c.startsWith("cluster.wiring.") ||
+          c === CAP.CLUSTER_BUCKETS_AGGREGATE || c === CAP.CLUSTER_USAGE_AGGREGATE,
+      );
+      bounceToFiles(
+        platformOrWiring
+          ? "Switch to UI Admin role to access this page."
+          : "Switch to an admin role to access this page.",
+      );
       return;
     }
-  }, [isLoading, data, navigate, location]);
+  }, [isLoading, data, navigate, location, canAny]);
 
   if (isLoading || !data) {
     return <LoadingSpinner />;

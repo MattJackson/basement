@@ -6,7 +6,8 @@
     "policies": "Policies",
     "serviceAccounts": "Service accounts",
     "audit": "Audit log",
-    "system": "System settings"
+    "system": "System settings",
+    "myCluster": "My cluster"
   },
   "userNav": {
     "files": "Files",

@@ -4225,6 +4225,51 @@ components:
               True when this account was provisioned via OIDC (no local
               password) so the elevation modal must use the OIDC
               challenge flow instead of the password form. v1.2.0c+.
+          activeRole:
+            description: |
+              The single active role the session is currently operating
+              as (v1.13.18). One of user / cluster-admin / ui-admin; a
+              cluster-admin carries the scoped cluster id.
+            type: object
+            required:
+            - kind
+            properties:
+              kind:
+                type: string
+                enum: [user, cluster-admin, ui-admin]
+              cluster:
+                type: string
+                description: Cluster id this role is scoped to (cluster-admin only).
+          availableRoles:
+            description: |
+              Every role the account may switch its active role to via
+              the persona pill (v1.13.18). Drives the role switcher.
+            type: array
+            items:
+              type: object
+              required:
+              - kind
+              - label
+              properties:
+                kind:
+                  type: string
+                  enum: [user, cluster-admin, ui-admin]
+                label:
+                  type: string
+                cluster:
+                  type: string
+                  description: Cluster id this role is scoped to (cluster-admin only).
+          capabilities:
+            description: |
+              Flat capability list for the session's ACTIVE role
+              (ADR-0009). Source of truth is internal/auth/capabilities.go;
+              the frontend mirror lives in
+              frontend/src/shared/auth/capabilities.ts. Both must stay in
+              sync. Drives useCan/<Can> and route gating — defense in
+              depth; the backend independently enforces each capability.
+            type: array
+            items:
+              type: string
           created_at:
             type: string
             format: date-time

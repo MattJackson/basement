@@ -45,6 +45,20 @@ vi.mock("@/shared/auth/useUser", () => ({
       role: "admin" as const,
       uiAdmin: true,
       oidcUser: false,
+      activeRole: { kind: "ui-admin" as const },
+      // ADR-0009: the nav rail gates each link on its capability via
+      // <Can>. Ship the UI-Admin platform + cross-cluster caps so the
+      // full admin nav renders.
+      capabilities: [
+        "platform.system.read",
+        "platform.users.list",
+        "platform.policies.list",
+        "platform.service-accounts.list",
+        "platform.audit.read",
+        "cluster.wiring.list",
+        "cluster.buckets.aggregate",
+        "cluster.usage.aggregate",
+      ],
     },
     isLoading: false,
     isError: false,
@@ -247,6 +261,16 @@ describe("AppShell — role-aware top nav (v2.0.0-beta.23)", () => {
           uiAdmin: true,
           oidcUser: false,
           activeRole: { kind: "ui-admin" },
+          // ADR-0009: <Can> gates each nav link on its capability.
+          capabilities: [
+            "platform.system.read",
+            "platform.policies.list",
+            "platform.service-accounts.list",
+            "platform.audit.read",
+            "cluster.wiring.list",
+            "cluster.buckets.aggregate",
+            "cluster.usage.aggregate",
+          ],
         },
         isLoading: false,
         isError: false,
@@ -311,6 +335,11 @@ describe("AppShell — role-aware top nav (v2.0.0-beta.23)", () => {
           uiAdmin: true,
           oidcUser: false,
           activeRole: { kind: "cluster-admin", cluster: "lsi" },
+          // ADR-0009: cluster-admin holds contents.read but no
+          // platform.* / wiring.list — so the platform nav links stay
+          // hidden while the cluster-admin still gets a usable rail
+          // (the "My cluster" link).
+          capabilities: ["cluster.wiring.read", "cluster.contents.read"],
         },
         isLoading: false,
         isError: false,
@@ -331,5 +360,10 @@ describe("AppShell — role-aware top nav (v2.0.0-beta.23)", () => {
     expect(queryByText("Service accounts")).not.toBeInTheDocument();
     expect(queryByText("Audit log")).not.toBeInTheDocument();
     expect(queryByText("System settings")).not.toBeInTheDocument();
+    // Clusters (cross-cluster list) is UI-Admin-only — hidden.
+    expect(queryByText("Clusters")).not.toBeInTheDocument();
+    // ADR-0009 live edge: cluster-admin now sees a usable nav rail —
+    // the "My cluster" link to their own cluster detail.
+    expect(queryByText("My cluster")).toBeInTheDocument();
   });
 });

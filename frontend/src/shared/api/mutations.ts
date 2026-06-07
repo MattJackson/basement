@@ -23,6 +23,10 @@ export interface UserResponse {
     label: string;
     cluster?: string;
   }>;
+  // ADR-0009: flat capability list for the active role. Drives
+  // useCan/<Can> and route gating. Source of truth is the backend
+  // (internal/auth/capabilities.go); mirror in shared/auth/capabilities.ts.
+  capabilities?: string[];
   oidcUser?: boolean;
 }
 

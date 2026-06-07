@@ -9,7 +9,8 @@ import { useCreateCluster } from "@/shared/api/mutations";
 import { useDriverDefaults, type DriverDefaults } from "@/shared/api/queries";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
-import { useUser } from "@/shared/auth/useUser";
+import { Can } from "@/shared/auth/Can";
+import { CAP } from "@/shared/auth/capabilities";
 
 type Driver = "garage-v1" | "garage" | "aws-s3" | "minio";
 
@@ -34,8 +35,6 @@ function AddClusterPage() {
   const { t } = useTranslation();
   const createCluster = useCreateCluster();
   const { data: driverDefaults } = useDriverDefaults();
-  const { data: user } = useUser();
-  const activeRole = user?.activeRole;
 
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("#C9874B");
@@ -211,9 +210,9 @@ function AddClusterPage() {
             <h2 className="text-sm font-medium text-muted-foreground">Garage S3 plane (optional)</h2>
             <p className="text-xs text-muted-foreground mt-1">
               S3 endpoint URL where Garage's S3 API listens (default :3902). Required for presign + user-side object browsing.
-              {activeRole?.kind === "ui-admin" && (
+              <Can cap={CAP.PLATFORM_USERS_LIST}>
                 <strong> Per-user S3 credentials now live as Grants — see <Link to="/admin/users" className="underline hover:no-underline">/admin/users</Link>.</strong>
-              )}
+              </Can>
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">

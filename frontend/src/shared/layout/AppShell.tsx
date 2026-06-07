@@ -7,6 +7,8 @@ import { NewVersionBanner } from "@/shared/ui/NewVersionBanner";
 import { PersonaPill } from "@/components/layout/PersonaPill";
 import { ElevationExpiredBanner } from "@/components/auth/ElevationExpiredBanner";
 import { useUser } from "@/shared/auth/useUser";
+import { Can } from "@/shared/auth/Can";
+import { CAP } from "@/shared/auth/capabilities";
 import { useAuthMode } from "@/shared/auth/mode";
 import { useOnboardingState } from "@/shared/api/queries";
 import { SkinInjector, OperatorFooter } from "@/shared/components/SkinInjector";
@@ -28,7 +30,14 @@ const NAV_LINK_ACTIVE = "text-foreground font-medium";
 
 export function AppShell({ children }: AppShellProps): ReactNode {
   const { data: user, isLoading: userLoading } = useUser();
-  const isUIAdminActive = user?.activeRole?.kind === "ui-admin";
+  // ADR-0009: nav links are gated per-capability via <Can> below, not
+  // on activeRole.kind. A cluster-admin (cluster.contents.read, no
+  // platform.*) now sees a usable nav rail scoped to their cluster
+  // instead of an empty header. The cluster-admin's single cluster id
+  // is still read off activeRole — that's surface-routing (which link
+  // points where), not permission enforcement.
+  const clusterAdminCluster =
+    user?.activeRole?.kind === "cluster-admin" ? user.activeRole.cluster : undefined;
   const { mode } = useAuthMode();
   const location = useLocation();
   const navigate = useNavigate();
@@ -143,65 +152,88 @@ if (location.pathname === "/login") return;
               className="flex items-center gap-5 overflow-x-auto whitespace-nowrap -mx-1 px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               aria-label="Primary"
             >
-              {isUIAdminActive && (
-                <>
-                  {/* 'Buckets' previously pointed at '/' which the role */}
-                  {/* gate redirects to '/admin/clusters' for UIAdmins — */}
-                  {/* so it landed on the same page as the Clusters nav */}
-                  {/* link. Now points directly at the aggregated buckets */}
-                  {/* view (lives at /admin/buckets, real route as of */}
-                  {/* v0.5.1 USER.ROUTING). Only visible to UI Admins. */}
+              {/* ADR-0009: every link gates on the capability the
+                  target route requires (see route-capabilities.ts).
+                  UI Admin gets the platform + cross-cluster links;
+                  cluster-admin gets a single "My cluster" link to
+                  their own cluster detail. */}
+              {clusterAdminCluster && (
+                <Can cap={CAP.CLUSTER_CONTENTS_READ}>
                   <Link
-                    to="/admin/buckets"
+                    to="/admin/clusters/$cid"
+                    params={{ cid: clusterAdminCluster }}
                     className={NAV_LINK}
                     activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
                   >
-                    Buckets
+                    {t("navigation.myCluster")}
                   </Link>
-                  <Link
-                    to="/admin/usage"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    Usage
-                  </Link>
-                  <Link
-                    to="/admin/clusters"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    Clusters
-                  </Link>
-                  <Link
-                    to="/admin/policies"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    {t("navigation.policies")}
-                  </Link>
-                  <Link
-                    to="/admin/service-accounts"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    {t("navigation.serviceAccounts")}
-                  </Link>
-                  <Link
-                    to="/admin/audit"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    {t("navigation.audit")}
-                  </Link>
-                  <Link
-                    to="/admin/system"
-                    className={NAV_LINK}
-                    activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
-                  >
-                    {t("navigation.system")}
-                  </Link>
-                </>
+                </Can>
               )}
+              {/* 'Buckets' points at the aggregated cross-cluster view
+                  (/admin/buckets); UI-Admin-only (cluster.buckets.aggregate). */}
+              <Can cap={CAP.CLUSTER_BUCKETS_AGGREGATE}>
+                <Link
+                  to="/admin/buckets"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  Buckets
+                </Link>
+              </Can>
+              <Can cap={CAP.CLUSTER_USAGE_AGGREGATE}>
+                <Link
+                  to="/admin/usage"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  Usage
+                </Link>
+              </Can>
+              <Can cap={CAP.CLUSTER_WIRING_LIST}>
+                <Link
+                  to="/admin/clusters"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  Clusters
+                </Link>
+              </Can>
+              <Can cap={CAP.PLATFORM_POLICIES_LIST}>
+                <Link
+                  to="/admin/policies"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  {t("navigation.policies")}
+                </Link>
+              </Can>
+              <Can cap={CAP.PLATFORM_SERVICE_ACCOUNTS_LIST}>
+                <Link
+                  to="/admin/service-accounts"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  {t("navigation.serviceAccounts")}
+                </Link>
+              </Can>
+              <Can cap={CAP.PLATFORM_AUDIT_READ}>
+                <Link
+                  to="/admin/audit"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  {t("navigation.audit")}
+                </Link>
+              </Can>
+              <Can cap={CAP.PLATFORM_SYSTEM_READ}>
+                <Link
+                  to="/admin/system"
+                  className={NAV_LINK}
+                  activeProps={{ className: `${NAV_LINK} ${NAV_LINK_ACTIVE}` }}
+                >
+                  {t("navigation.system")}
+                </Link>
+              </Can>
             </nav>
           </div>
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">

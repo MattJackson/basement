@@ -6,7 +6,8 @@
     "policies": "Políticas",
     "serviceAccounts": "Cuentas de servicio",
     "audit": "Registro de auditoría",
-    "system": "Configuración del sistema"
+    "system": "Configuración del sistema",
+    "myCluster": "Mi clúster"
   },
   "userNav": {
     "files": "Archivos",

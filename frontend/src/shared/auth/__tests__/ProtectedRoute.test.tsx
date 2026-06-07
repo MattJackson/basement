@@ -8,13 +8,38 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import { ProtectedRoute } from "@/shared/auth/ProtectedRoute";
+import { CAP } from "@/shared/auth/capabilities";
+
+// ADR-0009 — capability lists matching the backend role→cap matrix.
+// ProtectedRoute reads these off /auth/me (via useUser → useCan).
+const UI_ADMIN_CAPS = [
+  CAP.PLATFORM_SYSTEM_READ,
+  CAP.PLATFORM_USERS_LIST,
+  CAP.PLATFORM_POLICIES_LIST,
+  CAP.PLATFORM_SERVICE_ACCOUNTS_LIST,
+  CAP.PLATFORM_AUDIT_READ,
+  CAP.CLUSTER_WIRING_LIST,
+  CAP.CLUSTER_WIRING_CREATE,
+  CAP.CLUSTER_WIRING_UPDATE,
+  CAP.CLUSTER_WIRING_DELETE,
+  CAP.CLUSTER_WIRING_READ,
+  CAP.CLUSTER_BUCKETS_AGGREGATE,
+  CAP.CLUSTER_USAGE_AGGREGATE,
+];
+const CLUSTER_ADMIN_CAPS = [
+  CAP.CLUSTER_WIRING_READ,
+  CAP.CLUSTER_CONTENTS_READ,
+  CAP.CLUSTER_LAYOUT_WRITE,
+  CAP.CLUSTER_SCRUB_WRITE,
+];
+const USER_CAPS = [CAP.SELF_FILES_READ];
 
 const navigateMock = vi.fn();
 const { toastInfoMock } = vi.hoisted(() => ({ toastInfoMock: vi.fn() }));
 let mockedPathname = "/files";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
-  const actual = await importOriginal() as any;
+  const actual = await importOriginal() as Record<string, unknown>;
   return {
     ...actual,
     useNavigate: () => navigateMock,
@@ -132,6 +157,7 @@ describe("ProtectedRoute — activeRole gating for /admin/clusters/*", () => {
     uiAdmin: true,
     oidcUser: false,
     activeRole: { kind: "ui-admin" as const },
+    capabilities: UI_ADMIN_CAPS,
   };
   const clusterAdminA = {
     username: "matthew",
@@ -139,6 +165,7 @@ describe("ProtectedRoute — activeRole gating for /admin/clusters/*", () => {
     uiAdmin: true,
     oidcUser: false,
     activeRole: { kind: "cluster-admin" as const, cluster: "cluster-a" },
+    capabilities: CLUSTER_ADMIN_CAPS,
   };
   const plainUser = {
     username: "alice",
@@ -146,6 +173,7 @@ describe("ProtectedRoute — activeRole gating for /admin/clusters/*", () => {
     uiAdmin: false,
     oidcUser: false,
     activeRole: { kind: "user" as const },
+    capabilities: USER_CAPS,
   };
 
   beforeEach(() => {
@@ -177,14 +205,28 @@ describe("ProtectedRoute — activeRole gating for /admin/clusters/*", () => {
     });
   });
 
-  it("Cluster Admin can reach /admin/clusters/{their-cluster}/...", async () => {
-    mockedPathname = "/admin/clusters/cluster-a/edit";
+  it("Cluster Admin can reach their own cluster DETAIL page (cluster.wiring.read)", async () => {
+    mockedPathname = "/admin/clusters/cluster-a";
     mockUserState = { data: clusterAdminA, isLoading: false, isError: false };
 
     render(<ProtectedRoute><div data-testid="ok">ok</div></ProtectedRoute>);
 
     await vi.waitFor(() => {
       expect(navigateMock).not.toHaveBeenCalled();
+    });
+  });
+
+  it("Cluster Admin is bounced from cluster EDIT (wiring.update is UI-Admin-only)", async () => {
+    // ADR-0009: editing the cluster connection is a wiring write op the
+    // cluster-admin does not hold — they manage contents, not wiring.
+    mockedPathname = "/admin/clusters/cluster-a/edit";
+    mockUserState = { data: clusterAdminA, isLoading: false, isError: false };
+
+    render(<ProtectedRoute><div>blocked</div></ProtectedRoute>);
+
+    await vi.waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
+      expect(toastInfoMock).toHaveBeenCalledWith(expect.stringContaining("UI Admin"));
     });
   });
 
@@ -226,7 +268,9 @@ describe("ProtectedRoute — activeRole gating for /admin/clusters/*", () => {
     });
   });
 
-  it("Plain user is bounced from /admin/clusters/{cid}/edit with admin-role toast", async () => {
+  it("Plain user is bounced from /admin/clusters/{cid}/edit with UI-Admin-role toast", async () => {
+    // ADR-0009: cluster edit is a wiring op (cluster.wiring.update),
+    // so the bounce message names the UI Admin role specifically.
     mockedPathname = "/admin/clusters/cluster-a/edit";
     mockUserState = { data: plainUser, isLoading: false, isError: false };
 
@@ -235,7 +279,7 @@ describe("ProtectedRoute — activeRole gating for /admin/clusters/*", () => {
     await vi.waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith({ to: "/files" });
       expect(toastInfoMock).toHaveBeenCalledWith(
-        expect.stringContaining("admin"),
+        expect.stringContaining("UI Admin"),
       );
     });
   });
@@ -262,6 +306,7 @@ describe("ProtectedRoute — /admin landing (v2.0.0-beta.23)", () => {
     uiAdmin: true,
     oidcUser: false,
     activeRole: { kind: "ui-admin" },
+    capabilities: UI_ADMIN_CAPS,
   };
 
   beforeEach(() => {
@@ -287,8 +332,9 @@ describe("ProtectedRoute — /admin landing (v2.0.0-beta.23)", () => {
       uiAdmin: true,
       oidcUser: false,
       activeRole: { kind: "cluster-admin", cluster: "lsi" },
+      capabilities: CLUSTER_ADMIN_CAPS,
     };
-    
+
     mockUserState = { data: clusterAdminA, isLoading: false, isError: false };
 
     render(<ProtectedRoute><div>blocked</div></ProtectedRoute>);
@@ -305,6 +351,7 @@ describe("ProtectedRoute — /admin landing (v2.0.0-beta.23)", () => {
       uiAdmin: false,
       oidcUser: false,
       activeRole: { kind: "user" },
+      capabilities: USER_CAPS,
     };
 
     mockUserState = { data: plainUser, isLoading: false, isError: false };
@@ -325,6 +372,7 @@ describe("ProtectedRoute — cluster-admin redirect on /admin/clusters (v2.0.0-b
     uiAdmin: true,
     oidcUser: false,
     activeRole: { kind: "cluster-admin", cluster: "lsi" },
+    capabilities: CLUSTER_ADMIN_CAPS,
   };
 
   beforeEach(() => {
@@ -352,6 +400,7 @@ describe("ProtectedRoute — cluster-admin redirect on /admin/clusters (v2.0.0-b
       uiAdmin: true,
       oidcUser: false,
       activeRole: { kind: "ui-admin" },
+      capabilities: UI_ADMIN_CAPS,
     };
 
     mockUserState = { data: uiAdmin, isLoading: false, isError: false };

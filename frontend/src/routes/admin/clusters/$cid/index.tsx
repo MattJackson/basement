@@ -41,6 +41,8 @@ import { LockBadge } from "@/shared/ui/LockBadge";
 import { useClusterUnlockPrompt } from "@/shared/auth/clusterUnlock";
 import { client } from "@/shared/api/client";
 import { useDeleteCluster } from "@/shared/api/mutations";
+import { useCan } from "@/shared/auth/useCan";
+import { CAP } from "@/shared/auth/capabilities";
 import { adminPage } from "@/shared/layout/adminPage";
 import type { components } from "@/shared/api/types.gen";
 import { DriverBadge } from "@/components/clusters/DriverBadge";
@@ -53,16 +55,35 @@ export const Route = createFileRoute("/admin/clusters/$cid/")({
 function ClusterDetailScreen() {
   const { cid } = Route.useParams();
   const navigate = useNavigate();
-  const { data: user } = useUser();
-  const activeRole = user?.activeRole;
+  useUser();
+  const { can } = useCan();
   const { t } = useTranslation("pages");
+
+  // ADR-0009 wiring-vs-contents split. The page renders the WIRING
+  // surface (label/driver/health/nodes/test/edit/delete) for anyone
+  // with cluster.wiring.read — that's UI Admin (any cluster) AND
+  // cluster-admin (their cluster). The CONTENTS surface
+  // (buckets/keys/encryption-admins/lock-status) belongs to
+  // cluster-admin only (cluster.contents.read); a UI Admin holds
+  // wiring.read but NOT contents.read, so we must NOT fire the contents
+  // queries for them or the page lights up with 403 toasts.
+  const canContents = can(CAP.CLUSTER_CONTENTS_READ);
+  // "Back to Clusters" only makes sense for someone who can see the
+  // cross-cluster list (cluster.wiring.list = UI Admin). A cluster-
+  // admin has a single cluster and no list page, so hide it for them.
+  const hasClusterList = can(CAP.CLUSTER_WIRING_LIST);
+  // Edit/migrate/delete are wiring operations (UI Admin only). A
+  // cluster-admin reads the wiring surface but cannot mutate the
+  // connection, so hide these write affordances for them.
+  const canWiringWrite = can(CAP.CLUSTER_WIRING_UPDATE);
+  const canWiringDelete = can(CAP.CLUSTER_WIRING_DELETE);
 
   const { data: cluster, isLoading, error } = useGetCluster(cid);
   const { data: nodes } = useNodes(cid);
   const { data: capabilities } = useCapabilities();
-  const { data: buckets, isLoading: bucketsLoading } = useClusterBuckets(cid);
-  const { data: keys, isLoading: keysLoading } = useClusterKeys(cid);
-  const { data: lockStatus } = useClusterLockStatus(cid);
+  const { data: buckets, isLoading: bucketsLoading } = useClusterBuckets(cid, canContents);
+  const { data: keys, isLoading: keysLoading } = useClusterKeys(cid, canContents);
+  const { data: lockStatus } = useClusterLockStatus(cid, canContents);
   const deleteCluster = useDeleteCluster();
   // ADR-0003 v1.2.0b: cluster:delete is ELEVATED-min — wrap the
   // click handler so a 403 ELEVATION_REQUIRED triggers the password
@@ -96,7 +117,7 @@ function ClusterDetailScreen() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
+        <BackLink hideBack={!hasClusterList} />
         <ErrorBanner message={t("errors.connectionFailed")} />
       </div>
     );
@@ -105,7 +126,7 @@ function ClusterDetailScreen() {
   if (isLoading || !cluster) {
     return (
       <div className="space-y-6">
-        <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
+        <BackLink hideBack={!hasClusterList} />
         <Skeleton className="h-8 w-48" />
         <Card>
           <CardContent className="pt-6">
@@ -122,7 +143,7 @@ function ClusterDetailScreen() {
 
   return (
     <div className="space-y-6">
-      <BackLink isClusterAdmin={activeRole?.kind === "cluster-admin"} />
+      <BackLink hideBack={!hasClusterList} />
 
       {/* Header */}
       <div className="space-y-2">
@@ -139,24 +160,26 @@ function ClusterDetailScreen() {
             />
           ) : null}
           <div className="flex-1 min-w-0" />
-          <div className="flex flex-wrap gap-2 flex-shrink-0">
-             <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
-                title={t("adminClustersDetail.migrateThisClusterTitle")}
-              >
-                {t("adminClustersDetail.migrateThisCluster")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
-                title={t("adminClustersDetail.editClusterTitle")}
-              >
-                {t("adminClustersDetail.editCluster")}
-              </Button>
-          </div>
+          {canWiringWrite && (
+            <div className="flex flex-wrap gap-2 flex-shrink-0">
+               <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate({ to: "/admin/migrate", search: { srcCid: cid } })}
+                  title={t("adminClustersDetail.migrateThisClusterTitle")}
+                >
+                  {t("adminClustersDetail.migrateThisCluster")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate({ to: "/admin/clusters/$cid/edit", params: { cid } })}
+                  title={t("adminClustersDetail.editClusterTitle")}
+                >
+                  {t("adminClustersDetail.editCluster")}
+                </Button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -164,18 +187,25 @@ function ClusterDetailScreen() {
       <Card>
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="text-center p-4 rounded-lg bg-muted/50">
-              <div className="text-xl font-semibold tabular-nums">
-                {bucketsLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (buckets?.length ?? 0)}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.bucketCount")}</div>
-            </div>
-            <div className="text-center p-4 rounded-lg bg-muted/50">
-              <div className="text-xl font-semibold tabular-nums">
-                {keysLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (keys?.length ?? 0)}
-              </div>
-              <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.keyCount")}</div>
-            </div>
+            {/* ADR-0009: bucket/key counts are contents facts — only
+                shown to cluster.contents.read. The nodes count is a
+                wiring fact (shown to everyone with wiring.read). */}
+            {canContents && (
+              <>
+                <div className="text-center p-4 rounded-lg bg-muted/50">
+                  <div className="text-xl font-semibold tabular-nums">
+                    {bucketsLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (buckets?.length ?? 0)}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.bucketCount")}</div>
+                </div>
+                <div className="text-center p-4 rounded-lg bg-muted/50">
+                  <div className="text-xl font-semibold tabular-nums">
+                    {keysLoading ? <Skeleton className="h-6 w-10 mx-auto" /> : (keys?.length ?? 0)}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.keyCount")}</div>
+                </div>
+              </>
+            )}
             <div className="text-center p-4 rounded-lg bg-muted/50">
               <div className="text-xl font-semibold tabular-nums">{nodes?.length ?? 0}</div>
               <div className="text-xs text-muted-foreground mt-1">{t("adminClustersDetail.nodesTitle")}</div>
@@ -226,6 +256,13 @@ function ClusterDetailScreen() {
         </CardContent>
       </Card>
 
+    {/* ADR-0009: the CONTENTS surface (admins / encryption / buckets /
+          keys) only renders for cluster.contents.read — cluster-admin
+          on their cluster. A UI Admin holds wiring.read but NOT
+          contents.read, so these sections (and their queries, which
+          were disabled above) stay hidden rather than 403. */}
+      {canContents && (
+        <>
     {/* Cluster admins — persona-level info, shown above Buckets
           because "who runs this cluster" is the operator's first
           question when they hit a cluster detail page. v1.3.0e. */}
@@ -328,6 +365,8 @@ function ClusterDetailScreen() {
           </div>
         )}
       </section>
+        </>
+      )}
 
       {/* Nodes section - gated by capability */}
       {capabilities?.layout !== "readonly" && (
@@ -370,6 +409,12 @@ function ClusterDetailScreen() {
         </Card>
       )}
 
+    {/* ADR-0009: Scrub + Layout are cluster-admin maintenance ops
+          (cluster.scrub.write / cluster.layout.write). UI Admin holds
+          neither, so hide these for anyone without contents access —
+          the route gate would bounce them anyway. */}
+      {canContents && (
+        <>
     {/* Maintenance → Scrub link (v1.4.0c). Always rendered — the
           page itself surfaces "not supported" for AWS/MinIO drivers
           rather than hiding the link, so an operator can always learn
@@ -441,22 +486,26 @@ function ClusterDetailScreen() {
           </CardContent>
         </Card>
       )}
+        </>
+      )}
 
       {/* Created */}
       {cluster.createdAt && humanizeTime(cluster.createdAt) !== "—" && (
         <p className="text-xs text-muted-foreground">{t("adminClustersDetail.createdLabel")} {humanizeTime(cluster.createdAt)}</p>
       )}
 
-      {/* Danger Zone */}
-      <DangerZone description={t("adminClustersDetail.deleteDescription")}>
-        <Button
-          variant="destructive"
-          onClick={() => setDeleteDialogOpen(true)}
-          disabled={testQuery.isPending}
-        >
-          {t("adminClustersDetail.deleteClusterButton")}
-        </Button>
-      </DangerZone>
+      {/* Danger Zone — cluster delete is a wiring op (UI Admin). */}
+      {canWiringDelete && (
+        <DangerZone description={t("adminClustersDetail.deleteDescription")}>
+          <Button
+            variant="destructive"
+            onClick={() => setDeleteDialogOpen(true)}
+            disabled={testQuery.isPending}
+          >
+            {t("adminClustersDetail.deleteClusterButton")}
+          </Button>
+        </DangerZone>
+      )}
 
       <DeleteClusterConfirm
         open={deleteDialogOpen}
@@ -543,8 +592,8 @@ function ClusterKeyRow({ cid, keyId, fallbackName }: { cid: string; keyId: strin
   );
 }
 
-function BackLink({ isClusterAdmin }: { isClusterAdmin?: boolean }) {
-  if (isClusterAdmin) return null;
+function BackLink({ hideBack }: { hideBack?: boolean }) {
+  if (hideBack) return null;
   return (
     <Link
       to="/admin/clusters"
