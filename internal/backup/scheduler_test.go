@@ -168,6 +168,125 @@ func TestSchedulerPanicRecovery(t *testing.T) {
 	}
 }
 
+// TestSchedulerFireOverlapGuard verifies that while a fire() for a
+// backup is still running, a concurrent fire() for the same backup
+// is skipped rather than starting a second racing run. We hold the
+// first run open on a channel, launch a second fire() concurrently,
+// and assert the runner is invoked exactly once until we release.
+func TestSchedulerFireOverlapGuard(t *testing.T) {
+	store, _ := NewFileStore(t.TempDir())
+	ctx := context.Background()
+	b, _ := store.Create(ctx, Backup{OwnerUserID: "u", Schedule: "* * * * *"})
+
+	var calls int32
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	sched := NewScheduler(store, RunnerFunc(func(_ context.Context, _ Backup) BackupResult {
+		atomic.AddInt32(&calls, 1)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release // block until the test lets the run finish
+		return BackupResult{Success: true}
+	}), nil)
+
+	// First fire occupies the in-flight slot.
+	firstDone := make(chan struct{})
+	go func() {
+		sched.fire(b.ID)
+		close(firstDone)
+	}()
+	<-entered // ensure the first run is actually inside the runner
+
+	// Second fire while the first is still running must be skipped:
+	// it returns immediately without invoking the runner again.
+	sched.fire(b.ID)
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("expected overlap guard to skip second fire; runner called %d times, want 1", got)
+	}
+
+	// Release the first run and let it complete.
+	close(release)
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("first fire did not complete after release")
+	}
+
+	// Once the first run cleared the in-flight marker, a fresh fire
+	// is allowed again (channel already closed, so it won't block).
+	sched.fire(b.ID)
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("expected fire after completion to run; runner called %d times, want 2", got)
+	}
+}
+
+// TestSchedulerStopDoesNotBlockMutations proves Stop() does not hold
+// s.mu across the cron drain: while a long-running fire() is in
+// flight (so cron.Stop()'s drain context is still pending), a
+// concurrent Add/Remove/EntryCount must not block. We start the
+// scheduler, hold a fire() open, call Stop() in the background, and
+// assert mutation calls return promptly.
+func TestSchedulerStopDoesNotBlockMutations(t *testing.T) {
+	store, _ := NewFileStore(t.TempDir())
+	ctx := context.Background()
+	b, _ := store.Create(ctx, Backup{OwnerUserID: "u", Schedule: "* * * * *"})
+
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	sched := NewScheduler(store, RunnerFunc(func(_ context.Context, _ Backup) BackupResult {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return BackupResult{Success: true}
+	}), nil)
+
+	sched.Start()
+	if err := sched.Add(b); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	// Hold a fire() open so cron.Stop()'s drain context stays pending.
+	go sched.fire(b.ID)
+	<-entered
+
+	// Stop() in the background; its drain context won't resolve until
+	// we release the in-flight run.
+	stopReturned := make(chan struct{})
+	go func() {
+		sched.Stop()
+		close(stopReturned)
+	}()
+
+	// While the drain is pending, mutations must not block on s.mu.
+	mutated := make(chan struct{})
+	go func() {
+		sched.EntryCount()
+		_ = sched.Add(Backup{ID: "b2", Schedule: "*/5 * * * *"})
+		sched.Remove("b2")
+		close(mutated)
+	}()
+
+	select {
+	case <-mutated:
+		// good: mutations completed without waiting for the drain
+	case <-time.After(2 * time.Second):
+		close(release) // unblock to avoid leaking the goroutine
+		t.Fatalf("mutations blocked while Stop() drained — Stop() is holding s.mu across the drain")
+	}
+
+	// Release the in-flight run so Stop()'s drain can complete.
+	close(release)
+	select {
+	case <-stopReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Stop() did not return after in-flight run completed")
+	}
+}
+
 // TestSchedulerCronFires uses a once-per-second schedule and a real
 // Start/Stop cycle to prove an entry actually fires through cron.
 // Bounded to 3s so it can't hang CI.

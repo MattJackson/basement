@@ -135,13 +135,13 @@ type serverInfo struct {
 // now everything is serialised by Serve's loop, but the mutex is
 // cheap and keeps the invariant explicit.
 type Server struct {
-	client       *clilib.Client
-	logger       *slog.Logger
-	tools        []Tool
-	toolByName   map[string]Tool
-	stdoutMu     sync.Mutex
-	initialized  bool
-	clientInfo   serverInfo // recorded from initialize.params.clientInfo
+	client      *clilib.Client
+	logger      *slog.Logger
+	tools       []Tool
+	toolByName  map[string]Tool
+	stdoutMu    sync.Mutex
+	initialized bool
+	clientInfo  serverInfo // recorded from initialize.params.clientInfo
 }
 
 // NewServer wires the tool catalog (built in tools.go) to a
@@ -238,9 +238,21 @@ func (s *Server) handleLine(out io.Writer, line []byte) {
 		if isNotification {
 			return
 		}
+		// MCP requires the initialize / notifications/initialized
+		// handshake to complete before the server processes any
+		// non-initialization request. Reject tool traffic that
+		// arrives before the client has confirmed initialization.
+		if !s.initialized {
+			s.replyError(out, req.ID, errCodeInvalidRequest, "server not initialized: complete the initialize handshake first")
+			return
+		}
 		s.handleToolsList(out, req)
 	case "tools/call":
 		if isNotification {
+			return
+		}
+		if !s.initialized {
+			s.replyError(out, req.ID, errCodeInvalidRequest, "server not initialized: complete the initialize handshake first")
 			return
 		}
 		s.handleToolsCall(out, req)

@@ -113,8 +113,12 @@ type Enforcer interface {
 	// can revoke or narrow these via /admin/policies later.
 	//
 	// v2.0.0a: bucket_user role completely removed per [[v2_clean_break]].
-	// No seed assignment created; existing assignments are dropped at boot
-	// by Store.MigrateBucketUserAssignments().
+	// No seed assignment is created. NOTE: a migration to drop any
+	// pre-existing bucket_user assignments exists
+	// (Store.MigrateBucketUserAssignments()) but is NOT currently wired
+	// into the boot path — it has no caller, so legacy assignments are
+	// not automatically purged. Wiring-vs-removal is a pending operator
+	// decision; do not assume the migration runs.
 	SeedEnvAdmin(username string) error
 }
 
@@ -745,8 +749,10 @@ func (e *fileEnforcer) SeedEnvAdmin(username string) error {
 	e.mu.RUnlock()
 
 	// v2.0.0a: bucket_user role removed entirely per [[v2_clean_break]].
-	// No seed assignment created; legacy assignments are dropped at boot
-	// by Store.MigrateBucketUserAssignments().
+	// No seed assignment is created. NOTE: Store.MigrateBucketUserAssignments()
+	// exists to drop legacy bucket_user assignments but is NOT currently
+	// wired into the boot path (no caller), so legacy assignments are not
+	// automatically purged here. Pending operator decision.
 	wants := []RoleAssignment{
 		{UserID: username, RoleID: "host_admin", Scope: "host:*"},
 		// v0.9.0m.1: superuser scope. Covers every domain — key:*,

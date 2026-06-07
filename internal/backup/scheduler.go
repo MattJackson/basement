@@ -37,14 +37,24 @@ func (f RunnerFunc) Run(ctx context.Context, b Backup) BackupResult {
 // has no chain wrapper) and we install a panic recover so a
 // single misbehaving Backup can't kill the cron loop.
 type Scheduler struct {
-	mu       stdsync.Mutex
-	cron     *cron.Cron
-	parser   cron.Parser
-	store    Backups
-	runner   Runner
-	logger   *slog.Logger
-	entries  map[string]cron.EntryID
-	started  bool
+	mu      stdsync.Mutex
+	cron    *cron.Cron
+	parser  cron.Parser
+	store   Backups
+	runner  Runner
+	logger  *slog.Logger
+	entries map[string]cron.EntryID
+	started bool
+
+	// running tracks which backup IDs have a fire() currently in
+	// flight. robfig/cron/v3 launches every due entry in its own
+	// goroutine and does NOT serialize re-entrant fires of the same
+	// entry, so a backup whose copy overruns its interval would
+	// otherwise start a second concurrent run that races the
+	// destination + retention prune. fire() consults this set under
+	// mu and skips (logs) a tick whose prior run is still active.
+	// Guarded by mu.
+	running map[string]bool
 }
 
 // NewScheduler wires up an unstarted Scheduler. Call LoadAll then
@@ -71,6 +81,7 @@ func NewScheduler(store Backups, runner Runner, logger *slog.Logger) *Scheduler 
 		runner:  runner,
 		logger:  logger,
 		entries: map[string]cron.EntryID{},
+		running: map[string]bool{},
 	}
 }
 
@@ -113,16 +124,28 @@ func (s *Scheduler) Start() {
 // to complete. Returns the context returned by cron.Stop so callers
 // can wait on shutdown if they want — main.go currently doesn't,
 // since the process is exiting anyway.
+//
+// We snapshot the cron reference + started flag under the lock, then
+// release the lock BEFORE calling cron.Stop(). cron.Stop() returns a
+// context that resolves only once all in-flight fire() goroutines
+// finish, so holding s.mu across that drain would block any
+// concurrent Add/Remove/Reschedule/EntryCount for the full duration
+// of the longest-running backup (potentially many minutes on a
+// multi-GB sync). Those methods don't touch the cron loop's own
+// state during the drain, so releasing the lock is safe.
 func (s *Scheduler) Stop() context.Context {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.started {
+		s.mu.Unlock()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		return ctx
 	}
 	s.started = false
-	return s.cron.Stop()
+	c := s.cron
+	s.mu.Unlock()
+
+	return c.Stop()
 }
 
 // Add registers a Backup's cron entry. If the Backup already has
@@ -203,20 +226,59 @@ func (s *Scheduler) Trigger(ctx context.Context, backupID string) error {
 	return s.runAndRecord(ctx, backupID)
 }
 
-// fire is the cron-callback entry point. We swallow the cron's
-// own context (there isn't one) and use context.Background, since
-// these jobs may legitimately outlive a single tick.
+// maxFireDuration bounds a single scheduled backup run. cron fires
+// each due entry in its own goroutine with no context; without a
+// deadline a stalled driver would hold the run (and graceful
+// shutdown's drain) open indefinitely. 6h is generous headroom for
+// a large bucket copy while still guaranteeing the run eventually
+// releases — the runner gets a clean cancellation signal it can
+// propagate to the underlying driver.
+const maxFireDuration = 6 * time.Hour
+
+// fire is the cron-callback entry point.
 //
-// Panics inside the runner are caught and logged so one bad
-// Backup can't take down the scheduler loop.
+// Overlap guard: robfig/cron/v3 does not serialize re-entrant fires
+// of the same entry, so a backup that overruns its interval would
+// otherwise start a second concurrent run racing the same
+// destination + retention prune. We track in-flight backup IDs in
+// s.running (under s.mu) and skip a tick whose prior run is still
+// active, logging the skip so an operator can see the schedule is
+// too tight for the job.
+//
+// We use a bounded context (maxFireDuration) rather than the cron's
+// own context (there isn't one): these jobs may legitimately outlive
+// a single tick, but must not run forever.
+//
+// Panics inside the runner are caught and logged so one bad Backup
+// can't take down the cron loop — and the recover path still clears
+// the in-flight marker so a panicking run doesn't wedge the schedule
+// permanently.
 func (s *Scheduler) fire(backupID string) {
+	// Claim the in-flight slot; bail (logging) if a prior run for
+	// this backup is still active.
+	s.mu.Lock()
+	if s.running[backupID] {
+		s.mu.Unlock()
+		s.logger.Warn("backup scheduler: skipping fire; previous run still in progress",
+			"backupId", backupID)
+		return
+	}
+	s.running[backupID] = true
+	s.mu.Unlock()
+
 	defer func() {
+		s.mu.Lock()
+		delete(s.running, backupID)
+		s.mu.Unlock()
 		if r := recover(); r != nil {
 			s.logger.Error("backup scheduler: panic in fire",
 				"backupId", backupID, "panic", r)
 		}
 	}()
-	if err := s.runAndRecord(context.Background(), backupID); err != nil {
+
+	ctx, cancel := context.WithTimeout(context.Background(), maxFireDuration)
+	defer cancel()
+	if err := s.runAndRecord(ctx, backupID); err != nil {
 		s.logger.Error("backup scheduler: run failed",
 			"backupId", backupID, "error", err)
 	}

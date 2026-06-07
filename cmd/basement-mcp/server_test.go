@@ -122,6 +122,77 @@ func (ts *testServer) roundtrip(t *testing.T, req map[string]any) map[string]any
 	return resp
 }
 
+// roundtripFrames sends multiple JSON-RPC frames through a single
+// Serve session and returns the last non-empty response frame. Used
+// to drive the initialize handshake before a tools/* call now that
+// the server enforces handshake-first.
+func (ts *testServer) roundtripFrames(t *testing.T, reqs ...map[string]any) map[string]any {
+	t.Helper()
+	in, inWriter := io.Pipe()
+	out := &bytes.Buffer{}
+	done := make(chan error, 1)
+	go func() { done <- ts.srv.Serve(in, out) }()
+
+	for _, req := range reqs {
+		buf, err := json.Marshal(req)
+		if err != nil {
+			t.Fatalf("marshal req: %v", err)
+		}
+		if _, err := inWriter.Write(append(buf, '\n')); err != nil {
+			t.Fatalf("write stdin: %v", err)
+		}
+	}
+	_ = inWriter.Close()
+
+	if err := <-done; err != nil {
+		t.Fatalf("Serve: %v", err)
+	}
+	// Return the last frame written to stdout.
+	frames := bytes.Split(bytes.TrimRight(out.Bytes(), "\n"), []byte("\n"))
+	var last []byte
+	for _, f := range frames {
+		if len(bytes.TrimSpace(f)) > 0 {
+			last = f
+		}
+	}
+	if last == nil {
+		return nil
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(last, &resp); err != nil {
+		t.Fatalf("decode response %q: %v", string(last), err)
+	}
+	return resp
+}
+
+// initFrames returns the initialize + notifications/initialized
+// frames that must precede any tools/* call.
+func initFrames() []map[string]any {
+	return []map[string]any{
+		{
+			"jsonrpc": "2.0",
+			"id":      "init",
+			"method":  "initialize",
+			"params": map[string]any{
+				"protocolVersion": "2024-11-05",
+				"clientInfo":      map[string]any{"name": "test", "version": "1.0"},
+				"capabilities":    map[string]any{},
+			},
+		},
+		{
+			"jsonrpc": "2.0",
+			"method":  "notifications/initialized",
+		},
+	}
+}
+
+// roundtripAfterInit handshakes, then sends req, returning req's
+// response.
+func (ts *testServer) roundtripAfterInit(t *testing.T, req map[string]any) map[string]any {
+	t.Helper()
+	return ts.roundtripFrames(t, append(initFrames(), req)...)
+}
+
 // --- Initialize ---------------------------------------------------------
 
 func TestInitializeHandshake(t *testing.T) {
@@ -159,13 +230,61 @@ func TestInitializeHandshake(t *testing.T) {
 	}
 }
 
+// --- Handshake enforcement --------------------------------------------
+
+// TestToolsCallBeforeInitializeRejected confirms the server refuses
+// tools/call until the initialize handshake completes, then accepts
+// it afterwards. Per MCP, non-initialization requests must not be
+// processed before the initialize / notifications/initialized
+// exchange.
+func TestToolsCallBeforeInitializeRejected(t *testing.T) {
+	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Errorf("upstream must not be called before handshake completes")
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	})
+	resp := ts.roundtrip(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      100,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "basement_list_regions",
+			"arguments": map[string]any{},
+		},
+	})
+	if resp["error"] == nil {
+		t.Fatalf("expected error for pre-handshake tools/call, got %#v", resp)
+	}
+	errObj := resp["error"].(map[string]any)
+	if int(errObj["code"].(float64)) != errCodeInvalidRequest {
+		t.Errorf("code = %v, want %d (InvalidRequest)", errObj["code"], errCodeInvalidRequest)
+	}
+}
+
+// TestToolsListBeforeInitializeRejected mirrors the above for
+// tools/list.
+func TestToolsListBeforeInitializeRejected(t *testing.T) {
+	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {})
+	resp := ts.roundtrip(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      101,
+		"method":  "tools/list",
+	})
+	if resp["error"] == nil {
+		t.Fatalf("expected error for pre-handshake tools/list, got %#v", resp)
+	}
+	errObj := resp["error"].(map[string]any)
+	if int(errObj["code"].(float64)) != errCodeInvalidRequest {
+		t.Errorf("code = %v, want %d (InvalidRequest)", errObj["code"], errCodeInvalidRequest)
+	}
+}
+
 // --- tools/list --------------------------------------------------------
 
 func TestToolsList(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "should not be called", http.StatusInternalServerError)
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
 		"method":  "tools/list",
@@ -181,16 +300,16 @@ func TestToolsList(t *testing.T) {
 
 	// Lock the catalog: the senior plan calls for these ten tools.
 	want := map[string]bool{
-		"basement_list_regions":       false,
-		"basement_list_buckets":       false,
-		"basement_list_objects":       false,
+		"basement_list_regions":        false,
+		"basement_list_buckets":        false,
+		"basement_list_objects":        false,
 		"basement_get_object_metadata": false,
-		"basement_search":             false,
-		"basement_list_backups":       false,
-		"basement_list_federations":   false,
-		"basement_list_audit":         false,
-		"basement_create_share":       false,
-		"basement_create_backup_run":  false,
+		"basement_search":              false,
+		"basement_list_backups":        false,
+		"basement_list_federations":    false,
+		"basement_list_audit":          false,
+		"basement_create_share":        false,
+		"basement_create_backup_run":   false,
 	}
 	for _, t0 := range tools {
 		entry := t0.(map[string]any)
@@ -225,7 +344,7 @@ func TestToolsCallListRegions(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":"reg-1","alias":"primary","endpoint":"https://s3.example.com"}]`))
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      3,
 		"method":  "tools/call",
@@ -265,7 +384,7 @@ func TestToolsCallListObjectsQuery(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"objects":[],"commonPrefixes":[]}`))
 	})
-	_ = ts.roundtrip(t, map[string]any{
+	_ = ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      4,
 		"method":  "tools/call",
@@ -298,7 +417,7 @@ func TestToolsCallSearchPlaceholder(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "search shouldn't hit upstream", http.StatusInternalServerError)
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      5,
 		"method":  "tools/call",
@@ -326,7 +445,7 @@ func TestToolsCallAPIErrorMapsToIsError(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"code":"SERVICE_ACCOUNT_REVOKED","message":"This service account has been revoked"}}`))
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      6,
 		"method":  "tools/call",
@@ -355,7 +474,7 @@ func TestToolsCallUnknownTool(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "should not be called", http.StatusInternalServerError)
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      7,
 		"method":  "tools/call",
@@ -433,7 +552,7 @@ func TestCreateShareWireShape(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"token":"abc123","url":"https://example.com/share/abc123"}`))
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      9,
 		"method":  "tools/call",
@@ -475,7 +594,7 @@ func TestCreateShareRejectsBothPrefixAndKey(t *testing.T) {
 	ts := newTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Errorf("upstream should not be called when args are invalid")
 	})
-	resp := ts.roundtrip(t, map[string]any{
+	resp := ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      10,
 		"method":  "tools/call",
@@ -502,7 +621,7 @@ func TestBackupRunPath(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte(`{"id":"bk-99","status":"queued"}`))
 	})
-	_ = ts.roundtrip(t, map[string]any{
+	_ = ts.roundtripAfterInit(t, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      11,
 		"method":  "tools/call",
@@ -552,4 +671,3 @@ func TestBuildToolsNotEmpty(t *testing.T) {
 		t.Errorf("tools count = %d, want >= 10", len(tools))
 	}
 }
-
