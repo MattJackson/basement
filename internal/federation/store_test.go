@@ -636,3 +636,166 @@ func TestFederatedBuckets_DefaultPolicy(t *testing.T) {
 		t.Fatalf("DefaultPolicy Schedule: want empty got %q", p.Schedule)
 	}
 }
+
+// TestPromoteWithEpoch_SucceedsWhenEpochMatches: a CAS promotion with an
+// expectedEpoch matching the stored value applies the patch and advances
+// the stored FailoverEpoch to patch.FailoverEpoch.
+func TestPromoteWithEpoch_SucceedsWhenEpochMatches(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, newFed("matthew", "fed",
+		ReplicaTarget{RegionID: "region-r1", Bucket: "r-bucket"},
+	))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if created.FailoverEpoch != 0 {
+		t.Fatalf("new federation should start at epoch 0, got %d", created.FailoverEpoch)
+	}
+
+	patch := FederatedBucket{
+		Name:          created.Name,
+		Primary:       ReplicaTarget{RegionID: "region-r1", Bucket: "r-bucket"},
+		Replicas:      []ReplicaTarget{{RegionID: "region-primary", Bucket: "photos"}},
+		Policy:        created.Policy,
+		FailoverEpoch: 1,
+	}
+	out, err := store.PromoteWithEpoch(ctx, created.ID, 0, patch)
+	if err != nil {
+		t.Fatalf("PromoteWithEpoch: %v", err)
+	}
+	if out.FailoverEpoch != 1 {
+		t.Fatalf("expected epoch 1 after promotion, got %d", out.FailoverEpoch)
+	}
+	if out.Primary.RegionID != "region-r1" || out.Primary.Bucket != "r-bucket" {
+		t.Fatalf("primary not swapped: %+v", out.Primary)
+	}
+
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailoverEpoch != 1 {
+		t.Fatalf("persisted epoch should be 1, got %d", got.FailoverEpoch)
+	}
+}
+
+// TestPromoteWithEpoch_RejectsStaleEpoch: a CAS promotion whose
+// expectedEpoch no longer matches the stored value is rejected with
+// ErrEpochChanged and does NOT clobber the record (simulates a second
+// watchdog promotion racing a first that already landed).
+func TestPromoteWithEpoch_RejectsStaleEpoch(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, newFed("matthew", "fed",
+		ReplicaTarget{RegionID: "region-r1", Bucket: "r-bucket"},
+		ReplicaTarget{RegionID: "region-r2", Bucket: "r-bucket-2"},
+	))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// First promotion lands: epoch 0 -> 1, primary becomes region-r1.
+	first := FederatedBucket{
+		Name:          created.Name,
+		Primary:       ReplicaTarget{RegionID: "region-r1", Bucket: "r-bucket"},
+		Replicas:      []ReplicaTarget{{RegionID: "region-primary", Bucket: "photos"}, {RegionID: "region-r2", Bucket: "r-bucket-2"}},
+		Policy:        created.Policy,
+		FailoverEpoch: 1,
+	}
+	if _, err := store.PromoteWithEpoch(ctx, created.ID, 0, first); err != nil {
+		t.Fatalf("first PromoteWithEpoch: %v", err)
+	}
+
+	// Second promotion built off the SAME stale read (expectedEpoch 0)
+	// must be rejected — the stored epoch is now 1.
+	stale := FederatedBucket{
+		Name:          created.Name,
+		Primary:       ReplicaTarget{RegionID: "region-r2", Bucket: "r-bucket-2"},
+		Replicas:      []ReplicaTarget{{RegionID: "region-primary", Bucket: "photos"}, {RegionID: "region-r1", Bucket: "r-bucket"}},
+		Policy:        created.Policy,
+		FailoverEpoch: 1,
+	}
+	_, err = store.PromoteWithEpoch(ctx, created.ID, 0, stale)
+	if !errors.Is(err, ErrEpochChanged) {
+		t.Fatalf("expected ErrEpochChanged, got %v", err)
+	}
+
+	// The record must reflect the FIRST promotion, not the stale one.
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Primary.RegionID != "region-r1" || got.Primary.Bucket != "r-bucket" {
+		t.Fatalf("stale promotion clobbered the fresher primary: %+v", got.Primary)
+	}
+	if got.FailoverEpoch != 1 {
+		t.Fatalf("epoch should remain 1 after rejected promotion, got %d", got.FailoverEpoch)
+	}
+}
+
+// TestPromoteWithEpoch_RollsBackOnWriteFailure: a failed writeLocked must
+// leave the in-memory record (and epoch) matching disk — parity with
+// Update's rollback.
+func TestPromoteWithEpoch_RollsBackOnWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, newFed("matthew", "fed",
+		ReplicaTarget{RegionID: "region-r1", Bucket: "r-bucket"},
+	))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	restore := breakStorePath(t, store)
+	patch := FederatedBucket{
+		Name:          created.Name,
+		Primary:       ReplicaTarget{RegionID: "region-r1", Bucket: "r-bucket"},
+		Replicas:      []ReplicaTarget{{RegionID: "region-primary", Bucket: "photos"}},
+		Policy:        created.Policy,
+		FailoverEpoch: 1,
+	}
+	if _, err := store.PromoteWithEpoch(ctx, created.ID, 0, patch); err == nil {
+		t.Fatalf("expected PromoteWithEpoch to fail on broken write path")
+	}
+	restore()
+
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailoverEpoch != 0 {
+		t.Fatalf("epoch should roll back to 0, got %d", got.FailoverEpoch)
+	}
+	if got.Primary.RegionID != "region-primary" {
+		t.Fatalf("primary should roll back, got %+v", got.Primary)
+	}
+}
+
+// TestPromoteWithEpoch_NotFound: promoting a missing federation returns
+// ErrNotFound.
+func TestPromoteWithEpoch_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err := store.PromoteWithEpoch(context.Background(), "no-such-id", 0, FederatedBucket{}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}

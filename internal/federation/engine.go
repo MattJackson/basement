@@ -1557,23 +1557,76 @@ func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
 		}
 	}
 
-	// Health update on the replica: success resets the failure counter
-	// and rolls LastSync forward; failure increments + may flip to
-	// HealthBroken. We reuse the polling-tick helpers so the
-	// auto-failover / broken-after-3 semantics stay identical between
-	// the two paths.
-	//
-	// The event-driven path operates on a SINGLE known-good object: we
-	// just replicated/deleted it. Synthesise a diffResult that asserts
-	// "scanned 1, headed 1, not truncated" so recordSuccess's empty-diff
-	// reasoning treats this as a genuine successful verification (the
-	// alternative — scanned=0 — would also work but loses semantic
-	// fidelity for any future tick-vs-event-path debugging).
+	// Health update on the replica: success resets the failure counter;
+	// failure increments + may flip to HealthBroken. We reuse the
+	// polling-tick helpers so the auto-failover / broken-after-3
+	// semantics stay identical between the two paths.
 	if opErr != nil {
 		e.recordFailure(ctx, fb, task.target, opErr)
 		return
 	}
+	if task.isDelete {
+		// Delete-accounting fix (data safety): a delete replicates NO
+		// content, so it must NOT advance LastSync. Advancing it to `now`
+		// would raise the computeDiff prefilter floor and permanently
+		// shadow any primary object whose mtime sits below `now` but was
+		// not yet replicated — silently stranding it on the replica. Reset
+		// the failure counter and refresh health WITHOUT touching the
+		// high-water mark.
+		e.recordDeleteSuccess(ctx, fb, task.target)
+		return
+	}
+	// A put replicated a SINGLE known-good object we just HEAD-confirmed
+	// on the replica. Synthesise a diffResult asserting "scanned 1,
+	// headed 1, not truncated, fully drained" so recordSuccess advances
+	// LastSync for that confirmed object.
 	e.recordSuccess(ctx, fb, task.target, 1, 0, 0, diffResult{scanned: 1, headed: 1})
+}
+
+// recordDeleteSuccess records a successful event-driven delete on the
+// replica. Unlike recordSuccess it deliberately does NOT advance
+// LastSync — a delete moves no content, and bumping the watermark would
+// let the next polling tick's prefilter skip un-replicated objects whose
+// mtime predates `now`. It resets the consecutive-failure counter and
+// preserves the replica's existing LastSync / lag fields, refreshing
+// only the failure-driven health back to a non-broken state.
+func (e *Engine) recordDeleteSuccess(ctx context.Context, fb FederatedBucket, replica ReplicaTarget) {
+	e.resetFailureCount(fb.ID, replica)
+
+	// Preserve LastSync + lag exactly; only ensure health isn't stuck on a
+	// stale "broken" from a prior failure now that this op succeeded. Pull
+	// the current lag from the store so we don't zero it.
+	cur, _ := e.store.Get(ctx, fb.ID)
+	var lagBytes, lagObjects int64
+	lastSync := replica.LastSync
+	for _, r := range cur.Replicas {
+		if r.RegionID == replica.RegionID && r.Bucket == replica.Bucket {
+			lagBytes = r.LagBytes
+			lagObjects = r.LagObjects
+			lastSync = r.LastSync // most-recent persisted watermark
+			break
+		}
+	}
+	health := HealthInSync
+	if lagObjects > 0 {
+		health = HealthLagging
+	}
+
+	upd := ReplicaTarget{
+		RegionID:   replica.RegionID,
+		Bucket:     replica.Bucket,
+		LastSync:   lastSync, // NOT advanced — delete moves no content
+		Health:     health,
+		LagBytes:   lagBytes,
+		LagObjects: lagObjects,
+	}
+	if err := e.store.UpdateReplicaHealth(ctx, fb.ID, replica.RegionID, replica.Bucket, upd); err != nil {
+		if !errors.Is(err, ErrNotFound) {
+			e.logger.Warn("federation engine: delete health update failed",
+				"federationId", fb.ID, "regionId", replica.RegionID,
+				"bucket", replica.Bucket, "error", err)
+		}
+	}
 }
 
 // recordSuccess writes a replica-health update with the supplied
@@ -1592,57 +1645,73 @@ func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
 // replication bug — once LastSync was set, the LastSyncSlack window
 // would mark any whole-second mtime as "already replicated".
 //
-// Decision tree:
-//   - replicatedThisTick > 0           → InSync (or Lagging w/ pending);
-//     bump LastSync to now.
-//   - empty diff, scanned == 0         → source bucket is empty;
-//     genuinely InSync, bump LastSync.
-//   - empty diff, headed == scanned    → every source object was HEAD'd
-//     and matched; genuinely InSync,
-//     bump LastSync.
-//   - empty diff, headed  < scanned    → we trusted the LastSync filter
-//     for some objects; if LastSync
-//     was already set this is the
-//     normal steady-state path — bump
-//     LastSync, InSync. If LastSync
-//     was zero this is impossible
-//     (the filter never triggers when
-//     LastSync.IsZero()).
-//   - empty diff, truncated            → we stopped paginating; cannot
-//     confidently claim full sync.
-//     Bump LastSync, leave Lagging.
+// LastSync HIGH-WATER-MARK INVARIANT (data-safety fix):
+// LastSync is advanced to `now` ONLY when this tick fully drained the
+// work — i.e. there are no pending objects AND computeDiff did not stop
+// paginating (dr.truncated == false). The next tick's computeDiff
+// prefilter skips every source object whose LastModified <= LastSync -
+// slack, so advancing LastSync past content that was NOT replicated this
+// tick would permanently strand that tail on the replica. The two
+// not-fully-drained cases:
+//   - pendingObjects > 0: the MaxBatchPerTick cap left objects
+//     unreplicated this tick.
+//   - dr.truncated: computeDiff hit MaxBatchPerTick or the scanCap and
+//     stopped paginating, so objects beyond the scan window were never
+//     even examined (they may need replication).
+//
+// In both we LEAVE LastSync at its prior value (replica.LastSync) so the
+// next tick re-scans the tail, and report HealthLagging.
+//
+// Decision tree (health + whether LastSync advances):
+//   - pendingObjects > 0               → Lagging, LastSync NOT advanced.
+//   - dr.truncated                     → Lagging, LastSync NOT advanced.
+//   - replicatedThisTick > 0           → InSync, LastSync advanced.
+//   - empty diff, scanned == 0         → source empty; InSync, advanced.
+//   - empty diff, headed <= scanned    → every source object observed
+//     (filter-skip or HEAD-match); InSync, advanced.
 func (e *Engine) recordSuccess(ctx context.Context, fb FederatedBucket, replica ReplicaTarget, replicatedThisTick, pendingObjects, pendingBytes int64, dr diffResult) {
 	e.resetFailureCount(fb.ID, replica)
 
 	now := time.Now().UTC()
 	health := HealthInSync
 
+	// fullyDrained is the gate on advancing the high-water mark. Default
+	// to advancing; the not-fully-drained cases below clear it and leave
+	// LastSync at the prior value so the deferred tail is re-scanned.
+	lastSync := now
+
 	switch {
 	case pendingObjects > 0:
 		// Residual pending objects mean we're not yet caught up — surface
-		// that as lag even though this tick succeeded.
+		// that as lag and DO NOT advance LastSync past the unreplicated
+		// tail (it would be filter-skipped forever next tick).
 		health = HealthLagging
+		lastSync = replica.LastSync
+	case dr.truncated:
+		// computeDiff stopped paginating (MaxBatchPerTick / scanCap), so
+		// objects beyond the scan window were never examined. We can't
+		// claim to have replicated past `now`; keep the prior watermark so
+		// the next tick continues scanning from the same floor.
+		health = HealthLagging
+		lastSync = replica.LastSync
 	case replicatedThisTick > 0:
-		// We just replicated objects this tick → genuinely InSync.
+		// We just replicated objects this tick and the diff fully drained
+		// → genuinely InSync, advance the watermark.
 	case dr.scanned == 0:
 		// Source bucket is empty → trivially in sync.
-	case dr.truncated:
-		// Tick was capped mid-scan; we can't claim full sync. The next
-		// tick continues paginating.
-		health = HealthLagging
 	default:
 		// scanned > 0, replicated 0, not truncated: we observed every
-		// source object either via filter-skip or HEAD. If LastSync was
-		// zero this is a genuine first-tick verification (the filter
-		// never runs in that case → every object was HEAD'd). If
-		// LastSync was set this is the normal steady-state empty-diff
-		// path. Either way InSync is justified.
+		// source object either via filter-skip or HEAD-match. If LastSync
+		// was zero this is a genuine first-tick verification (the filter
+		// never runs in that case → every object was HEAD'd). If LastSync
+		// was set this is the normal steady-state empty-diff path. Either
+		// way InSync + advance is justified.
 	}
 
 	upd := ReplicaTarget{
 		RegionID:   replica.RegionID,
 		Bucket:     replica.Bucket,
-		LastSync:   now,
+		LastSync:   lastSync,
 		Health:     health,
 		LagBytes:   pendingBytes,
 		LagObjects: pendingObjects,
@@ -1873,32 +1942,39 @@ func (e *Engine) probePrimary(ctx context.Context, fb FederatedBucket) bool {
 
 // pickHealthiestReplica returns the replica that's the best candidate
 // for promotion. Selection rule (per cycle spec):
-//  1. Lowest LagSec (where LagSec is now-LastSync; zero LastSync sorts
-//     last because we have no proof the replica's caught up)
+//  1. Lowest LagSec (LagSec = now-LastSync)
 //  2. Tie-broken alphabetically by (RegionID, Bucket) for determinism
 //
-// A replica with Health=broken is excluded — that's a known-bad target.
-// Returns (zero, false) when no healthy replica is available.
+// ELIGIBILITY (data-safety gate — the point is to never promote an
+// empty/stale backend and silently lose the recoverable primary's data):
+//   - A replica that has NEVER synced (LastSync.IsZero()) is excluded —
+//     it has no proof of a single confirmed object, so promoting it
+//     would make an empty bucket the source of truth.
+//   - A replica with Health == HealthStale or HealthBroken is excluded
+//     — known too-far-behind / known-bad targets.
+//
+// Only HealthInSync / HealthLagging replicas with a non-zero LastSync
+// are eligible. Returns (zero, false) when none qualify — the caller
+// MUST skip the failover in that case rather than promote.
 func pickHealthiestReplica(fb FederatedBucket, now time.Time) (ReplicaTarget, bool) {
 	type scored struct {
 		rep    ReplicaTarget
 		lagSec int64
-		seen   bool // false when LastSync is zero
 	}
 	var candidates []scored
 	for _, rep := range fb.Replicas {
-		if rep.Health == HealthBroken {
+		// Eligibility gate: refuse never-synced / stale / broken targets.
+		if rep.LastSync.IsZero() {
 			continue
 		}
-		s := scored{rep: rep, seen: !rep.LastSync.IsZero()}
-		if s.seen {
-			delta := now.Sub(rep.LastSync)
-			if delta < 0 {
-				delta = 0
-			}
-			s.lagSec = int64(delta / time.Second)
+		if rep.Health == HealthStale || rep.Health == HealthBroken {
+			continue
 		}
-		candidates = append(candidates, s)
+		delta := now.Sub(rep.LastSync)
+		if delta < 0 {
+			delta = 0
+		}
+		candidates = append(candidates, scored{rep: rep, lagSec: int64(delta / time.Second)})
 	}
 	if len(candidates) == 0 {
 		return ReplicaTarget{}, false
@@ -1907,15 +1983,7 @@ func pickHealthiestReplica(fb FederatedBucket, now time.Time) (ReplicaTarget, bo
 	for i := 1; i < len(candidates); i++ {
 		ci := candidates[i]
 		cb := candidates[best]
-		// Sort: seen-with-lag < never-seen, then by lagSec asc, then
-		// (RegionID, Bucket) lexicographic asc.
-		if ci.seen && !cb.seen {
-			best = i
-			continue
-		}
-		if !ci.seen && cb.seen {
-			continue
-		}
+		// Sort by lagSec asc, then (RegionID, Bucket) lexicographic asc.
 		if ci.lagSec < cb.lagSec {
 			best = i
 			continue
@@ -1950,16 +2018,28 @@ func (e *Engine) triggerAutoFailover(ctx context.Context, fb FederatedBucket) {
 	now := time.Now().UTC()
 	newPrimary, ok := pickHealthiestReplica(fb, now)
 	if !ok {
-		e.logger.Error("federation engine: auto-failover skipped — no healthy replica",
+		// pickHealthiestReplica refuses never-synced / stale / broken
+		// targets, so "no eligible replica" means every candidate is
+		// either unverifiable (never synced) or too far behind / broken.
+		// Promoting any of them would risk silently losing the (still
+		// recoverable) primary's data, so we skip rather than promote.
+		// Whether the cause is "all broken" or "all never-synced/stale"
+		// the safe action is identical: leave the primary in place.
+		hasReplicas := len(fb.Replicas) > 0
+		reason := "no healthy replica available"
+		if hasReplicas {
+			reason = "no acceptably-fresh replica (candidates: never-synced/stale)"
+		}
+		e.logger.Error("federation engine: auto-failover skipped — no eligible replica",
 			"federationId", fb.ID, "primaryRegion", fb.Primary.RegionID,
-			"primaryBucket", fb.Primary.Bucket)
+			"primaryBucket", fb.Primary.Bucket, "reason", reason)
 		e.audit.Log(audit.Event{
 			Actor:    fb.OwnerUserID,
 			Action:   "federation:auto_failover_skipped",
 			Resource: "federation:" + fb.ID,
 			Result:   audit.ResultFailure,
-			Detail: fmt.Sprintf("primary=%s:%s reason=no healthy replica available",
-				fb.Primary.RegionID, fb.Primary.Bucket),
+			Detail: fmt.Sprintf("primary=%s:%s reason=%s",
+				fb.Primary.RegionID, fb.Primary.Bucket, reason),
 		})
 		return
 	}
@@ -1981,13 +2061,35 @@ func (e *Engine) triggerAutoFailover(ctx context.Context, fb FederatedBucket) {
 		newReplicas = append(newReplicas, rep)
 	}
 
+	// Epoch fence: bump the generation counter and persist via a
+	// compare-and-swap keyed on the epoch we read at the top of this
+	// tick (carried on fb). If another promotion landed between our read
+	// and this write, the stored epoch will have advanced and the CAS
+	// rejects us — we abort rather than clobber the fresher primary.
+	newEpoch := fb.FailoverEpoch + 1
 	patch := FederatedBucket{
-		Name:     fb.Name,
-		Primary:  ReplicaTarget{RegionID: newPrimary.RegionID, Bucket: newPrimary.Bucket},
-		Replicas: newReplicas,
-		Policy:   fb.Policy,
+		Name:          fb.Name,
+		Primary:       ReplicaTarget{RegionID: newPrimary.RegionID, Bucket: newPrimary.Bucket},
+		Replicas:      newReplicas,
+		Policy:        fb.Policy,
+		FailoverEpoch: newEpoch,
 	}
-	if _, err := e.store.Update(ctx, fb.ID, patch); err != nil {
+	if _, err := e.store.PromoteWithEpoch(ctx, fb.ID, fb.FailoverEpoch, patch); err != nil {
+		if errors.Is(err, ErrEpochChanged) {
+			// A concurrent promotion already advanced the epoch. Do NOT
+			// clobber it — abort this stale promotion and surface it.
+			e.logger.Warn("federation engine: auto-failover skipped — epoch changed",
+				"federationId", fb.ID, "expectedEpoch", fb.FailoverEpoch)
+			e.audit.Log(audit.Event{
+				Actor:    fb.OwnerUserID,
+				Action:   "federation:auto_failover_skipped",
+				Resource: "federation:" + fb.ID,
+				Result:   audit.ResultFailure,
+				Detail: fmt.Sprintf("primary=%s:%s reason=epoch changed (concurrent promotion) expectedEpoch=%d",
+					fb.Primary.RegionID, fb.Primary.Bucket, fb.FailoverEpoch),
+			})
+			return
+		}
 		e.logger.Error("federation engine: auto-failover persist failed",
 			"federationId", fb.ID, "error", err)
 		e.audit.Log(audit.Event{
@@ -2018,9 +2120,9 @@ func (e *Engine) triggerAutoFailover(ctx context.Context, fb FederatedBucket) {
 		Action:   "federation:auto_failover",
 		Resource: "federation:" + fb.ID,
 		Result:   audit.ResultSuccess,
-		Detail: fmt.Sprintf("old_primary=%s:%s new_primary=%s:%s reason=%s",
+		Detail: fmt.Sprintf("old_primary=%s:%s new_primary=%s:%s reason=%s epoch=%d",
 			oldPrimary.RegionID, oldPrimary.Bucket,
-			newPrimary.RegionID, newPrimary.Bucket, reason),
+			newPrimary.RegionID, newPrimary.Bucket, reason, newEpoch),
 	})
 	e.logger.Info("federation engine: auto-failover promoted replica",
 		"federationId", fb.ID,

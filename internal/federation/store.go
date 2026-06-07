@@ -24,6 +24,13 @@ var ErrNotFound = errors.New("federated bucket not found")
 // trimming is the API handler's responsibility (v1.6.0c).
 var ErrDuplicateName = errors.New("duplicate federated bucket name for owner")
 
+// ErrEpochChanged is returned by PromoteWithEpoch when the stored
+// bucket's FailoverEpoch no longer matches the expected value supplied
+// by the caller — i.e. a concurrent promotion already advanced the
+// epoch. The caller (the watchdog's triggerAutoFailover) must abort its
+// promotion rather than clobber the newer primary.
+var ErrEpochChanged = errors.New("federated bucket failover epoch changed (concurrent promotion)")
+
 // FederatedBuckets is the persistence interface for FederatedBucket
 // records. Same shape as internal/backup.Backups — a single JSON file
 // ({dataDir}/federated_buckets.json), atomic write, RWMutex-guarded.
@@ -38,6 +45,17 @@ type FederatedBuckets interface {
 	Create(ctx context.Context, fb FederatedBucket) (FederatedBucket, error)
 	Get(ctx context.Context, id string) (FederatedBucket, error)
 	Update(ctx context.Context, id string, patch FederatedBucket) (FederatedBucket, error)
+	// PromoteWithEpoch applies a failover-promotion patch (Name, Primary,
+	// Replicas, Policy) ONLY if the stored bucket's FailoverEpoch still
+	// equals expectedEpoch — a compare-and-swap that fences concurrent
+	// promotions. On a successful CAS the stored FailoverEpoch is set to
+	// patch.FailoverEpoch (the watchdog computes expectedEpoch+1). If the
+	// stored epoch has moved on (a newer promotion already landed) it
+	// returns ErrEpochChanged and leaves the record untouched. The
+	// check-and-write happens under the store's write lock so it is
+	// atomic with respect to other store mutations. Regular Update stays
+	// the path for non-promotion edits (policy/replica changes).
+	PromoteWithEpoch(ctx context.Context, id string, expectedEpoch int, patch FederatedBucket) (FederatedBucket, error)
 	Delete(ctx context.Context, id string) error
 	ListForUser(ctx context.Context, userID string) ([]FederatedBucket, error)
 	// All returns every FederatedBucket across every owner. Used by the
@@ -208,6 +226,64 @@ func (fs *fileStore) Update(_ context.Context, id string, patch FederatedBucket)
 	// Snapshot the prior record so a write failure leaves in-memory state
 	// matching disk (parity with Create's rollback). cur holds a freshly
 	// allocated Replicas slice, so restoring old does not alias it.
+	old := fs.rows[id]
+	fs.rows[id] = cur
+	if err := fs.writeLocked(); err != nil {
+		fs.rows[id] = old
+		return FederatedBucket{}, err
+	}
+	return cloneFederatedBucket(cur), nil
+}
+
+// PromoteWithEpoch is the failover-only sibling of Update: it applies
+// the same mutable fields (Name, Primary, Replicas, Policy) but gates
+// the write on a FailoverEpoch compare-and-swap so two watchdog ticks
+// (or a watchdog racing a manual failover) can't both promote off the
+// same stale read and clobber each other.
+//
+// Contract:
+//   - If the stored record's FailoverEpoch != expectedEpoch, return
+//     ErrEpochChanged and DO NOT modify the record.
+//   - Otherwise apply the patch, set the stored FailoverEpoch to
+//     patch.FailoverEpoch (the caller has already computed
+//     expectedEpoch+1), bump UpdatedAt, and persist.
+//
+// The whole check-and-write runs under fs.mu (the store's write lock)
+// so it is atomic against Update / UpdateReplicaHealth / Delete. Reuses
+// Update's rollback-on-write-failure pattern: a failed writeLocked
+// restores the prior in-memory record so memory never diverges from disk.
+//
+// Identity fields (ID, OwnerUserID, CreatedAt) are never taken from the
+// patch — same as Update.
+func (fs *fileStore) PromoteWithEpoch(_ context.Context, id string, expectedEpoch int, patch FederatedBucket) (FederatedBucket, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	cur, ok := fs.rows[id]
+	if !ok {
+		return FederatedBucket{}, ErrNotFound
+	}
+	// Compare-and-swap fence: reject if a newer promotion already landed.
+	if cur.FailoverEpoch != expectedEpoch {
+		return FederatedBucket{}, ErrEpochChanged
+	}
+
+	cur.Name = patch.Name
+	cur.Primary = patch.Primary
+	// Defensive copy of the patch's Replicas slice (parity with Update)
+	// so the caller can't retain a reference into the stored map.
+	if len(patch.Replicas) > 0 {
+		cur.Replicas = make([]ReplicaTarget, len(patch.Replicas))
+		copy(cur.Replicas, patch.Replicas)
+	} else {
+		cur.Replicas = nil
+	}
+	cur.Policy = patch.Policy
+	cur.FailoverEpoch = patch.FailoverEpoch
+	cur.UpdatedAt = time.Now().UTC()
+
+	// Snapshot the prior record so a write failure leaves in-memory state
+	// matching disk. cur holds a freshly allocated Replicas slice, so
+	// restoring old does not alias it.
 	old := fs.rows[id]
 	fs.rows[id] = cur
 	if err := fs.writeLocked(); err != nil {

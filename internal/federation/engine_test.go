@@ -970,9 +970,12 @@ func TestWatchdog_FailingPrimaryTriggersFailover(t *testing.T) {
 	// Sub-second watchdog interval so the test finishes quickly. With
 	// watchdogInterval=20ms and AutoFailoverSec=1, the watchdog needs
 	// 1/1=1 (clamped to 1) failure -> failover after the first probe.
-	// We bump AutoFailoverSec to 1s = 50 probes at 20ms to make the
-	// "counts up over time" semantics visible.
 	e.SetWatchdogInterval(20 * time.Millisecond)
+	// Long polling tick so the replication loop (whose computeDiff fails
+	// against the broken primary) doesn't race the watchdog and mark the
+	// replica HealthBroken before failover fires — a broken replica is
+	// now (correctly) excluded from promotion by the data-safety gate.
+	e.SetTickInterval(1 * time.Hour)
 	ctx := context.Background()
 
 	primary := newGatedDriver("primary")
@@ -998,6 +1001,13 @@ func TestWatchdog_FailingPrimaryTriggersFailover(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	// The replica must be acceptably-fresh to be promotable (data-safety
+	// gate): give it a recent LastSync + in-sync health.
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		LastSync: time.Now().Add(-30 * time.Second), Health: HealthInSync,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
+	}
 
 	e.Start(ctx)
 	defer e.Stop()
@@ -1007,14 +1017,18 @@ func TestWatchdog_FailingPrimaryTriggersFailover(t *testing.T) {
 	}
 
 	// Wait for the failover to materialise: store's primary should now
-	// point at region-replica/r-bucket. 5s deadline covers 1s of probes
-	// + scheduling slack.
+	// point at region-replica/r-bucket AND the audit event should have
+	// landed. We gate on the audit event too because triggerAutoFailover
+	// persists the swap (PromoteWithEpoch) BEFORE emitting the audit
+	// event; waiting only on the store swap can race the audit Log call.
+	// 5s deadline covers 1s of probes + scheduling slack.
 	waitFor(t, 5*time.Second, func() bool {
 		got, err := st.Get(ctx, fb.ID)
 		if err != nil {
 			return false
 		}
-		return got.Primary.RegionID == "region-replica" && got.Primary.Bucket == "r-bucket"
+		swapped := got.Primary.RegionID == "region-replica" && got.Primary.Bucket == "r-bucket"
+		return swapped && rec.countByAction("federation:auto_failover") >= 1
 	})
 
 	got, err := st.Get(ctx, fb.ID)
@@ -1217,7 +1231,7 @@ func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
 		{
 			name: "seen wins over never-seen",
 			replicas: []ReplicaTarget{
-				{RegionID: "r-a", Bucket: "ba"}, // zero LastSync
+				{RegionID: "r-a", Bucket: "ba"}, // zero LastSync — excluded
 				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-1 * time.Hour)},
 			},
 			wantR:  "r-b",
@@ -1225,10 +1239,45 @@ func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
 			wantOK: true,
 		},
 		{
+			name: "all never-synced returns no candidate (data-safety gate)",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba"}, // zero LastSync
+				{RegionID: "r-b", Bucket: "bb"}, // zero LastSync
+			},
+			wantOK: false,
+		},
+		{
+			name: "stale replica excluded",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-2 * time.Hour), Health: HealthStale},
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-5 * time.Minute), Health: HealthLagging},
+			},
+			wantR:  "r-b",
+			wantB:  "bb",
+			wantOK: true,
+		},
+		{
+			name: "all stale returns no candidate",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-2 * time.Hour), Health: HealthStale},
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-3 * time.Hour), Health: HealthStale},
+			},
+			wantOK: false,
+		},
+		{
+			name: "lagging replica is eligible",
+			replicas: []ReplicaTarget{
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-5 * time.Minute), Health: HealthLagging},
+			},
+			wantR:  "r-a",
+			wantB:  "ba",
+			wantOK: true,
+		},
+		{
 			name: "all broken returns no candidate",
 			replicas: []ReplicaTarget{
-				{RegionID: "r-a", Bucket: "ba", Health: HealthBroken},
-				{RegionID: "r-b", Bucket: "bb", Health: HealthBroken},
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-1 * time.Minute), Health: HealthBroken},
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-1 * time.Minute), Health: HealthBroken},
 			},
 			wantOK: false,
 		},
@@ -1329,6 +1378,10 @@ func TestWatchdog_PolicyToggleSpawnsAndStops(t *testing.T) {
 func TestWatchdog_AuditEventEmitted(t *testing.T) {
 	e, st, res, rec := newTestEngine(t)
 	e.SetWatchdogInterval(20 * time.Millisecond)
+	// Long polling tick so the replication loop doesn't mark the replica
+	// HealthBroken (against the failing primary) before failover fires;
+	// a broken replica is excluded from promotion by the data-safety gate.
+	e.SetTickInterval(1 * time.Hour)
 	ctx := context.Background()
 
 	primary := newGatedDriver("primary")
@@ -1351,6 +1404,13 @@ func TestWatchdog_AuditEventEmitted(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
+	}
+	// Make the replica acceptably-fresh so the data-safety gate allows
+	// its promotion.
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		LastSync: time.Now().Add(-30 * time.Second), Health: HealthInSync,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
 	}
 
 	e.Start(ctx)
@@ -2143,5 +2203,371 @@ func TestEngine_AuditOnReplicateFailure(t *testing.T) {
 	}
 	if failureEvents == 0 {
 		t.Fatalf("expected at least one failure audit event, got %d", failureEvents)
+	}
+}
+
+// TestWatchdog_NeverSyncedReplicaNotPromoted: the sole replica has never
+// synced (LastSync zero). The data-safety gate in pickHealthiestReplica
+// must refuse to promote it; the watchdog emits auto_failover_skipped
+// with the never-synced reason and leaves the primary in place.
+func TestWatchdog_NeverSyncedReplicaNotPromoted(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	e.SetTickInterval(1 * time.Hour) // keep the polling loop from touching replica health
+	ctx := context.Background()
+
+	primary := newGatedDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.failList.Store(true)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 1
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		// Replica with zero LastSync (never synced) and no health set.
+		Replicas: []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:   policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	waitFor(t, 5*time.Second, func() bool {
+		return rec.countByAction("federation:auto_failover_skipped") >= 1
+	})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Primary.RegionID != "region-primary" || got.Primary.Bucket != "p-bucket" {
+		t.Fatalf("never-synced replica must NOT be promoted; primary changed to %s/%s",
+			got.Primary.RegionID, got.Primary.Bucket)
+	}
+	if got.FailoverEpoch != 0 {
+		t.Fatalf("epoch must stay 0 when failover skipped, got %d", got.FailoverEpoch)
+	}
+	if rec.countByAction("federation:auto_failover") != 0 {
+		t.Fatalf("expected zero successful failovers, got %d", rec.countByAction("federation:auto_failover"))
+	}
+	// The skip reason should flag the never-synced/stale cause.
+	var sawReason bool
+	for _, ev := range rec.snapshot() {
+		if ev.Action == "federation:auto_failover_skipped" &&
+			strings.Contains(ev.Detail, "never-synced/stale") {
+			sawReason = true
+			break
+		}
+	}
+	if !sawReason {
+		t.Fatalf("expected auto_failover_skipped detail to cite never-synced/stale reason")
+	}
+}
+
+// TestWatchdog_StaleReplicaNotPromoted: the sole replica is HealthStale
+// (too far behind). Even though it has synced at some point, the gate
+// refuses to promote it.
+func TestWatchdog_StaleReplicaNotPromoted(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	e.SetTickInterval(1 * time.Hour) // keep the polling loop from touching replica health
+	ctx := context.Background()
+
+	primary := newGatedDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.failList.Store(true)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 1
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas: []ReplicaTarget{{
+			RegionID: "region-replica",
+			Bucket:   "r-bucket",
+			LastSync: time.Now().Add(-24 * time.Hour),
+			Health:   HealthStale,
+		}},
+		Policy: policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Persist the stale health (Create trusts data-path health fields).
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		LastSync: time.Now().Add(-24 * time.Hour),
+		Health:   HealthStale,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	waitFor(t, 5*time.Second, func() bool {
+		return rec.countByAction("federation:auto_failover_skipped") >= 1
+	})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Primary.RegionID != "region-primary" {
+		t.Fatalf("stale replica must NOT be promoted; primary changed to %s/%s",
+			got.Primary.RegionID, got.Primary.Bucket)
+	}
+	if rec.countByAction("federation:auto_failover") != 0 {
+		t.Fatalf("expected zero successful failovers, got %d", rec.countByAction("federation:auto_failover"))
+	}
+}
+
+// TestWatchdog_FailoverIncrementsEpoch: a successful auto-failover of an
+// in-sync replica advances FailoverEpoch from 0 to 1, demotes the old
+// primary to a replica, and stamps epoch=1 into the audit detail.
+func TestWatchdog_FailoverIncrementsEpoch(t *testing.T) {
+	e, st, res, rec := newTestEngine(t)
+	e.SetWatchdogInterval(20 * time.Millisecond)
+	e.SetTickInterval(1 * time.Hour) // keep the polling loop from marking the replica broken
+	ctx := context.Background()
+
+	primary := newGatedDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	primary.failList.Store(true)
+
+	policy := DefaultPolicy()
+	policy.AutoFailover = true
+	policy.AutoFailoverSec = 1
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas: []ReplicaTarget{{
+			RegionID: "region-replica",
+			Bucket:   "r-bucket",
+			LastSync: time.Now().Add(-30 * time.Second),
+			Health:   HealthInSync,
+		}},
+		Policy: policy,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Persist the in-sync health/LastSync so the store view matches intent.
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		LastSync: time.Now().Add(-30 * time.Second),
+		Health:   HealthInSync,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	// Gate on the audit event (emitted after the store swap) to avoid
+	// racing the audit Log call.
+	waitFor(t, 5*time.Second, func() bool {
+		got, err := st.Get(ctx, fb.ID)
+		return err == nil && got.Primary.RegionID == "region-replica" &&
+			rec.countByAction("federation:auto_failover") >= 1
+	})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailoverEpoch != 1 {
+		t.Fatalf("expected FailoverEpoch 1 after promotion, got %d", got.FailoverEpoch)
+	}
+	if got.Primary.RegionID != "region-replica" || got.Primary.Bucket != "r-bucket" {
+		t.Fatalf("primary should be promoted replica, got %+v", got.Primary)
+	}
+	if len(got.Replicas) != 1 || got.Replicas[0].RegionID != "region-primary" || got.Replicas[0].Bucket != "p-bucket" {
+		t.Fatalf("old primary should be demoted to replica, got %+v", got.Replicas)
+	}
+	// Audit detail must carry epoch=1.
+	var sawEpoch bool
+	for _, ev := range rec.snapshot() {
+		if ev.Action == "federation:auto_failover" && strings.Contains(ev.Detail, "epoch=1") {
+			sawEpoch = true
+			break
+		}
+	}
+	if !sawEpoch {
+		t.Fatalf("expected auto_failover audit detail to contain epoch=1")
+	}
+}
+
+// TestEngine_TruncatedTickDoesNotAdvanceLastSyncAndEventuallySyncs:
+// seeds >MaxBatchPerTick changed objects so the first tick's computeDiff
+// truncates (queues 100, leaves the tail). The high-water-mark fix means
+// LastSync must NOT advance to `now` on a truncated tick — otherwise the
+// next tick's prefilter would skip the deferred tail forever. Asserts
+// (a) all objects eventually replicate across ticks, and (b) the replica
+// is reported InSync only once fully drained.
+func TestEngine_TruncatedTickDoesNotAdvanceLastSyncAndEventuallySyncs(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	e.SetTickInterval(15 * time.Millisecond)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	replica := newFakeDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", replica)
+
+	// Seed 150 objects (> MaxBatchPerTick = 100) all with the SAME mtime
+	// in the past. This is the dangerous case: if a truncated first tick
+	// advanced LastSync to now, the prefilter (LastModified <= LastSync -
+	// slack) would skip every remaining object permanently.
+	const total = 150
+	mtime := time.Now().Add(-time.Hour).UTC()
+	for i := 0; i < total; i++ {
+		primary.seed("p-bucket", fmt.Sprintf("obj-%03d.txt", i), []byte("data"), mtime)
+	}
+
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	e.Start(ctx)
+	defer e.Stop()
+
+	// Eventually all 150 objects must land on the replica despite the
+	// per-tick 100-object cap.
+	waitFor(t, 10*time.Second, func() bool {
+		replica.mu.Lock()
+		n := len(replica.data["r-bucket"])
+		replica.mu.Unlock()
+		return n == total
+	})
+
+	replica.mu.Lock()
+	got := len(replica.data["r-bucket"])
+	replica.mu.Unlock()
+	if got != total {
+		t.Fatalf("expected all %d objects replicated, got %d", total, got)
+	}
+
+	// Once fully drained, a subsequent tick should mark the replica
+	// InSync with zero lag and a non-zero LastSync.
+	waitFor(t, 5*time.Second, func() bool {
+		cur, err := st.Get(ctx, fb.ID)
+		if err != nil || len(cur.Replicas) != 1 {
+			return false
+		}
+		r := cur.Replicas[0]
+		return r.Health == HealthInSync && r.LagObjects == 0 && !r.LastSync.IsZero()
+	})
+}
+
+// TestRecordSuccess_PendingDoesNotAdvanceLastSync is a focused unit test
+// on recordSuccess: a tick that leaves pendingObjects > 0 must preserve
+// the replica's prior LastSync (not bump to now) and report Lagging.
+func TestRecordSuccess_PendingDoesNotAdvanceLastSync(t *testing.T) {
+	e, st, _, _ := newTestEngine(t)
+	ctx := context.Background()
+
+	prior := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket", LastSync: prior, Health: HealthInSync}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		LastSync: prior, Health: HealthInSync,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
+	}
+
+	replica := ReplicaTarget{RegionID: "region-replica", Bucket: "r-bucket", LastSync: prior}
+	// 100 replicated, 50 still pending → must NOT advance LastSync.
+	e.recordSuccess(ctx, fb, replica, 100, 50, 1234, diffResult{scanned: 150, headed: 150, truncated: true})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	r := got.Replicas[0]
+	if !r.LastSync.Equal(prior) {
+		t.Fatalf("LastSync must stay at prior %v on a pending tick, got %v", prior, r.LastSync)
+	}
+	if r.Health != HealthLagging {
+		t.Fatalf("expected Lagging on pending tick, got %q", r.Health)
+	}
+	if r.LagObjects != 50 {
+		t.Fatalf("expected LagObjects 50, got %d", r.LagObjects)
+	}
+}
+
+// TestRecordSuccess_TruncatedDoesNotAdvanceLastSync: even when the
+// MaxBatchPerTick batch fully drained (pendingObjects == 0), a truncated
+// computeDiff (paging stopped) means objects beyond the scan window were
+// never examined, so LastSync must NOT advance.
+func TestRecordSuccess_TruncatedDoesNotAdvanceLastSync(t *testing.T) {
+	e, st, _, _ := newTestEngine(t)
+	ctx := context.Background()
+
+	prior := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket", LastSync: prior}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := st.UpdateReplicaHealth(ctx, fb.ID, "region-replica", "r-bucket", ReplicaTarget{
+		LastSync: prior,
+	}); err != nil {
+		t.Fatalf("UpdateReplicaHealth: %v", err)
+	}
+
+	replica := ReplicaTarget{RegionID: "region-replica", Bucket: "r-bucket", LastSync: prior}
+	// 100 replicated, 0 pending in THIS batch, but the scan truncated.
+	e.recordSuccess(ctx, fb, replica, 100, 0, 0, diffResult{scanned: 400, headed: 400, truncated: true})
+
+	got, err := st.Get(ctx, fb.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	r := got.Replicas[0]
+	if !r.LastSync.Equal(prior) {
+		t.Fatalf("LastSync must stay at prior %v on a truncated tick, got %v", prior, r.LastSync)
+	}
+	if r.Health != HealthLagging {
+		t.Fatalf("expected Lagging on truncated tick, got %q", r.Health)
 	}
 }

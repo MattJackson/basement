@@ -30,6 +30,21 @@ type FederatedBucket struct {
 	Policy      FederationPolicy `json:"policy"`
 	CreatedAt   time.Time        `json:"createdAt"`
 	UpdatedAt   time.Time        `json:"updatedAt"`
+	// FailoverEpoch is a monotonically-increasing generation counter
+	// bumped by every successful auto-failover promotion. It exists to
+	// fence concurrent promotions in the single-writer control plane:
+	// the watchdog reads the epoch alongside the federation, builds a
+	// promotion patch, and the store persists it only if the stored
+	// epoch still equals what the watchdog read (compare-and-swap). If a
+	// newer promotion already landed (epoch advanced), the stale
+	// promotion is rejected rather than clobbering the fresher primary.
+	//
+	// Defaults to 0 and is omitted from JSON when zero, so records
+	// written before this field existed unmarshal as epoch 0 (back-compat).
+	// This is NOT a distributed lease or consensus token — it only
+	// orders writes within this process's store. See ADR-0005 for the
+	// deliberate scope (epoch+CAS, not Raft).
+	FailoverEpoch int `json:"failoverEpoch,omitempty"`
 }
 
 // ReplicaTarget is one (region, bucket) endpoint inside a federation.
