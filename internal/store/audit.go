@@ -15,11 +15,11 @@ var auditMu sync.Mutex
 
 // AuditEntry represents a single audit log entry.
 type AuditEntry struct {
-	Timestamp time.Time              `json:"ts"`
-	UserID    string                 `json:"user_id"`
-	Action    string                 `json:"action"`     // e.g. "bucket.create"
-	Resource  string                 `json:"resource"`   // e.g. "bucket:photos"
-	Details   map[string]any         `json:"details,omitempty"`
+	Timestamp time.Time      `json:"ts"`
+	UserID    string         `json:"user_id"`
+	Action    string         `json:"action"`   // e.g. "bucket.create"
+	Resource  string         `json:"resource"` // e.g. "bucket:photos"
+	Details   map[string]any `json:"details,omitempty"`
 }
 
 // AppendAudit appends an audit entry to the daily log file.
@@ -88,8 +88,15 @@ func (s *Store) CleanupAudit() error {
 		return fmt.Errorf("reading audit dir: %w", err)
 	}
 
-	now := time.Now()
-	cutoff := now.Add(-s.retention)
+	now := time.Now().UTC()
+	// Truncate the cutoff to a day boundary. logDate is parsed from a
+	// "2006-01-02" filename and is therefore always midnight UTC, whereas
+	// now.Add(-retention) carries the current wall-clock time-of-day. Without
+	// truncation a file dated exactly `retention` ago (midnight) compares as
+	// Before(midnight-minus-time-of-day) and gets purged up to a day early.
+	// Truncating to the day makes the comparison day-vs-day so a file is only
+	// removed once its date is strictly older than the retention window.
+	cutoff := now.Add(-s.retention).Truncate(24 * time.Hour)
 
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -107,7 +114,11 @@ func (s *Store) CleanupAudit() error {
 			continue // skip files with invalid dates
 		}
 
-		if logDate.Before(cutoff) || logDate.Equal(cutoff) {
+		// Strict Before only: a file whose date equals the cutoff day still
+		// holds entries inside the retention window (its newest entry is
+		// ~24h after midnight), so it must be kept. Deleting on Equal here is
+		// what purged audit files up to a day too early.
+		if logDate.Before(cutoff) {
 			logPath := filepath.Join(dir, name)
 			if err := os.Remove(logPath); err != nil {
 				return fmt.Errorf("removing old audit file %s: %w", name, err)
@@ -117,5 +128,3 @@ func (s *Store) CleanupAudit() error {
 
 	return nil
 }
-
-

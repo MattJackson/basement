@@ -105,6 +105,52 @@ func TestUserRegions_DefaultRegionLabel(t *testing.T) {
 	}
 }
 
+// TestUserRegions_GetReturnsDeepCopy proves Get/ListForUser hand back a
+// SecretKeyEnc byte slice that is a true copy, not a window onto the cache's
+// backing array. A caller mutating the returned bytes must NOT corrupt the
+// cached record (or another caller's copy). Guards the deep-copy fix in
+// applyReadDefaults.
+func TestUserRegions_GetReturnsDeepCopy(t *testing.T) {
+	r, _ := newUserRegions(t)
+	ctx := context.Background()
+
+	created, err := r.Create(ctx, sampleRegion())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	first, err := r.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(first.SecretKeyEnc) == 0 {
+		t.Fatal("expected non-empty SecretKeyEnc")
+	}
+
+	// Snapshot the original bytes, then scribble all over the returned slice.
+	want := append([]byte(nil), first.SecretKeyEnc...)
+	for i := range first.SecretKeyEnc {
+		first.SecretKeyEnc[i] ^= 0xFF
+	}
+
+	second, err := r.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get (second): %v", err)
+	}
+	if !bytes.Equal(second.SecretKeyEnc, want) {
+		t.Fatal("mutating a Get() result corrupted the cached SecretKeyEnc — slice was not deep-copied")
+	}
+
+	// The fresh copy must also decrypt correctly (i.e. the cache survived).
+	plain, err := r.Decrypt(second)
+	if err != nil {
+		t.Fatalf("Decrypt after mutation: %v", err)
+	}
+	if plain != string(sampleRegion().SecretKeyEnc) {
+		t.Errorf("decrypt mismatch after mutation: got %q", plain)
+	}
+}
+
 func TestUserRegions_EncryptDecrypt(t *testing.T) {
 	r, dir := newUserRegions(t)
 	ctx := context.Background()

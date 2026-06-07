@@ -76,5 +76,15 @@ func saveJSON(path string, v any) error {
 		return fmt.Errorf("renaming tmp to final path: %w", err)
 	}
 
+	// fsync the parent directory so the rename itself is durable —
+	// otherwise a crash right after rename can lose the directory entry
+	// even though the tmp file's contents were fsynced. Mirrors the
+	// pattern in internal/config/bootstrap.go. Errors are non-fatal:
+	// some platforms/filesystems don't support directory fsync.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+
 	return nil
 }

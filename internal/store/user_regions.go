@@ -36,6 +36,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -57,13 +58,13 @@ import (
 // so stylistic URL variants (default port, trailing slash, host case)
 // still collide on the alias check.
 type UserRegion struct {
-	ID           string    `json:"id"`
-	UserID       string    `json:"userId"`
-	Alias        string    `json:"alias"`
-	Endpoint     string    `json:"endpoint"` // canonical, see NormalizeEndpoint
-	Region       string    `json:"region"`   // S3 region label, default "us-east-1"
-	AccessKeyID  string    `json:"accessKeyId"`
-	SecretKeyEnc []byte    `json:"secretKeyEnc"` // AES-GCM(nonce||ct||tag), per crypto.go
+	ID           string `json:"id"`
+	UserID       string `json:"userId"`
+	Alias        string `json:"alias"`
+	Endpoint     string `json:"endpoint"` // canonical, see NormalizeEndpoint
+	Region       string `json:"region"`   // S3 region label, default "us-east-1"
+	AccessKeyID  string `json:"accessKeyId"`
+	SecretKeyEnc []byte `json:"secretKeyEnc"` // AES-GCM(nonce||ct||tag), per crypto.go
 	// AddressingStyle is the v1.3.0c per-region S3 addressing toggle:
 	// "path" (default) routes requests as endpoint/bucket/key; "virtual_host"
 	// routes as bucket.endpoint/key. Empty / unset reads as "path" so
@@ -349,8 +350,15 @@ func (s *userRegionStore) Create(_ context.Context, r UserRegion) (UserRegion, e
 // every caller observing a UserRegion read from disk sees an explicit
 // addressing-style value — even rows persisted before v1.3.0c (which
 // don't carry the field on disk). Safe to call multiple times.
+//
+// It also clones the SecretKeyEnc byte slice so the returned value is a
+// true deep copy: a caller mutating the bytes (or appending under cap)
+// can't race a concurrent save() reading the cached backing array. This
+// is the single choke point for every Get/GetByUserEndpoint/ListForUser
+// return, so cloning here covers them all.
 func applyReadDefaults(r UserRegion) UserRegion {
 	r.AddressingStyle = normalizeAddressingStyle(r.AddressingStyle)
+	r.SecretKeyEnc = bytes.Clone(r.SecretKeyEnc)
 	return r
 }
 

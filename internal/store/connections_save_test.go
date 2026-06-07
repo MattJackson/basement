@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io/ioutil"
-		"path/filepath"
+	"path/filepath"
 	"testing"
 )
 
@@ -82,7 +82,7 @@ func TestConnectionsSave_Locked_WithConnection(t *testing.T) {
 		Owner: "org",
 	}
 
-	_ , _ = s.Create(ctx, in)
+	_, _ = s.Create(ctx, in)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestConnectionsSave_Locked_MarshalError(t *testing.T) {
 	store.connPath = "/nonexistent/directory/connections.json"
 
 	err = store.saveLocked()
-	
+
 	// Restore path for cleanup
 	store.connPath = originalPath
 
@@ -182,6 +182,58 @@ func TestConnectionsSave_FuncWrapper(t *testing.T) {
 	}
 }
 
+// TestConnection_GetReturnsDeepCopyOfEncBytes proves Get/List clone the
+// ConfigEnc byte slice so a caller mutating the returned bytes cannot corrupt
+// the cache's backing array (which a concurrent saveLocked/SwapClusterSecret
+// reads under the lock). Guards the cloneConnection deep-copy fix.
+func TestConnection_GetReturnsDeepCopyOfEncBytes(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenConnectionsWithKey(dir, []byte("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := s.Create(ctx, Connection{
+		Label:  "enc-copy",
+		Driver: "garage",
+		Owner:  "org",
+		Config: map[string]string{
+			"admin_url":   "http://garage:3903",
+			"admin_token": "super-secret-admin-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	first, err := s.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(first.ConfigEnc) == 0 {
+		t.Fatal("expected non-empty ConfigEnc (sensitive key should have been encrypted)")
+	}
+
+	want := append([]byte(nil), first.ConfigEnc...)
+	for i := range first.ConfigEnc {
+		first.ConfigEnc[i] ^= 0xFF
+	}
+
+	second, err := s.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get (second): %v", err)
+	}
+	if !bytes.Equal(second.ConfigEnc, want) {
+		t.Fatal("mutating a Get() result corrupted the cached ConfigEnc — slice was not deep-copied")
+	}
+
+	// The cached Config map must also be untouched / still decryptable.
+	if second.Config["admin_token"] != "super-secret-admin-token" {
+		t.Errorf("admin_token corrupted after mutating returned ConfigEnc: %q", second.Config["admin_token"])
+	}
+}
+
 // TestDecryptSensitiveMap_EmptyInput returns empty map.
 func TestDecryptSensitiveMap_EmptyInput(t *testing.T) {
 	key := []byte("01234567890123456789012345678901")
@@ -202,48 +254,5 @@ func TestDecryptSensitiveMap_InvalidCiphertext(t *testing.T) {
 	_, err := decryptSensitiveMap(invalidEnc, key)
 	if err == nil {
 		t.Error("expected error for invalid ciphertext, got nil")
-	}
-}
-
-// TestGenerateID_ReturnsValidUUID(t *testing.T) {
-func TestGenerateID_ReturnsValidUUID(t *testing.T) {
-	id, err := GenerateID()
-	if err != nil {
-		t.Fatalf("GenerateID failed: %v", err)
-	}
-	if id == "" {
-		t.Error("expected non-empty ID")
-	}
-	// UUID should be 36 characters (8-4-4-4-12 + dashes)
-	if len(id) != 36 {
-		t.Errorf("ID length=%d, want 36", len(id))
-	}
-}
-
-// TestGenerateToken_ReturnsHex(t *testing.T) {
-func TestGenerateToken_ReturnsHex(t *testing.T) {
-	token, err := GenerateToken(16) // 16 bytes = 32 hex chars
-	if err != nil {
-		t.Fatalf("GenerateToken failed: %v", err)
-	}
-	if len(token) != 32 {
-		t.Errorf("token length=%d, want 32", len(token))
-	}
-	// All chars should be hex
-	for _, c := range token {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			t.Errorf("token contains non-hex char: %q", c)
-		}
-	}
-}
-
-// TestGenerateToken_ZeroBytes(t *testing.T) {
-func TestGenerateToken_ZeroBytes(t *testing.T) {
-	token, err := GenerateToken(0)
-	if err != nil {
-		t.Fatalf("GenerateToken(0) failed: %v", err)
-	}
-	if len(token) != 0 {
-		t.Errorf("expected empty token for 0 bytes, got length %d", len(token))
 	}
 }

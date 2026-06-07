@@ -28,7 +28,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -42,10 +41,10 @@ import (
 
 // Supported drivers for validation.
 const (
-	DriverGarage    = "garage"
-	DriverGarageV1  = "garage-v1"
-	DriverAWSS3     = "aws-s3"
-	DriverMinio     = "minio"
+	DriverGarage   = "garage"
+	DriverGarageV1 = "garage-v1"
+	DriverAWSS3    = "aws-s3"
+	DriverMinio    = "minio"
 )
 
 // SupportedDrivers is the set of drivers that can be used in connections.
@@ -248,102 +247,102 @@ func openConnections(dataDir string, jwtSecret []byte) (Connections, error) {
 }
 
 // load reads connections.json into the cache, decrypts ConfigEnc into
-	// the in-memory Config map, and (one-shot per record) migrates any
-	// plaintext sensitive keys to ConfigEnc by rewriting the file.
-	//
-	// Encryption-off mode (jwtSecret == nil) skips both decrypt and
-	// migration; on-disk shape stays as Connection JSON, plaintext.
-	func (s *store) load() error {
-		disk, err := loadJSON[[]connectionDisk](s.connPath)
-		if err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("loading connections: %w", err)
-		}
+// the in-memory Config map, and (one-shot per record) migrates any
+// plaintext sensitive keys to ConfigEnc by rewriting the file.
+//
+// Encryption-off mode (jwtSecret == nil) skips both decrypt and
+// migration; on-disk shape stays as Connection JSON, plaintext.
+func (s *store) load() error {
+	disk, err := loadJSON[[]connectionDisk](s.connPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("loading connections: %w", err)
+	}
 
-		if err != nil { // file missing
-			s.connsMu.Lock()
-			s.connsCache = make([]Connection, 0)
-			s.connsMu.Unlock()
-			return nil
-		}
-
-		cache := make([]Connection, 0, len(disk))
-		migrated := false
-		droppedLegacyCSK := 0
-		for _, d := range disk {
-			c := Connection{
-				ID:           d.ID,
-				Label:        d.Label,
-				Driver:       d.Driver,
-				Color:        d.Color,
-				Owner:        d.Owner,
-				CreatedAt:    d.CreatedAt,
-				Config:       cloneStringMap(d.Config),
-				ConfigEnc:    d.ConfigEnc,
-				ConfigEncCSK: d.ConfigEncCSK,
-			}
-			if c.Config == nil {
-				c.Config = map[string]string{}
-			}
-
-			if s.jwtSecret != nil {
-				// v2.0.0-beta.2: Check for legacy JWT-encrypted credentials
-				// with no CSK parallel — these clusters are dropped per [[v2_clean_break]].
-				if len(c.ConfigEnc) > 0 && len(c.ConfigEncCSK) == 0 {
-					droppedLegacyCSK++
-					continue
-				}
-
-				// Decrypt any existing ConfigEnc into the in-memory Config so
-				// callers see a unified view.
-				if len(c.ConfigEnc) > 0 {
-					dec, derr := decryptSensitiveMap(c.ConfigEnc, s.jwtSecret)
-					if derr != nil {
-						return fmt.Errorf("decrypting ConfigEnc for connection %q: %w", c.ID, derr)
-					}
-					for k, v := range dec {
-						c.Config[k] = v
-					}
-				}
-
-				// Migration: if the on-disk Config (d.Config — BEFORE we
-				// merged decrypted ConfigEnc in) carries plaintext sensitive
-				// keys, flag a rewrite. save() will split them out.
-				//
-				// We use d.Config rather than c.Config so post-merge keys
-				// (which always look "plaintext" in c.Config because
-				// decryption put them there) don't trigger a needless
-				// re-save on every boot. Result: idempotent — second boot
-				// with already-encrypted records is a no-op.
-				for k := range d.Config {
-					if sensitiveConfigKeys[k] {
-						migrated = true
-						break
-					}
-				}
-			}
-
-			cache = append(cache, c)
-		}
-
+	if err != nil { // file missing
 		s.connsMu.Lock()
-		s.connsCache = cache
+		s.connsCache = make([]Connection, 0)
 		s.connsMu.Unlock()
-
-		if droppedLegacyCSK > 0 {
-			fmt.Fprintf(os.Stderr, "[WARN] Dropped %d connection(s) with legacy JWT-encrypted credentials (ConfigEnc but no ConfigEncCSK); re-add via /admin/connections per v2.0.0-beta.2 [[v2_clean_break]]\n", droppedLegacyCSK)
-		}
-
-		if migrated {
-			s.connsMu.Lock()
-			err := s.saveLocked()
-			s.connsMu.Unlock()
-			if err != nil {
-				return fmt.Errorf("re-saving connections after at-rest migration: %w", err)
-			}
-		}
-
 		return nil
 	}
+
+	cache := make([]Connection, 0, len(disk))
+	migrated := false
+	droppedLegacyCSK := 0
+	for _, d := range disk {
+		c := Connection{
+			ID:           d.ID,
+			Label:        d.Label,
+			Driver:       d.Driver,
+			Color:        d.Color,
+			Owner:        d.Owner,
+			CreatedAt:    d.CreatedAt,
+			Config:       cloneStringMap(d.Config),
+			ConfigEnc:    d.ConfigEnc,
+			ConfigEncCSK: d.ConfigEncCSK,
+		}
+		if c.Config == nil {
+			c.Config = map[string]string{}
+		}
+
+		if s.jwtSecret != nil {
+			// v2.0.0-beta.2: Check for legacy JWT-encrypted credentials
+			// with no CSK parallel — these clusters are dropped per [[v2_clean_break]].
+			if len(c.ConfigEnc) > 0 && len(c.ConfigEncCSK) == 0 {
+				droppedLegacyCSK++
+				continue
+			}
+
+			// Decrypt any existing ConfigEnc into the in-memory Config so
+			// callers see a unified view.
+			if len(c.ConfigEnc) > 0 {
+				dec, derr := decryptSensitiveMap(c.ConfigEnc, s.jwtSecret)
+				if derr != nil {
+					return fmt.Errorf("decrypting ConfigEnc for connection %q: %w", c.ID, derr)
+				}
+				for k, v := range dec {
+					c.Config[k] = v
+				}
+			}
+
+			// Migration: if the on-disk Config (d.Config — BEFORE we
+			// merged decrypted ConfigEnc in) carries plaintext sensitive
+			// keys, flag a rewrite. save() will split them out.
+			//
+			// We use d.Config rather than c.Config so post-merge keys
+			// (which always look "plaintext" in c.Config because
+			// decryption put them there) don't trigger a needless
+			// re-save on every boot. Result: idempotent — second boot
+			// with already-encrypted records is a no-op.
+			for k := range d.Config {
+				if sensitiveConfigKeys[k] {
+					migrated = true
+					break
+				}
+			}
+		}
+
+		cache = append(cache, c)
+	}
+
+	s.connsMu.Lock()
+	s.connsCache = cache
+	s.connsMu.Unlock()
+
+	if droppedLegacyCSK > 0 {
+		fmt.Fprintf(os.Stderr, "[WARN] Dropped %d connection(s) with legacy JWT-encrypted credentials (ConfigEnc but no ConfigEncCSK); re-add via /admin/connections per v2.0.0-beta.2 [[v2_clean_break]]\n", droppedLegacyCSK)
+	}
+
+	if migrated {
+		s.connsMu.Lock()
+		err := s.saveLocked()
+		s.connsMu.Unlock()
+		if err != nil {
+			return fmt.Errorf("re-saving connections after at-rest migration: %w", err)
+		}
+	}
+
+	return nil
+}
 
 // save writes the connections cache to disk atomically, encrypting
 // sensitive keys on the way out. Caller must hold connsMu (write).
@@ -466,6 +465,18 @@ func cloneStringMap(m map[string]string) map[string]string {
 	return out
 }
 
+// cloneConnection returns a deep copy of c: the Config map and the
+// ConfigEnc / ConfigEncCSK byte slices are cloned so a caller mutating
+// the returned value can't race a concurrent saveLocked/SwapClusterSecret
+// reading the cached backing array. Honors the "deep copy" contract on
+// List/Get.
+func cloneConnection(c Connection) Connection {
+	c.Config = cloneStringMap(c.Config)
+	c.ConfigEnc = bytes.Clone(c.ConfigEnc)
+	c.ConfigEncCSK = bytes.Clone(c.ConfigEncCSK)
+	return c
+}
+
 // List returns all connections. Callers receive a deep copy with
 // decrypted Config maps.
 func (s *store) List(ctx context.Context) ([]Connection, error) {
@@ -474,8 +485,7 @@ func (s *store) List(ctx context.Context) ([]Connection, error) {
 
 	result := make([]Connection, len(s.connsCache))
 	for i, c := range s.connsCache {
-		result[i] = c
-		result[i].Config = cloneStringMap(c.Config)
+		result[i] = cloneConnection(c)
 	}
 	return result, nil
 }
@@ -487,9 +497,7 @@ func (s *store) Get(ctx context.Context, id string) (Connection, error) {
 
 	for _, c := range s.connsCache {
 		if c.ID == id {
-			out := c
-			out.Config = cloneStringMap(c.Config)
-			return out, nil
+			return cloneConnection(c), nil
 		}
 	}
 
@@ -698,22 +706,4 @@ func (s *store) Count(ctx context.Context) (int, error) {
 	defer s.connsMu.RUnlock()
 
 	return len(s.connsCache), nil
-}
-
-// GenerateID creates a new UUID for connection IDs.
-func GenerateID() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generating UUID: %w", err)
-	}
-	return uuid.UUID(b).String(), nil
-}
-
-// GenerateToken creates a random hex token for authentication.
-func GenerateToken(bytes int) (string, error) {
-	b := make([]byte, bytes)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generating token: %w", err)
-	}
-	return hex.EncodeToString(b), nil
 }

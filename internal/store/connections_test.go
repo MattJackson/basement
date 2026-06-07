@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -46,9 +45,9 @@ func TestConnectionRoundTrip(t *testing.T) {
 		Label:  "test-connection",
 		Driver: "garage",
 		Config: map[string]string{
-			"admin_url":    "http://garage:3903",
-			"admin_token":  "secret-token",
-			"s3_region":    "us-east-1",
+			"admin_url":   "http://garage:3903",
+			"admin_token": "secret-token",
+			"s3_region":   "us-east-1",
 		},
 		Color: "#FF5733",
 		Owner: "org",
@@ -173,9 +172,9 @@ func TestConnectionUpdate(t *testing.T) {
 	id := result.ID
 
 	newConfig := map[string]string{
-		"admin_url":    "http://new-garage:3903",
-		"admin_token":  "new-token",
-		"s3_region":    "eu-west-1",
+		"admin_url":   "http://new-garage:3903",
+		"admin_token": "new-token",
+		"s3_region":   "eu-west-1",
 	}
 
 	patch := Connection{
@@ -691,50 +690,6 @@ func TestConnectionGetMissing(t *testing.T) {
 	_, err = s.Get(context.Background(), "absent")
 	if err == nil {
 		t.Fatal("expected error for missing id")
-	}
-}
-
-// TestGenerateID exercises the package-level helper (used elsewhere in code).
-func TestGenerateID(t *testing.T) {
-	id1, err := GenerateID()
-	if err != nil {
-		t.Fatalf("GenerateID: %v", err)
-	}
-	if id1 == "" {
-		t.Fatal("empty UUID")
-	}
-	// UUID v4 stringified is 36 chars (8-4-4-4-12 with hyphens)
-	if len(id1) != 36 {
-		t.Errorf("len(id1)=%d, want 36", len(id1))
-	}
-
-	id2, _ := GenerateID()
-	if id1 == id2 {
-		t.Errorf("GenerateID returned identical IDs twice")
-	}
-}
-
-// TestGenerateToken exercises the package-level helper.
-func TestGenerateToken(t *testing.T) {
-	for _, n := range []int{1, 16, 32, 64} {
-		tok, err := GenerateToken(n)
-		if err != nil {
-			t.Fatalf("GenerateToken(%d): %v", n, err)
-		}
-		// hex encoding is 2x bytes
-		if len(tok) != n*2 {
-			t.Errorf("GenerateToken(%d) returned %d hex chars, want %d", n, len(tok), n*2)
-		}
-		if _, err := hex.DecodeString(tok); err != nil {
-			t.Errorf("GenerateToken(%d) not valid hex: %v", n, err)
-		}
-	}
-
-	// Two consecutive tokens must differ.
-	a, _ := GenerateToken(16)
-	b, _ := GenerateToken(16)
-	if a == b {
-		t.Errorf("two GenerateToken(16) calls returned identical results")
 	}
 }
 

@@ -50,29 +50,29 @@ type OrgCapabilities struct {
 	// v1.13.0a (ADR-0008) — pluggable-skins foundation. ActiveSkin
 	// names the currently-rendered skin (basement-default ships with
 	// every deploy and is the fallback when the named skin isn't
-	// registered). 
+	// registered).
 	//
 	// v1.13.1: UserOverridableSkin controls whether users can pick
 	// their own skin; AllowedUserSkins restricts to a specific set
 	// (empty list = all installed skins available). v2.0.0-beta.2: SkinPolicy
 	// field removed — legacy values migrate on read per the loader logic below.
-	ActiveSkin string `json:"activeSkin,omitempty"`
-	UserOverridableSkin bool `json:"userOverridableSkin"`
-	AllowedUserSkins []string `json:"allowedUserSkins,omitempty"`
+	ActiveSkin          string   `json:"activeSkin,omitempty"`
+	UserOverridableSkin bool     `json:"userOverridableSkin"`
+	AllowedUserSkins    []string `json:"allowedUserSkins,omitempty"`
 }
 
 // Skin defaults for ADR-0008. DefaultActiveSkin is the built-in fallback;
 // DefaultUserOverridableSkin controls whether users can pick their own skin.
 const (
-	DefaultActiveSkin        = "basement-default"
+	DefaultActiveSkin          = "basement-default"
 	DefaultUserOverridableSkin = false
 )
 
 // DetermineAllowedUserSkins returns the effective set of user-visible skins:
-	// - If AllowedUserSkins is non-empty, return it as-is
-	// - If UserOverridableSkin=true and AllowedUserSkins empty, return all installed skins (empty slice signals "all")
-	// This helper centralizes the fallback semantics so callers don't duplicate logic.
-	func DetermineAllowedUserSkins(userOverridable bool, allowed []string) []string {
+// - If AllowedUserSkins is non-empty, return it as-is
+// - If UserOverridableSkin=true and AllowedUserSkins empty, return all installed skins (empty slice signals "all")
+// This helper centralizes the fallback semantics so callers don't duplicate logic.
+func DetermineAllowedUserSkins(userOverridable bool, allowed []string) []string {
 	if !userOverridable {
 		return nil // no user override allowed
 	}
@@ -121,114 +121,93 @@ type GatewayConfig struct {
 	Options map[string]string `json:"options,omitempty"`
 }
 
-// WebDAVSettings is the legacy v1.9.0b operator-facing config. Kept
-// in the v1.9.0d shape for back-compat: reads migrate this into the
-// generic Protocols map; writes are mirrored back so a downgrade to
-// v1.9.0b would still see the toggle.
+// IsEnabled reports whether the named gateway is enabled in this
+// settings blob. Webdav defaults to true (matches v1.9.0a behaviour);
+// every other gateway defaults to false (stub gateways can't actually be
+// enabled regardless of caps, but the FE consults this flag to decide which
+// row shows a toggle).
 //
-// Enabled defaults to true on a fresh install so the gateway works the
-// moment basement comes up — operators who want to lock it down flip
-// the toggle in /admin/system and the handler returns 403 GATEWAY_DISABLED
-// from then on.
-//
-// BaseURL is an optional override for the URL the UI displays in the
-// "connect from your platform" hint. Empty (the default) means the FE
-// computes window.location.origin + "/webdav" — which is the right
-// answer for the common single-origin deployment. Operators who front
-// basement behind a reverse proxy with a different external WebDAV
-// host can pin it here.
-type WebDAVSettings struct {
-	Enabled bool   `json:"enabled"`
-	BaseURL string `json:"baseUrl,omitempty"`
+// Lookup order: Protocols[name] wins when present; else default-by-name fires.
+func (g GatewaySettings) IsEnabled(name string) bool {
+	if cfg, ok := g.Protocols[name]; ok {
+		return cfg.Enabled
+	}
+	return false
 }
 
-// IsEnabled reports whether the named gateway is enabled in this
-	// settings blob. Webdav defaults to true (matches v1.9.0a behaviour); 
-	// every other gateway defaults to false (stub gateways can't actually be 
-	// enabled regardless of caps, but the FE consults this flag to decide which 
-	// row shows a toggle).
-	//
-	// Lookup order: Protocols[name] wins when present; else default-by-name fires.
-	func (g GatewaySettings) IsEnabled(name string) bool {
-		if cfg, ok := g.Protocols[name]; ok {
-			return cfg.Enabled
-		}
-		return false
-	}
-
 // BaseURL returns the operator-pinned base URL for the named gateway,
-	// or "" when none is set. Same lookup precedence as IsEnabled.
-	func (g GatewaySettings) BaseURL(name string) string {
-		if cfg, ok := g.Protocols[name]; ok && cfg.BaseURL != "" {
-			return cfg.BaseURL
-		}
-		return ""
+// or "" when none is set. Same lookup precedence as IsEnabled.
+func (g GatewaySettings) BaseURL(name string) string {
+	if cfg, ok := g.Protocols[name]; ok && cfg.BaseURL != "" {
+		return cfg.BaseURL
 	}
+	return ""
+}
 
 // DefaultOrgCapabilities returns the default org capabilities. The Protocols map
-	// starts with webdav.enabled=true — this is the only source of truth post-v2.0.0-beta.2.
-	//
-	// v1.13.0a (ADR-0008) adds ActiveSkin + SkinPolicy with defaults;
-	// v1.13.1 migrates to UserOverridableSkin + AllowedUserSkins. A fresh
-	// install renders basement-default; operator opts into user overrides
-	// via /admin/system surface.
-	func DefaultOrgCapabilities() OrgCapabilities {
-		return OrgCapabilities{
-			SignupMode:            "invite",
-			EnabledDrivers:        []string{"garage", "garage-v1", "aws-s3", "minio"},
-			AllowUserBackends:     false,
-			UserBackendDrivers:    []string{},
-			OIDCOnly:              false,
-			AdminSessionTTLSec:    AdminSessionTTLDefaultSec,
-			Gateways: GatewaySettings{
-				Protocols: map[string]GatewayConfig{
-					"webdav": {Enabled: true},
-				},
+// starts with webdav.enabled=true — this is the only source of truth post-v2.0.0-beta.2.
+//
+// v1.13.0a (ADR-0008) adds ActiveSkin + SkinPolicy with defaults;
+// v1.13.1 migrates to UserOverridableSkin + AllowedUserSkins. A fresh
+// install renders basement-default; operator opts into user overrides
+// via /admin/system surface.
+func DefaultOrgCapabilities() OrgCapabilities {
+	return OrgCapabilities{
+		SignupMode:         "invite",
+		EnabledDrivers:     []string{"garage", "garage-v1", "aws-s3", "minio"},
+		AllowUserBackends:  false,
+		UserBackendDrivers: []string{},
+		OIDCOnly:           false,
+		AdminSessionTTLSec: AdminSessionTTLDefaultSec,
+		Gateways: GatewaySettings{
+			Protocols: map[string]GatewayConfig{
+				"webdav": {Enabled: true},
 			},
-			ActiveSkin:          DefaultActiveSkin,
-			UserOverridableSkin: DefaultUserOverridableSkin,
-			AllowedUserSkins:    []string{},
-		}
+		},
+		ActiveSkin:          DefaultActiveSkin,
+		UserOverridableSkin: DefaultUserOverridableSkin,
+		AllowedUserSkins:    []string{},
 	}
+}
 
 // normalizeGateways migrates a legacy on-disk file into the v1.9.0d
-	// generic Protocols map shape. Two legacy shapes can hit this in v2:
-	//
-	//  1. No "gateways" key at all (pre-v1.9.0b): substitute defaults with
-	//     webdav.enabled=true, no other protocols.
-	//  2. "gateways": {"webdav": {...}} only (v1.9.0b): migrate the WebDAV
-	//     field into Protocols["webdav"] and drop the legacy field on write.
-	//
-	// v2.0.0-beta.2: The WebDAV hand-typed field is removed; migration copies
-	// it into Protocols["webdav"] then drops it from disk on next save.
-	//
-	// We do NOT mutate the on-disk file here — that happens lazily on the
-	// next Update() call. Read paths get the live defaults, write paths
-	// persist them, and an operator hand-editing the JSON between reads
-	// and writes still wins.
-	func normalizeGateways(g GatewaySettings, hadField bool) GatewaySettings {
-		if !hadField {
-			// Legacy file, no gateways block at all: default on.
-			return GatewaySettings{
-				Protocols: map[string]GatewayConfig{
-					"webdav": {Enabled: true},
-				},
-			}
+// generic Protocols map shape. Two legacy shapes can hit this in v2:
+//
+//  1. No "gateways" key at all (pre-v1.9.0b): substitute defaults with
+//     webdav.enabled=true, no other protocols.
+//  2. "gateways": {"webdav": {...}} only (v1.9.0b): migrate the WebDAV
+//     field into Protocols["webdav"] and drop the legacy field on write.
+//
+// v2.0.0-beta.2: The WebDAV hand-typed field is removed; migration copies
+// it into Protocols["webdav"] then drops it from disk on next save.
+//
+// We do NOT mutate the on-disk file here — that happens lazily on the
+// next Update() call. Read paths get the live defaults, write paths
+// persist them, and an operator hand-editing the JSON between reads
+// and writes still wins.
+func normalizeGateways(g GatewaySettings, hadField bool) GatewaySettings {
+	if !hadField {
+		// Legacy file, no gateways block at all: default on.
+		return GatewaySettings{
+			Protocols: map[string]GatewayConfig{
+				"webdav": {Enabled: true},
+			},
 		}
-		if g.Protocols == nil {
-			g.Protocols = make(map[string]GatewayConfig)
-		}
-		// v2.0.0-beta.2: Forward-migrate the legacy WebDAV field into Protocols["webdav"]
-		// when the map is silent on webdav. Without this branch a v1.9.0b file with
-		// webdav.enabled=false would read as enabled=true via defaults and clobber the
-		// operator's kill switch. The WebDAV field will be dropped from disk on next save.
-		if _, ok := g.Protocols["webdav"]; !ok {
-			g.Protocols["webdav"] = GatewayConfig{
-				Enabled: true, // default for webdav (v1.9.0a behaviour)
-			}
-		}
-		return g
 	}
+	if g.Protocols == nil {
+		g.Protocols = make(map[string]GatewayConfig)
+	}
+	// v2.0.0-beta.2: Forward-migrate the legacy WebDAV field into Protocols["webdav"]
+	// when the map is silent on webdav. Without this branch a v1.9.0b file with
+	// webdav.enabled=false would read as enabled=true via defaults and clobber the
+	// operator's kill switch. The WebDAV field will be dropped from disk on next save.
+	if _, ok := g.Protocols["webdav"]; !ok {
+		g.Protocols["webdav"] = GatewayConfig{
+			Enabled: true, // default for webdav (v1.9.0a behaviour)
+		}
+	}
+	return g
+}
 
 // ClampAdminSessionTTL returns the input clamped into the
 // [AdminSessionTTLMinSec, AdminSessionTTLMaxSec] window. Zero (or any
@@ -295,9 +274,9 @@ func (s *OrgCapabilitiesStore) load() error {
 	// don't merge in from the in-memory default. Without this, a
 	// v1.9.0b-shaped file (only "gateways.webdav") would inherit the
 	// default's Protocols["webdav"]={Enabled:true} entry and clobber
-	// the operator's explicit kill-switch via the syncGatewaySettings
-	// "map wins" rule. The migration logic below substitutes the
-	// right shape from whichever side carried the on-disk truth.
+	// the operator's explicit kill-switch. The migration logic below
+	// (normalizeGateways) substitutes the right shape from whichever
+	// side carried the on-disk truth.
 	s.data.Gateways = GatewaySettings{}
 
 	if err := json.Unmarshal(data, &s.data); err != nil {
@@ -377,49 +356,49 @@ func (s *OrgCapabilitiesStore) load() error {
 	return nil
 }
 
-// Save persists capabilities to disk.
+// Save persists capabilities to disk atomically. Routes through the
+// package's shared saveJSON helper (tmp 0600 + fsync + rename + parent-dir
+// fsync) so a crash mid-write can't truncate the live org_capabilities.json
+// and brick boot — every other store in this package uses the same path.
+// The mutex is held through the marshal+write so concurrent Get() readers
+// can't observe a value that is still being persisted.
 func (s *OrgCapabilitiesStore) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := json.MarshalIndent(s.data, "", "  ")
-	if err != nil {
-		return err
-	}
-
 	// 0600: org config (admin session TTL, signup/OIDC mode, gateways).
-	return os.WriteFile(s.path, data, 0600)
+	return saveJSON(s.path, s.data)
 }
 
 // Get returns a copy of the current capabilities. Legacy
-	// org_capabilities.json files predating v1.3.0a.4 lack the
-	// AdminSessionTTLSec field; we substitute the default at read time
-	// rather than mutating the on-disk file behind the operator's back —
-	// they'll see the default reflected in /admin/system and can persist
-	// a deliberate choice from there.
-	func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
-		s.mu.RLock()
-		defer s.mu.RUnlock()
-		out := s.data
-		if out.AdminSessionTTLSec <= 0 {
-			out.AdminSessionTTLSec = AdminSessionTTLDefaultSec
-		}
-		// v1.13.0a (ADR-0008) — defensive defaults. load() already
-		// substitutes these on the read-from-disk path, but a caller
-		// that constructed an OrgCapabilitiesStore without going through
-		// load() (or a future migration that resets the in-memory data)
-		// would otherwise hand the FE empty strings the renderer can't
-		// resolve to a registered skin.
-		if out.ActiveSkin == "" {
-			out.ActiveSkin = DefaultActiveSkin
-		}
-		// v1.13.1 — ensure new fields have defaults if not set by load()
-		if !out.UserOverridableSkin && len(out.AllowedUserSkins) == 0 {
-			out.UserOverridableSkin = DefaultUserOverridableSkin
-			out.AllowedUserSkins = []string{}
-		}
-		return out
+// org_capabilities.json files predating v1.3.0a.4 lack the
+// AdminSessionTTLSec field; we substitute the default at read time
+// rather than mutating the on-disk file behind the operator's back —
+// they'll see the default reflected in /admin/system and can persist
+// a deliberate choice from there.
+func (s *OrgCapabilitiesStore) Get() OrgCapabilities {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := s.data
+	if out.AdminSessionTTLSec <= 0 {
+		out.AdminSessionTTLSec = AdminSessionTTLDefaultSec
 	}
+	// v1.13.0a (ADR-0008) — defensive defaults. load() already
+	// substitutes these on the read-from-disk path, but a caller
+	// that constructed an OrgCapabilitiesStore without going through
+	// load() (or a future migration that resets the in-memory data)
+	// would otherwise hand the FE empty strings the renderer can't
+	// resolve to a registered skin.
+	if out.ActiveSkin == "" {
+		out.ActiveSkin = DefaultActiveSkin
+	}
+	// v1.13.1 — ensure new fields have defaults if not set by load()
+	if !out.UserOverridableSkin && len(out.AllowedUserSkins) == 0 {
+		out.UserOverridableSkin = DefaultUserOverridableSkin
+		out.AllowedUserSkins = []string{}
+	}
+	return out
+}
 
 // Update replaces all capabilities and persists. Per v1.3.0a.4 the
 // admin session TTL is clamped into the supported range on the way in
@@ -435,7 +414,6 @@ func (s *OrgCapabilitiesStore) Save() error {
 // new path would see stale flags.
 func (s *OrgCapabilitiesStore) Update(capabilities OrgCapabilities) error {
 	capabilities.AdminSessionTTLSec = ClampAdminSessionTTL(capabilities.AdminSessionTTLSec)
-	capabilities.Gateways = syncGatewaySettings(capabilities.Gateways)
 
 	// v1.13.0a (ADR-0008) — clamp skin fields the same way as
 	// AdminSessionTTLSec: an empty string lands as the default; an
@@ -472,28 +450,6 @@ func (s *OrgCapabilitiesStore) MarkOnboardingCompleted() error {
 	return s.Save()
 }
 
-// syncGatewaySettings mirrors the legacy WebDAV field into the
-	// Protocols map (and vice versa) so both shapes always agree on the
-	// canonical state for webdav. Called on every Update so a v1.9.0b-
-	// shaped PATCH (legacy field only) and a v1.9.0d-shaped PATCH (map
-	// only) both round-trip cleanly.
-	//
-	// Tie-break: when the Protocols["webdav"] entry and the legacy
-	// WebDAV field disagree, the LEGACY field wins. Rationale: every
-	// caller-mutation path the FE uses today touches the legacy field
-	// (the v1.9.0b card mutates WebDAV; the v1.9.0d card writes a
-	// Protocols["webdav"] entry built from the same shape AND mirrors
-	// it back to the legacy field). A divergence means the caller used
-	// the legacy mutation path — preferring the legacy value preserves
-	// the kill-switch contract. v1.10+ gateways without a legacy field
-	// are read-only through the map and aren't affected.
-	// v2.0.0-beta.2: syncGatewaySettings is no-op since WebDAV field was removed;
-	// Protocols["webdav"] is now always the source of truth on write.
-	func syncGatewaySettings(g GatewaySettings) GatewaySettings {
-		return g
-	}
-
-
 // checkRawSkinPolicy peeks at raw JSON to detect if SkinPolicy was present.
 // Returns (present, value). v2.0.0-beta.2 uses this to migrate legacy
 // skin policy values before unmarshal into the new shape.
@@ -508,4 +464,3 @@ func checkRawSkinPolicy(raw map[string]json.RawMessage) (bool, string) {
 	}
 	return true, value
 }
-

@@ -3,9 +3,7 @@ package store
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -126,7 +124,7 @@ func (s *Store) IncrementDownloads(token string) error {
 	for i := range s.sharesCache {
 		if s.sharesCache[i].Token == token {
 			sh := &s.sharesCache[i]
-			
+
 			if sh.DownloadLimit != nil && sh.DownloadsUsed >= *sh.DownloadLimit {
 				return fmt.Errorf("download limit reached for share: %s", token)
 			}
@@ -169,22 +167,4 @@ func (s *Store) IsExpired(token string) (bool, error) {
 	}
 
 	return time.Now().After(*sh.ExpiresAt), nil
-}
-
-// loadShares loads shares from disk.
-func loadShares(path string) ([]Share, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []Share{}, nil
-		}
-		return nil, fmt.Errorf("reading shares file: %w", err)
-	}
-
-	var shares []Share
-	if err := json.Unmarshal(data, &shares); err != nil {
-		return nil, fmt.Errorf("unmarshaling shares: %w", err)
-	}
-
-	return shares, nil
 }

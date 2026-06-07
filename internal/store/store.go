@@ -28,12 +28,12 @@ type Store struct {
 	orgCapsPath string
 
 	usersCache  []User
-	sharesCache       []Share
-	orgCaps           *OrgCapabilitiesStore
-	oidcGroups        *OIDCGroupMappingsStore
-	userRegions       UserRegions
-	invites           Invites
-	feds              federation.FederatedBuckets
+	sharesCache []Share
+	orgCaps     *OrgCapabilitiesStore
+	oidcGroups  *OIDCGroupMappingsStore
+	userRegions UserRegions
+	invites     Invites
+	feds        federation.FederatedBuckets
 	// v2.0.0-beta.28: per-user skin preference store. Nil until
 	// WireUserSkins() runs in production main.go at boot — tests that
 	// don't care leave it unset; handlers nil-check and return 503
@@ -252,11 +252,11 @@ func (s *Store) MigrateLegacyUsers() error {
 }
 
 // MigrateBucketUserAssignments drops all RoleAssignments with roleID="bucket_user"
-	// from policies.json at boot (v2.0.0a per [[v2_clean_break]]). Silently removes
-	// them — no warning, no replacement. Logs a WARN line with the count removed so
-	// operators can see in startup logs how many legacy rows were dropped. Returns
-	// the number of assignments dropped. Idempotent: re-running is a no-op since
-	// all bucket_user rows are gone after first drop.
+// from policies.json at boot (v2.0.0a per [[v2_clean_break]]). Silently removes
+// them — no warning, no replacement. Logs a WARN line with the count removed so
+// operators can see in startup logs how many legacy rows were dropped. Returns
+// the number of assignments dropped. Idempotent: re-running is a no-op since
+// all bucket_user rows are gone after first drop.
 func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
 	data, err := os.ReadFile(policyPath)
 	if err != nil {
@@ -268,7 +268,7 @@ func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
 
 	// Local policyFile shape for unmarshalling policies.json (mirrors internal/auth/policy)
 	type policyFile struct {
-		Roles       []policy.Role `json:"roles"`
+		Roles       []policy.Role           `json:"roles"`
 		Assignments []policy.RoleAssignment `json:"assignments"`
 	}
 
@@ -297,11 +297,13 @@ func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
 	data = append(data, '\n')
 
 	tmp := policyPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	// 0600: policies.json holds RBAC role assignments (authorization
+	// data) — it must not be world-readable on a multi-user host.
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
 		return 0, fmt.Errorf("writing tmp file: %w", err)
 	}
 
-	f, err := os.OpenFile(tmp, os.O_RDONLY|os.O_SYNC, 0644)
+	f, err := os.OpenFile(tmp, os.O_RDONLY|os.O_SYNC, 0600)
 	if err != nil {
 		os.Remove(tmp)
 		return 0, fmt.Errorf("opening tmp for fsync: %w", err)
@@ -330,8 +332,8 @@ func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
 }
 
 // ArchiveLegacyBucketGrants renames {dataDir}/bucket_grants.json to
-	// bucket_grants.json.migrated-v1.1.0e if the legacy file still exists.
-	// Idempotent: no-op if the file is already archived or never existed.
+// bucket_grants.json.migrated-v1.1.0e if the legacy file still exists.
+// Idempotent: no-op if the file is already archived or never existed.
 //
 // The per-user per-bucket BucketGrants table was the v0.9.0c–v1.1.0d
 // credential store; ADR-0002 replaced it with the per-user region

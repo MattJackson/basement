@@ -135,7 +135,7 @@ func TestConcurrentWrites(t *testing.T) {
 			for j := 0; j < usersPerGoroutine; j++ {
 				u := User{
 					ID:           uuid.New().String(),
-					Username:     "user-" + string(rune('a'+base))+"-"+string(rune('0'+j)),
+					Username:     "user-" + string(rune('a'+base)) + "-" + string(rune('0'+j)),
 					PasswordHash: "hash",
 					Role:         "user",
 				}
@@ -229,27 +229,35 @@ func TestAuditRotation(t *testing.T) {
 	}
 }
 
+// TestAuditRetention anchors on the REAL wall clock (CleanupAudit reads
+// time.Now() internally and we don't want to change its signature). Audit
+// files are keyed purely off their date-stamped filename, so we drop empty
+// .jsonl files at known day-offsets from today and assert exactly which the
+// 48h-retention cleanup deletes vs keeps. This guards the off-by-one-day
+// cutoff fix: the file dated exactly 2 days ago (the boundary day) must be
+// KEPT, because its newest entry is still inside the 48h window.
 func TestAuditRetention(t *testing.T) {
-	t.Skip("Time-dependent: fixes 'now' to 2026-05-18 but CleanupAudit reads time.Now(). Needs a clock-mock. Tracked.")
 	tmpDir := t.TempDir()
 	s, err := Open(tmpDir, 48*time.Hour) // retention = 2 days
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 
-	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	dir := filepath.Join(tmpDir, "audit")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatalf("mkdir audit: %v", err)
+	}
 
-	for i := -3; i <= 1; i++ {
-		date := now.AddDate(0, 0, i)
-		entry := AuditEntry{
-			Timestamp: date,
-			UserID:    "user-1",
-			Action:    "test.action",
-			Resource:  "resource:test",
-		}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	mk := func(offsetDays int) string {
+		return today.AddDate(0, 0, offsetDays).Format("2006-01-02")
+	}
 
-		if err := s.AppendAudit(entry); err != nil {
-			t.Fatalf("AppendAudit failed for %s: %v", date.Format("2006-01-02"), err)
+	// Create files from 4 days ago through tomorrow.
+	for i := -4; i <= 1; i++ {
+		name := mk(i) + ".jsonl"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}\n"), 0600); err != nil {
+			t.Fatalf("writing %s: %v", name, err)
 		}
 	}
 
@@ -257,32 +265,29 @@ func TestAuditRetention(t *testing.T) {
 		t.Fatalf("CleanupAudit failed: %v", err)
 	}
 
-	dir := filepath.Join(tmpDir, "audit")
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir audit dir failed: %v", err)
 	}
-
 	foundDates := make(map[string]bool)
 	for _, f := range files {
 		if strings.HasSuffix(f.Name(), ".jsonl") {
-			dateStr := strings.TrimSuffix(f.Name(), ".jsonl")
-			foundDates[dateStr] = true
+			foundDates[strings.TrimSuffix(f.Name(), ".jsonl")] = true
 		}
 	}
 
-	// Files older than 48 hours from now (May 18) should be deleted
-	// May 13, 14, 15 are > 48h old and should not exist
-	shouldNotExist := []string{"2026-05-15", "2026-05-14", "2026-05-13"}
-	for _, shouldNotExist := range shouldNotExist {
-		if foundDates[shouldNotExist] {
-			t.Errorf("file %s.jsonl should have been deleted but exists", shouldNotExist)
+	// cutoff = today - 2 days (truncated). Strict Before deletes files
+	// strictly older than that day: 3 and 4 days ago. The boundary day
+	// (exactly 2 days ago) and everything newer is kept.
+	for _, off := range []int{-4, -3} {
+		if foundDates[mk(off)] {
+			t.Errorf("file %s.jsonl (%d days old) should have been deleted but exists", mk(off), -off)
 		}
 	}
-
-	// At least May 17 or May 18 should exist (within retention window)
-	if !foundDates["2026-05-17"] && !foundDates["2026-05-18"] {
-		t.Error("expected at least one recent audit file within retention window")
+	for _, off := range []int{-2, -1, 0, 1} {
+		if !foundDates[mk(off)] {
+			t.Errorf("file %s.jsonl (%d days old) is within retention and should still exist", mk(off), -off)
+		}
 	}
 }
 
