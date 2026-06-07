@@ -146,9 +146,15 @@ type ClusterSecretStore interface {
 // read-locked while only the rare Unlock/Lock/AddAdmin paths take the
 // write lock.
 type ClusterSecretManager struct {
-	mu    sync.RWMutex
-	csks  map[string][]byte // clusterID → plaintext CSK (in memory only)
-	store ClusterSecretStore
+	mu   sync.RWMutex
+	csks map[string][]byte // clusterID → plaintext CSK (in memory only)
+	// bootstrapMu serializes BootstrapFirstAdmin's check+create critical
+	// section so two concurrent bootstraps can't both pass the "no
+	// existing CSK" check and write divergent CSKs. Kept separate from mu
+	// so the rare, expensive (Argon2id) bootstrap path doesn't block the
+	// Encrypt/Decrypt hot path that takes mu.
+	bootstrapMu sync.Mutex
+	store       ClusterSecretStore
 }
 
 // New constructs a manager wired to the supplied store. Nil store is
@@ -447,6 +453,15 @@ func (m *ClusterSecretManager) BootstrapFirstAdmin(clusterID, adminUserID, passw
 		return errors.New("clustersecret: password required")
 	}
 
+	// Hold bootstrapMu across the whole check+generate+store+cache so two
+	// concurrent bootstraps can't both observe zero records and both
+	// write a CSK. The check and the create must be a single atomic
+	// critical section; the store upserts by (clusterID, adminUserID), so
+	// without this guard the loser's divergent in-memory CSK would
+	// silently mismatch the on-disk wrap.
+	m.bootstrapMu.Lock()
+	defer m.bootstrapMu.Unlock()
+
 	recs, err := m.store.GetWrappedCSKs(clusterID)
 	if err != nil {
 		return fmt.Errorf("clustersecret: load wrapped CSKs: %w", err)
@@ -552,6 +567,15 @@ func tryUnwrap(rec WrappedCSK, password string) ([]byte, bool) {
 		// Default KDFParams.KeyLen so very old records (which never
 		// existed in production but might in tests) don't blow up.
 		params.KeyLen = wrappingKeyLen
+	}
+	// Guard the Argon2id cost parameters before calling the KDF.
+	// argon2.IDKey panics ("number of rounds too small" / "parallelism
+	// degree too low") when Time or Threads is < 1; a corrupted or
+	// bit-flipped on-disk record with a zero param would otherwise crash
+	// the process (DoS). Treat invalid params as a failed unwrap (the
+	// caller folds this into ErrInvalidPassword) rather than panicking.
+	if params.Time == 0 || params.Memory == 0 || params.Threads == 0 || params.KeyLen == 0 {
+		return nil, false
 	}
 	wk := argon2.IDKey([]byte(password), rec.Salt, params.Time, params.Memory, params.Threads, params.KeyLen)
 	defer func() {

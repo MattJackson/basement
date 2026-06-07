@@ -385,6 +385,120 @@ func TestConcurrentEncryptDecryptVsLock(t *testing.T) {
 	wg.Wait()
 }
 
+// TestUnlockCorruptKDFParamsNoPanic seeds a WrappedCSK whose Argon2id
+// KDF parameters are zeroed (Time=0 / Threads=0), as a corrupted or
+// bit-flipped on-disk record would be. argon2.IDKey panics on Time<1 or
+// Threads<1; without the guard in tryUnwrap this would crash the process
+// (DoS) on Unlock. The record must be well-formed enough to pass the
+// length/salt guards so the KDF call is actually reached.
+func TestUnlockCorruptKDFParamsNoPanic(t *testing.T) {
+	cases := []struct {
+		name   string
+		params KDFParams
+	}{
+		{"time-zero", KDFParams{Time: 0, Memory: Argon2Memory, Threads: Argon2Threads, KeyLen: wrappingKeyLen}},
+		{"threads-zero", KDFParams{Time: Argon2Time, Memory: Argon2Memory, Threads: 0, KeyLen: wrappingKeyLen}},
+		{"memory-zero", KDFParams{Time: Argon2Time, Memory: 0, Threads: Argon2Threads, KeyLen: wrappingKeyLen}},
+		{"all-zero-but-keylen", KDFParams{Time: 0, Memory: 0, Threads: 0, KeyLen: wrappingKeyLen}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			// Wrapped must be >= nonceSize+16 and Salt non-empty so
+			// tryUnwrap reaches the KDF call rather than bailing on the
+			// earlier length guard.
+			rec := WrappedCSK{
+				ClusterID:   "cidA",
+				AdminUserID: "matthew",
+				Wrapped:     make([]byte, nonceSize+16+cskSize),
+				Salt:        make([]byte, saltSize),
+				KDFParams:   tc.params,
+			}
+			if err := store.PutWrappedCSK(rec); err != nil {
+				t.Fatalf("seed PutWrappedCSK: %v", err)
+			}
+			m := New(store)
+
+			// Must return a clean error (folded into ErrInvalidPassword),
+			// not panic. If the guard is missing, argon2.IDKey panics and
+			// fails the test before reaching the assertion.
+			err := m.Unlock("cidA", "hunter2")
+			if !errors.Is(err, ErrInvalidPassword) {
+				t.Fatalf("Unlock with corrupt KDF params: got %v want ErrInvalidPassword", err)
+			}
+			if m.IsUnlocked("cidA") {
+				t.Fatalf("cluster must not be unlocked from a corrupt record")
+			}
+		})
+	}
+}
+
+// TestConcurrentBootstrapFirstAdmin fires many BootstrapFirstAdmin calls
+// at the same cluster concurrently. Exactly one must succeed; all others
+// must return ErrAdminAlreadyExists. Before the fix the check (no
+// existing CSK) and the create were not under a single held lock, so two
+// callers could both pass the check and write divergent CSKs, leaving the
+// in-memory CSK out of sync with the on-disk wrap. Run with `go test -race`.
+func TestConcurrentBootstrapFirstAdmin(t *testing.T) {
+	store := NewMemoryStore()
+	m := New(store)
+
+	const N = 16
+	var wg sync.WaitGroup
+	errs := make([]error, N)
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = m.BootstrapFirstAdmin("cidA", "matthew", "hunter2")
+		}(i)
+	}
+	wg.Wait()
+
+	successes := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrAdminAlreadyExists):
+			// expected for the losers
+		default:
+			t.Fatalf("unexpected BootstrapFirstAdmin error: %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected exactly 1 successful bootstrap, got %d", successes)
+	}
+
+	// Exactly one wrapped record persisted (no divergent double-write).
+	recs, err := store.GetWrappedCSKs("cidA")
+	if err != nil {
+		t.Fatalf("GetWrappedCSKs: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected exactly 1 wrapped record, got %d", len(recs))
+	}
+
+	// The cached CSK must match the persisted wrap: lock, then unlock with
+	// the same password and confirm a round-trip still decrypts. A
+	// divergent cache (the old race) would fail this.
+	ct, err := m.Encrypt("cidA", []byte("payload"))
+	if err != nil {
+		t.Fatalf("Encrypt after bootstrap: %v", err)
+	}
+	m.Lock("cidA")
+	if err := m.Unlock("cidA", "hunter2"); err != nil {
+		t.Fatalf("Unlock after bootstrap: %v", err)
+	}
+	got, err := m.Decrypt("cidA", ct)
+	if err != nil {
+		t.Fatalf("Decrypt after re-unlock: %v", err)
+	}
+	if string(got) != "payload" {
+		t.Fatalf("cache/disk CSK divergence: round-trip mismatch %q", got)
+	}
+}
+
 func TestFileStorePersistAndReload(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := NewFileStore(dir)
