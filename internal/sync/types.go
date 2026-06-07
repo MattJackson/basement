@@ -23,10 +23,11 @@ type SyncJob struct {
 
 // SyncProgress tracks the progress of a sync job.
 type SyncProgress struct {
-	ObjectsTotal  int       `json:"objects_total"`
-	ObjectsCopied int       `json:"objects_copied"`
-	BytesTotal    int64     `json:"bytes_total"`
-	BytesCopied   int64     `json:"bytes_copied"`
-	StartedAt     *time.Time `json:"started_at,omitempty"`
-	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	ObjectsTotal   int        `json:"objects_total"`
+	ObjectsCopied  int        `json:"objects_copied"`
+	ObjectsSkipped int        `json:"objects_skipped"`
+	BytesTotal     int64      `json:"bytes_total"`
+	BytesCopied    int64      `json:"bytes_copied"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
 }

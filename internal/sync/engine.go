@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattjackson/basement/internal/driver"
@@ -26,24 +27,107 @@ func NewEngine(store Store, maxConcurrency int) *Engine {
 	}
 }
 
+// runState is the live, in-memory control handle for a sync run currently
+// executing in some goroutine. It is shared between the goroutine doing the
+// work (which reads paused / ctx) and any Pause caller (which writes paused
+// and calls cancel).
+//
+// Pause/Resume historically loaded a fresh *SyncJob from disk and mutated
+// THAT pointer, which the running goroutine — holding a different *SyncJob —
+// never observed. The registry fixes that by keying live runs on job ID so a
+// Pause issued from a different Engine instance (the API builds a fresh
+// Engine per HTTP request) still reaches the in-flight goroutine.
+type runState struct {
+	paused atomic.Bool
+	cancel context.CancelFunc
+}
+
+// runRegistry tracks live sync runs across every Engine instance in the
+// process. It is package-global on purpose: the HTTP layer constructs a fresh
+// Engine per request, so a per-Engine map would never let a Pause handler
+// reach the goroutine spawned by the create handler. Keyed by job ID.
+var runRegistry = struct {
+	mu     sync.Mutex
+	active map[string]*runState
+}{active: make(map[string]*runState)}
+
+// registerRun installs a runState for jobID, replacing (and cancelling) any
+// prior run for the same job. Returns the new runState.
+func registerRun(jobID string, cancel context.CancelFunc) *runState {
+	rs := &runState{cancel: cancel}
+	runRegistry.mu.Lock()
+	if prev, ok := runRegistry.active[jobID]; ok && prev.cancel != nil {
+		// A stale run for this job is still registered; cancel it so two
+		// goroutines don't fight over the same job.
+		prev.cancel()
+	}
+	runRegistry.active[jobID] = rs
+	runRegistry.mu.Unlock()
+	return rs
+}
+
+// deregisterRun removes the runState for jobID, but only if it is still the
+// one we registered (so a Resume that replaced us doesn't get clobbered).
+func deregisterRun(jobID string, rs *runState) {
+	runRegistry.mu.Lock()
+	if cur, ok := runRegistry.active[jobID]; ok && cur == rs {
+		delete(runRegistry.active, jobID)
+	}
+	runRegistry.mu.Unlock()
+}
+
+// lookupRun returns the live runState for jobID, if any.
+func lookupRun(jobID string) (*runState, bool) {
+	runRegistry.mu.Lock()
+	rs, ok := runRegistry.active[jobID]
+	runRegistry.mu.Unlock()
+	return rs, ok
+}
+
 // Run executes a sync job with bounded parallelism.
+//
+// Run detaches from the caller's context: it derives its own cancellable run
+// context (via context.WithoutCancel) so that an HTTP request context being
+// cancelled when the handler returns cannot kill a background sync. The run
+// context's cancel func is stored in the registry so Pause (and future
+// shutdown logic) can stop the run.
 func (e *Engine) Run(ctx context.Context, job *SyncJob, srcDriver driver.Driver, dstDriver driver.Driver) error {
+	// Detach from the caller's lifecycle but keep its values (deadlines that
+	// belong to a request are intentionally dropped — a background sync must
+	// outlive the request that triggered it).
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	rs := registerRun(job.ID, cancel)
+	defer cancel()
+	defer deregisterRun(job.ID, rs)
+
 	job.State = "running"
 	now := time.Now()
 	job.Progress.StartedAt = &now
-	e.store.Save(job)
+	if err := e.store.Save(job); err != nil {
+		// Persisting the initial state failed; surface but keep going so an
+		// in-memory run can still complete (the store may recover).
+		_ = err
+	}
 
 	// Plan the sync
-	actions, err := Plan(ctx, srcDriver, dstDriver, job.SrcConnectionID, job.SrcBucket, job.SrcPrefix, job.DstConnectionID, job.DstBucket, job.DstPrefix)
+	actions, err := Plan(runCtx, srcDriver, dstDriver, job.SrcConnectionID, job.SrcBucket, job.SrcPrefix, job.DstConnectionID, job.DstBucket, job.DstPrefix)
 	if err != nil {
 		job.State = "error"
 		job.LastError = fmt.Sprintf("plan failed: %v", err)
-		e.store.Save(job)
+		_ = e.store.Save(job)
 		return fmt.Errorf("planning sync: %w", err)
 	}
 
 	job.Progress.ObjectsTotal = len(actions)
-	e.store.Save(job)
+	// Populate BytesTotal so byte-progress is meaningful (was never set).
+	var bytesTotal int64
+	for i := range actions {
+		if actions[i].ObjectInfo != nil {
+			bytesTotal += actions[i].ObjectInfo.Size
+		}
+	}
+	job.Progress.BytesTotal = bytesTotal
+	_ = e.store.Save(job)
 
 	// Process actions with bounded parallelism
 	sem := make(chan struct{}, e.maxConcurrency)
@@ -52,9 +136,24 @@ func (e *Engine) Run(ctx context.Context, job *SyncJob, srcDriver driver.Driver,
 	var firstErr error
 
 	for _, action := range actions {
-		wg.Add(1)
-		sem <- struct{}{}
+		// Stop dispatching as soon as the run is paused/cancelled rather than
+		// queueing every remaining object first.
+		if rs.paused.Load() || runCtx.Err() != nil {
+			break
+		}
 
+		// ctx-aware semaphore acquire so a cancelled run isn't wedged waiting
+		// for a worker slot. The select's `break` only exits the select; the
+		// runCtx.Err() check below exits the dispatch loop.
+		select {
+		case sem <- struct{}{}:
+		case <-runCtx.Done():
+		}
+		if runCtx.Err() != nil {
+			break
+		}
+
+		wg.Add(1)
 		go func(a Action) {
 			defer wg.Done()
 			defer func() { <-sem }()
@@ -67,33 +166,52 @@ func (e *Engine) Run(ctx context.Context, job *SyncJob, srcDriver driver.Driver,
 						firstErr = fmt.Errorf("panic copying %s: %v", a.SrcKey, r)
 						job.State = "error"
 						job.LastError = fmt.Sprintf("panic copying %s: %v", a.SrcKey, r)
-						e.store.Save(job)
+						_ = e.store.Save(job)
 					}
 					mu.Unlock()
+					cancel() // stop the rest of the run
 				}
 			}()
 
 			// All job.State / job.Progress access is guarded by mu; Save is
 			// done under the lock so the store never marshals a job while
 			// another worker is mutating it (was a data race). Use the
-			// captured `a`, NOT the loop variable `action` (which the for
-			// loop concurrently overwrites — a race + wrong byte attribution).
+			// captured `a`, NOT the loop variable `action`.
+			//
+			// Stop is now driven by the SHARED runState.paused flag (set by
+			// Pause through the registry) — not by re-reading job.State from a
+			// disconnected disk copy.
+			if rs.paused.Load() || runCtx.Err() != nil {
+				return
+			}
 			mu.Lock()
-			stop := job.State == "paused" || job.State == "error"
+			stop := job.State == "error"
 			mu.Unlock()
-			if stop || ctx.Err() != nil {
+			if stop {
 				return
 			}
 
-			err := e.copyObject(ctx, srcDriver, dstDriver, a)
+			// "skip" actions are etag-matched at plan time — the destination
+			// already holds an identical object, so do NOT re-stream it.
+			// Count it toward progress (objects skipped) but transfer 0 bytes.
+			if a.ActionType == "skip" {
+				mu.Lock()
+				job.Progress.ObjectsSkipped++
+				_ = e.store.Save(job)
+				mu.Unlock()
+				return
+			}
+
+			err := e.copyObject(runCtx, srcDriver, dstDriver, a)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
-				if firstErr == nil && job.State != "paused" {
+				if firstErr == nil && !rs.paused.Load() && job.State != "paused" {
 					firstErr = err
 					job.State = "error"
 					job.LastError = err.Error()
-					e.store.Save(job)
+					_ = e.store.Save(job)
+					cancel() // abort in-flight + undispatched work on first error
 				}
 				return
 			}
@@ -101,7 +219,7 @@ func (e *Engine) Run(ctx context.Context, job *SyncJob, srcDriver driver.Driver,
 			if a.ObjectInfo != nil {
 				job.Progress.BytesCopied += a.ObjectInfo.Size
 			}
-			e.store.Save(job)
+			_ = e.store.Save(job)
 		}(action)
 	}
 
@@ -112,13 +230,19 @@ func (e *Engine) Run(ctx context.Context, job *SyncJob, srcDriver driver.Driver,
 	if firstErr != nil {
 		return firstErr
 	}
-	// Only a still-"running" job transitions to "done" — a job paused
-	// mid-run must STAY paused (was incorrectly marked done).
+	// A paused run must STAY paused; Pause already persisted "paused" to disk
+	// and set the shared flag. Don't overwrite it to "done".
+	if rs.paused.Load() {
+		job.State = "paused"
+		_ = e.store.Save(job)
+		return nil
+	}
+	// Only a still-"running" job transitions to "done".
 	if job.State == "running" {
 		job.State = "done"
 		finished := time.Now()
 		job.Progress.FinishedAt = &finished
-		e.store.Save(job)
+		_ = e.store.Save(job)
 	}
 
 	return nil
@@ -159,7 +283,11 @@ func (e *Engine) copyObject(ctx context.Context, srcDriver driver.Driver, dstDri
 	return nil
 }
 
-// Pause pauses a running sync job.
+// Pause pauses a running sync job. It signals the LIVE run (if one is
+// registered in this process) by setting the shared paused flag and
+// cancelling its run context, then persists "paused" to the store so the
+// state survives a reload. Pausing a job with no live run still persists the
+// paused state.
 func (e *Engine) Pause(ctx context.Context, jobID string) error {
 	job, err := e.store.Load(jobID)
 	if err != nil {
@@ -170,12 +298,27 @@ func (e *Engine) Pause(ctx context.Context, jobID string) error {
 		return fmt.Errorf("job not in running state")
 	}
 
+	// Signal the live run first so workers stop ASAP, then persist. Setting
+	// the flag before the live run's own terminal Save means its Run loop
+	// observes paused == true and writes "paused" rather than "done".
+	if rs, ok := lookupRun(jobID); ok {
+		rs.paused.Store(true)
+		if rs.cancel != nil {
+			rs.cancel()
+		}
+	}
+
 	job.State = "paused"
-	e.store.Save(job)
+	if err := e.store.Save(job); err != nil {
+		return fmt.Errorf("saving paused state: %w", err)
+	}
 	return nil
 }
 
-// Resume resumes a paused sync job.
+// Resume resumes a paused sync job. The run is detached from the caller's
+// context inside Run (via context.WithoutCancel), so the caller may safely
+// pass a request-scoped context that gets cancelled when the HTTP handler
+// returns — the background run keeps going regardless.
 func (e *Engine) Resume(ctx context.Context, jobID string, srcDriver driver.Driver, dstDriver driver.Driver) error {
 	job, err := e.store.Load(jobID)
 	if err != nil {
@@ -191,8 +334,12 @@ func (e *Engine) Resume(ctx context.Context, jobID string, srcDriver driver.Driv
 	if job.Progress.StartedAt == nil {
 		job.Progress.StartedAt = &now
 	}
-	e.store.Save(job)
+	if err := e.store.Save(job); err != nil {
+		return fmt.Errorf("saving resumed state: %w", err)
+	}
 
+	// Run derives its own background run context and registers the live run;
+	// the caller's ctx does not gate the goroutine's lifetime.
 	go e.Run(ctx, job, srcDriver, dstDriver)
 	return nil
 }
