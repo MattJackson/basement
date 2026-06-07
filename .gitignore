@@ -53,6 +53,7 @@ data/
 /basement
 /basement-mcp
 /basement-server
+/basement-ui
 
 # `go test -c` / ad-hoc compiled test binaries dropped in the repo root
 /api.test
