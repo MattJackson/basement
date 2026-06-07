@@ -47,7 +47,7 @@ vi.mock("@/shared/hooks/useSkin", async (importOriginal) => {
   return {
     ...(actual as object),
     useSkinRegistry: () => ({ data: [] }),
-    useSkin: () => ({ skin: null, error: null, densityTokens: [], borderRadius: "", setSelectedSkin: vi.fn() }),
+    useSkin: () => ({ skin: null, error: null, densityTokens: [], borderRadius: "" }),
   };
 });
 

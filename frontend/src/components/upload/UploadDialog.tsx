@@ -3,6 +3,7 @@ import { X, Upload as UploadIcon, File as FileIcon, CheckCircle2, AlertCircle, L
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { API_BASE } from "@/shared/api/client";
 
 type FileUpload = {
   file: File;
@@ -27,7 +28,7 @@ type UploadDialogProps = {
 // uploadBaseFor builds the /user/regions/{regionId}/buckets/{bid} prefix
 // used by every signed-URL request out of this dialog.
 function uploadBaseFor(opts: { regionId: string; bid: string }): string {
-  return `/api/v1/user/regions/${encodeURIComponent(opts.regionId)}/buckets/${encodeURIComponent(opts.bid)}`;
+  return `${API_BASE}/user/regions/${encodeURIComponent(opts.regionId)}/buckets/${encodeURIComponent(opts.bid)}`;
 }
 
 // Per-part retry budget on a retryable (5xx/429) PUT status. Each retry
