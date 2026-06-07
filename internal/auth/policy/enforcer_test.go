@@ -481,6 +481,10 @@ func TestScopeMatches(t *testing.T) {
 		{"bucket:abc:*", "bucket:abc:lsi", true},
 		{"bucket:abc:lsi", "bucket:abc:lsi", true},
 		{"bucket:xyz:*", "bucket:abc:lsi", false},
+		// Prefix-confusion: "ab:*" must NOT match "abc:..." — the segment
+		// "ab" is not a prefix of the segment "abc"; matching is per-segment,
+		// not raw string-prefix.
+		{"bucket:ab:*", "bucket:abc:lsi", false},
 		{"cluster:abc", "bucket:abc:lsi", false},
 		{"cluster:abc", "cluster:xyz", false},
 		{"", "bucket:abc:lsi", false},

@@ -159,6 +159,44 @@ func TestClusterContentsWriteCapsClusterAdminOnly(t *testing.T) {
 	}
 }
 
+// TestCanClusterScopeFailClosedMatrix exhaustively walks every
+// cluster-scoped capability and asserts the fail-closed scope contract for
+// a cluster-admin:
+//   - empty clusterID  -> DENY (a route that resolves an empty cid must
+//     never collapse to an unscoped global grant)
+//   - matching cluster -> ALLOW
+//   - mismatched cluster -> DENY
+//
+// The one documented exception is checked separately: ui-admin holds
+// cluster.wiring.read platform-wide, so it ALLOWs even with an empty cid.
+func TestCanClusterScopeFailClosedMatrix(t *testing.T) {
+	clusterAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "cluster-admin", Cluster: "cluster-a"}}
+
+	// Every cluster-scoped capability is exactly the cluster-admin grant.
+	for _, cap := range roleCapabilities["cluster-admin"] {
+		if !IsClusterScopedCapability(cap) {
+			t.Errorf("%s should be cluster-scoped", cap)
+			continue
+		}
+		if Can(clusterAdmin, cap, "") {
+			t.Errorf("cluster-admin %s with empty clusterID must DENY (fail-closed)", cap)
+		}
+		if !Can(clusterAdmin, cap, "cluster-a") {
+			t.Errorf("cluster-admin %s on matching cluster-a must ALLOW", cap)
+		}
+		if Can(clusterAdmin, cap, "cluster-b") {
+			t.Errorf("cluster-admin %s on mismatched cluster-b must DENY", cap)
+		}
+	}
+
+	// Documented exception: ui-admin's cluster.wiring.read is a platform-wide
+	// grant, so an empty cid still ALLOWs (it is NOT cluster-admin contents).
+	uiAdmin := &Claims{ActiveRole: &ActiveRole{Kind: "ui-admin"}}
+	if !Can(uiAdmin, CapClusterWiringRead, "") {
+		t.Error("ui-admin cluster.wiring.read with empty cid must still ALLOW (documented exception)")
+	}
+}
+
 // TestPlatformReadCapsUIAdminOnly covers the Phase C platform read caps
 // added so the GET routes can gate without borrowing the write cap.
 func TestPlatformReadCapsUIAdminOnly(t *testing.T) {

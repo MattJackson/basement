@@ -11,10 +11,8 @@ import (
 type contextKey string
 
 const (
-	claimsKey    = contextKey("claims")
-	uiAdminKey   = contextKey("uiAdmin")
-	clusterAdmin = contextKey("clusterAdmin")
-	bucketGrant  = contextKey("bucketGrant")
+	claimsKey  = contextKey("claims")
+	uiAdminKey = contextKey("uiAdmin")
 )
 
 // Middleware returns an HTTP middleware that validates the session JWT
@@ -37,11 +35,6 @@ func FromContext(ctx context.Context) (*Claims, bool) {
 		return nil, false
 	}
 	return claims, true
-}
-
-// RequireUIAdmin returns an HTTP middleware that requires UI Admin status.
-func RequireUIAdmin() func(http.Handler) http.Handler {
-	return ActiveRoleUIAdminMiddleware()
 }
 
 // RequireRole returns an HTTP middleware that requires a specific role.

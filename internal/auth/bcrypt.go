@@ -2,8 +2,6 @@
 package auth
 
 import (
-	"errors"
-
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -23,6 +21,3 @@ func VerifyPassword(hash, plaintext string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(plaintext))
 	return err == nil
 }
-
-// ErrInvalidHash is returned by VerifyPassword when the stored hash is malformed.
-var ErrInvalidHash = errors.New("invalid hash")

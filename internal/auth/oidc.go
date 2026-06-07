@@ -31,6 +31,10 @@ type OIDCClaims struct {
 	Email    string
 	Name     string
 	Provider string
+	// EmailVerified mirrors the IdP id_token claim. Enforcement (e.g. gating
+	// new-account auto-provisioning on a verified email) is the provisioning
+	// caller's responsibility — see internal/api OIDC callback.
+	EmailVerified bool
 }
 
 // idTokenPayload is the raw JSON shape we decode standard claims from.
@@ -189,10 +193,11 @@ func (p *OIDCProvider) VerifyIDTokenWithAuthTime(ctx context.Context, rawIDToken
 	}
 
 	return &OIDCClaims{
-		Subject:  idToken.Subject,
-		Email:    payload.Email,
-		Name:     displayName,
-		Provider: idToken.Issuer,
+		Subject:       idToken.Subject,
+		Email:         payload.Email,
+		Name:          displayName,
+		Provider:      idToken.Issuer,
+		EmailVerified: payload.EmailVerified,
 	}, payload.AuthTime, nil
 }
 
@@ -236,10 +241,11 @@ func (p *OIDCProvider) VerifyIDTokenWithAllClaims(ctx context.Context, rawIDToke
 	}
 
 	return &OIDCClaims{
-		Subject:  idToken.Subject,
-		Email:    payload.Email,
-		Name:     displayName,
-		Provider: idToken.Issuer,
+		Subject:       idToken.Subject,
+		Email:         payload.Email,
+		Name:          displayName,
+		Provider:      idToken.Issuer,
+		EmailVerified: payload.EmailVerified,
 	}, all, nil
 }
 

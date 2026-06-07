@@ -347,7 +347,7 @@ func (e *fileEnforcer) CanWithReason(userID, capability, scope string) (bool, []
 		})
 		if matchingExpr == capability {
 			steps = append(steps, ReasoningStep{
-				Step: "capability granted",
+				Step:   "capability granted",
 				Detail: fmt.Sprintf("role %q lists %s directly", a.RoleID, capability),
 			})
 		} else {
@@ -468,9 +468,9 @@ func (e *fileEnforcer) UpsertRole(r Role) error {
 			// Preserve Seed flag from the existing record — caller can't
 			// promote nor demote seed status via UpsertRole.
 			r.Seed = existing.Seed
-// Preserve Deprecated flag too — once a role is sunsetted, an operator
-		// editing its label or capabilities can't accidentally un-deprecate it.
-		// Removing the deprecation is a code change, not a UI action.
+			// Preserve Deprecated flag too — once a role is sunsetted, an operator
+			// editing its label or capabilities can't accidentally un-deprecate it.
+			// Removing the deprecation is a code change, not a UI action.
 			r.Deprecated = existing.Deprecated
 			e.roles[i] = r
 			return e.saveLocked()

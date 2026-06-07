@@ -23,7 +23,8 @@ var ErrInvalidAlgorithm = errors.New("unsupported algorithm")
 // "user". ModeExpiresAt is a unix seconds timestamp; 0 means the mode
 // never expires (USER default). Tokens issued before v1.2.0a omit both
 // fields — the policy gate treats those as ADMIN mode for a 7-day grace
-// window so matthew's existing session keeps working across the deploy.
+// window so existing admin sessions keep working across the deploy. The
+// grace logic lives in policy_gates.currentMode.
 // See policy_gates.currentMode + ADR-0003 "Backwards compatibility".
 //
 // ServiceAccountID (v1.7.0b): populated by the bearer-auth middleware
@@ -39,14 +40,15 @@ var ErrInvalidAlgorithm = errors.New("unsupported algorithm")
 //   - {"kind":"user"}              — every authenticated user
 //   - {"kind":"cluster-admin","cluster":"<cid>"} — cluster admin grant
 //   - {"kind":"ui-admin"}          — only if user.uiAdmin==true
+//
 // Persisted in session cookie + returned on /auth/me alongside availableRoles.
 type Claims struct {
-	UserID           string    `json:"userId"`
-	Role             string    `json:"role"`
-	UIAdmin          bool      `json:"uiAdmin"`
-	Mode             string    `json:"mode,omitempty"`
-	ModeExpiresAt    int64     `json:"mext,omitempty"`
-	ServiceAccountID string    `json:"-"`
+	UserID           string      `json:"userId"`
+	Role             string      `json:"role"`
+	UIAdmin          bool        `json:"uiAdmin"`
+	Mode             string      `json:"mode,omitempty"`
+	ModeExpiresAt    int64       `json:"mext,omitempty"`
+	ServiceAccountID string      `json:"-"`
 	ActiveRole       *ActiveRole `json:"activeRole,omitempty"`
 	*jwt.RegisteredClaims
 }
@@ -54,8 +56,8 @@ type Claims struct {
 // ActiveRole represents the user's currently active role.
 // One of three kinds: "user" (always available), "cluster-admin" (per cluster grant), or "ui-admin" (if uiAdmin==true).
 type ActiveRole struct {
-	Kind     string `json:"kind"`
-	Cluster  string `json:"cluster,omitempty"` // only populated when Kind=="cluster-admin"
+	Kind    string `json:"kind"`
+	Cluster string `json:"cluster,omitempty"` // only populated when Kind=="cluster-admin"
 }
 
 // RoleKey returns a stable string key for the active role, used in FE radio buttons.
@@ -119,12 +121,12 @@ func IssueTokenWithActiveRole(secret []byte, userID, role string, uiAdmin bool, 
 		activeRole = &ActiveRole{Kind: "user"}
 	}
 	claims := &Claims{
-		UserID:       userID,
-		Role:         role,
-		UIAdmin:      uiAdmin,
-		Mode:         mode,
+		UserID:        userID,
+		Role:          role,
+		UIAdmin:       uiAdmin,
+		Mode:          mode,
 		ModeExpiresAt: modeExpiresAtUnix,
-		ActiveRole:   activeRole,
+		ActiveRole:    activeRole,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(nowFunc().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(nowFunc()),
