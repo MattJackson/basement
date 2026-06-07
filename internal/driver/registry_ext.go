@@ -286,6 +286,16 @@ func (r *Registry) ForUserRegion(_ context.Context, endpoint, accessKeyID, secre
 			// Legacy aliases the garage_v1 S3 path may consult.
 			"s3_access_key": accessKeyID,
 			"s3_secret_key": secretKey,
+			// SSRF guard (security/audit r11): the endpoint here is
+			// USER-supplied (a UserRegion the caller stored), so the S3
+			// client must refuse to dial loopback / private / link-local /
+			// 169.254.169.254-metadata addresses. The garage_v1 driver reads
+			// this marker and routes through driver.BuildUserRegionS3Client,
+			// whose dialer Control hook reuses webhook.SSRFSafeDialControl —
+			// the same DNS-rebind-safe policy the webhook engine enforces.
+			// Admin/cluster-tier drivers never set this and keep the
+			// unguarded client (they legitimately reach internal backends).
+			"ssrf_guard": "user-region",
 		}
 		drv, err = Open("garage-v1", cfg)
 	}

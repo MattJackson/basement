@@ -57,7 +57,21 @@ func newS3Client(ctx context.Context, cfg map[string]string) (*s3Client, error) 
 	// user-region tier where the underlying backend may be MinIO / AWS
 	// reached via wildcard DNS at the operator's endpoint host.
 	addressingStyle := cfg["addressing_style"]
-	client, err := driverpkg.BuildS3Client(ctx, endpoint, accessKey, secretKey, region, addressingStyle)
+
+	// SSRF guard (security/audit r11): when this driver is built for the
+	// user-region tier (driver.Registry.ForUserRegion sets
+	// cfg["ssrf_guard"]="user-region"), the endpoint is USER-supplied, so
+	// every dial must be blocked from reaching loopback / private / link-
+	// local (incl. 169.254.169.254 metadata) addresses. Admin/cluster-tier
+	// builds leave the marker unset and keep the unguarded client (they
+	// legitimately reach internal backends).
+	var client *s3.Client
+	var err error
+	if cfg["ssrf_guard"] == "user-region" {
+		client, err = driverpkg.BuildUserRegionS3Client(ctx, endpoint, accessKey, secretKey, region, addressingStyle)
+	} else {
+		client, err = driverpkg.BuildS3Client(ctx, endpoint, accessKey, secretKey, region, addressingStyle)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create S3 client for endpoint %q: %w", endpoint, err)
 	}

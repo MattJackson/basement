@@ -13,9 +13,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"syscall"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -132,16 +132,44 @@ var DefaultBackoff = []time.Duration{
 	15 * time.Second,
 }
 
-// NewEngine constructs an unstarted Engine. Passing nil for audit
-// installs a noop logger so callers that don't wire audit still get a
-// working engine; production main.go always passes the real FileLogger.
-// blockedWebhookIP reports whether ip is in a range a user-defined webhook
+// BlockedIP reports whether ip is in a range a user-supplied outbound
 // target must never reach (SSRF guard): loopback, private (RFC-1918/ULA),
 // link-local (incl. 169.254.169.254 cloud metadata), unspecified, multicast.
-func blockedWebhookIP(ip net.IP) bool {
+//
+// This is the single source of truth for basement's server-side SSRF
+// policy. It is exported so other subsystems that dial user-supplied
+// endpoints (e.g. internal/driver's user-region S3 path) enforce the
+// IDENTICAL classification rather than re-deriving it and drifting.
+func BlockedIP(ip net.IP) bool {
 	return ip == nil || ip.IsLoopback() || ip.IsPrivate() ||
 		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsUnspecified() || ip.IsMulticast()
+}
+
+// blockedWebhookIP is retained as the webhook-internal name (still used by
+// the package's own tests). It delegates to the shared BlockedIP so the
+// classification can never diverge.
+func blockedWebhookIP(ip net.IP) bool { return BlockedIP(ip) }
+
+// SSRFSafeDialControl returns a net.Dialer.Control hook that refuses to
+// connect to any non-public address (per BlockedIP). The hook runs AFTER
+// DNS resolution with the actual IP about to be dialed, so it is
+// DNS-rebind-safe: a hostname that resolved to a public IP at validation
+// time but an internal IP at connect time is still refused.
+//
+// label is prefixed to the error so the caller's subsystem is identifiable
+// in logs/responses (e.g. "webhook", "region").
+func SSRFSafeDialControl(label string) func(network, address string, c syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if BlockedIP(net.ParseIP(host)) {
+			return fmt.Errorf("%s: refusing to connect to non-public address %s", label, address)
+		}
+		return nil
+	}
 }
 
 // newSafeWebhookClient builds the outbound webhook HTTP client with an SSRF
@@ -153,16 +181,7 @@ func blockedWebhookIP(ip net.IP) bool {
 func newSafeWebhookClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
-		Control: func(_, address string, _ syscall.RawConn) error {
-			host, _, err := net.SplitHostPort(address)
-			if err != nil {
-				return err
-			}
-			if blockedWebhookIP(net.ParseIP(host)) {
-				return fmt.Errorf("webhook: refusing to connect to non-public address %s", address)
-			}
-			return nil
-		},
+		Control: SSRFSafeDialControl("webhook"),
 	}
 	return &http.Client{
 		Timeout: timeout,
@@ -180,6 +199,9 @@ func newSafeWebhookClient(timeout time.Duration) *http.Client {
 	}
 }
 
+// NewEngine constructs an unstarted Engine. Passing nil for audit
+// installs a noop logger so callers that don't wire audit still get a
+// working engine; production main.go always passes the real FileLogger.
 func NewEngine(store Store, audit audit.Logger, logger *slog.Logger) *Engine {
 	if audit == nil {
 		audit = noopAudit{}

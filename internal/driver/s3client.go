@@ -2,15 +2,20 @@ package driver
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+
+	"github.com/mattjackson/basement/internal/webhook"
 )
 
 // AddressingStylePath / AddressingStyleVirtualHost are the canonical
@@ -57,6 +62,17 @@ const (
 // usage). When region is empty it defaults to "us-east-1" — Garage and
 // MinIO ignore region but the SDK refuses to load a config without one.
 func NewS3PathStyleClient(ctx context.Context, endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
+	return newS3PathStyleClient(ctx, endpoint, accessKey, secretKey, region, nil)
+}
+
+// newS3PathStyleClient is the implementation behind NewS3PathStyleClient with
+// an optional httpClient. When httpClient is non-nil it is installed via
+// config.WithHTTPClient so an SSRF-guarded transport (see
+// userRegionSSRFClient) governs every dial the SDK makes for this client —
+// including SDK-internal retries and the dial that backs presigned-URL
+// signing. nil preserves the SDK's default transport (the app's own /
+// admin-curated backends, which legitimately use internal addresses).
+func newS3PathStyleClient(ctx context.Context, endpoint, accessKey, secretKey, region string, httpClient *http.Client) (*s3.Client, error) {
 	if accessKey == "" {
 		return nil, fmt.Errorf("NewS3PathStyleClient: empty accessKey")
 	}
@@ -74,6 +90,10 @@ func NewS3PathStyleClient(ctx context.Context, endpoint, accessKey, secretKey, r
 			"", // no token for static creds
 		)),
 		config.WithRegion(region),
+	}
+
+	if httpClient != nil {
+		opts = append(opts, config.WithHTTPClient(httpClient))
 	}
 
 	if endpoint != "" {
@@ -113,6 +133,13 @@ func NewS3PathStyleClient(ctx context.Context, endpoint, accessKey, secretKey, r
 // the caller should fall back to path-style regardless of this
 // constructor — see BuildS3Client.
 func NewS3VirtualHostClient(ctx context.Context, endpoint, accessKey, secretKey, region string) (*s3.Client, error) {
+	return newS3VirtualHostClient(ctx, endpoint, accessKey, secretKey, region, nil)
+}
+
+// newS3VirtualHostClient is the implementation behind NewS3VirtualHostClient
+// with an optional SSRF-guarded httpClient (see newS3PathStyleClient for the
+// rationale).
+func newS3VirtualHostClient(ctx context.Context, endpoint, accessKey, secretKey, region string, httpClient *http.Client) (*s3.Client, error) {
 	if accessKey == "" {
 		return nil, fmt.Errorf("NewS3VirtualHostClient: empty accessKey")
 	}
@@ -130,6 +157,10 @@ func NewS3VirtualHostClient(ctx context.Context, endpoint, accessKey, secretKey,
 			"", // no token for static creds
 		)),
 		config.WithRegion(region),
+	}
+
+	if httpClient != nil {
+		opts = append(opts, config.WithHTTPClient(httpClient))
 	}
 
 	if endpoint != "" {
@@ -195,8 +226,53 @@ func EndpointHostIsIP(endpoint string) bool {
 //     a future "auto" or "global_endpoint" toggle can extend this here
 //     without touching every call site)
 func BuildS3Client(ctx context.Context, endpoint, accessKey, secretKey, region, addressingStyle string) (*s3.Client, error) {
+	return buildS3Client(ctx, endpoint, accessKey, secretKey, region, addressingStyle, nil)
+}
+
+// BuildUserRegionS3Client is the SSRF-guarded sibling of BuildS3Client, for
+// the ONLY caller path that dials an endpoint a *user* supplied: the
+// /api/v1/user/regions/* tier (driver.Registry.ForUserRegion). It is
+// identical to BuildS3Client except every dial the SDK performs is routed
+// through an HTTP client whose net.Dialer.Control hook refuses non-public
+// addresses (loopback / RFC-1918 / ULA / link-local incl. 169.254.169.254
+// cloud metadata / unspecified / multicast).
+//
+// The guard runs AFTER DNS resolution, so it is DNS-rebind-safe: a hostname
+// that resolves to a public IP at create-time validation but an internal IP
+// at request time is still refused at connect. This mirrors the webhook
+// engine's accepted SSRF decision and reuses its exact classification via
+// webhook.SSRFSafeDialControl / webhook.BlockedIP — the app's own / admin-
+// curated backends deliberately do NOT use this path (they legitimately
+// reach internal addresses) and go through BuildS3Client instead.
+func BuildUserRegionS3Client(ctx context.Context, endpoint, accessKey, secretKey, region, addressingStyle string) (*s3.Client, error) {
+	return buildS3Client(ctx, endpoint, accessKey, secretKey, region, addressingStyle, userRegionSSRFClient())
+}
+
+func buildS3Client(ctx context.Context, endpoint, accessKey, secretKey, region, addressingStyle string, httpClient *http.Client) (*s3.Client, error) {
 	if addressingStyle == AddressingStyleVirtualHost && !EndpointHostIsIP(endpoint) {
-		return NewS3VirtualHostClient(ctx, endpoint, accessKey, secretKey, region)
+		return newS3VirtualHostClient(ctx, endpoint, accessKey, secretKey, region, httpClient)
 	}
-	return NewS3PathStyleClient(ctx, endpoint, accessKey, secretKey, region)
+	return newS3PathStyleClient(ctx, endpoint, accessKey, secretKey, region, httpClient)
+}
+
+// userRegionSSRFClient builds the HTTP client used for user-region S3 dials.
+// The net.Dialer.Control hook is shared with the webhook engine
+// (webhook.SSRFSafeDialControl) so the two outbound user-supplied-endpoint
+// surfaces enforce one identical SSRF policy and can never drift.
+func userRegionSSRFClient() *http.Client {
+	dialer := &net.Dialer{
+		Timeout: 10 * time.Second,
+		Control: webhook.SSRFSafeDialControl("region"),
+	}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext:           dialer.DialContext,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+			MaxIdleConns:          10,
+			IdleConnTimeout:       30 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
 }
