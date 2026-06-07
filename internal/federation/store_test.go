@@ -3,6 +3,7 @@ package federation
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -264,6 +265,144 @@ func TestFederatedBuckets_Delete(t *testing.T) {
 	}
 	if err := store.Delete(ctx, created.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound on second Delete, got %v", err)
+	}
+}
+
+// breakStorePath points the fileStore at a path whose parent directory
+// does not exist, so the next writeLocked() (tmp WriteFile) fails. Used
+// by the rollback tests to inject a disk-write failure mid-operation.
+// Returns a restore func to repair the path for later assertions.
+func breakStorePath(t *testing.T, store FederatedBuckets) (restore func()) {
+	t.Helper()
+	fs, ok := store.(*fileStore)
+	if !ok {
+		t.Fatalf("expected *fileStore, got %T", store)
+	}
+	good := fs.path
+	fs.path = filepath.Join(good, "nonexistent-dir", "federated_buckets.json")
+	return func() { fs.path = good }
+}
+
+// TestFederatedBuckets_Update_RollsBackOnWriteFailure: when writeLocked
+// fails, Update must leave the in-memory record matching disk (the old
+// value) — parity with Create's rollback.
+func TestFederatedBuckets_Update_RollsBackOnWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, newFed("matthew", "lsi",
+		ReplicaTarget{RegionID: "region-b2", Bucket: "lsi-b2"},
+	))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	restore := breakStorePath(t, store)
+	patch := FederatedBucket{
+		Name:     "renamed",
+		Primary:  ReplicaTarget{RegionID: "region-primary", Bucket: "photos"},
+		Replicas: []ReplicaTarget{{RegionID: "region-w", Bucket: "lsi-w"}},
+		Policy:   DefaultPolicy(),
+	}
+	if _, err := store.Update(ctx, created.ID, patch); err == nil {
+		t.Fatalf("expected Update to fail on broken write path")
+	}
+	restore()
+
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get after failed Update: %v", err)
+	}
+	if got.Name != "lsi" {
+		t.Fatalf("Update was not rolled back: Name=%q want %q", got.Name, "lsi")
+	}
+	if len(got.Replicas) != 1 || got.Replicas[0].Bucket != "lsi-b2" {
+		t.Fatalf("Update replicas not rolled back: %+v", got.Replicas)
+	}
+}
+
+// TestFederatedBuckets_Delete_RollsBackOnWriteFailure: when writeLocked
+// fails, the deleted row must be restored in memory so a process
+// restart (which re-reads disk) does not resurrect a "gone" record.
+func TestFederatedBuckets_Delete_RollsBackOnWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, newFed("matthew", "keepme",
+		ReplicaTarget{RegionID: "region-b2", Bucket: "lsi-b2"},
+	))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	restore := breakStorePath(t, store)
+	if err := store.Delete(ctx, created.ID); err == nil {
+		t.Fatalf("expected Delete to fail on broken write path")
+	}
+	restore()
+
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Delete was not rolled back; expected record to survive, got %v", err)
+	}
+	if got.Name != "keepme" || len(got.Replicas) != 1 {
+		t.Fatalf("Delete rollback restored a corrupt record: %+v", got)
+	}
+}
+
+// TestFederatedBuckets_UpdateReplicaHealth_RollsBackOnWriteFailure: when
+// writeLocked fails, the replica's health fields (which are mutated in
+// place on the shared backing array) must be restored to their prior
+// values so in-memory state matches disk.
+func TestFederatedBuckets_UpdateReplicaHealth_RollsBackOnWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	ctx := context.Background()
+
+	created, err := store.Create(ctx, newFed("matthew", "lsi",
+		ReplicaTarget{RegionID: "region-b2", Bucket: "lsi-b2"},
+	))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Seed an initial health value via a successful update.
+	firstSync := time.Now().UTC().Truncate(time.Second)
+	if err := store.UpdateReplicaHealth(ctx, created.ID, "region-b2", "lsi-b2", ReplicaTarget{
+		LastSync: firstSync, Health: HealthInSync, LagBytes: 0, LagObjects: 0,
+	}); err != nil {
+		t.Fatalf("seed UpdateReplicaHealth: %v", err)
+	}
+
+	restore := breakStorePath(t, store)
+	if err := store.UpdateReplicaHealth(ctx, created.ID, "region-b2", "lsi-b2", ReplicaTarget{
+		LastSync: firstSync.Add(time.Hour), Health: HealthBroken, LagBytes: 999, LagObjects: 7,
+	}); err == nil {
+		t.Fatalf("expected UpdateReplicaHealth to fail on broken write path")
+	}
+	restore()
+
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get after failed UpdateReplicaHealth: %v", err)
+	}
+	if len(got.Replicas) != 1 {
+		t.Fatalf("unexpected replica count: %+v", got.Replicas)
+	}
+	r := got.Replicas[0]
+	if r.Health != HealthInSync || r.LagBytes != 0 || r.LagObjects != 0 || !r.LastSync.Equal(firstSync) {
+		t.Fatalf("UpdateReplicaHealth was not rolled back: %+v", r)
 	}
 }
 

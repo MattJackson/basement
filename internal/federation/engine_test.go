@@ -1840,6 +1840,89 @@ func TestFederationEngine_ReplicateTimesOut(t *testing.T) {
 	}
 }
 
+// TestEngine_EventDrivenReplicateTimesOut: the event-driven path
+// (handleEventTask) must wrap each object op in the same per-object
+// timeout the polling path uses. When the replica's PutObjectStream
+// wedges forever, the timeout cancels it and the event worker does NOT
+// stay blocked — so Stop() returns promptly instead of hanging until
+// its grace period (the inflight WaitGroup must drain).
+//
+// Without the fix the wedged PUT runs under the raw event-worker ctx
+// with no deadline: the inflight Add(1) never sees a matching Done, and
+// Stop blocks on inflight.Wait until the grace timer fires.
+func TestEngine_EventDrivenReplicateTimesOut(t *testing.T) {
+	e, st, res, _ := newTestEngine(t)
+	// 1h tick → no polling interference; the event path is the only one
+	// that touches the replica during the test.
+	e.SetTickInterval(1 * time.Hour)
+	// Tight per-object timeout so the wedged PUT is cancelled quickly.
+	e.SetObjectReplicateTimeout(100 * time.Millisecond)
+	// Generous grace so a regression (Stop hanging on inflight) shows up
+	// as a slow Stop rather than being masked by a tiny grace window.
+	e.SetStopGracePeriod(5 * time.Second)
+	ctx := context.Background()
+
+	primary := newFakeDriver("primary")
+	wedged := newWedgedDriver("replica")
+	res.set("region-primary", primary)
+	res.set("region-replica", wedged)
+
+	// Primary starts EMPTY so the boot tick replicates nothing — the
+	// wedge is entered only via the event-driven path below.
+	fb, err := st.Create(ctx, FederatedBucket{
+		OwnerUserID: "matthew",
+		Name:        "fed",
+		Primary:     ReplicaTarget{RegionID: "region-primary", Bucket: "p-bucket"},
+		Replicas:    []ReplicaTarget{{RegionID: "region-replica", Bucket: "r-bucket"}},
+		Policy:      DefaultPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	we := newWebhookEngine(t)
+	e.Start(ctx)
+	e.SubscribeToEvents(we)
+
+	// Seed a new primary object + emit a create event. The event-driven
+	// PutObjectStream enters the wedge.
+	primary.seed("p-bucket", "wedge.txt", []byte("wedge body"), time.Now().UTC())
+	we.Emit(webhook.EventEnvelope{
+		Type:     webhook.EventObjectCreated,
+		RegionID: "region-primary",
+		Bucket:   "p-bucket",
+		Key:      "wedge.txt",
+		Size:     int64(len("wedge body")),
+	})
+
+	// The wedged PUT must be entered (proves the event path reached the
+	// replicate) and then cancelled by the per-object timeout.
+	waitFor(t, 2*time.Second, func() bool { return wedged.putStarted.Load() >= 1 })
+	waitFor(t, 2*time.Second, func() bool { return wedged.putCancelled.Load() >= 1 })
+
+	// Stop must return promptly: the per-object timeout released the
+	// event worker, so the inflight WaitGroup drains well before the 5s
+	// grace period. A regression makes this block ~5s.
+	stopDone := make(chan struct{})
+	start := time.Now()
+	go func() {
+		e.Stop()
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+	case <-time.After(3 * time.Second):
+		t.Fatalf("Stop did not return within 3s — event-task inflight never drained (missing per-object timeout)")
+	}
+	if elapsed := time.Since(start); elapsed > 2500*time.Millisecond {
+		t.Fatalf("Stop took %v, expected prompt return well under the 5s grace period", elapsed)
+	}
+
+	if fb.ID == "" {
+		t.Fatalf("federation id should not be empty after Create")
+	}
+}
+
 // TestFederationEngine_TickContinuesAfterStuckBatch: when the boot
 // tick wedges on a slow replicate, the per-tick deadline expires and
 // the per-federation goroutine returns to the for-select to consume

@@ -205,8 +205,13 @@ func (fs *fileStore) Update(_ context.Context, id string, patch FederatedBucket)
 	}
 	cur.Policy = patch.Policy
 	cur.UpdatedAt = time.Now().UTC()
+	// Snapshot the prior record so a write failure leaves in-memory state
+	// matching disk (parity with Create's rollback). cur holds a freshly
+	// allocated Replicas slice, so restoring old does not alias it.
+	old := fs.rows[id]
 	fs.rows[id] = cur
 	if err := fs.writeLocked(); err != nil {
+		fs.rows[id] = old
 		return FederatedBucket{}, err
 	}
 	return cloneFederatedBucket(cur), nil
@@ -215,11 +220,17 @@ func (fs *fileStore) Update(_ context.Context, id string, patch FederatedBucket)
 func (fs *fileStore) Delete(_ context.Context, id string) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	if _, ok := fs.rows[id]; !ok {
+	old, ok := fs.rows[id]
+	if !ok {
 		return ErrNotFound
 	}
 	delete(fs.rows, id)
-	return fs.writeLocked()
+	if err := fs.writeLocked(); err != nil {
+		// Restore so in-memory state matches disk (parity with Create).
+		fs.rows[id] = old
+		return err
+	}
+	return nil
 }
 
 func (fs *fileStore) ListForUser(_ context.Context, userID string) ([]FederatedBucket, error) {
@@ -318,13 +329,32 @@ func (fs *fileStore) UpdateReplicaHealth(_ context.Context, fbID, regionID, buck
 		if r.RegionID != regionID || r.Bucket != bucket {
 			continue
 		}
+		// Snapshot the fields we mutate (and UpdatedAt) so a write
+		// failure can be rolled back in place — cur.Replicas aliases the
+		// stored backing array, so we cannot simply reassign fs.rows.
+		// This gives parity with Create's rollback-on-save-failure.
+		prevLastSync := r.LastSync
+		prevHealth := r.Health
+		prevLagBytes := r.LagBytes
+		prevLagObjects := r.LagObjects
+		prevUpdatedAt := cur.UpdatedAt
+
 		r.LastSync = health.LastSync
 		r.Health = health.Health
 		r.LagBytes = health.LagBytes
 		r.LagObjects = health.LagObjects
 		cur.UpdatedAt = time.Now().UTC()
 		fs.rows[fbID] = cur
-		return fs.writeLocked()
+		if err := fs.writeLocked(); err != nil {
+			r.LastSync = prevLastSync
+			r.Health = prevHealth
+			r.LagBytes = prevLagBytes
+			r.LagObjects = prevLagObjects
+			cur.UpdatedAt = prevUpdatedAt
+			fs.rows[fbID] = cur
+			return err
+		}
+		return nil
 	}
 	return ErrNotFound
 }

@@ -1505,9 +1505,19 @@ func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
 	e.inflight.Add(1)
 	defer e.inflight.Done()
 
+	// Per-object timeout, mirroring the polling path (replicateBatch).
+	// Without it a wedged backend blocks this event worker goroutine
+	// indefinitely — draining the per-federation event channel and, more
+	// importantly, holding the inflight WaitGroup open so Stop() hangs
+	// until its grace period elapses. Drivers that honour ctx return
+	// promptly on deadline; drivers that ignore ctx are abandoned by
+	// Stop's grace period exactly as in replicateBatch.
+	objCtx, objCancel := context.WithTimeout(ctx, e.objectReplicateTimeout)
+	defer objCancel()
+
 	var opErr error
 	if task.isDelete {
-		opErr = replicaDrv.DeleteObject(ctx, task.target.Bucket, task.singleKey)
+		opErr = replicaDrv.DeleteObject(objCtx, task.target.Bucket, task.singleKey)
 		if opErr != nil {
 			e.audit.Log(audit.Event{
 				Actor:    fb.OwnerUserID,
@@ -1527,7 +1537,7 @@ func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
 		}
 	} else {
 		entry := diffEntry{key: task.singleKey, size: task.singleSize}
-		opErr = e.replicateOne(ctx, fb, task.target, primaryDrv, replicaDrv, entry)
+		opErr = e.replicateOne(objCtx, fb, task.target, primaryDrv, replicaDrv, entry)
 		if opErr != nil {
 			e.audit.Log(audit.Event{
 				Actor:    fb.OwnerUserID,
@@ -1584,23 +1594,23 @@ func (e *Engine) handleEventTask(ctx context.Context, task eventTask) {
 //
 // Decision tree:
 //   - replicatedThisTick > 0           → InSync (or Lagging w/ pending);
-//                                        bump LastSync to now.
+//     bump LastSync to now.
 //   - empty diff, scanned == 0         → source bucket is empty;
-//                                        genuinely InSync, bump LastSync.
+//     genuinely InSync, bump LastSync.
 //   - empty diff, headed == scanned    → every source object was HEAD'd
-//                                        and matched; genuinely InSync,
-//                                        bump LastSync.
+//     and matched; genuinely InSync,
+//     bump LastSync.
 //   - empty diff, headed  < scanned    → we trusted the LastSync filter
-//                                        for some objects; if LastSync
-//                                        was already set this is the
-//                                        normal steady-state path — bump
-//                                        LastSync, InSync. If LastSync
-//                                        was zero this is impossible
-//                                        (the filter never triggers when
-//                                        LastSync.IsZero()).
+//     for some objects; if LastSync
+//     was already set this is the
+//     normal steady-state path — bump
+//     LastSync, InSync. If LastSync
+//     was zero this is impossible
+//     (the filter never triggers when
+//     LastSync.IsZero()).
 //   - empty diff, truncated            → we stopped paginating; cannot
-//                                        confidently claim full sync.
-//                                        Bump LastSync, leave Lagging.
+//     confidently claim full sync.
+//     Bump LastSync, leave Lagging.
 func (e *Engine) recordSuccess(ctx context.Context, fb FederatedBucket, replica ReplicaTarget, replicatedThisTick, pendingObjects, pendingBytes int64, dr diffResult) {
 	e.resetFailureCount(fb.ID, replica)
 
@@ -1863,9 +1873,9 @@ func (e *Engine) probePrimary(ctx context.Context, fb FederatedBucket) bool {
 
 // pickHealthiestReplica returns the replica that's the best candidate
 // for promotion. Selection rule (per cycle spec):
-//   1. Lowest LagSec (where LagSec is now-LastSync; zero LastSync sorts
-//      last because we have no proof the replica's caught up)
-//   2. Tie-broken alphabetically by (RegionID, Bucket) for determinism
+//  1. Lowest LagSec (where LagSec is now-LastSync; zero LastSync sorts
+//     last because we have no proof the replica's caught up)
+//  2. Tie-broken alphabetically by (RegionID, Bucket) for determinism
 //
 // A replica with Health=broken is excluded — that's a known-bad target.
 // Returns (zero, false) when no healthy replica is available.
@@ -2129,8 +2139,8 @@ func computeHealth(lastSync, now time.Time, lagAlertSec, failureCount int) strin
 // for the v1.6 cycle).
 type noopAudit struct{}
 
-func (noopAudit) Log(audit.Event)                                                       {}
-func (noopAudit) Query(_, _ time.Time, _ audit.QueryFilter) ([]audit.Event, error)      { return nil, nil }
+func (noopAudit) Log(audit.Event)                                                  {}
+func (noopAudit) Query(_, _ time.Time, _ audit.QueryFilter) ([]audit.Event, error) { return nil, nil }
 func (noopAudit) QueryWithTotal(_, _ time.Time, _ audit.QueryFilter) ([]audit.Event, int, error) {
 	return nil, 0, nil
 }
