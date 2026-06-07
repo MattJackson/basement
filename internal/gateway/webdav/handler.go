@@ -84,10 +84,27 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Upload size guard (data-plane OOM defence). The PUT path buffers
+	// the whole body in process memory before flushing to the backend,
+	// so cap it. When the client declares an oversized Content-Length we
+	// reject up front with a clean 413 (and audit it). For a missing or
+	// lying Content-Length we still wrap the body with MaxBytesReader so
+	// the in-memory buffer can never exceed the cap — that path surfaces
+	// as the upstream handler's write-error status, but heap stays
+	// bounded either way.
+	if r.Method == http.MethodPut && g.maxUploadBytes > 0 {
+		if r.ContentLength > g.maxUploadBytes {
+			http.Error(w, "upload exceeds maximum allowed size", http.StatusRequestEntityTooLarge)
+			g.auditDispatch(r, uctx, http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, g.maxUploadBytes)
+	}
+
 	// Build a per-request fs scoped to the resolved UserContext. The
 	// fs caches lookups within a single request; never reused across
 	// requests.
-	fsys := newFS(r.Context(), uctx.UserContext, g.backend)
+	fsys := newFS(r.Context(), uctx.UserContext, g.backend, g.maxUploadBytes)
 
 	wdh := &wdav.Handler{
 		Prefix:     g.prefix,

@@ -41,6 +41,18 @@ import (
 	"github.com/mattjackson/basement/internal/gateway"
 )
 
+// DefaultMaxUploadBytes is the default ceiling on a single WebDAV PUT
+// body. The PUT path buffers the entire upload in process memory
+// before flushing it to the backend (see writeFile in fs.go), so an
+// unbounded body is an OOM / DoS vector on the tenant-facing data
+// plane. 1 GiB is a deliberately conservative default: large enough
+// for ordinary file uploads, small enough that a handful of
+// concurrent maximal PUTs won't exhaust a typical server's heap.
+// Operators who need larger objects can raise the cap via
+// Deps.MaxUploadBytes; true streaming (io.Pipe into PutObjectStream)
+// is tracked as a separate enhancement.
+const DefaultMaxUploadBytes int64 = 1 << 30 // 1 GiB
+
 // Gateway is the WebDAV protocol handler. Implements
 // gateway.Gateway + http.Handler so the registry can hand it back to
 // the chi router under the /webdav/ prefix.
@@ -53,6 +65,10 @@ type Gateway struct {
 	auth   *authResolver
 	locks  wdav.LockSystem
 	prefix string
+
+	// maxUploadBytes caps a single PUT body. Zero is never stored —
+	// New defaults it to DefaultMaxUploadBytes.
+	maxUploadBytes int64
 
 	// stats is a thin runtime counter the /admin/gateways endpoint
 	// surfaces. We keep it on the gateway, not the registry, so
@@ -84,6 +100,11 @@ type Deps struct {
 	OrgCaps OrgCapsLookup
 	Audit   audit.Logger
 	Logger  *slog.Logger
+
+	// MaxUploadBytes overrides the per-PUT body ceiling. Zero (the
+	// zero value) selects DefaultMaxUploadBytes; a negative value
+	// also falls back to the default rather than disabling the cap.
+	MaxUploadBytes int64
 }
 
 // OrgCapsLookup is the narrow read interface the gateway uses to
@@ -103,14 +124,19 @@ func New(deps Deps) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	maxUpload := deps.MaxUploadBytes
+	if maxUpload <= 0 {
+		maxUpload = DefaultMaxUploadBytes
+	}
 	g := &Gateway{
-		backend: deps.Backend,
-		orgCaps: deps.OrgCaps,
-		audit:   deps.Audit,
-		logger:  logger,
-		locks:   wdav.NewMemLS(),
-		prefix:  "/webdav",
-		stats:   &runtimeStats{},
+		backend:        deps.Backend,
+		orgCaps:        deps.OrgCaps,
+		audit:          deps.Audit,
+		logger:         logger,
+		locks:          wdav.NewMemLS(),
+		prefix:         "/webdav",
+		stats:          &runtimeStats{},
+		maxUploadBytes: maxUpload,
 	}
 	g.auth = &authResolver{backend: deps.Backend}
 	return g

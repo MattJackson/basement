@@ -41,8 +41,8 @@ type fakeBackend struct {
 	saSecret string
 	saOwner  string
 
-	regions map[string][]gateway.Region                // userID → regions
-	objects map[string]map[string]map[string][]byte    // regionID → bucket → key → body
+	regions map[string][]gateway.Region             // userID → regions
+	objects map[string]map[string]map[string][]byte // regionID → bucket → key → body
 }
 
 func newFakeBackend() *fakeBackend {
@@ -500,6 +500,78 @@ func TestPutThenPropfindShowsObject(t *testing.T) {
 	}
 	if !strings.Contains(pf.Body.String(), "note.txt") {
 		t.Errorf("PROPFIND missing put object: %s", pf.Body.String())
+	}
+}
+
+// buildGatewayWithCap mirrors buildGateway but sets an explicit
+// MaxUploadBytes so the PUT size-cap path can be exercised.
+func buildGatewayWithCap(t *testing.T, cap int64) (*Gateway, *fakeBackend) {
+	t.Helper()
+	be := newFakeBackend()
+	be.addUser("alice", "alicepw")
+	be.addRegion("alice", gateway.Region{
+		ID:          "region-1",
+		Alias:       "home",
+		Endpoint:    "https://s3.example.test",
+		AccessKeyID: "AKID",
+		Region:      "us-east-1",
+	})
+	g := New(Deps{
+		Backend:        be,
+		Audit:          audit.NewNoop(),
+		MaxUploadBytes: cap,
+	})
+	if err := g.Start(context.Background()); err != nil {
+		t.Fatalf("buildGatewayWithCap Start: %v", err)
+	}
+	return g, be
+}
+
+// TestPutOverCapRejected verifies a PUT whose declared Content-Length
+// exceeds the configured ceiling is refused with 413 and never reaches
+// the backend.
+func TestPutOverCapRejected(t *testing.T) {
+	g, be := buildGatewayWithCap(t, 16)
+	be.addBucket("region-1", "uploads")
+
+	body := bytes.Repeat([]byte("x"), 64) // 64 bytes, cap is 16
+	w := do(t, g, http.MethodPut, "/webdav/home/uploads/big.bin", map[string]string{
+		"Authorization": basic("alice", "alicepw"),
+	}, body)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("PUT over cap: want 413 got %d body=%s", w.Code, w.Body.String())
+	}
+
+	be.mu.Lock()
+	_, ok := be.objects["region-1"]["uploads"]["big.bin"]
+	be.mu.Unlock()
+	if ok {
+		t.Errorf("PUT over cap should not have stored the object")
+	}
+}
+
+// TestPutUnderCapSucceeds verifies a PUT within the ceiling still
+// stores normally.
+func TestPutUnderCapSucceeds(t *testing.T) {
+	g, be := buildGatewayWithCap(t, 1024)
+	be.addBucket("region-1", "uploads")
+
+	body := []byte("small enough")
+	w := do(t, g, http.MethodPut, "/webdav/home/uploads/ok.txt", map[string]string{
+		"Authorization": basic("alice", "alicepw"),
+	}, body)
+	if w.Code != http.StatusCreated && w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("PUT under cap: unexpected status %d body=%s", w.Code, w.Body.String())
+	}
+
+	be.mu.Lock()
+	got, ok := be.objects["region-1"]["uploads"]["ok.txt"]
+	be.mu.Unlock()
+	if !ok {
+		t.Fatalf("PUT under cap did not store object")
+	}
+	if string(got) != string(body) {
+		t.Errorf("PUT under cap body: want %q got %q", body, got)
 	}
 }
 

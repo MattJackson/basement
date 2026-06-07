@@ -44,17 +44,23 @@ type fs struct {
 	uctx    *gateway.UserContext
 	backend gateway.Backend
 
+	// maxUploadBytes caps the in-memory PUT buffer (writeFile). 0
+	// means "no fs-level cap" — the HTTP layer (ServeHTTP) is the
+	// primary guard, this is defence in depth for any non-HTTP caller.
+	maxUploadBytes int64
+
 	// cached per-call lookups — webdav verbs often call Stat then
 	// OpenFile back-to-back; caching shaves a region-resolve and an
 	// S3 round-trip off the second call.
 	cachedRegions []gateway.Region
 }
 
-func newFS(ctx context.Context, uctx *gateway.UserContext, backend gateway.Backend) *fs {
+func newFS(ctx context.Context, uctx *gateway.UserContext, backend gateway.Backend, maxUploadBytes int64) *fs {
 	return &fs{
-		ctx:     ctx,
-		uctx:    uctx,
-		backend: backend,
+		ctx:            ctx,
+		uctx:           uctx,
+		backend:        backend,
+		maxUploadBytes: maxUploadBytes,
 	}
 }
 
@@ -196,7 +202,7 @@ func (f *fs) OpenFile(_ context.Context, name string, flag int, _ os.FileMode) (
 		if strings.HasSuffix(res.objectKey, "/") {
 			return nil, os.ErrPermission
 		}
-		return newWriteFile(f.ctx, f.backend, f.uctx, res.region.ID, res.bucket, res.objectKey), nil
+		return newWriteFile(f.ctx, f.backend, f.uctx, res.region.ID, res.bucket, res.objectKey, f.maxUploadBytes), nil
 	}
 
 	switch {
@@ -449,9 +455,11 @@ func (rf *readFile) Seek(offset int64, whence int) (int64, error) {
 		if offset == rf.offset {
 			return rf.offset, nil
 		}
-		if offset == 0 {
-			return rf.offset, os.ErrInvalid
-		}
+		// Any other absolute seek (e.g. an HTTP Range request seeking
+		// to a non-zero start) is rejected: the backing stream is a
+		// forward-only GetObject body, so a non-resumable seek can't be
+		// satisfied without a range-aware backend fetch. Failing here is
+		// safe — http.ServeContent surfaces it rather than misreading.
 		return rf.offset, os.ErrInvalid
 	case io.SeekCurrent:
 		if offset == 0 {
@@ -485,10 +493,11 @@ type writeFile struct {
 	bucket   string
 	key      string
 	buf      []byte
+	maxBytes int64 // 0 == unbounded; see fs.maxUploadBytes
 	closed   bool
 }
 
-func newWriteFile(ctx context.Context, backend gateway.Backend, uctx *gateway.UserContext, regionID, bucket, key string) *writeFile {
+func newWriteFile(ctx context.Context, backend gateway.Backend, uctx *gateway.UserContext, regionID, bucket, key string, maxBytes int64) *writeFile {
 	return &writeFile{
 		ctx:      ctx,
 		backend:  backend,
@@ -496,12 +505,21 @@ func newWriteFile(ctx context.Context, backend gateway.Backend, uctx *gateway.Us
 		regionID: regionID,
 		bucket:   bucket,
 		key:      key,
+		maxBytes: maxBytes,
 	}
 }
 
 func (wf *writeFile) Write(p []byte) (int, error) {
 	if wf.closed {
 		return 0, os.ErrClosed
+	}
+	// Defence-in-depth heap cap: the whole upload buffers here before
+	// the Close-time PutObject, so refuse to grow past maxBytes. The
+	// HTTP layer (ServeHTTP) is the primary guard and turns the common
+	// oversized case into a clean 413; this stops the buffer growing
+	// unbounded for any caller that bypasses that check.
+	if wf.maxBytes > 0 && int64(len(wf.buf))+int64(len(p)) > wf.maxBytes {
+		return 0, os.ErrInvalid
 	}
 	wf.buf = append(wf.buf, p...)
 	return len(p), nil
@@ -550,10 +568,10 @@ func newDirFile(name string, children []os.FileInfo) *dirFile {
 	return &dirFile{name: name, children: children}
 }
 
-func (d *dirFile) Close() error                    { return nil }
-func (d *dirFile) Read([]byte) (int, error)        { return 0, os.ErrInvalid }
-func (d *dirFile) Write([]byte) (int, error)       { return 0, os.ErrPermission }
-func (d *dirFile) Seek(int64, int) (int64, error)  { return 0, os.ErrInvalid }
+func (d *dirFile) Close() error                   { return nil }
+func (d *dirFile) Read([]byte) (int, error)       { return 0, os.ErrInvalid }
+func (d *dirFile) Write([]byte) (int, error)      { return 0, os.ErrPermission }
+func (d *dirFile) Seek(int64, int) (int64, error) { return 0, os.ErrInvalid }
 func (d *dirFile) Stat() (os.FileInfo, error) {
 	return newDirInfo(d.name, time.Time{}), nil
 }
