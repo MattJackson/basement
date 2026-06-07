@@ -81,6 +81,46 @@ func TestUserRoundTrip(t *testing.T) {
 	}
 }
 
+// TestUserByID covers UserByID hit (lookup by the canonical UUID
+// primary key) and miss. This is the lookup the elevation flow uses
+// because the session JWT carries user.ID — not username — as its
+// subject (notably for OIDC-provisioned users whose ID is a UUID).
+func TestUserByID(t *testing.T) {
+	s, err := Open(t.TempDir(), 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	u := User{
+		ID:       "11111111-2222-3333-4444-555555555555",
+		Username: "alice",
+		Role:     "user",
+		Provider: "https://idp.example.com",
+		Subject:  "subj-alice",
+	}
+	if err := s.CreateUser(u); err != nil {
+		t.Fatalf("CreateUser failed: %v", err)
+	}
+
+	// Hit: lookup by the UUID returns the user.
+	got, err := s.UserByID("11111111-2222-3333-4444-555555555555")
+	if err != nil {
+		t.Fatalf("UserByID hit failed: %v", err)
+	}
+	if got.Username != "alice" {
+		t.Errorf("UserByID returned username %q, want alice", got.Username)
+	}
+
+	// Miss: an unknown ID (and notably the username, which must NOT
+	// match an ID lookup) returns an error.
+	if _, err := s.UserByID("no-such-id"); err == nil {
+		t.Error("UserByID(unknown) returned nil error, want not-found")
+	}
+	if _, err := s.UserByID("alice"); err == nil {
+		t.Error("UserByID(username) matched; ID lookup must not match on username")
+	}
+}
+
 func TestAtomicSaveCorruptionRecovery(t *testing.T) {
 	tmpDir := t.TempDir()
 	usersPath := filepath.Join(tmpDir, "users.json")

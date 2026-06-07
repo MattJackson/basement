@@ -62,10 +62,10 @@ func mintLegacyModelessToken(t *testing.T, secret []byte, userID string) string 
 func mintActiveRoleToken(t *testing.T, secret []byte, userID, role string, uiAdmin bool, activeRole *auth.ActiveRole) string {
 	t.Helper()
 	claims := &auth.Claims{
-		UserID:   userID,
-		Role:     role,
-		UIAdmin:  uiAdmin,
-		Mode:     "user",
+		UserID:     userID,
+		Role:       role,
+		UIAdmin:    uiAdmin,
+		Mode:       "user",
 		ActiveRole: activeRole,
 		RegisteredClaims: &jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
@@ -212,6 +212,99 @@ func TestElevate_HappyPath_UserToAdmin(t *testing.T) {
 	}
 	if claims.ModeExpiresAt == 0 {
 		t.Errorf("new cookie ModeExpiresAt should be set (got 0)")
+	}
+}
+
+// TestElevate_StoreUser_ByID_PasswordPath: a store-backed local-
+// password user (provisioned with a UUID ID, as all store users are)
+// elevates via password. The session JWT carries the UUID as its
+// subject, so verifyElevationPassword must resolve the record via
+// UserByID(UUID) — not UserByUsername. This is the second call site
+// the elevation lookup fix touches; before the fix the UUID lookup
+// fell through UserByUsername and 401'd.
+func TestElevate_StoreUser_ByID_PasswordPath(t *testing.T) {
+	srv, secret, st := newElevateTestServerWithStore(t)
+
+	uid := "uuid-local-bob"
+	if err := st.CreateUser(store.User{
+		ID:           uid,
+		Username:     "bob",
+		PasswordHash: elevateTestPasswordHash, // bcrypt("test")
+		Role:         "user",
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+
+	// Token subject is the UUID, mirroring production token issuance.
+	tok := tokenWithMode(t, secret, uid, "user", 0)
+
+	rr := sendElevate(t, srv, tok, map[string]any{
+		"password":    "test",
+		"target_mode": "admin",
+	})
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200. Body: %s", rr.Code, rr.Body.String())
+	}
+	var resp elevateResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Mode != "admin" {
+		t.Errorf("Mode=%q, want admin", resp.Mode)
+	}
+	if resp.RequiresOIDC {
+		t.Error("RequiresOIDC=true for a local-password user; want password elevation")
+	}
+
+	var newCookie *http.Cookie
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == auth.CookieName {
+			newCookie = c
+			break
+		}
+	}
+	if newCookie == nil {
+		t.Fatal("no session cookie issued")
+	}
+	claims, err := auth.ParseToken(secret, newCookie.Value)
+	if err != nil {
+		t.Fatalf("ParseToken: %v", err)
+	}
+	if claims.Mode != "admin" {
+		t.Errorf("cookie Mode=%q, want admin", claims.Mode)
+	}
+	if claims.UserID != uid {
+		t.Errorf("cookie UserID=%q, want %q", claims.UserID, uid)
+	}
+}
+
+// TestElevate_StoreUser_ByID_WrongPassword: same store user as above
+// but a wrong password 401s — proving the UserByID record was found
+// and its hash actually checked (a missed lookup would also 401, so
+// the happy-path test above is what distinguishes "found" from
+// "missed"; this guards the negative branch of the same path).
+func TestElevate_StoreUser_ByID_WrongPassword(t *testing.T) {
+	srv, secret, st := newElevateTestServerWithStore(t)
+
+	uid := "uuid-local-carol"
+	if err := st.CreateUser(store.User{
+		ID:           uid,
+		Username:     "carol",
+		PasswordHash: elevateTestPasswordHash,
+		Role:         "user",
+	}); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	tok := tokenWithMode(t, secret, uid, "user", 0)
+
+	rr := sendElevate(t, srv, tok, map[string]any{
+		"password":    "wrong",
+		"target_mode": "admin",
+	})
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want 401. Body: %s", rr.Code, rr.Body.String())
 	}
 }
 

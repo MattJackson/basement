@@ -63,10 +63,17 @@ func newOIDCElevateTestServer(t *testing.T) (*Server, []byte, *fakeOIDC, *store.
 }
 
 // addOIDCUser creates a store user with no password + an issuer so the
-// dispatcher recognises them as OIDC-only.
-func addOIDCUser(t *testing.T, st *store.Store, username string) {
+// dispatcher recognises them as OIDC-only. It returns the user's
+// canonical ID (a UUID) — which is what the session JWT carries as its
+// subject for OIDC-provisioned users (see auth_oidc.go: IssueToken is
+// called with user.ID, the UUID, not the username). Callers must mint
+// their elevation token with this ID so the test mirrors production;
+// minting with the username masks the elevation lookup bug.
+func addOIDCUser(t *testing.T, st *store.Store, username string) string {
 	t.Helper()
+	id := "uuid-" + username // realistic: a UUID-shaped, non-username ID
 	u := store.User{
+		ID:       id,
 		Username: username,
 		Role:     "user",
 		Provider: "https://idp.example.com",
@@ -76,6 +83,7 @@ func addOIDCUser(t *testing.T, st *store.Store, username string) {
 	if err := st.CreateUser(u); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
+	return id
 }
 
 // sendElevateOIDCStart POSTs to /auth/elevate/oidc/start.
@@ -108,8 +116,8 @@ func sendElevateOIDCCallback(t *testing.T, srv *Server, token, state, code strin
 // callback will read is in place.
 func TestElevateOIDCStart_ReturnsRedirectURLWithPromptAndState(t *testing.T) {
 	srv, secret, fake, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	rr := sendElevateOIDCStart(t, srv, tok, map[string]any{"target_mode": "admin"})
 
@@ -142,8 +150,8 @@ func TestElevateOIDCStart_ReturnsRedirectURLWithPromptAndState(t *testing.T) {
 	if !ok {
 		t.Fatalf("state %q not stored", fake.lastState)
 	}
-	if entry.UserID != "alice" {
-		t.Errorf("entry.UserID=%q, want alice", entry.UserID)
+	if entry.UserID != aliceID {
+		t.Errorf("entry.UserID=%q, want %q", entry.UserID, aliceID)
 	}
 	if string(entry.TargetMode) != "admin" {
 		t.Errorf("entry.TargetMode=%q, want admin", entry.TargetMode)
@@ -160,8 +168,8 @@ func TestElevateOIDCStart_ReturnsRedirectURLWithPromptAndState(t *testing.T) {
 // the canonical "admin".
 func TestElevateOIDCStart_LegacyElevatedRewritten(t *testing.T) {
 	srv, secret, fake, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	rr := sendElevateOIDCStart(t, srv, tok, map[string]any{"target_mode": "elevated"})
 
@@ -183,9 +191,9 @@ func TestElevateOIDCStart_LegacyElevatedRewritten(t *testing.T) {
 // "contact your administrator" message.
 func TestElevateOIDCStart_OIDCNotConfigured(t *testing.T) {
 	srv, secret, _, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
+	aliceID := addOIDCUser(t, st, "alice")
 	srv.SetOIDC(nil) // strip OIDC provider
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	rr := sendElevateOIDCStart(t, srv, tok, map[string]any{"target_mode": "admin"})
 
@@ -204,8 +212,8 @@ func TestElevateOIDCStart_OIDCNotConfigured(t *testing.T) {
 // cookie at mode=admin + 302 to /?elevated=admin.
 func TestElevateOIDCCallback_FreshAuthTime_IssuesElevatedCookie(t *testing.T) {
 	srv, secret, fake, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	// Kick off start to establish state binding.
 	startRR := sendElevateOIDCStart(t, srv, tok, map[string]any{"target_mode": "admin"})
@@ -253,8 +261,8 @@ func TestElevateOIDCCallback_FreshAuthTime_IssuesElevatedCookie(t *testing.T) {
 	if claims.ModeExpiresAt <= time.Now().Unix() {
 		t.Errorf("ModeExpiresAt %d should be in the future", claims.ModeExpiresAt)
 	}
-	if claims.UserID != "alice" {
-		t.Errorf("cookie UserID=%q, want alice", claims.UserID)
+	if claims.UserID != aliceID {
+		t.Errorf("cookie UserID=%q, want %q", claims.UserID, aliceID)
 	}
 }
 
@@ -264,8 +272,8 @@ func TestElevateOIDCCallback_FreshAuthTime_IssuesElevatedCookie(t *testing.T) {
 // ignores prompt=login + max_age=0 and serves a cached session.
 func TestElevateOIDCCallback_StaleAuthTime_401(t *testing.T) {
 	srv, secret, fake, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	startRR := sendElevateOIDCStart(t, srv, tok, map[string]any{"target_mode": "admin"})
 	if startRR.Code != http.StatusOK {
@@ -294,8 +302,8 @@ func TestElevateOIDCCallback_StaleAuthTime_401(t *testing.T) {
 // TestElevateOIDCCallback_InvalidState_400: unknown state → 400.
 func TestElevateOIDCCallback_InvalidState_400(t *testing.T) {
 	srv, secret, _, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	rr := sendElevateOIDCCallback(t, srv, tok, "never-issued-state", "code-abc")
 
@@ -313,14 +321,14 @@ func TestElevateOIDCCallback_InvalidState_400(t *testing.T) {
 // more than 5 minutes ago is treated as gone.
 func TestElevateOIDCCallback_ExpiredState_400(t *testing.T) {
 	srv, secret, _, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	// Hand-craft an expired state entry directly.
 	expiredState := "expired-state-abc"
 	srv.ensureOIDCElevationStore().entries[expiredState] = oidcElevationStateEntry{
 		TargetMode: "admin",
-		UserID:     "alice",
+		UserID:     aliceID,
 		Nonce:      "nonce-x",
 		CreatedAt:  time.Now().Add(-10 * time.Minute), // way past TTL
 	}
@@ -342,10 +350,10 @@ func TestElevateOIDCCallback_ExpiredState_400(t *testing.T) {
 // same-session check stops the elevation.
 func TestElevateOIDCCallback_SessionMismatch_400(t *testing.T) {
 	srv, secret, fake, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	addOIDCUser(t, st, "bob")
-	aliceTok := tokenWithMode(t, secret, "alice", "user", 0)
-	bobTok := tokenWithMode(t, secret, "bob", "user", 0)
+	aliceID := addOIDCUser(t, st, "alice")
+	bobID := addOIDCUser(t, st, "bob")
+	aliceTok := tokenWithMode(t, secret, aliceID, "user", 0)
+	bobTok := tokenWithMode(t, secret, bobID, "user", 0)
 
 	// Start in alice's session.
 	startRR := sendElevateOIDCStart(t, srv, aliceTok, map[string]any{"target_mode": "admin"})
@@ -373,8 +381,13 @@ func TestElevateOIDCCallback_SessionMismatch_400(t *testing.T) {
 // instead of the old 403 OIDC_USER_ELEVATION_NOT_SUPPORTED.
 func TestElevate_DispatcherPivotsOIDCUser(t *testing.T) {
 	srv, secret, _, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	// OIDC user provisioned with a UUID ID (as auth_oidc.go does); the
+	// session JWT carries that UUID as its subject. The dispatcher must
+	// resolve the user via UserByID(UUID) — NOT UserByUsername — to see
+	// they are OIDC-only and pivot. Minting the token with the UUID
+	// here is what exercises the elevation lookup bug end-to-end.
+	aliceID := addOIDCUser(t, st, "alice")
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	rr := sendElevate(t, srv, tok, map[string]any{
 		"password":    "irrelevant",
@@ -409,9 +422,9 @@ func TestElevate_DispatcherPivotsOIDCUser(t *testing.T) {
 // your administrator" message.
 func TestElevate_DispatcherOIDCUserButOIDCNotConfigured(t *testing.T) {
 	srv, secret, _, st := newOIDCElevateTestServer(t)
-	addOIDCUser(t, st, "alice")
+	aliceID := addOIDCUser(t, st, "alice")
 	srv.SetOIDC(nil) // strip OIDC provider
-	tok := tokenWithMode(t, secret, "alice", "user", 0)
+	tok := tokenWithMode(t, secret, aliceID, "user", 0)
 
 	rr := sendElevate(t, srv, tok, map[string]any{
 		"password":    "irrelevant",

@@ -137,7 +137,7 @@ func (s *Server) elevateHandler(w http.ResponseWriter, r *http.Request) {
 	// the FE renders the "contact your administrator" message.
 	loadAdminCreds(s.cfg)
 	if claims.UserID != adminUser && s.store != nil {
-		if u, err := s.store.UserByUsername(claims.UserID); err == nil {
+		if u, err := s.store.UserByID(claims.UserID); err == nil {
 			if u.PasswordHash == "" && u.Provider != "" {
 				if s.oidc == nil {
 					s.audit.Log(audit.Event{
@@ -265,7 +265,7 @@ func (s *Server) verifyElevationPassword(userID, password string) bool {
 	if s.store == nil {
 		return false
 	}
-	u, err := s.store.UserByUsername(userID)
+	u, err := s.store.UserByID(userID)
 	if err != nil {
 		return false
 	}

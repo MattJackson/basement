@@ -170,6 +170,22 @@ func (s *Store) UserByUsername(name string) (User, error) {
 	return User{}, fmt.Errorf("user not found: %s", name)
 }
 
+// UserByID returns a user by ID (the canonical UUID primary key, which
+// is also what the session JWT carries as its subject). Returns error
+// if not found. Mirrors UserByUsername's locking + not-found style.
+func (s *Store) UserByID(id string) (User, error) {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+
+	for _, u := range s.usersCache {
+		if u.ID == id {
+			return u, nil
+		}
+	}
+
+	return User{}, fmt.Errorf("user not found: %s", id)
+}
+
 // ErrUserNotFound is returned when a lookup does not find a matching user.
 var ErrUserNotFound = fmt.Errorf("user not found")
 
