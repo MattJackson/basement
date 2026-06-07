@@ -195,12 +195,14 @@ func (l *FileLogger) openForDay(day string) error {
 		l.bw = nil
 	}
 
-	if err := os.MkdirAll(l.dir, 0o755); err != nil {
+	// 0o700 dir / 0o600 files: audit events carry Actor, IP, UserAgent,
+	// Resource and Detail — owner-only, matching the secret stores.
+	if err := os.MkdirAll(l.dir, 0o700); err != nil {
 		return fmt.Errorf("creating audit dir: %w", err)
 	}
 
 	path := filepath.Join(l.dir, day+".log")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening %s: %w", path, err)
 	}

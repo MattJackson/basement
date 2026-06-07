@@ -350,6 +350,60 @@ func TestUpdate_DuplicateNameWithLiveSiblingErrors(t *testing.T) {
 	}
 }
 
+// TestUpdate_RollsBackOnSaveFailure forces writeLocked to fail (read-only
+// dir) and asserts the in-memory row is restored to its prior state, so
+// the cache does not diverge from disk. Before the fix Update mutated
+// fs.rows[id] then returned the write error without rolling back.
+func TestUpdate_RollsBackOnSaveFailure(t *testing.T) {
+	dir := t.TempDir()
+	store, _ := Open(dir)
+	ctx := context.Background()
+
+	sa, secret, _ := store.Create(ctx, ServiceAccount{
+		OwnerUserID:  "matthew",
+		Name:         "ci-prod",
+		Capabilities: []Capability{{ID: "bucket:view", Scope: "bucket:c1:b1"}},
+	})
+
+	// Make the data dir read-only so the atomic write-tmp step fails.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	_, err := store.Update(ctx, sa.ID, ServiceAccount{
+		Name:         "ci-prod-renamed",
+		Capabilities: []Capability{{ID: "objects:get", Scope: "bucket:c1:b1"}},
+	})
+	if err == nil {
+		t.Fatal("expected Update to fail on read-only dir, got nil")
+	}
+
+	// In-memory state must be rolled back: list the owner's SAs and
+	// confirm the name + capabilities are the originals, not the patch.
+	rows, lerr := store.ListForUser(ctx, "matthew")
+	if lerr != nil {
+		t.Fatalf("ListForUser: %v", lerr)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Name != "ci-prod" {
+		t.Errorf("name not rolled back: got %q want %q", rows[0].Name, "ci-prod")
+	}
+	if len(rows[0].Capabilities) != 1 || rows[0].Capabilities[0].ID != "bucket:view" {
+		t.Errorf("capabilities not rolled back: got %+v", rows[0].Capabilities)
+	}
+	// Original secret still verifies — the row is intact.
+	ok, verr := store.VerifySecret(ctx, sa.AccessKeyID, secret)
+	if verr != nil {
+		t.Fatalf("VerifySecret: %v", verr)
+	}
+	if !ok {
+		t.Error("original secret no longer verifies after rolled-back Update")
+	}
+}
+
 func TestRotate_InvalidatesOldSecret_ReturnsNewOnce(t *testing.T) {
 	dir := t.TempDir()
 	store, _ := Open(dir)

@@ -62,6 +62,36 @@ func TestFileLogger_AppendAndReadBack(t *testing.T) {
 	}
 }
 
+// TestFileLogger_FilePermissions locks in owner-only modes: audit
+// events carry Actor/IP/UserAgent/Resource/Detail, so the dir is 0700
+// and each daily log is 0600 (matching the secret stores).
+func TestFileLogger_FilePermissions(t *testing.T) {
+	tmp := t.TempDir()
+	logger := NewFileLogger(tmp)
+	defer logger.Close()
+
+	fixed := time.Date(2026, 5, 21, 14, 30, 0, 0, time.UTC)
+	logger.now = func() time.Time { return fixed }
+	logger.Log(Event{Actor: "matthew", Action: "x", Resource: "y", Result: ResultSuccess})
+
+	dir := filepath.Join(tmp, "audit")
+	di, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if perm := di.Mode().Perm(); perm != 0o700 {
+		t.Errorf("audit dir mode = %o, want 0700", perm)
+	}
+
+	fi, err := os.Stat(filepath.Join(dir, "2026-05-21.log"))
+	if err != nil {
+		t.Fatalf("stat log: %v", err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("audit log mode = %o, want 0600", perm)
+	}
+}
+
 // TestFileLogger_Rotation verifies that events on different UTC
 // dates land in different files. Inject a clock that ticks across
 // midnight on the second event.

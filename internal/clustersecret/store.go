@@ -38,7 +38,7 @@ func NewFileStore(dataDir string) (*FileStore, error) {
 	if dataDir == "" {
 		return nil, errors.New("clustersecret: empty dataDir")
 	}
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("clustersecret: mkdir %s: %w", dataDir, err)
 	}
 	s := &FileStore{
@@ -138,10 +138,14 @@ func (s *FileStore) PutWrappedCSK(rec WrappedCSK) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	replaced := false
+	replacedIdx := -1
+	var prevRec WrappedCSK
 	for i, r := range s.records {
 		if r.ClusterID == rec.ClusterID && r.AdminUserID == rec.AdminUserID {
+			prevRec = s.records[i] // snapshot before overwrite
 			s.records[i] = rec
 			replaced = true
+			replacedIdx = i
 			break
 		}
 	}
@@ -150,13 +154,11 @@ func (s *FileStore) PutWrappedCSK(rec WrappedCSK) error {
 	}
 	if err := s.saveLocked(); err != nil {
 		// Roll back the in-memory mutation so the cache stays in sync
-		// with disk on save failure.
+		// with disk on save failure. Restore in place — do NOT call
+		// s.load() here: it re-acquires s.mu, which we already hold
+		// (non-reentrant), and would deadlock the process.
 		if replaced {
-			// Best effort: reload from disk. If load fails the next
-			// boot picks up the on-disk state regardless.
-			s.loaded = false
-			s.records = nil
-			_ = s.load() // best-effort
+			s.records[replacedIdx] = prevRec
 		} else {
 			s.records = s.records[:len(s.records)-1]
 		}

@@ -13,27 +13,25 @@
 // Each WrappedCSK carries the Argon2id salt + params plus the AES-GCM
 // ciphertext of the CSK under the password-derived wrapping key. The
 // CSK plaintext NEVER touches the WrappedCSK; only the wrapping key
-	// (transiently held during unlock) can recover it.
-	//
-	// API summary:
-	//
-	//	Unlock(cid, password)     decode CSK into memory using one admin's password
-	//	Lock(cid)                 zero CSK from memory
-	//	IsUnlocked(cid)           cheap predicate for the request path
-	//	Encrypt/Decrypt(cid, …)   AES-GCM under the in-memory CSK
-	//	AddAdmin/RemoveAdmin      manage the set of wrappedCSK records
-	//
-	// Anything that reaches "I need a cluster's stored secret" calls
-	// Decrypt(cid, ciphertext) and converts ErrLocked into HTTP 423 LOCKED
-	// at the API edge so the FE can surface the unlock modal.
+// (transiently held during unlock) can recover it.
+//
+// API summary:
+//
+//	Unlock(cid, password)     decode CSK into memory using one admin's password
+//	Lock(cid)                 zero CSK from memory
+//	IsUnlocked(cid)           cheap predicate for the request path
+//	Encrypt/Decrypt(cid, …)   AES-GCM under the in-memory CSK
+//	AddAdmin/RemoveAdmin      manage the set of wrappedCSK records
+//
+// Anything that reaches "I need a cluster's stored secret" calls
+// Decrypt(cid, ciphertext) and converts ErrLocked into HTTP 423 LOCKED
+// at the API edge so the FE can surface the unlock modal.
 package clustersecret
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -96,11 +94,11 @@ var (
 // `Nonce(12) || ciphertext(32) || tag(16)`. wrappingKey is derived from
 // (password, Salt, KDFParams) via Argon2id; never stored.
 type WrappedCSK struct {
-	ClusterID   string     `json:"clusterId"`
-	AdminUserID string     `json:"adminUserId"`
-	Wrapped     []byte     `json:"wrapped"` // nonce||ct||tag
-	Salt        []byte     `json:"salt"`
-	KDFParams   KDFParams  `json:"kdfParams"`
+	ClusterID   string    `json:"clusterId"`
+	AdminUserID string    `json:"adminUserId"`
+	Wrapped     []byte    `json:"wrapped"` // nonce||ct||tag
+	Salt        []byte    `json:"salt"`
+	KDFParams   KDFParams `json:"kdfParams"`
 }
 
 // KDFParams captures the Argon2id cost parameters used at wrap time so
@@ -336,13 +334,22 @@ func (m *ClusterSecretManager) ListAdmins(clusterID string) ([]string, error) {
 // internal/store/crypto.go so existing decryption call sites can
 // switch over with minimal churn.
 func (m *ClusterSecretManager) Encrypt(clusterID string, plaintext []byte) ([]byte, error) {
+	// Copy the CSK into a fresh slice while holding the lock. The map's
+	// backing bytes are zeroed in place by Lock/LockAll under the write
+	// lock; using the slice alias after RUnlock would be a data race and
+	// could seal under a partially-zeroed key.
 	m.mu.RLock()
 	csk, ok := m.csks[clusterID]
+	var cskCopy []byte
+	if ok {
+		cskCopy = append([]byte(nil), csk...)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		return nil, ErrLocked
 	}
-	return aesGCMSeal(csk, plaintext)
+	defer zero(cskCopy)
+	return aesGCMSeal(cskCopy, plaintext)
 }
 
 // Decrypt reverses Encrypt. Returns ErrLocked if the cluster's CSK
@@ -350,13 +357,20 @@ func (m *ClusterSecretManager) Encrypt(clusterID string, plaintext []byte) ([]by
 // truncated ciphertext (callers should treat as a 500, not a 423 —
 // the user can't unlock their way out of corrupted storage).
 func (m *ClusterSecretManager) Decrypt(clusterID string, ciphertext []byte) ([]byte, error) {
+	// Copy the CSK under the lock (see Encrypt) to avoid racing
+	// Lock/LockAll, which zero the map's backing bytes in place.
 	m.mu.RLock()
 	csk, ok := m.csks[clusterID]
+	var cskCopy []byte
+	if ok {
+		cskCopy = append([]byte(nil), csk...)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		return nil, ErrLocked
 	}
-	return aesGCMOpen(csk, ciphertext)
+	defer zero(cskCopy)
+	return aesGCMOpen(cskCopy, ciphertext)
 }
 
 // AddAdmin wraps the in-memory CSK under a new admin's
@@ -377,12 +391,19 @@ func (m *ClusterSecretManager) AddAdmin(clusterID, adminUserID, password string)
 		return errors.New("clustersecret: password required")
 	}
 
+	// Copy the CSK under the lock (see Encrypt); wrap() reads these
+	// bytes via AES-GCM after the lock is released, racing Lock/LockAll.
 	m.mu.RLock()
 	csk, ok := m.csks[clusterID]
+	var cskCopy []byte
+	if ok {
+		cskCopy = append([]byte(nil), csk...)
+	}
 	m.mu.RUnlock()
 	if !ok {
 		return ErrLocked
 	}
+	defer zero(cskCopy)
 
 	// Reject duplicate-admin add so the audit log captures
 	// rotate-by-remove-then-add explicitly rather than a silent overwrite.
@@ -396,7 +417,7 @@ func (m *ClusterSecretManager) AddAdmin(clusterID, adminUserID, password string)
 		}
 	}
 
-	rec, err := wrap(csk, clusterID, adminUserID, password)
+	rec, err := wrap(cskCopy, clusterID, adminUserID, password)
 	if err != nil {
 		return err
 	}
@@ -605,33 +626,11 @@ func aesGCMOpenRaw(key, ciphertext []byte) ([]byte, error) {
 	return gcm.Open(nil, nonce, ct, nil)
 }
 
-// jwtAESGCMOpen reverses internal/store/crypto.go's encryptSecret —
-// the wire format is identical, the key derivation is
-// sha256(jwtSecret) which is what store/crypto.go uses.
-//
-// Lives here (instead of importing internal/store) to avoid a package
-// import cycle: store needs to know about clustersecret to call this,
-// but clustersecret can't import store. Duplicating ~30 lines of
-// well-tested AES-GCM glue is the lesser evil.
-func jwtAESGCMOpen(jwtSecret, ciphertext []byte) ([]byte, error) {
-	if len(jwtSecret) == 0 {
-		return nil, errors.New("clustersecret: empty jwtSecret")
+// zero overwrites a byte slice with zeros. Used to wipe transient CSK
+// copies once a seal/open completes; defence-in-depth, same caveats as
+// Lock's zeroing pass.
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
 	}
-	// sha256 of the secret; matches store.deriveKey shape.
-	derived := sha256Sum(jwtSecret)
-	return aesGCMOpenRaw(derived[:], ciphertext)
-}
-
-// sha256Sum is the same derivation as crypto/sha256.Sum256 but kept
-// inline so the imports stay tidy.
-func sha256Sum(b []byte) [32]byte {
-	return sha256.Sum256(b)
-}
-
-// EqualBytes is a constant-time equality check; exported so tests can
-// assert "wrappedCSK changed" without flake-prone slice comparison.
-// Not used by the manager itself; provided as a convenience for the
-// API layer and tests.
-func EqualBytes(a, b []byte) bool {
-	return subtle.ConstantTimeCompare(a, b) == 1
 }

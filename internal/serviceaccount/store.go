@@ -372,6 +372,7 @@ func (fs *fileStore) Update(_ context.Context, id string, patch ServiceAccount) 
 	if !ok {
 		return ServiceAccount{}, ErrNotFound
 	}
+	original := cur
 
 	// Name: optional in a patch — empty means "leave alone", non-empty
 	// validates + re-checks uniqueness against other live rows.
@@ -423,6 +424,11 @@ func (fs *fileStore) Update(_ context.Context, id string, patch ServiceAccount) 
 
 	fs.rows[id] = cur
 	if err := fs.writeLocked(); err != nil {
+		// Roll back so an unsaveable update doesn't leave the in-memory
+		// row diverged from disk (mirrors Rotate). cur carries
+		// reassigned Capabilities/Scopes slices, so the original value
+		// fully restores prior state.
+		fs.rows[id] = original
 		return ServiceAccount{}, fmt.Errorf("persisting service account update: %w", err)
 	}
 	return cur, nil

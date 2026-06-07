@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Tests deliberately use the production Argon2id params so the
@@ -320,6 +321,70 @@ func TestConcurrentEncryptDecryptUnlocked(t *testing.T) {
 	wg.Wait()
 }
 
+// TestConcurrentEncryptDecryptVsLock hammers Encrypt/Decrypt while a
+// second set of goroutines repeatedly Lock+Unlock the same cluster.
+// Before the fix, Encrypt/Decrypt aliased the map's CSK backing array
+// across the RUnlock boundary; Lock zeroed those exact bytes in place
+// under the write lock, which is a data race the -race detector flags
+// (and could seal/open under a partially-zeroed key). Run with
+// `go test -race`.
+func TestConcurrentEncryptDecryptVsLock(t *testing.T) {
+	const password = "hunter2"
+	m := New(NewMemoryStore())
+	if err := m.BootstrapFirstAdmin("cidA", "matthew", password); err != nil {
+		t.Fatalf("BootstrapFirstAdmin: %v", err)
+	}
+
+	// Kept small: each Unlock pays a full Argon2id (~100ms). A handful
+	// of overlapping cycles is enough for the race detector to flag the
+	// unsynchronised read-vs-zero on the CSK backing array.
+	var wg sync.WaitGroup
+	const workers = 8
+	const iters = 4
+
+	// Encrypt/Decrypt workers. ErrLocked is expected and benign when a
+	// Lock goroutine is mid-cycle; any other error is a real failure.
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				ct, err := m.Encrypt("cidA", []byte("hello"))
+				if err != nil {
+					if !errors.Is(err, ErrLocked) {
+						t.Errorf("Encrypt: %v", err)
+					}
+					continue
+				}
+				got, err := m.Decrypt("cidA", ct)
+				if err != nil {
+					if !errors.Is(err, ErrLocked) {
+						t.Errorf("Decrypt: %v", err)
+					}
+					continue
+				}
+				if string(got) != "hello" {
+					t.Errorf("round-trip mismatch: %q", got)
+				}
+			}
+		}()
+	}
+
+	// Lock/Unlock churners: zero the CSK then re-decode it.
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < iters; j++ {
+				m.Lock("cidA")
+				_ = m.Unlock("cidA", password)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
 func TestFileStorePersistAndReload(t *testing.T) {
 	dir := t.TempDir()
 	fs, err := NewFileStore(dir)
@@ -357,6 +422,70 @@ func TestFileStorePersistAndReload(t *testing.T) {
 	}
 	if !bytes.Equal(plaintext, got) {
 		t.Fatalf("reload round-trip mismatch: %q != %q", got, plaintext)
+	}
+}
+
+// TestPutWrappedCSKSaveFailureRollback forces a disk save failure on
+// the replace path and asserts (a) the call returns promptly without
+// hanging — the old rollback called the locking load() while holding
+// s.mu, deadlocking the process — and (b) in-memory state is rolled
+// back to the prior record so cache and disk stay consistent.
+func TestPutWrappedCSKSaveFailureRollback(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	orig := WrappedCSK{
+		ClusterID:   "cidA",
+		AdminUserID: "matthew",
+		Wrapped:     []byte("original-wrapped-bytes"),
+		Salt:        []byte("original-salt"),
+		KDFParams:   DefaultKDFParams(),
+	}
+	if err := fs.PutWrappedCSK(orig); err != nil {
+		t.Fatalf("seed PutWrappedCSK: %v", err)
+	}
+
+	// Make the data dir read-only so the atomic write-tmp step fails.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	replacement := orig
+	replacement.Wrapped = []byte("replacement-wrapped-bytes")
+
+	// Run in a goroutine with a watchdog so a regression (deadlock)
+	// fails the test instead of hanging the whole suite.
+	done := make(chan error, 1)
+	go func() { done <- fs.PutWrappedCSK(replacement) }()
+
+	select {
+	case putErr := <-done:
+		if putErr == nil {
+			t.Fatalf("expected save failure on read-only dir, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("PutWrappedCSK hung on save failure (deadlock regression)")
+	}
+
+	// Restore write access so we can inspect via Get without the dir
+	// permission interfering, then assert the prior record survived.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod restore: %v", err)
+	}
+	recs, err := fs.GetWrappedCSKs("cidA")
+	if err != nil {
+		t.Fatalf("GetWrappedCSKs: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("expected 1 record after rollback, got %d", len(recs))
+	}
+	if !bytes.Equal(recs[0].Wrapped, orig.Wrapped) {
+		t.Fatalf("in-memory record not rolled back: got %q want %q",
+			recs[0].Wrapped, orig.Wrapped)
 	}
 }
 
