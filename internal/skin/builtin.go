@@ -8,10 +8,6 @@
 
 package skin
 
-import (
-	"encoding/json"
-)
-
 // BuiltInHighContrast returns the high contrast skin for accessibility.
 // Meets WCAG AAA requirements with extreme color contrasts.
 func BuiltInHighContrast() Skin {
@@ -184,9 +180,4 @@ func RegisterBuiltInSkins(r *Registry) {
 	r.Register(BuiltInMinimal())
 	r.Register(BuiltIn95())
 	r.Register(BuiltInTerminal())
-}
-
-// SkinJSON returns the JSON representation of a skin for upload/storage.
-func SkinJSON(s Skin) ([]byte, error) {
-	return json.MarshalIndent(s, "", "  ")
 }

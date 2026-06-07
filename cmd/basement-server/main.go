@@ -130,7 +130,10 @@ func main() {
 			if cfg.Driver.Garage.S3SecretKey != "" {
 				connConfig["s3_secret_key"] = cfg.Driver.Garage.S3SecretKey
 			}
-		case "aws-s3":
+		case "aws-s3", "minio":
+			// minio and aws-s3 share the same SigV4 connection fields
+			// (region/access_key/secret_key + optional endpoint), loaded
+			// off BASEMENT_DRIVER_AWS_S3_* into cfg.Driver.Aws.
 			connConfig["region"] = cfg.Driver.Aws.Region
 			connConfig["access_key"] = cfg.Driver.Aws.AccessKey
 			connConfig["secret_key"] = cfg.Driver.Aws.SecretKey
@@ -177,15 +180,15 @@ func main() {
 		if err != nil {
 			slog.Warn("falling back to legacy single-driver mode", "error", err)
 			driverCfg := map[string]string{
-				"admin_url":    cfg.Driver.Garage.AdminURL,
-				"admin_token":  cfg.Driver.Garage.AdminToken,
-				"s3_url":       cfg.Driver.Garage.S3URL,
-				"s3_region":    cfg.Driver.Garage.S3Region,
+				"admin_url":     cfg.Driver.Garage.AdminURL,
+				"admin_token":   cfg.Driver.Garage.AdminToken,
+				"s3_url":        cfg.Driver.Garage.S3URL,
+				"s3_region":     cfg.Driver.Garage.S3Region,
 				"s3_access_key": cfg.Driver.Garage.S3AccessKey,
 				"s3_secret_key": cfg.Driver.Garage.S3SecretKey,
 			}
 
-			if cfg.Driver.Name == "aws-s3" {
+			if cfg.Driver.Name == "aws-s3" || cfg.Driver.Name == "minio" {
 				driverCfg["region"] = cfg.Driver.Aws.Region
 				driverCfg["access_key"] = cfg.Driver.Aws.AccessKey
 				driverCfg["secret_key"] = cfg.Driver.Aws.SecretKey
@@ -202,15 +205,15 @@ func main() {
 		}
 	} else if cfg.Driver.Name != "" {
 		driverCfg := map[string]string{
-			"admin_url":    cfg.Driver.Garage.AdminURL,
-			"admin_token":  cfg.Driver.Garage.AdminToken,
-			"s3_url":       cfg.Driver.Garage.S3URL,
-			"s3_region":    cfg.Driver.Garage.S3Region,
+			"admin_url":     cfg.Driver.Garage.AdminURL,
+			"admin_token":   cfg.Driver.Garage.AdminToken,
+			"s3_url":        cfg.Driver.Garage.S3URL,
+			"s3_region":     cfg.Driver.Garage.S3Region,
 			"s3_access_key": cfg.Driver.Garage.S3AccessKey,
 			"s3_secret_key": cfg.Driver.Garage.S3SecretKey,
 		}
 
-		if cfg.Driver.Name == "aws-s3" {
+		if cfg.Driver.Name == "aws-s3" || cfg.Driver.Name == "minio" {
 			driverCfg["region"] = cfg.Driver.Aws.Region
 			driverCfg["access_key"] = cfg.Driver.Aws.AccessKey
 			driverCfg["secret_key"] = cfg.Driver.Aws.SecretKey

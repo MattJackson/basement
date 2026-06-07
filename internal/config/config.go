@@ -25,12 +25,12 @@ type Config struct {
 	// unauthenticated — the standard Prometheus convention is to front
 	// it with a network allowlist. Set this when shared ingress makes
 	// the network gate impractical.
-	MetricsToken   string // BASEMENT_METRICS_TOKEN, optional
+	MetricsToken string // BASEMENT_METRICS_TOKEN, optional
 
-	Driver  DriverConfig
-	Admin   AdminConfig
-	JWT     JWTConfig
-	OIDC    OIDCConfig // optional, v1.3
+	Driver DriverConfig
+	Admin  AdminConfig
+	JWT    JWTConfig
+	OIDC   OIDCConfig // optional, v1.3
 }
 
 // DriverConfig holds driver-specific configuration.
@@ -236,16 +236,20 @@ func Load() (*Config, error) {
 		// S3 fields are optional per design (can be omitted if not needed)
 	}
 
-	// Validate AWS driver config (required if Driver=aws-s3)
-	if cfg.Driver.Name == "aws-s3" {
+	// Validate AWS/MinIO driver config (required if Driver=aws-s3 or
+	// Driver=minio). Both drivers read the same SigV4 fields
+	// (region/access_key/secret_key + optional endpoint) off the shared
+	// BASEMENT_DRIVER_AWS_S3_* env vars (see cfg.Driver.Aws above), so
+	// the validation is identical — only the error label differs.
+	if cfg.Driver.Name == "aws-s3" || cfg.Driver.Name == "minio" {
 		if cfg.Driver.Aws.Region == "" {
-			errs = append(errs, errors.New("BASEMENT_DRIVER_AWS_S3_REGION is required when DRIVER=aws-s3"))
+			errs = append(errs, fmt.Errorf("BASEMENT_DRIVER_AWS_S3_REGION is required when DRIVER=%s", cfg.Driver.Name))
 		}
 		if cfg.Driver.Aws.AccessKey == "" {
-			errs = append(errs, errors.New("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY is required when DRIVER=aws-s3"))
+			errs = append(errs, fmt.Errorf("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY is required when DRIVER=%s", cfg.Driver.Name))
 		}
 		if cfg.Driver.Aws.SecretKey == "" {
-			errs = append(errs, errors.New("BASEMENT_DRIVER_AWS_S3_SECRET_KEY is required when DRIVER=aws-s3"))
+			errs = append(errs, fmt.Errorf("BASEMENT_DRIVER_AWS_S3_SECRET_KEY is required when DRIVER=%s", cfg.Driver.Name))
 		}
 		// Endpoint is optional for S3-compatible services
 	}

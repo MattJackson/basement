@@ -717,10 +717,15 @@ func TestLoad_GarageV1Driver(t *testing.T) {
 	}
 }
 
-// TestLoad_MinioDriver covers DRIVER=minio (no minio-specific required-env
-// validation in Load() at present — accepted as a valid name).
-func TestLoad_MinioDriver(t *testing.T) {
+// TestLoad_MinioDriver_Happy covers DRIVER=minio with all required keys set.
+// minio reads the same SigV4 fields as aws-s3 off BASEMENT_DRIVER_AWS_S3_*,
+// so a valid minio config populates cfg.Driver.Aws and validates cleanly.
+func TestLoad_MinioDriver_Happy(t *testing.T) {
 	t.Setenv("BASEMENT_DRIVER", "minio")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_REGION", "us-east-1")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_ACCESS_KEY", "minioadmin")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_SECRET_KEY", "minioadmin")
+	t.Setenv("BASEMENT_DRIVER_AWS_S3_ENDPOINT", "http://minio:9000")
 	t.Setenv("BASEMENT_ADMIN_USER", "admin")
 	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
 	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
@@ -731,6 +736,45 @@ func TestLoad_MinioDriver(t *testing.T) {
 	}
 	if cfg.Driver.Name != "minio" {
 		t.Errorf("Driver.Name=%q, want minio", cfg.Driver.Name)
+	}
+	if cfg.Driver.Aws.Region != "us-east-1" {
+		t.Errorf("Aws.Region=%q, want us-east-1", cfg.Driver.Aws.Region)
+	}
+	if cfg.Driver.Aws.AccessKey != "minioadmin" {
+		t.Errorf("Aws.AccessKey=%q, want minioadmin", cfg.Driver.Aws.AccessKey)
+	}
+	if cfg.Driver.Aws.SecretKey != "minioadmin" {
+		t.Errorf("Aws.SecretKey=%q, want minioadmin", cfg.Driver.Aws.SecretKey)
+	}
+	if cfg.Driver.Aws.Endpoint != "http://minio:9000" {
+		t.Errorf("Aws.Endpoint=%q, want http://minio:9000", cfg.Driver.Aws.Endpoint)
+	}
+}
+
+// TestLoad_MinioDriver_MissingRequired covers the missing-required-field
+// branch: DRIVER=minio with no region/access/secret keys must aggregate all
+// three errors (mirroring the aws-s3 validation, labelled DRIVER=minio).
+func TestLoad_MinioDriver_MissingRequired(t *testing.T) {
+	t.Setenv("BASEMENT_DRIVER", "minio")
+	t.Setenv("BASEMENT_ADMIN_USER", "admin")
+	t.Setenv("BASEMENT_ADMIN_PASSWORD_HASH", "$2a$12$pJTF.RYhgBywOdBWPEV2t.ZQ.YuG9BC.P6Tn1U8OGv0KNlobir.Yu")
+	t.Setenv("BASEMENT_JWT_SECRET", "dGhpc2lzYXNlY3JldGtleTEyMzQ1Njc4OTBhYmNkZWZnaGlq")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for minio with no required env")
+	}
+	for _, want := range []string{
+		"BASEMENT_DRIVER_AWS_S3_REGION",
+		"BASEMENT_DRIVER_AWS_S3_ACCESS_KEY",
+		"BASEMENT_DRIVER_AWS_S3_SECRET_KEY",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %s: %v", want, err)
+		}
+	}
+	if !strings.Contains(err.Error(), "DRIVER=minio") {
+		t.Errorf("error should label DRIVER=minio: %v", err)
 	}
 }
 
