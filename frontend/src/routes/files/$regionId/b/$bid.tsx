@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate, useLocation } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
@@ -44,8 +44,20 @@ import { EncryptionSection } from "@/shared/ui/EncryptionSection";
 // the order S3 returned. Approaching the bottom of a truncated page
 // auto-fetches the next continuation. Scroll position resets to the
 // top whenever the URL `prefix` changes (folder navigation).
+// Typed search contract (Router v1): the object browser drives folder
+// navigation entirely through the `prefix` search param. validateSearch
+// is the single source of truth for its shape — a non-string prefix
+// (or a missing one) sanitizes to "" so the S3 list call always gets a
+// well-formed value and Route.useSearch() returns a typed { prefix }.
+type BucketSearch = {
+  prefix: string;
+};
+
 export const Route = createFileRoute("/files/$regionId/b/$bid")({
   component: UserRegionBucketObjects,
+  validateSearch: (search: Record<string, unknown>): BucketSearch => ({
+    prefix: typeof search.prefix === "string" ? search.prefix : "",
+  }),
 });
 
 type ObjectInfo = components["schemas"]["ObjectInfo"];
@@ -75,14 +87,15 @@ function UserRegionBucketObjects() {
   const { regionId, bid } = Route.useParams();
   const navigate = useNavigate();
 
-  // Read search params via useLocation() so the component re-renders
-  // when navigate() updates the URL with a new prefix (folder click).
-  // The previous URLSearchParams read at module load was non-reactive,
-  // which broke folder navigation in v1.3.0c.1 — clicking a folder
-  // updated the URL but the prefix stayed at "".
-  const location = useLocation();
-  const urlParams = new URLSearchParams(location.searchStr || "");
-  const prefix = urlParams.get("prefix") ?? "";
+  // Read the prefix via the typed search hook so the component
+  // re-renders when navigate() updates the URL with a new prefix
+  // (folder click). validateSearch on the route guarantees `prefix`
+  // is always a string, so no hand-rolled URLSearchParams parsing /
+  // null-coalescing is needed here. (The previous module-load
+  // URLSearchParams read was non-reactive, which broke folder
+  // navigation in v1.3.0c.1 — clicking a folder updated the URL but
+  // the prefix stayed at "".)
+  const { prefix } = Route.useSearch();
 
   const { data: bucketsData, isLoading: bucketsLoading } = useUserRegionBuckets(regionId);
   // v1.4.0a: the bucket-list hook now returns {buckets, perBucketStatsAvailable}.
@@ -174,7 +187,7 @@ function UserRegionBucketObjects() {
     navigate({
       to: "/files/$regionId/b/$bid",
       params: { regionId, bid },
-      search: { prefix: folderPrefix, token: "" },
+      search: { prefix: folderPrefix },
     });
   };
 
@@ -401,7 +414,7 @@ function UserRegionBucketObjects() {
             navigate({
               to: "/files/$regionId/b/$bid",
               params: { regionId, bid },
-              search: { prefix: p, token: "" },
+              search: { prefix: p },
             })
           }
         />

@@ -12,11 +12,11 @@
 
 const navigateMock = vi.fn();
 
-// v1.4.0a: useLocation feeds the prefix/token reads in the route
-// component; mocked here so the test doesn't need a full router
-// context. Tests that need a specific prefix override
-// locationSearchStr via the helper at the top of the file.
-let locationSearchStr = "";
+// The route now reads the prefix via Route.useSearch() (typed search,
+// backed by validateSearch on the route). The mock exposes useSearch on
+// the Route object via createFileRoute; tests that need a specific
+// prefix override `searchPrefix` before rendering.
+let searchPrefix = "";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal();
@@ -30,9 +30,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
     createFileRoute: () => (config: { component: any }) => ({
       component: config.component,
       useParams: () => ({ regionId: "lsi-region-id", bid: "lsi" }),
+      useSearch: () => ({ prefix: searchPrefix }),
     }),
     useNavigate: () => navigateMock,
-    useLocation: () => ({ searchStr: locationSearchStr }),
   };
 });
 
@@ -204,8 +204,8 @@ describe("/files/$regionId/b/$bid — folder navigation (v1.3.0c.1)", () => {
   });
 
   it("shows the 'This folder is empty' state when both objects and commonPrefixes are empty inside a prefix", () => {
-    // Force prefix=raw/ via the mocked useLocation.
-    locationSearchStr = "?prefix=raw/";
+    // Force prefix=raw/ via the mocked Route.useSearch.
+    searchPrefix = "raw/";
 
     vi.mocked(useUserRegionObjectsInfinite).mockReturnValue(
       makeInfiniteResult({
@@ -217,7 +217,7 @@ describe("/files/$regionId/b/$bid — folder navigation (v1.3.0c.1)", () => {
     renderBucket();
     expect(screen.getByText(/This folder is empty/i)).toBeInTheDocument();
 
-    locationSearchStr = "";
+    searchPrefix = "";
   });
 });
 

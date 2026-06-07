@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,9 +35,15 @@ function RegionBuckets() {
   const deleteRegion = useDeleteUserRegion();
 
   const noRegions = regions !== undefined && regions.length === 0;
-  if (noRegions) {
-    navigate({ to: "/files", replace: true });
-  }
+  // Redirect-on-empty runs as a post-render effect, not in render:
+  // navigate() in the render body mutates router state mid-render
+  // (React 19 / StrictMode double-invokes render), which warns and can
+  // double-fire / loop under concurrent rendering.
+  useEffect(() => {
+    if (noRegions) {
+      navigate({ to: "/files", replace: true });
+    }
+  }, [noRegions, navigate]);
 
   const activeRegion = region ?? regions?.find((r) => r.id === regionId);
   // v1.4.0a: the bucket-list hook now returns an envelope carrying
@@ -162,9 +169,13 @@ function BucketRow({
   objects: number;
   statsAvailable: boolean;
 }) {
+  const navigate = useNavigate();
   const primaryAlias = aliases[0];
+  // Client-side SPA navigation (not window.location.href, which forces
+  // a full-page reload — refetches the whole shell and defeats the
+  // router's defaultPreload:"intent" hover prefetch).
   const onNavigate = () => {
-    window.location.href = `/files/${regionId}/b/${bucketId}`;
+    navigate({ to: "/files/$regionId/b/$bid", params: { regionId, bid: bucketId } });
   };
 
   // ADR-0002 deliberately drops the per-bucket "stat me" hydration

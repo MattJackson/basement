@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
@@ -52,9 +52,16 @@ function AdminBucketsAggregated() {
   const runWithElevation = useElevationGuard();
 
   const noClusters = clusters !== undefined && clusters.length === 0;
-  if (noClusters) {
-    navigate({ to: "/admin/clusters", replace: true });
-  }
+  // Redirect-on-empty must run as a post-render effect, not in the
+  // render body: calling navigate() during render mutates router state
+  // mid-render (React 19 / StrictMode double-invokes render), which
+  // logs "Cannot update a component while rendering a different
+  // component" and can loop under concurrent rendering.
+  useEffect(() => {
+    if (noClusters) {
+      navigate({ to: "/admin/clusters", replace: true });
+    }
+  }, [noClusters, navigate]);
 
   const handleRefresh = () => {
     queryClient.invalidateQueries({ queryKey: ["admin", "buckets"] });

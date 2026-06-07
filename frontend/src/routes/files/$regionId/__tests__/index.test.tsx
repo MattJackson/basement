@@ -177,6 +177,43 @@ describe("/files/$regionId — USER_KEY_REJECTED handling", () => {
   });
 });
 
+// audit fe3 (P1 CORRECTNESS): the no-regions redirect must run as a
+// post-render effect, not in the render body. We can't directly observe
+// "render purity" in jsdom, but we can assert the redirect still fires
+// exactly once to /files when the user has zero regions — and does NOT
+// fire when regions exist.
+describe("/files/$regionId — no-regions redirect (audit fe3 P1)", () => {
+  it("redirects to /files when the user has no regions", () => {
+    vi.mocked(useUserRegions).mockReturnValue({
+      data: [],
+      isLoading: false,
+      error: null,
+    } as any);
+    vi.mocked(useUserRegionBuckets).mockReturnValue({
+      data: { buckets: [], perBucketStatsAvailable: false },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderRegion();
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/files", replace: true });
+  });
+
+  it("does NOT redirect when the user has regions", () => {
+    // Default beforeEach mock returns one region.
+    vi.mocked(useUserRegionBuckets).mockReturnValue({
+      data: { buckets: [], perBucketStatsAvailable: false },
+      isLoading: false,
+      error: null,
+    } as any);
+
+    renderRegion();
+
+    expect(navigateMock).not.toHaveBeenCalledWith({ to: "/files", replace: true });
+  });
+});
+
 // v1.4.0a: per-driver capability flag (PerBucketStatsAvailable) drives
 // whether the Size + Objects columns render. Garage v1 returns false
 // today — hide the columns rather than render rows of em-dashes.

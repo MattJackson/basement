@@ -129,8 +129,17 @@ function AdminBucketDetail() {
   const handleAliasSave = async () => {
     if (!aliasInput.trim()) return;
 
+    // The header editor only ever edits the PRIMARY alias (index 0) —
+    // clicking the title seeds aliasInput from aliases[0]. Replace that
+    // slot by index, preserving every other alias by position. The
+    // previous `filter((a) => a !== aliases[0])` removed ALL aliases
+    // equal to the old primary by value, so a bucket whose primary
+    // string collided with a secondary alias silently lost the
+    // secondary on save.
     const aliases = bucket.aliases ?? [];
-    const newAliases = [aliasInput, ...aliases.filter((a) => a !== aliases[0])];
+    const newAliases = aliases.length > 0
+      ? aliases.map((a, i) => (i === 0 ? aliasInput : a))
+      : [aliasInput];
     setIsEditingAlias(false);
     try {
       await runWithElevation(() =>

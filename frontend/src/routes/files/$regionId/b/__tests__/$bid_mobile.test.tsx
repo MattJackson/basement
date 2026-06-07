@@ -11,7 +11,7 @@
 // presence of the mobile-only select-all strip.
 
 const navigateMock = vi.fn();
-let locationSearchStr = "";
+let searchPrefix = "";
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal();
@@ -23,9 +23,9 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
     createFileRoute: () => (config: { component: any }) => ({
       component: config.component,
       useParams: () => ({ regionId: "lsi-region-id", bid: "lsi" }),
+      useSearch: () => ({ prefix: searchPrefix }),
     }),
     useNavigate: () => navigateMock,
-    useLocation: () => ({ searchStr: locationSearchStr }),
   };
 });
 
@@ -119,7 +119,7 @@ let teardownMatchMedia: (() => void) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  locationSearchStr = "";
+  searchPrefix = "";
   vi.mocked(useUserRegionBuckets).mockReturnValue({
     data: {
       buckets: [{ id: "lsi", aliases: ["lsi"], objects: 0, bytes: 0, unfinishedUploads: 0 }],
