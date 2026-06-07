@@ -39,7 +39,7 @@ func newActiveRoleTestServer(t *testing.T) (*Server, []byte) {
 	}
 	st := &store.Store{}
 	srv := New(cfg, st, nil, nil, nil)
-	
+
 	// Use a real file-backed enforcer for policy assignment tests
 	enforcer, err := policy.Open(t.TempDir())
 	if err != nil {
@@ -191,20 +191,66 @@ func TestActiveRoleHandler_UIAdminSwitch_Elevated(t *testing.T) {
 	}
 }
 
+// TestActiveRoleHandler_UIAdminSwitch_ExpiredMode: an EXPIRED admin window
+// must still require re-elevation. The JWT carries mode="admin" but its
+// ModeExpiresAt is in the past, so the effective mode (per currentMode) is
+// USER. The handler must read the effective mode — not the raw claims.Mode
+// — and return 423 requires_elevation instead of minting a ui-admin cookie.
+// Regression guard for the auth.go activeRoleHandler raw-claims.Mode bug.
+func TestActiveRoleHandler_UIAdminSwitch_ExpiredMode(t *testing.T) {
+	srv, secret := newActiveRoleTestServer(t)
+
+	// mode="admin" but the elevation window expired 10 minutes ago.
+	activeRole := &auth.ActiveRole{Kind: "user"}
+	tok, _ := auth.IssueTokenWithActiveRole(secret, "admin", "admin", true, "admin", time.Now().Add(-10*time.Minute).Unix(), 24*time.Hour, activeRole)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/auth/active-role", bytes.NewReader([]byte(`{"kind":"ui-admin"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: tok, Path: "/"})
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusLocked {
+		t.Fatalf("expected 423 LOCKED (expired admin mode requires re-elevation), got %d body=%s", rr.Code, rr.Body.String())
+	}
+
+	var lockResp map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &lockResp); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if re, _ := lockResp["requires_elevation"].(bool); !re {
+		t.Errorf("requires_elevation = %v, want true", lockResp["requires_elevation"])
+	}
+
+	// And crucially: NO new ui-admin cookie was minted.
+	for _, c := range rr.Result().Cookies() {
+		if c.Name != auth.CookieName {
+			continue
+		}
+		claims, err := auth.ParseToken(secret, c.Value)
+		if err != nil {
+			continue
+		}
+		if claims.ActiveRole != nil && claims.ActiveRole.Kind == "ui-admin" {
+			t.Fatalf("expired admin mode was issued a ui-admin cookie; elevation bypass")
+		}
+	}
+}
+
 // TestMeHandler_ReturnsActiveRoleAndAvailableRoles: /auth/me returns active role + eligibility list.
 func TestMeHandler_ReturnsActiveRoleAndAvailableRoles(t *testing.T) {
 	srv, secret := newActiveRoleTestServer(t)
 
 	// Grant user cluster_admin on "classe" and "lsi", and set uiAdmin=true via policy enforcer
 	srv.policy.AssignRole(policy.RoleAssignment{
-		UserID:  "admin",
-		RoleID:  "cluster_admin",
-		Scope:   "cluster:classe",
+		UserID: "admin",
+		RoleID: "cluster_admin",
+		Scope:  "cluster:classe",
 	})
 	srv.policy.AssignRole(policy.RoleAssignment{
-		UserID:  "admin",
-		RoleID:  "cluster_admin",
-		Scope:   "cluster:lsi",
+		UserID: "admin",
+		RoleID: "cluster_admin",
+		Scope:  "cluster:lsi",
 	})
 
 	activeRole := &auth.ActiveRole{Kind: "cluster-admin", Cluster: "classe"}

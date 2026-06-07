@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/mattjackson/basement/internal/audit"
 	"github.com/mattjackson/basement/internal/auth"
+	"github.com/mattjackson/basement/internal/auth/policy"
 	"github.com/mattjackson/basement/internal/config"
 	"github.com/mattjackson/basement/internal/driver"
 )
@@ -30,12 +32,12 @@ type LoginRequest struct {
 // the one place that needs the live values because the gate's grace-
 // window logic can downgrade a pre-v1.2 cookie to ADMIN on the wire.
 type UserResponse struct {
-	Username       string        `json:"username"`
-	Role           string        `json:"role"`
-	UIAdmin        bool          `json:"uiAdmin,omitempty"`
-	Mode           string        `json:"mode,omitempty"`
-	ModeExpiresAt  int64         `json:"modeExpiresAt,omitempty"`
-	ActiveRole     *auth.ActiveRole `json:"activeRole,omitempty"`
+	Username       string               `json:"username"`
+	Role           string               `json:"role"`
+	UIAdmin        bool                 `json:"uiAdmin,omitempty"`
+	Mode           string               `json:"mode,omitempty"`
+	ModeExpiresAt  int64                `json:"modeExpiresAt,omitempty"`
+	ActiveRole     *auth.ActiveRole     `json:"activeRole,omitempty"`
 	AvailableRoles []auth.AvailableRole `json:"availableRoles,omitempty"`
 	// Capabilities is the flat list of capability strings the user's
 	// active role grants. The FE reads this to drive useCan(...) —
@@ -89,7 +91,7 @@ func (s *Server) loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Constant-time comparison for both username and password to prevent timing attacks.
 	// Per anti-fab gates: use subtle.ConstantTimeCompare for username too, not just bcrypt.
-	usernameMatch := subtleConstantTimeString(req.Username, adminUser)
+	usernameMatch := subtle.ConstantTimeCompare([]byte(req.Username), []byte(adminUser)) == 1
 	passwordMatch := auth.VerifyPassword(adminHash, req.Password)
 
 	if !usernameMatch || !passwordMatch {
@@ -374,28 +376,6 @@ func (s *Server) logoutElevationHandler(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// subtleConstantTimeString compares two strings in constant time.
-func subtleConstantTimeString(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	aBytes := []byte(a)
-	bBytes := []byte(b)
-	return subtleConstantTimeCompare(aBytes, bBytes) == 0
-}
-
-// subtleConstantTimeCompare is a simplified constant-time byte comparison.
-func subtleConstantTimeCompare(a, b []byte) int {
-	if len(a) != len(b) {
-		return 1
-	}
-	var diff uint8
-	for i := range a {
-		diff |= a[i] ^ b[i]
-	}
-	return int(diff)
-}
-
 // capabilitiesHandler handles GET /api/v1/capabilities.
 // Calls drv.Capabilities(ctx) and JSON-encodes the result.
 // If driver returns ErrUnsupported, passes through uniform error shape
@@ -486,7 +466,15 @@ func (s *Server) activeRoleHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine if elevation is required for this role switch
+	// Determine if elevation is required for this role switch.
+	//
+	// Use the EFFECTIVE mode from currentMode(r) — not the raw
+	// claims.Mode JWT value — so an expired admin/elevated window
+	// (ModeExpiresAt in the past) correctly demands re-elevation.
+	// currentMode also normalises the legacy "elevated" string to
+	// ModeAdmin, so a single == policy.ModeAdmin check covers both.
+	currentEffectiveMode := currentMode(r)
+
 	requiresElevation := false
 	elevationPrompt := ""
 
@@ -530,14 +518,14 @@ func (s *Server) activeRoleHandler(w http.ResponseWriter, r *http.Request) {
 			writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "User is not a UI admin")
 			return
 		}
-		if claims.Mode != "admin" && claims.Mode != "elevated" {
+		if currentEffectiveMode != policy.ModeAdmin {
 			requiresElevation = true
 			elevationPrompt = "Switching to UI admin requires admin re-authentication."
 		}
 	}
 
 	// If elevation required but user not elevated, return 423 LOCKED
-	if requiresElevation && claims.Mode != "admin" && claims.Mode != "elevated" {
+	if requiresElevation && currentEffectiveMode != policy.ModeAdmin {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusLocked)
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
