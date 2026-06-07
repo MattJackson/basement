@@ -228,11 +228,17 @@ func (s *Server) lockStatusHandler(w http.ResponseWriter, r *http.Request) {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID", "cluster id required")
 		return
 	}
-	// Reading lock-status uses the broader cluster:test gate (anyone
-	// who can probe the cluster's health can see its lock-state). This
-	// keeps the cluster detail page available to viewers who can't
-	// otherwise mutate the cluster.
-	if _, ok := s.requireCapability(w, r, "cluster:test", scopeCluster(cid)); !ok {
+	// Reading lock-status is a read-tier operation: anyone who can view
+	// the cluster's contents/layout can see its lock-state. The router
+	// middleware gates this route on CapClusterContentsRead (ADR-0009),
+	// which cluster-admins hold; align the in-handler ADR-0001 gate to
+	// the matching read capability (cluster:view_layout) so a role
+	// passes BOTH layers instead of holding one and being silently
+	// blocked by the other (r10 gate-mismatch). cluster-admins hold
+	// cluster:view_layout in the seed matrix; the previous cluster:test
+	// gate (a wiring/probe cap) is NOT in the cluster-admin ADR-0009
+	// set and would have rejected the intended audience.
+	if _, ok := s.requireCapability(w, r, "cluster:view_layout", scopeCluster(cid)); !ok {
 		return
 	}
 	if !s.requireClusterSecrets(w) {
@@ -425,13 +431,13 @@ func (s *Server) removeAdminHandler(w http.ResponseWriter, r *http.Request) {
 //
 // Safety: the legacy ConfigEnc is NEVER mutated. The CSK-encrypted
 // v2.0.0-beta.2: This function was removed — legacy JWT-encrypted credentials
-	// are no longer supported. Clusters with ConfigEnc but no ConfigEncCSK are
-	// dropped on boot per [[v2_clean_break]]. Returns (migrated, error) where
-	// migrated is always false and there is nothing to migrate.
-	func (s *Server) maybeMigrateLegacyClusterSecret(r *http.Request, cid string) (bool, error) {
-		// Legacy migration removed in v2.0.0-beta.2 — no-op for API compat.
-		return false, nil
-	}
+// are no longer supported. Clusters with ConfigEnc but no ConfigEncCSK are
+// dropped on boot per [[v2_clean_break]]. Returns (migrated, error) where
+// migrated is always false and there is nothing to migrate.
+func (s *Server) maybeMigrateLegacyClusterSecret(r *http.Request, cid string) (bool, error) {
+	// Legacy migration removed in v2.0.0-beta.2 — no-op for API compat.
+	return false, nil
+}
 
 // clusterRequiresLegacyMigration reports whether the cluster's
 // Connection still carries a legacy JWT-encrypted ConfigEnc with no
@@ -456,4 +462,3 @@ func (s *Server) clusterRequiresLegacyMigration(r *http.Request, cid string) (bo
 	// fallback until the future cycle that retires it).
 	return len(conn.ConfigEnc) > 0 && len(conn.ConfigEncCSK) == 0, nil
 }
-

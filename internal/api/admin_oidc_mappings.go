@@ -3,8 +3,8 @@
 // Two endpoints power the operator-editable map of OIDC group claims
 // to basement role assignments:
 //
-//   GET /api/v1/admin/oidc-group-mappings   list current mappings
-//   PUT /api/v1/admin/oidc-group-mappings   replace the full list
+//	GET /api/v1/admin/oidc-group-mappings   list current mappings
+//	PUT /api/v1/admin/oidc-group-mappings   replace the full list
 //
 // Both are gated on host:manage_policies — the same persona that owns
 // the matrix at /admin/policies owns this mapping table. Per ADR-0001
@@ -104,6 +104,26 @@ func (s *Server) updateOIDCGroupMappingsHandler(w http.ResponseWriter, r *http.R
 			writeErrorSimple(w, http.StatusBadRequest, "INVALID_MAPPING",
 				"Each mapping requires claim, claimValue, roleId, and scope.")
 			return
+		}
+		// Validate the scope against the same grammar SA scopes use
+		// (r10): a malformed scope (e.g. "bucket:" or "invalidns:x")
+		// would otherwise be stored and later handed to
+		// SyncOIDCAssignments on login, where it silently fails to
+		// enforce. Reject it at write time instead.
+		//
+		// The bare "*" superuser scope is additionally accepted here —
+		// unlike SA grants it is a legitimate operator choice for
+		// role assignments (ScopeMatches("*", anything) == true, the
+		// same scope SeedEnvAdmin grants host_admin) and the SA grammar
+		// validator does not permit it.
+		if m.Scope != "*" {
+			if err := validateServiceAccountScope(m.Scope); err != nil {
+				s.auditFailureDetail(r, "host:oidc_mappings_edit", resourceHost,
+					"mapping at index "+itoa(i)+" invalid scope: "+err.Error())
+				writeErrorSimple(w, http.StatusBadRequest, "INVALID_SCOPE",
+					"Mapping at index "+itoa(i)+" has an invalid scope: "+err.Error())
+				return
+			}
 		}
 		cleaned = append(cleaned, m)
 	}

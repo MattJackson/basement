@@ -47,7 +47,11 @@ func newUsageSeriesTestEnv(t *testing.T, grantHostAdmin bool) (*Server, *metrics
 		t.Fatalf("policy.Open: %v", err)
 	}
 
-	connsStore := &testMockConnectionStore{}
+	// Seed the connection the series queries reference so the
+	// cluster-scope existence check (r10 IDOR fix) resolves it.
+	connsStore := &testMockConnectionStore{
+		conns: []store.Connection{{ID: "ca", Label: "ca", Driver: "garage"}},
+	}
 	srv := New(cfg, st, connsStore, nil, nil)
 	srv.SetPolicy(enf)
 
@@ -55,10 +59,16 @@ func newUsageSeriesTestEnv(t *testing.T, grantHostAdmin bool) (*Server, *metrics
 	srv.SetMetricsRecorder(rec)
 
 	if grantHostAdmin {
-		if err := enf.AssignRole(policy.RoleAssignment{
-			UserID: "admin", RoleID: "host_admin", Scope: "host:*",
-		}); err != nil {
-			t.Fatalf("AssignRole: %v", err)
+		// Mirror SeedEnvAdmin: a real host admin holds host_admin at
+		// host:* AND at the "*" superuser scope. The latter is what
+		// covers the bucket:view scope check the series handler now
+		// enforces (r10).
+		for _, scope := range []string{"host:*", "*"} {
+			if err := enf.AssignRole(policy.RoleAssignment{
+				UserID: "admin", RoleID: "host_admin", Scope: scope,
+			}); err != nil {
+				t.Fatalf("AssignRole: %v", err)
+			}
 		}
 	}
 

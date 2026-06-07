@@ -1,13 +1,12 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/mattjackson/basement/internal/auth"
@@ -30,16 +29,8 @@ type InviteUserRequest struct {
 
 // InviteRedeemRequest represents the request for redeeming an invite.
 type InviteRedeemRequest struct {
-	Token  string `json:"token"`
+	Token    string `json:"token"`
 	Password string `json:"password"`
-}
-
-// UserInvite represents an invite token with expiration.
-type UserInvite struct {
-	Token     string    `json:"token"`      // hashed for storage
-	HashedToken string   `json:"hashedToken,omitempty"` // for response (we send plain, store hash)
-	Username  string    `json:"username"`
-	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // listAllUsersHandler handles GET /api/v1/admin/users.
@@ -116,7 +107,68 @@ func (s *Server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create user
+	// Invite-only mode: persist a redeemable invite instead of creating
+	// the account up front.
+	//
+	// SECURITY (r10/r11): the previous inline branch (a) created the
+	// user record FIRST and minted the token afterward — a token-gen
+	// failure left an orphan account with no password and no invite;
+	// (b) returned the bcrypt HashedToken on the wire (needless
+	// credential-hash exposure); and (c) never persisted the token to
+	// store.Invites, so the returned plaintext could never be redeemed
+	// (inviteRedeemHandler verifies against the store only). We now
+	// route through the canonical persisted-invite path: the token is
+	// stored bcrypt-hashed, the plaintext is returned exactly ONCE
+	// (mirroring shares + createInvitePersistedHandler), the hash never
+	// leaves the server, and no user is pre-created — the account is
+	// minted at redeem time from the invite Label.
+	if req.InviteOnly {
+		if s.store.Invites() == nil {
+			writeErrorSimple(w, http.StatusServiceUnavailable, "INVITES_NOT_WIRED",
+				"Invite store is not configured on this deployment.")
+			return
+		}
+
+		claims, _ := auth.FromContext(r.Context())
+		createdBy := ""
+		if claims != nil {
+			createdBy = claims.UserID
+		}
+
+		// Label carries the desired username; the redeem path
+		// sanitizes it into the new account's login.
+		inv, plain, err := s.store.Invites().Create(req.Username, createdBy, 7*24*time.Hour)
+		if err != nil {
+			s.auditFailure(r, "invite:create", "invite:"+req.Username, err)
+			writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create invite")
+			return
+		}
+
+		s.auditSuccess(r, "invite:create", "invite:"+inv.ID)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"user": UserResponse{Username: req.Username, Role: "user"},
+			"invite": createInviteResponse{
+				Invite: toInvitePublic(inv),
+				Token:  plain, // plaintext, returned once; hash stays server-side
+			},
+		})
+		return
+	}
+
+	// Direct (non-invite) creation: a password is required.
+	if req.Password == "" {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "Password required for non-invite user")
+		return
+	}
+	hashStr, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to hash password")
+		return
+	}
+
 	user := store.User{
 		ID:           uuid.New().String(),
 		Username:     req.Username,
@@ -124,19 +176,8 @@ func (s *Server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 		UIAdmin:      false,
 		Email:        req.Email,
 		Name:         req.Name,
+		PasswordHash: hashStr,
 		Created:      time.Now(),
-	}
-
-	if !req.InviteOnly && req.Password != "" {
-		hashStr, err := auth.HashPassword(req.Password)
-		if err != nil {
-			writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to hash password")
-			return
-		}
-		user.PasswordHash = hashStr
-	} else if !req.InviteOnly {
-		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "Password required for non-invite user")
-		return
 	}
 
 	if err := s.store.CreateUser(user); err != nil {
@@ -147,49 +188,13 @@ func (s *Server) createUserHandler(w http.ResponseWriter, r *http.Request) {
 
 	s.auditSuccess(r, "user:create", resourceUser(user.Username))
 
-	resp := UserResponse{
-		Username:  user.Username,
-		Role:      user.Role,
-		UIAdmin:   false,
-	}
-
-	if req.InviteOnly {
-		// Generate invite token
-		tokenBytes := make([]byte, 32)
-		if _, err := rand.Read(tokenBytes); err != nil {
-			writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to generate token")
-			return
-		}
-		token := hex.EncodeToString(tokenBytes)
-
-		// Hash for storage
-		hashedToken, err := auth.HashPassword(token)
-		if err != nil {
-			writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to hash token")
-			return
-		}
-
-		invite := UserInvite{
-			Token:       token, // Return plain token to user
-			HashedToken: hashedToken,
-			Username:    req.Username,
-			ExpiresAt:   time.Now().Add(7 * 24 * time.Hour), // 7 days
-		}
-
-		resp.UIAdmin = false
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"user":     resp,
-			"invite":   invite,
-		})
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(UserResponse{
+		Username: user.Username,
+		Role:     user.Role,
+		UIAdmin:  false,
+	})
 }
 
 // deleteUserHandler handles DELETE /api/v1/admin/users/{id}.
@@ -206,18 +211,35 @@ func (s *Server) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.URL.Query().Get("id")
-	if id == "" {
+	// The route is DELETE /admin/users/{id}, so the identifier is a
+	// PATH param — not a query param (the previous ?id= read always
+	// landed empty under chi and 400'd, leaving the endpoint
+	// permanently broken). The FE addresses users by username (the
+	// only field /admin/users surfaces), so accept either the store
+	// UUID or the username and resolve to the canonical store ID
+	// before deleting — store.DeleteUser matches on the UUID ID.
+	param := chi.URLParam(r, "id")
+	if param == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST", "User ID is required")
 		return
 	}
 
+	id := param
+	if _, err := s.store.UserByID(param); err != nil {
+		// Not a known store UUID — try resolving it as a username.
+		if u, uerr := s.store.UserByUsername(param); uerr == nil {
+			id = u.ID
+		}
+		// If neither resolves, fall through with the raw param; the
+		// DeleteUser call below returns not-found and we 404.
+	}
+
 	if err := s.store.DeleteUser(id); err != nil {
-		s.auditFailure(r, "user:delete", resourceUser(id), err)
+		s.auditFailure(r, "user:delete", resourceUser(param), err)
 		writeErrorSimple(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found")
 		return
 	}
 
-	s.auditSuccess(r, "user:delete", resourceUser(id))
+	s.auditSuccess(r, "user:delete", resourceUser(param))
 	w.WriteHeader(http.StatusNoContent)
 }

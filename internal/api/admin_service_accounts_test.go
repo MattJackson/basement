@@ -52,10 +52,17 @@ func newServiceAccountTestEnv(t *testing.T, grant bool) (*Server, *store.Store) 
 	srv.SetPolicy(enf)
 
 	if grant {
-		if err := enf.AssignRole(policy.RoleAssignment{
-			UserID: "admin", RoleID: "host_admin", Scope: "host:*",
-		}); err != nil {
-			t.Fatalf("AssignRole: %v", err)
+		// Mirror SeedEnvAdmin: a real host admin holds host_admin at
+		// host:* AND at the "*" superuser scope. The superuser scope is
+		// what lets the minter-authority bound (the SA privesc fix)
+		// grant capabilities at cluster/bucket/key scopes — a host:*
+		// assignment alone does NOT cover those scopes.
+		for _, scope := range []string{"host:*", "*"} {
+			if err := enf.AssignRole(policy.RoleAssignment{
+				UserID: "admin", RoleID: "host_admin", Scope: scope,
+			}); err != nil {
+				t.Fatalf("AssignRole: %v", err)
+			}
 		}
 	}
 

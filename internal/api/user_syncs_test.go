@@ -17,11 +17,11 @@ var syncErrNotFound = fmt.Errorf("sync job not found")
 
 // mockSyncStore implements sync.Store for testing.
 type mockSyncStore struct {
-	listErr      error
-	saveErr      error
-	deleteErr    error
-	syncJob      *sync.SyncJob
-	jobs         []*sync.SyncJob
+	listErr       error
+	saveErr       error
+	deleteErr     error
+	syncJob       *sync.SyncJob
+	jobs          []*sync.SyncJob
 	isNotExistErr bool
 }
 
@@ -105,5 +105,56 @@ func TestUserListSyncsHandler_ENOENT(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Errorf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+}
+
+// withSyncAuth wraps a handler with the auth middleware and a valid
+// session cookie for "test-user", so handlers that read
+// auth.FromContext before their nil-store guard can be exercised.
+func withSyncAuth(t *testing.T, s *Server, h http.HandlerFunc, method, url string) *httptest.ResponseRecorder {
+	t.Helper()
+	if s.cfg == nil {
+		s.cfg = &config.Config{JWT: config.JWTConfig{Secret: testSecret}}
+	}
+	token, err := auth.IssueTokenWithActiveRole(testSecret, "test-user", "admin", true, "user", 0, 24*time.Hour, nil)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	req := httptest.NewRequest(method, url, nil)
+	// Inject the chi {id} param the per-record handlers read so the
+	// empty-id 400 doesn't pre-empt the nil-store 503 we're testing.
+	req = withChiParam(req, "id", "j1")
+	req.AddCookie(&http.Cookie{Name: "__Host-basement_session", Value: token, Path: "/", Secure: true, HttpOnly: true})
+	w := httptest.NewRecorder()
+	s.authMiddleware()(h).ServeHTTP(w, req)
+	return w
+}
+
+// TestUserSyncHandlers_NilStore_503: every per-record sync handler
+// (create/get/delete/pause/resume) returns 503 — not a nil panic —
+// when the sync store isn't wired (r11). Previously only the list
+// handler guarded this.
+func TestUserSyncHandlers_NilStore_503(t *testing.T) {
+	s := &Server{syncStore: nil, cfg: &config.Config{JWT: config.JWTConfig{Secret: testSecret}}}
+
+	cases := []struct {
+		name   string
+		h      http.HandlerFunc
+		method string
+		url    string
+	}{
+		{"create", s.userCreateSyncHandler, http.MethodPost, "/api/v1/user/syncs"},
+		{"get", s.userGetSyncHandler, http.MethodGet, "/api/v1/user/syncs/j1"},
+		{"delete", s.userDeleteSyncHandler, http.MethodDelete, "/api/v1/user/syncs/j1"},
+		{"pause", s.userPauseSyncHandler, http.MethodPost, "/api/v1/user/syncs/j1/pause"},
+		{"resume", s.userResumeSyncHandler, http.MethodPost, "/api/v1/user/syncs/j1/resume"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := withSyncAuth(t, s, c.h, c.method, c.url)
+			if w.Code != http.StatusServiceUnavailable {
+				t.Errorf("%s: status=%d body=%s; want 503", c.name, w.Code, w.Body.String())
+			}
+		})
 	}
 }

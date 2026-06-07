@@ -9,11 +9,11 @@
 // Wire shape kept deliberately small so the frontend can render an
 // inline SVG sparkline without further transformation:
 //
-//   {
-//     "snapshots":  [ { "time": iso, "bytes": n, "objects": n }, ... ],
-//     "bucketAlias": "photos",
-//     "range":       "7d"
-//   }
+//	{
+//	  "snapshots":  [ { "time": iso, "bytes": n, "objects": n }, ... ],
+//	  "bucketAlias": "photos",
+//	  "range":       "7d"
+//	}
 //
 // Default range is 7 days; max is 90 days. Range parameters are
 // validated and clamped server-side so a malformed URL can't trigger
@@ -59,9 +59,12 @@ const usageSeriesDefaultRange = 7 * 24 * time.Hour
 //   - from  RFC3339; defaults to to-7d.
 //   - to    RFC3339; defaults to now.
 //
-// Gated on host:manage_users at host:* — same coarse Host Admin gate
-// the overview handler uses. There's no per-bucket "view metrics"
-// capability yet; reusing the existing one keeps the matrix small.
+// Gated on host:manage_users at host:* (the coarse Host Admin gate the
+// overview handler uses) AND, additionally, on bucket:view at the
+// requested bucket scope so the per-bucket series can't be read for a
+// cluster/bucket the caller has no scoped authority over (r10 IDOR
+// fix). There's no dedicated "view metrics" capability yet; bucket:view
+// is the closest least-privilege match.
 func (s *Server) getUsageSeriesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorSimple(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "GET required")
@@ -78,6 +81,21 @@ func (s *Server) getUsageSeriesHandler(w http.ResponseWriter, r *http.Request) {
 	if cid == "" || bid == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_REQUEST",
 			"cid and bid query parameters are required")
+		return
+	}
+
+	// Cluster-scope check (r10 IDOR): the coarse host:manage_users gate
+	// above does NOT bind the query to the requested cluster/bucket, so
+	// a Host Admin with no per-cluster role could read metrics for any
+	// cluster. Add the same scoped bucket:view gate the lifecycle /
+	// scrub read handlers use, tying authority to the requested
+	// (cid,bid). Existence-check the cluster first so an unknown cid
+	// 404s rather than leaking through to the metrics store.
+	if _, err := s.conns.Get(r.Context(), cid); err != nil {
+		writeRegistryForError(w, err)
+		return
+	}
+	if _, ok := s.requireCapability(w, r, "bucket:view", scopeBucket(cid, bid)); !ok {
 		return
 	}
 

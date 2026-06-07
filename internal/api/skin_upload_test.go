@@ -177,7 +177,7 @@ func TestGetSkinPolicyHandler(t *testing.T) {
 	policyPath := filepath.Join(dataDir, "test-skin.policy.json")
 	policy := SkinPolicy{Public: true, CORSOrigin: "https://example.com"}
 	_ = os.WriteFile(policyPath, []byte(""), 0644) // Create file first
-	
+
 	jsonBytes, _ := json.MarshalIndent(policy, "", "  ")
 	os.WriteFile(policyPath, jsonBytes, 0644)
 
@@ -208,7 +208,7 @@ func TestUpdateSkinPolicyHandler(t *testing.T) {
 	policyPath := filepath.Join(dataDir, "test-skin.policy.json")
 	initialPolicy := SkinPolicy{Public: false}
 	_ = os.WriteFile(policyPath, []byte(""), 0644) // Create file first
-	
+
 	jsonBytes, _ := json.MarshalIndent(initialPolicy, "", "  ")
 	os.WriteFile(policyPath, jsonBytes, 0644)
 
@@ -305,7 +305,7 @@ func TestListAdminSkinsHandler(t *testing.T) {
 
 	var resp []map[string]interface{}
 	json.Unmarshal(rw.Body.Bytes(), &resp)
-	
+
 	// Should include at least basement-default and built-in skins
 	if len(resp) < 5 {
 		t.Errorf("Expected at least 5 skins (default + 4 built-in), got %d", len(resp))
@@ -333,7 +333,7 @@ func TestValidateSkinJSON(t *testing.T) {
 
 	// Test missing palette
 	invalidSkin := map[string]interface{}{
-		"name": "test",
+		"name":    "test",
 		"palette": map[string]interface{}{},
 	}
 	skinData, _ = json.Marshal(invalidSkin)
@@ -344,8 +344,8 @@ func TestValidateSkinJSON(t *testing.T) {
 
 	// Test invalid density
 	invalidSkin["palette"] = map[string]interface{}{
-		"light":  map[string]string{"primary": "100 50% 50%"},
-		"dark":   map[string]string{"primary": "200 60% 40%"},
+		"light": map[string]string{"primary": "100 50% 50%"},
+		"dark":  map[string]string{"primary": "200 60% 40%"},
 	}
 	invalidSkin["density"] = "invalid-density"
 	skinData, _ = json.Marshal(invalidSkin)
@@ -432,8 +432,8 @@ func TestSkinNameRegex(t *testing.T) {
 	}
 
 	invalidNames := []string{
-		"",           // empty
-		"A-B-C",      // uppercase
+		"",      // empty
+		"A-B-C", // uppercase
 		"skin with spaces",
 		"-starts-dash",
 		"ends-with-",
@@ -485,7 +485,7 @@ func TestSkinUploadWithPolicy(t *testing.T) {
 	// not the form-upload filename
 	dataDir := filepath.Join(tmpDir, "skins")
 	policyPath := filepath.Join(dataDir, testSkin.Name+".policy.json")
-	
+
 	var policy SkinPolicy
 	if data, err := os.ReadFile(policyPath); err == nil {
 		json.Unmarshal(data, &policy)
@@ -660,13 +660,66 @@ func setupTestServerWithConfig(cfg *config.Config, t *testing.T) *Server {
 	if err := st.WireUserSkins(); err != nil {
 		t.Fatalf("Failed to wire user skins: %v", err)
 	}
-	
+
 	srv := New(cfg, st, nil, nil, nil)
-	
+
 	// Register built-in skins for testing
 	skinRegistry := skin.New()
 	skin.RegisterBuiltInSkins(skinRegistry)
 	srv.SetSkinRegistry(skinRegistry)
 
 	return srv
+}
+
+// TestSkinHandlers_RejectPathTraversalID verifies the {id} path param
+// is validated against skinNameRegex before any filepath.Join, so an
+// admin can't traverse out of the skins data dir (r11). The handlers
+// are invoked directly with a crafted chi param.
+func TestSkinHandlers_RejectPathTraversalID(t *testing.T) {
+	tmpDir := t.TempDir()
+	srv := setupTestServerWithConfig(&config.Config{DataDir: tmpDir}, t)
+
+	badIDs := []string{"..", "../..", "../../etc/passwd", "foo/bar", "UPPER", "a.b"}
+
+	for _, id := range badIDs {
+		// GET policy
+		{
+			req := withChiParam(createAuthRequest(http.MethodGet, "/api/v1/admin/skins/x/policy"), "id", id)
+			rw := httptest.NewRecorder()
+			srv.getSkinPolicyHandler(rw, req)
+			if rw.Code != http.StatusBadRequest {
+				t.Errorf("getSkinPolicy id=%q: status=%d want 400", id, rw.Code)
+			}
+		}
+		// PUT policy
+		{
+			body := bytes.NewReader([]byte(`{"public":true}`))
+			req := withChiParam(createAuthRequest(http.MethodPut, "/api/v1/admin/skins/x/policy"), "id", id)
+			req.Body = io.NopCloser(body)
+			req.Header.Set("Content-Type", "application/json")
+			rw := httptest.NewRecorder()
+			srv.updateSkinPolicyHandler(rw, req)
+			if rw.Code != http.StatusBadRequest {
+				t.Errorf("updateSkinPolicy id=%q: status=%d want 400", id, rw.Code)
+			}
+		}
+		// DELETE skin
+		{
+			req := withChiParam(createAuthRequest(http.MethodDelete, "/api/v1/admin/skins/x"), "id", id)
+			rw := httptest.NewRecorder()
+			srv.deleteSkinHandler(rw, req)
+			if rw.Code != http.StatusBadRequest {
+				t.Errorf("deleteSkin id=%q: status=%d want 400", id, rw.Code)
+			}
+		}
+		// PUT activate
+		{
+			req := withChiParam(createAuthRequest(http.MethodPut, "/api/v1/admin/skins/x/activate"), "id", id)
+			rw := httptest.NewRecorder()
+			srv.activateSkinHandler(rw, req)
+			if rw.Code != http.StatusBadRequest {
+				t.Errorf("activateSkin id=%q: status=%d want 400", id, rw.Code)
+			}
+		}
+	}
 }

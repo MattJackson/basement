@@ -34,6 +34,24 @@ import (
 
 var skinNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$`)
 
+// validSkinID validates a {id}/name path param against skinNameRegex
+// BEFORE it is interpolated into a filepath.Join. The {id} chi route
+// has no pattern constraint, so a CapPlatformSkinsWrite admin could
+// otherwise pass id="../.." (or a percent-decoded form) and read /
+// write / delete files outside the skins data dir (r11). The upload
+// path is already safe because it derives the filename from the
+// validated JSON body Name — this closes the same gap on the
+// id-addressed policy GET/PUT, activate, and delete handlers.
+// Writes 400 INVALID_ID and returns false on a bad id.
+func validSkinID(w http.ResponseWriter, id string) bool {
+	if !skinNameRegex.MatchString(id) {
+		writeErrorSimple(w, http.StatusBadRequest, "INVALID_ID",
+			"Skin id must match ^[a-z0-9][a-z0-9-]{0,62}[a-z0-9]$")
+		return false
+	}
+	return true
+}
+
 // Server-side mirrors of the SkinInjector/useSkin FE guards (r13). A skin
 // file is untrusted input that gets interpolated into live CSS — including
 // on the PRE-AUTH login page — so we reject malformed values at upload
@@ -288,9 +306,9 @@ func (s *Server) uploadSkinHandler(w http.ResponseWriter, r *http.Request) {
 	description := r.FormValue("policy.description")
 
 	policy := SkinPolicy{
-		Public:       publicStr != "false", // default true unless explicitly false
-		CORSOrigin:   corsOrigin,
-		Description:  description,
+		Public:      publicStr != "false", // default true unless explicitly false
+		CORSOrigin:  corsOrigin,
+		Description: description,
 	}
 
 	// Write policy file alongside skin
@@ -327,6 +345,9 @@ func (s *Server) getSkinPolicyHandler(w http.ResponseWriter, r *http.Request) {
 		writeErrorSimple(w, http.StatusBadRequest, "MISSING_ID", "Skin ID required")
 		return
 	}
+	if !validSkinID(w, id) {
+		return
+	}
 
 	dataDir := s.skinDataDir()
 	policyPath := filepath.Join(dataDir, id+".policy.json")
@@ -353,6 +374,9 @@ func (s *Server) updateSkinPolicyHandler(w http.ResponseWriter, r *http.Request)
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "MISSING_ID", "Skin ID required")
+		return
+	}
+	if !validSkinID(w, id) {
 		return
 	}
 
@@ -386,6 +410,13 @@ func (s *Server) activateSkinHandler(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "MISSING_ID", "Skin ID required")
+		return
+	}
+	if !validSkinID(w, id) {
+		return
+	}
+	if s.skins == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SKINS_NOT_WIRED", "Skin registry is not configured on this deployment.")
 		return
 	}
 
@@ -426,6 +457,9 @@ func (s *Server) deleteSkinHandler(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "MISSING_ID", "Skin ID required")
+		return
+	}
+	if !validSkinID(w, id) {
 		return
 	}
 
@@ -554,7 +588,7 @@ func (s *Server) getActiveSkinHandler(w http.ResponseWriter, r *http.Request) {
 			"name":        skinName,
 			"displayName": strings.Title(skinName),
 			"version":     "1.0.0",
-			"palette": map[string]interface{}{},
+			"palette":     map[string]interface{}{},
 		})
 	}
 }
@@ -588,6 +622,15 @@ func (s *Server) setUserSkinHandler(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.FromContext(r.Context())
 	if !ok {
 		writeErrorSimple(w, http.StatusUnauthorized, "UNAUTHORIZED", "Authentication required")
+		return
+	}
+
+	// Nil-guard the skin registry (r11): setUserSkinHandler is on the
+	// authenticated group (any logged-in user), and s.skins is nil on
+	// opt-out / test deploys. Without this the s.skins.All() below
+	// nil-panics.
+	if s.skins == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SKINS_NOT_WIRED", "Skin registry is not configured on this deployment.")
 		return
 	}
 

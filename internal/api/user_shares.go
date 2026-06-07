@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -10,6 +12,43 @@ import (
 	"github.com/mattjackson/basement/internal/store"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// userShareResponse is the wire shape for a user-facing share. It
+// deliberately omits store.Share.PasswordHash — returning the raw
+// store struct leaked the bcrypt hash to the owner on the create
+// response (r11). hasPassword conveys the only fact the FE needs.
+// The plaintext token rides along on create (returned exactly once).
+type userShareResponse struct {
+	Token         string     `json:"token"`
+	OwnerUserID   string     `json:"ownerUserId"`
+	ConnectionID  string     `json:"connectionId"`
+	BucketID      string     `json:"bucketId"`
+	Prefix        string     `json:"prefix,omitempty"`
+	Key           string     `json:"key,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	ExpiresAt     *time.Time `json:"expiresAt,omitempty"`
+	DownloadLimit *int       `json:"downloadLimit,omitempty"`
+	DownloadsUsed int        `json:"downloadsUsed"`
+	HasPassword   bool       `json:"hasPassword"`
+	Revoked       bool       `json:"revoked"`
+}
+
+func toUserShareResponse(sh store.Share) userShareResponse {
+	return userShareResponse{
+		Token:         sh.Token,
+		OwnerUserID:   sh.OwnerUserID,
+		ConnectionID:  sh.ConnectionID,
+		BucketID:      sh.BucketID,
+		Prefix:        sh.Prefix,
+		Key:           sh.Key,
+		CreatedAt:     sh.CreatedAt,
+		ExpiresAt:     sh.ExpiresAt,
+		DownloadLimit: sh.DownloadLimit,
+		DownloadsUsed: sh.DownloadsUsed,
+		HasPassword:   sh.PasswordHash != "",
+		Revoked:       sh.Revoked,
+	}
+}
 
 // UserShareCreateRequest represents the request body for creating a share.
 type UserShareCreateRequest struct {
@@ -157,6 +196,20 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 		share.PasswordHash = string(passwordHash)
 	}
 
+	// Generate the share token here (32 bytes crypto/rand, URL-safe
+	// base64 — matching store.generateToken) so the SAME token is both
+	// persisted AND returned to the caller. Previously the handler let
+	// CreateShare mint the token internally but returned the local
+	// (token-less) struct, so the create response carried an empty
+	// token and the link was never surfaced — this is the only time the
+	// plaintext token is returned.
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		writeErrorSimple(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to generate share token")
+		return
+	}
+	share.Token = base64.URLEncoding.EncodeToString(tokenBytes)
+
 	if s.store == nil {
 		writeErrorSimple(w, http.StatusInternalServerError, "STORE_NOT_AVAILABLE", "Store not available")
 		return
@@ -170,7 +223,8 @@ func (s *Server) userCreateShareHandler(w http.ResponseWriter, r *http.Request) 
 
 	s.auditSuccess(r, "share:create", resourceShare(share.Token))
 	// Return the share with plaintext token (only time it's returned).
-	writeJSON(w, http.StatusCreated, share)
+	// Use the DTO so the bcrypt PasswordHash never crosses the wire.
+	writeJSON(w, http.StatusCreated, toUserShareResponse(share))
 }
 
 // userListSharesHandler handles GET /api/v1/user/shares.
@@ -294,18 +348,6 @@ func (s *Server) userRevokeShareHandler(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"message": "Share link revoked",
 	})
-}
-
-// hashPassword hashes a plaintext password using bcrypt.
-func hashPassword(password string) (string, error) {
-	if password == "" {
-		return "", nil
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
 }
 
 // formatTimeOrNull formats a time pointer to RFC3339 or returns null.

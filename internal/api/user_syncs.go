@@ -44,6 +44,15 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Nil-guard the sync store (r11): on a deployment where the sync
+	// store isn't wired, every dereference below (Save + the goroutine's
+	// engine) would nil-panic. userListSyncsHandler already 503s on this
+	// — mirror it here and on the other per-record handlers.
+	if s.syncStore == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SYNC_STORE_NOT_WIRED", "Sync store is not configured on this deployment.")
+		return
+	}
+
 	var req UserSyncCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_JSON", "Invalid request body")
@@ -154,6 +163,14 @@ func (s *Server) userCreateSyncHandler(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		ctx := context.Background()
 
+		// Guard the registry: a nil s.reg here would panic the
+		// goroutine after the handler has already returned 202 (no
+		// recoverer in scope). Bail cleanly instead.
+		if s.reg == nil {
+			s.logger.Error("sync: driver registry not wired; cannot run job", "job_id", respID)
+			return
+		}
+
 		srcDrv, err := s.reg.For(ctx, srcConnID)
 		if err != nil {
 			s.logger.Error("sync: failed to resolve source driver", "job_id", respID, "error", err)
@@ -230,6 +247,11 @@ func (s *Server) userGetSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.syncStore == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SYNC_STORE_NOT_WIRED", "Sync store is not configured on this deployment.")
+		return
+	}
+
 	job, err := s.syncStore.Load(jobID)
 	if err != nil {
 		writeErrorSimple(w, http.StatusNotFound, "SYNC_NOT_FOUND", "Sync job not found")
@@ -262,6 +284,11 @@ func (s *Server) userDeleteSyncHandler(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	if jobID == "" {
 		writeErrorSimple(w, http.StatusBadRequest, "INVALID_ID", "Sync ID required")
+		return
+	}
+
+	if s.syncStore == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SYNC_STORE_NOT_WIRED", "Sync store is not configured on this deployment.")
 		return
 	}
 
@@ -307,6 +334,11 @@ func (s *Server) userPauseSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.syncStore == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SYNC_STORE_NOT_WIRED", "Sync store is not configured on this deployment.")
+		return
+	}
+
 	// Ownership check (was MISSING — a cross-tenant IDOR let any authed
 	// user pause any other user's sync job by ID). Mirror the resume/
 	// delete handlers: load the job and verify the caller owns it.
@@ -349,6 +381,11 @@ func (s *Server) userResumeSyncHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.syncStore == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "SYNC_STORE_NOT_WIRED", "Sync store is not configured on this deployment.")
+		return
+	}
+
 	job, err := s.syncStore.Load(jobID)
 	if err != nil {
 		writeErrorSimple(w, http.StatusNotFound, "SYNC_NOT_FOUND", "Sync job not found")
@@ -358,6 +395,11 @@ func (s *Server) userResumeSyncHandler(w http.ResponseWriter, r *http.Request) {
 	// Verify ownership
 	if job.OwnerUserID != claims.UserID {
 		writeErrorSimple(w, http.StatusForbidden, "FORBIDDEN", "Access denied to this sync job")
+		return
+	}
+
+	if s.reg == nil {
+		writeErrorSimple(w, http.StatusServiceUnavailable, "REGISTRY_NOT_WIRED", "Driver registry is not configured on this deployment.")
 		return
 	}
 

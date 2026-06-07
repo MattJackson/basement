@@ -154,6 +154,16 @@ func (s *Server) updateKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reject an empty patch up front (r10): with both optional fields
+	// nil neither update branch fires and the handler would fall
+	// through to GetKey + 200, reporting success for a request that
+	// changed nothing. Return 400 so the caller knows nothing applied.
+	if body.Name == nil && body.BucketsPermissions == nil {
+		writeError(w, http.StatusBadRequest, "NOTHING_TO_UPDATE",
+			"Provide at least one of name or bucketsPermissions.", nil)
+		return
+	}
+
 	drv, err := s.driverForRouteCluster(r)
 	if err != nil {
 		writeRegistryForError(w, err)

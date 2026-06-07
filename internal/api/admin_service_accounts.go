@@ -6,12 +6,12 @@
 // minter selected, so handing one out has the same trust gravity as
 // creating a host admin user). Per the cycle prompt:
 //
-//   POST   /admin/service-accounts          — mint, returns plaintext ONCE
-//   GET    /admin/service-accounts          — list SAs the caller owns
-//   GET    /admin/service-accounts/{id}     — detail (no secret)
-//   PUT    /admin/service-accounts/{id}     — update name/caps/expiry (NOT secret)
-//   DELETE /admin/service-accounts/{id}     — soft-delete (RevokedAt)
-//   POST   /admin/service-accounts/{id}/rotate — new secret returned ONCE
+//	POST   /admin/service-accounts          — mint, returns plaintext ONCE
+//	GET    /admin/service-accounts          — list SAs the caller owns
+//	GET    /admin/service-accounts/{id}     — detail (no secret)
+//	PUT    /admin/service-accounts/{id}     — update name/caps/expiry (NOT secret)
+//	DELETE /admin/service-accounts/{id}     — soft-delete (RevokedAt)
+//	POST   /admin/service-accounts/{id}/rotate — new secret returned ONCE
 //
 // Cross-user GETs collapse to 404 — basement doesn't leak
 // "this ID exists but isn't yours" through the wire shape. Audit
@@ -192,6 +192,48 @@ func validateServiceAccountScopes(scopes []string) error {
 	return nil
 }
 
+// requireMinterAuthority enforces the privilege-escalation bound on SA
+// minting/update: an SA may only be granted capabilities the MINTER
+// itself currently holds at the requested scope. Without this, any
+// holder of host:manage_users could mint an SA carrying e.g.
+// policy:edit_matrix @ host:* or cluster:delete @ cluster:* that they
+// do not themselves have — a durable escalation token that also
+// outlives any later downgrade of the minter's own role.
+//
+// At request time policy.ServiceAccountAllows authorises straight from
+// the SA's stored caps, so the only place to clamp the grant is at
+// write time, here.
+//
+// For each requested capability we expand wildcard expressions
+// ("domain:*", "*:*") to their leaf set and require the minter holds
+// EVERY leaf at the requested per-capability scope (s.policy.Can). A
+// bare leaf is checked directly. An empty leaf set (a wildcard that
+// matches no registered capability) is rejected — validation should
+// already have caught it, but a grant that covers nothing is never
+// something we want to mint.
+//
+// Returns (capID, scope, false) for the first capability the minter
+// cannot satisfy so the handler can name it in the 403; ("","",true)
+// when every requested capability is within the minter's authority.
+func (s *Server) requireMinterAuthority(userID string, caps []serviceaccount.Capability) (capID, scope string, ok bool) {
+	for _, c := range caps {
+		leaves := policy.Expand(c.ID)
+		if c.ID != "" && len(leaves) == 0 {
+			// Not a registered leaf and not a wildcard that matches
+			// anything — treat the literal as the leaf to check so a
+			// future-renamed capability still gets an explicit authority
+			// check rather than silently passing.
+			leaves = []string{c.ID}
+		}
+		for _, leaf := range leaves {
+			if !s.policy.Can(userID, leaf, c.Scope) {
+				return leaf, c.Scope, false
+			}
+		}
+	}
+	return "", "", true
+}
+
 // createServiceAccountHandler — POST /api/v1/admin/service-accounts.
 // Returns 201 + the plaintext secret on the first call; the caller
 // stores the secret and is responsible for handing it to the
@@ -230,6 +272,18 @@ func (s *Server) createServiceAccountHandler(w http.ResponseWriter, r *http.Requ
 	caps := make([]serviceaccount.Capability, 0, len(req.Capabilities))
 	for _, c := range req.Capabilities {
 		caps = append(caps, serviceaccount.Capability{ID: c.ID, Scope: c.Scope})
+	}
+
+	// Privilege-escalation bound: an SA may only carry capabilities the
+	// minter itself currently holds at the requested scope. See
+	// requireMinterAuthority.
+	if capID, scope, authOK := s.requireMinterAuthority(userID, caps); !authOK {
+		s.auditFailureDetail(r, "service_account:create", "service_account:"+req.Name,
+			"minter lacks "+capID+" on "+scope)
+		writeError(w, http.StatusForbidden, "INSUFFICIENT_PRIVILEGE",
+			"A service account cannot be granted a capability the minter does not hold.",
+			map[string]any{"capability": capID, "scope": scope})
+		return
 	}
 
 	sa, secret, err := s.store.ServiceAccounts().Create(r.Context(), serviceaccount.ServiceAccount{
@@ -405,6 +459,18 @@ func (s *Server) updateServiceAccountHandler(w http.ResponseWriter, r *http.Requ
 		caps := make([]serviceaccount.Capability, 0, len(req.Capabilities))
 		for _, c := range req.Capabilities {
 			caps = append(caps, serviceaccount.Capability{ID: c.ID, Scope: c.Scope})
+		}
+		// Privilege-escalation bound on update too: re-granting (or
+		// adding) any capability the minter doesn't currently hold is
+		// refused, mirroring create. Without this, update is an
+		// equivalent escalation path to create.
+		if capID, scope, authOK := s.requireMinterAuthority(userID, caps); !authOK {
+			s.auditFailureDetail(r, "service_account:update", resourceServiceAccount(id),
+				"minter lacks "+capID+" on "+scope)
+			writeError(w, http.StatusForbidden, "INSUFFICIENT_PRIVILEGE",
+				"A service account cannot be granted a capability the minter does not hold.",
+				map[string]any{"capability": capID, "scope": scope})
+			return
 		}
 		patch.Capabilities = caps
 	}

@@ -202,9 +202,17 @@ func TestCreateShare_WithPassword(t *testing.T) {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	passwordHash, ok := result["passwordHash"].(string)
-	if !ok || passwordHash == "" {
-		t.Error("expected passwordHash in response")
+	// Security (r11): the create response must NOT carry the bcrypt
+	// PasswordHash. It exposes only hasPassword=true.
+	if _, leaked := result["passwordHash"]; leaked {
+		t.Errorf("create response leaked passwordHash: %v", result["passwordHash"])
+	}
+	if hp, ok := result["hasPassword"].(bool); !ok || !hp {
+		t.Errorf("expected hasPassword=true in response, got %v", result["hasPassword"])
+	}
+	// The plaintext token still rides along (returned exactly once).
+	if tok, ok := result["token"].(string); !ok || tok == "" {
+		t.Errorf("expected non-empty token in create response, got %v", result["token"])
 	}
 }
 

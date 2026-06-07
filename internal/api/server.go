@@ -57,12 +57,12 @@ type oidcProvider interface {
 
 // Server holds the HTTP server and its dependencies.
 type Server struct {
-	cfg        *config.Config
-	store      *store.Store
-	conns      store.Connections
-	drv        driver.Driver
-	reg        *driver.Registry
-	syncStore  sync.Store
+	cfg       *config.Config
+	store     *store.Store
+	conns     store.Connections
+	drv       driver.Driver
+	reg       *driver.Registry
+	syncStore sync.Store
 	// v1.5.0a backup subsystem. Both are nil in tests that don't
 	// wire them, and the user_backups handlers treat nil as
 	// "subsystem disabled" rather than crashing.
@@ -85,23 +85,23 @@ type Server struct {
 	// returns 503 WEBDAV_NOT_WIRED. Production main.go wires a
 	// *webdav.Handler before Start(); tests that don't care about the
 	// gateway leave the field unset.
-	webdav      http.Handler
+	webdav http.Handler
 	// v1.9.0c gateway registry. The /admin/gateways endpoint reads
 	// from this to render every registered gateway (real + stub).
 	// Nil in tests that don't care about the multi-gateway surface;
 	// the handler returns 503 GATEWAYS_NOT_WIRED in that case.
-	gateways    *gateway.Registry
+	gateways *gateway.Registry
 	// v1.13.0a (ADR-0008) skin registry. The /skins endpoint reads
 	// from this to enumerate every registered skin. Nil in tests
 	// that don't care about skins; the handler returns 503
 	// SKINS_NOT_WIRED in that case. Production main.go always
 	// supplies a populated registry (basement-default + any
 	// user-uploaded skins v1.13.0b+ adds).
-	skins       *skin.Registry
-	oidc        oidcProvider
-	policy     policy.Enforcer
-	audit      audit.Logger
-	metrics    metrics.Recorder
+	skins   *skin.Registry
+	oidc    oidcProvider
+	policy  policy.Enforcer
+	audit   audit.Logger
+	metrics metrics.Recorder
 	// v1.11.0f: Prometheus collector + optional bearer token gate
 	// for /metrics. Nil collector means the endpoint returns 503
 	// METRICS_NOT_WIRED. Token is enforced (constant-time compare)
@@ -117,9 +117,9 @@ type Server struct {
 	// docs/adr/0007-per-cluster-envelope-encryption.md for the
 	// model.
 	clusterSecrets *clustersecret.ClusterSecretManager
-	router     chi.Router
-	httpServer *http.Server
-	logger     *slog.Logger
+	router         chi.Router
+	httpServer     *http.Server
+	logger         *slog.Logger
 
 	// oidcElevState backs /api/v1/auth/elevate/oidc/start +
 	// /callback (ADR-0003, v1.2.0c). 5min TTL'd, cleaned up on each
@@ -402,7 +402,7 @@ func (s *Server) routes() {
 			authG.Get("/auth/elevate/oidc/callback", s.elevateOIDCCallbackHandler)
 			authG.Get("/auth/org-capabilities", s.getCurrentOrgCapabilities)
 			authG.Get("/capabilities", s.capabilitiesHandler)
-// v1.13.0a (ADR-0008): pluggable skins read endpoint.
+			// v1.13.0a (ADR-0008): pluggable skins read endpoint.
 			// Every logged-in user can enumerate all registered skins;
 			// the active skin is rendered at boot from registry tokens.
 			authG.Get("/skins", s.listSkinsHandler)
@@ -660,7 +660,11 @@ func (s *Server) routes() {
 			userG.Get("/user/backups/{id}", s.userGetBackupHandler)
 			userG.Put("/user/backups/{id}", s.userUpdateBackupHandler)
 			userG.Delete("/user/backups/{id}", s.userDeleteBackupHandler)
-			userG.Post("/user/backups/{id}/run", s.userRunBackupHandler)
+			// Backup run + restore stream potentially many objects
+			// synchronously; lift the per-request write deadline so a
+			// large job isn't cut off by the 15s control-plane
+			// WriteTimeout.
+			userG.With(s.dataPlaneWriteDeadline).Post("/user/backups/{id}/run", s.userRunBackupHandler)
 			// v1.5.0b: list the snapshot timestamps the backup
 			// currently has on disk. Used by the detail page to
 			// render the "browse this snapshot" table. Returns an
@@ -669,7 +673,7 @@ func (s *Server) routes() {
 			// v1.5.0c: restore a snapshot back to a chosen target.
 			// Synchronous — the wizard wants the per-object summary
 			// inline. See backup_restore.go for the engine.
-			userG.Post("/user/backups/{id}/restore", s.userRestoreBackupHandler)
+			userG.With(s.dataPlaneWriteDeadline).Post("/user/backups/{id}/restore", s.userRestoreBackupHandler)
 
 			// v1.6.0c FEDERATION.API — user-tier CRUD + failover +
 			// resync over the FederatedBucket store + replication
@@ -779,8 +783,10 @@ func (s *Server) routes() {
 	// handler. When SetWebDAVHandler hasn't been called we return a
 	// typed 503 so a Finder probe surfaces "service not configured"
 	// instead of falling through to the SPA's catchall 404.
-	r.Handle("/webdav", s.webdavRouter())
-	r.Handle("/webdav/*", s.webdavRouter())
+	// WebDAV transfers can run far longer than the control-plane
+	// WriteTimeout; lift the per-request write deadline for the subtree.
+	r.Handle("/webdav", s.dataPlaneWriteDeadline(s.webdavRouter()))
+	r.Handle("/webdav/*", s.dataPlaneWriteDeadline(s.webdavRouter()))
 
 	// v1.11.0f: Prometheus exporter. No auth by convention (operators
 	// front this with a network allowlist) unless promToken is set, in
@@ -895,6 +901,28 @@ func (s *Server) webdavRouter() http.Handler {
 		}
 
 		s.webdav.ServeHTTP(w, r)
+	})
+}
+
+// dataPlaneWriteDeadline clears the per-request write deadline for
+// long-running data-plane transfers (WebDAV, backup run, snapshot
+// restore). The shared http.Server.WriteTimeout (15s) is right for
+// the control-plane JSON API — it bounds slow clients — but it
+// severs large WebDAV GET/PUTs and backup/restore transfers that
+// legitimately run for minutes. http.NewResponseController lets us
+// lift the deadline for just these routes without weakening the
+// global timeout (and ReadHeaderTimeout + IdleTimeout still guard
+// against slowloris on every connection).
+//
+// A zero time disables the deadline. If the underlying
+// ResponseWriter doesn't support SetWriteDeadline (e.g. a test
+// recorder) the error is ignored — the handler still runs, just
+// under whatever deadline was already in effect.
+func (s *Server) dataPlaneWriteDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+		next.ServeHTTP(w, r)
 	})
 }
 

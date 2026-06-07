@@ -395,3 +395,62 @@ func TestOIDCCallback_ManualAssignmentSurvives(t *testing.T) {
 	}
 }
 
+// putOIDCMappings is a helper that PUTs the supplied mappings as the
+// host-admin and returns the recorder.
+func putOIDCMappings(t *testing.T, srv *Server, mappings []store.OIDCGroupMapping) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(updateOIDCGroupMappingsRequest{Mappings: mappings})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/oidc-group-mappings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{
+		Name:     "__Host-basement_session",
+		Value:    generateUIAdminToken(),
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	rr := httptest.NewRecorder()
+	srv.router.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestOIDCGroupMappings_PUT_RejectsInvalidScope: a malformed scope is
+// refused at write time (r10) rather than silently stored and failing
+// to enforce on the next OIDC login.
+func TestOIDCGroupMappings_PUT_RejectsInvalidScope(t *testing.T) {
+	srv, st, _, cleanup := newOIDCMappingTestEnv(t, true)
+	defer cleanup()
+
+	rr := putOIDCMappings(t, srv, []store.OIDCGroupMapping{
+		{Claim: "groups", ClaimValue: "x", RoleID: "host_admin", Scope: "bucket:"},
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s; want 400 INVALID_SCOPE", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "INVALID_SCOPE") {
+		t.Errorf("body=%s; want INVALID_SCOPE", rr.Body.String())
+	}
+	// Nothing persisted.
+	if got := st.OIDCGroupMappings().Get(); len(got.Mappings) != 0 {
+		t.Errorf("expected no mappings persisted, got %d", len(got.Mappings))
+	}
+}
+
+// TestOIDCGroupMappings_PUT_AcceptsSuperuserScope: the bare "*"
+// superuser scope is a legitimate role-assignment scope (unlike SA
+// grants) and must be accepted.
+func TestOIDCGroupMappings_PUT_AcceptsSuperuserScope(t *testing.T) {
+	srv, st, _, cleanup := newOIDCMappingTestEnv(t, true)
+	defer cleanup()
+
+	rr := putOIDCMappings(t, srv, []store.OIDCGroupMapping{
+		{Claim: "groups", ClaimValue: "supers", RoleID: "host_admin", Scope: "*"},
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s; want 200", rr.Code, rr.Body.String())
+	}
+	if got := st.OIDCGroupMappings().Get(); len(got.Mappings) != 1 {
+		t.Errorf("expected 1 mapping persisted, got %d", len(got.Mappings))
+	}
+}

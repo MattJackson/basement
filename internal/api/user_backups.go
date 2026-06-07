@@ -357,9 +357,10 @@ func (s *Server) loadOwnedBackup(w http.ResponseWriter, r *http.Request) (backup
 // userRestoreBackupHandler handles POST /api/v1/user/backups/{id}/restore.
 //
 // Synchronous (the wizard wants the summary inline). For a huge
-// snapshot the request can take a while; the HTTP server's
-// WriteTimeout is bumped on the route group level for restore +
-// run endpoints alike. Audits run_start before kicking off and
+// snapshot the request can take a while; the restore + run routes are
+// wrapped with dataPlaneWriteDeadline (see server.go), which clears
+// the per-request write deadline so the shared 15s WriteTimeout
+// doesn't sever the transfer. Audits run_start before kicking off and
 // run_complete after the result lands (success or otherwise).
 //
 // v1.5.0c only supports snapshot-mode backups — restore from a
