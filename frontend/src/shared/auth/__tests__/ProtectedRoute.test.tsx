@@ -315,13 +315,17 @@ describe("ProtectedRoute — /admin landing (v2.0.0-beta.23)", () => {
     mockedPathname = "/admin";
   });
 
-  it("UI Admin landing on /admin is redirected to /admin/system", async () => {
+  it("UI Admin landing on /admin is redirected to /admin/clusters (canonical, matches RootRouteRedirect)", async () => {
+    // ADR-0009: bare /admin and / now share resolveAdminLanding(), which
+    // prefers cluster.wiring.list → /admin/clusters for a UI Admin. This
+    // used to send /admin to /admin/system while / sent the same role to
+    // /admin/clusters — the divergence the shared resolver closes.
     mockUserState = { data: uiAdmin, isLoading: false, isError: false };
 
     render(<ProtectedRoute><div>blocked</div></ProtectedRoute>);
 
     await vi.waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/system" });
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/admin/clusters" });
     });
   });
 

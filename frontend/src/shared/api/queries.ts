@@ -116,7 +116,12 @@ export function useCapabilities() {
   });
 }
 
-export function useNodes(cid: string) {
+// ADR-0009: nodes/topology is a CONTENTS fact — the backend gates
+// GET /admin/clusters/{cid}/nodes on cluster.contents.read (server.go).
+// A UI Admin holds cluster.wiring.read but NOT contents.read, so the
+// cluster-detail page passes `enabled=canContents` to suppress this
+// query for them; otherwise it fires a request that 403s.
+export function useNodes(cid: string, enabled = true) {
   return useQuery<Node[]>({
     queryKey: ["admin", "clusters", cid, "nodes"],
     queryFn: async () => {
@@ -126,7 +131,7 @@ export function useNodes(cid: string) {
       if (!response.ok || !data) throw apiError(`admin/clusters/${cid}/nodes`, response.status, error);
       return data as Node[];
     },
-    enabled: !!cid,
+    enabled: !!cid && enabled,
     staleTime: 30 * 1000,
     refetchInterval: 30 * 1000,
     retry: 1,

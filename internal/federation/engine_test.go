@@ -1181,11 +1181,16 @@ func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
 	now := time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
-		name     string
-		replicas []ReplicaTarget
-		wantR    string
-		wantB    string
-		wantOK   bool
+		name string
+		// lagAlertSec drives the lag-based staleness gate (staleBound =
+		// 10 × lagAlertSec). 0 disables the gate (matches a federation with
+		// no lag-alert policy); cases that exercise staleness set it
+		// explicitly.
+		lagAlertSec int
+		replicas    []ReplicaTarget
+		wantR       string
+		wantB       string
+		wantOK      bool
 	}{
 		{
 			name: "lowest lag wins",
@@ -1247,9 +1252,15 @@ func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
 			wantOK: false,
 		},
 		{
-			name: "stale replica excluded",
+			// Staleness is gated on actual lag (now-LastSync > 10×LagAlertSec),
+			// NOT on a persisted Health==HealthStale value (the engine never
+			// stores HealthStale). With lagAlertSec=300 the stale bound is
+			// 3000s: r-a at -2h is stale-by-lag and excluded even though its
+			// stored Health reads HealthLagging; r-b at -5min stays eligible.
+			name:        "stale-by-lag replica excluded (HealthStale never persisted)",
+			lagAlertSec: 300,
 			replicas: []ReplicaTarget{
-				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-2 * time.Hour), Health: HealthStale},
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-2 * time.Hour), Health: HealthLagging},
 				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-5 * time.Minute), Health: HealthLagging},
 			},
 			wantR:  "r-b",
@@ -1257,10 +1268,11 @@ func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name: "all stale returns no candidate",
+			name:        "all stale-by-lag returns no candidate",
+			lagAlertSec: 300,
 			replicas: []ReplicaTarget{
-				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-2 * time.Hour), Health: HealthStale},
-				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-3 * time.Hour), Health: HealthStale},
+				{RegionID: "r-a", Bucket: "ba", LastSync: now.Add(-2 * time.Hour), Health: HealthLagging},
+				{RegionID: "r-b", Bucket: "bb", LastSync: now.Add(-3 * time.Hour), Health: HealthInSync},
 			},
 			wantOK: false,
 		},
@@ -1290,7 +1302,10 @@ func TestWatchdog_PicksHealthiestReplica(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fb := FederatedBucket{Replicas: tc.replicas}
+			fb := FederatedBucket{
+				Replicas: tc.replicas,
+				Policy:   FederationPolicy{LagAlertSec: tc.lagAlertSec},
+			}
 			got, ok := pickHealthiestReplica(fb, now)
 			if ok != tc.wantOK {
 				t.Fatalf("ok=%v, want %v", ok, tc.wantOK)

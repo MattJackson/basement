@@ -88,6 +88,85 @@ func TestMigrateBucketUserAssignments(t *testing.T) {
 	}
 }
 
+// TestMigrateBucketUserAssignments_NoOpDoesNotRewrite: when there are no
+// bucket_user assignments to drop, the migration must NOT rewrite
+// policies.json (no reformat, no fsync) — a clean store shouldn't be
+// touched on every boot.
+func TestMigrateBucketUserAssignments_NoOpDoesNotRewrite(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir, 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	path := filepath.Join(dir, "policies.json")
+
+	// No bucket_user rows — nothing to drop.
+	writePolicies(t, path, []map[string]string{
+		{"userId": "bob", "roleId": "host_admin", "scope": "host:*"},
+	})
+
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+	// Capture the exact bytes too — mtime resolution can be coarse.
+	beforeBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read before: %v", err)
+	}
+
+	n, err := s.MigrateBucketUserAssignments(path)
+	if err != nil || n != 0 {
+		t.Fatalf("MigrateBucketUserAssignments: n=%d err=%v, want 0,nil", n, err)
+	}
+
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("policies.json was rewritten on a no-op migration (mtime changed %v -> %v)",
+			before.ModTime(), after.ModTime())
+	}
+	afterBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	if string(afterBytes) != string(beforeBytes) {
+		t.Fatalf("policies.json content changed on a no-op migration")
+	}
+}
+
+// TestMigrateLegacyUsers_NoOpWhenNothingChanged: when no admin needs the
+// UIAdmin flag flipped, the migration returns nil without rewriting users.
+func TestMigrateLegacyUsers_NoOpWhenNothingChanged(t *testing.T) {
+	s, err := Open(t.TempDir(), 24*time.Hour)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// All admins already UIAdmin; a regular user that should stay untouched.
+	mustCreate(t, s, User{ID: "u-admin-ok", Username: "okadmin", Role: "admin", UIAdmin: true})
+	mustCreate(t, s, User{ID: "u-regular", Username: "regular", Role: "user", UIAdmin: false})
+
+	before, err := os.Stat(s.usersPath)
+	if err != nil {
+		t.Fatalf("stat before: %v", err)
+	}
+
+	if err := s.MigrateLegacyUsers(); err != nil {
+		t.Fatalf("MigrateLegacyUsers: %v", err)
+	}
+
+	after, err := os.Stat(s.usersPath)
+	if err != nil {
+		t.Fatalf("stat after: %v", err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("users.json was rewritten on a no-op migration (mtime changed %v -> %v)",
+			before.ModTime(), after.ModTime())
+	}
+}
+
 // --- helpers ---
 
 func mustCreate(t *testing.T, s *Store, u User) {

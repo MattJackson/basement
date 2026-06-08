@@ -49,14 +49,17 @@ describe("useCan", () => {
     expect(result.current.can(CAP.CLUSTER_CONTENTS_READ)).toBe(false);
   });
 
-  it("default-denies while loading", () => {
+  it("ENFORCES default-deny while loading even with cached data", () => {
     setCaps([CAP.PLATFORM_USERS_LIST], /* isLoading */ true);
-    // Even though data carries the cap, isLoading short-circuits the
-    // consumer's intent — but the Set is still built from data; assert
-    // the documented loading flag is surfaced and checks still work
-    // off whatever data is present.
+    // Deny-while-loading is enforced, not advisory: even though `data`
+    // already carries the cap (React Query stale-while-revalidate), the
+    // Set is forced empty while isLoading is true so can() can't return
+    // true off stale caps during a re-fetch.
     const { result } = renderHook(() => useCan());
     expect(result.current.isLoading).toBe(true);
+    expect(result.current.can(CAP.PLATFORM_USERS_LIST)).toBe(false);
+    expect(result.current.canAny(CAP.PLATFORM_USERS_LIST)).toBe(false);
+    expect(result.current.canAll(CAP.PLATFORM_USERS_LIST)).toBe(false);
   });
 
   it("default-denies when capabilities is undefined (older backend)", () => {

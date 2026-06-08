@@ -33,6 +33,10 @@ const useClusterBuckets = vi.fn(() => ({ data: [], isLoading: false }));
 const useClusterKeys = vi.fn(() => ({ data: [], isLoading: false }));
 const useClusterLockStatus = vi.fn(() => ({ data: undefined, isLoading: false }));
 const useClusterAdmins = vi.fn(() => ({ data: undefined, isLoading: false, error: null }));
+// useNodes is a contents query too (the endpoint is contents.read-gated),
+// so we spy on it rather than no-op it — the test below asserts the page
+// disables it for a UI Admin so it never fires a 403.
+const useNodes = vi.fn(() => ({ data: [] }));
 
 vi.mock("@/shared/api/queries", async (importOriginal) => {
   const actual = await importOriginal();
@@ -43,7 +47,7 @@ vi.mock("@/shared/api/queries", async (importOriginal) => {
       isLoading: false,
       error: null,
     }),
-    useNodes: () => ({ data: [] }),
+    useNodes,
     useCapabilities: () => ({ data: { layout: "readonly" } }),
     useTestClusterQuery: () => ({ data: null, isFetching: false, isPending: false, refetch: vi.fn() }),
     useClusterBuckets,
@@ -116,6 +120,9 @@ describe("cluster detail — ADR-0009 contents gating", () => {
     expect(useClusterBuckets).toHaveBeenCalledWith("cluster-A", false);
     expect(useClusterKeys).toHaveBeenCalledWith("cluster-A", false);
     expect(useClusterLockStatus).toHaveBeenCalledWith("cluster-A", false);
+    // nodes is contents.read-gated server-side, so it must also be
+    // disabled for a UI Admin — this is the regression the FIX closes.
+    expect(useNodes).toHaveBeenCalledWith("cluster-A", false);
     // The admins section isn't even rendered for a UI Admin, so its
     // hook never runs.
     expect(useClusterAdmins).not.toHaveBeenCalled();
@@ -128,6 +135,8 @@ describe("cluster detail — ADR-0009 contents gating", () => {
     expect(useClusterBuckets).toHaveBeenCalledWith("cluster-A", true);
     expect(useClusterKeys).toHaveBeenCalledWith("cluster-A", true);
     expect(useClusterLockStatus).toHaveBeenCalledWith("cluster-A", true);
+    // nodes is enabled for a cluster-admin who holds contents.read.
+    expect(useNodes).toHaveBeenCalledWith("cluster-A", true);
     // The admins section IS rendered, firing its hook.
     expect(useClusterAdmins).toHaveBeenCalled();
   });

@@ -4,6 +4,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -242,10 +243,18 @@ func (s *Store) MigrateLegacyUsers() error {
 	s.usersMu.Lock()
 	defer s.usersMu.Unlock()
 
+	changed := false
 	for i := range s.usersCache {
 		if s.usersCache[i].Role == "admin" && !s.usersCache[i].UIAdmin {
 			s.usersCache[i].UIAdmin = true
+			changed = true
 		}
+	}
+
+	if !changed {
+		// Nothing flipped — skip the disk write so a clean store isn't
+		// rewritten on every boot.
+		return nil
 	}
 
 	return saveJSON(s.usersPath, s.usersCache)
@@ -287,6 +296,14 @@ func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
 		filtered = append(filtered, a)
 	}
 
+	if dropped == 0 {
+		// Nothing to drop — don't rewrite policies.json. Re-serialising a
+		// clean, operator-editable file on every boot (and paying an fsync)
+		// is wasteful and could subtly reorder keys vs. an operator's hand
+		// edits. Idempotent re-runs after the first drop hit this path.
+		return 0, nil
+	}
+
 	pf.Assignments = filtered
 
 	// Write back atomically.
@@ -323,10 +340,10 @@ func (s *Store) MigrateBucketUserAssignments(policyPath string) (int, error) {
 		return 0, fmt.Errorf("renaming policies: %w", err)
 	}
 
-	if dropped > 0 {
-		// Log at WARN level so operators see it in startup logs.
-		fmt.Printf("[WARN] MigrateBucketUserAssignments: dropped %d bucket_user assignment(s) per v2.0.0a [[v2_clean_break]]\n", dropped)
-	}
+	// Log at WARN level via slog so operators see it in structured startup
+	// logs (reached only when dropped > 0 — the no-op path returned above).
+	slog.Warn("MigrateBucketUserAssignments: dropped legacy bucket_user assignment(s) per v2.0.0a [[v2_clean_break]]",
+		"dropped", dropped)
 
 	return dropped, nil
 }

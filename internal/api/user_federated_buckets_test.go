@@ -415,6 +415,15 @@ func TestFailoverFederation_Happy(t *testing.T) {
 	var created federatedBucketResponse
 	_ = json.NewDecoder(createRR.Body).Decode(&created)
 
+	// Mark the replica as recently synced so the promotion-safety gate
+	// (never-synced/broken/stale) lets the manual failover through.
+	if err := env.store.UpdateReplicaHealth(context.Background(), created.ID, replicaID, "replica-bucket", federation.ReplicaTarget{
+		LastSync: time.Now().Add(-30 * time.Second),
+		Health:   federation.HealthInSync,
+	}); err != nil {
+		t.Fatalf("seed replica health: %v", err)
+	}
+
 	// Promote the b2 replica to primary.
 	failoverBody := map[string]string{
 		"newPrimaryRegionId": replicaID,
@@ -426,6 +435,9 @@ func TestFailoverFederation_Happy(t *testing.T) {
 	env.srv.router.ServeHTTP(foRR, foReq)
 	if foRR.Code != http.StatusOK {
 		t.Fatalf("failover: expected 200, got %d body=%s", foRR.Code, foRR.Body.String())
+	}
+	if afterFOEpoch := mustGetFederation(t, env.store, created.ID).FailoverEpoch; afterFOEpoch != 1 {
+		t.Fatalf("manual failover should bump FailoverEpoch to 1, got %d", afterFOEpoch)
 	}
 	var afterFO federatedBucketResponse
 	_ = json.NewDecoder(foRR.Body).Decode(&afterFO)
@@ -486,6 +498,147 @@ func TestFailoverFederation_NotAReplica(t *testing.T) {
 	_ = json.NewDecoder(foRR.Body).Decode(&resp)
 	if resp.Error.Code != "NOT_A_REPLICA" {
 		t.Fatalf("expected code=NOT_A_REPLICA, got %q", resp.Error.Code)
+	}
+}
+
+// mustGetFederation fetches a federation directly from the store, failing
+// the test on error. Used to assert on internal fields (e.g. FailoverEpoch)
+// that aren't surfaced on the wire response.
+func mustGetFederation(t *testing.T, store federation.FederatedBuckets, id string) federation.FederatedBucket {
+	t.Helper()
+	fb, err := store.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("store.Get(%q): %v", id, err)
+	}
+	return fb
+}
+
+// seedFailoverFederation creates a federation (primary + one replica) via
+// the API and returns its ID plus the replica region ID. The replica's
+// LastSync/Health are left as the create defaults (never-synced) so the
+// caller can stamp whatever sync state the test needs.
+func seedFailoverFederation(t *testing.T, env *federationTestEnv) (fedID, replicaID string) {
+	t.Helper()
+	primaryID := env.seedRegion(t, "matthew", "garage", "https://s3.home.example.com")
+	replicaID = env.seedRegion(t, "matthew", "b2", "https://s3.us-west-002.backblazeb2.com")
+	createReq := newJSONRequest("/api/v1/user/federated-buckets",
+		validFederationBody("lsi", primaryID, replicaID))
+	createReq.AddCookie(fedUserCookie(t, "matthew"))
+	createRR := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d body=%s", createRR.Code, createRR.Body.String())
+	}
+	var created federatedBucketResponse
+	_ = json.NewDecoder(createRR.Body).Decode(&created)
+	return created.ID, replicaID
+}
+
+// postFailover issues a manual-failover request and returns the recorder.
+func postFailover(t *testing.T, env *federationTestEnv, fedID, regionID, bucket string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := map[string]string{"newPrimaryRegionId": regionID, "newPrimaryBucket": bucket}
+	req := newJSONRequest("/api/v1/user/federated-buckets/"+fedID+"/failover", body)
+	req.AddCookie(fedUserCookie(t, "matthew"))
+	rr := httptest.NewRecorder()
+	env.srv.router.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestFailoverFederation_RefusesNeverSynced: a manual failover to a replica
+// that has never completed a sync (zero LastSync, no confirmed data) is
+// refused with 409 REPLICA_NOT_SYNCED — same data-safety gate as
+// auto-failover. Promoting an unverified backend could strand the old
+// primary's data behind an empty source-of-truth.
+func TestFailoverFederation_RefusesNeverSynced(t *testing.T) {
+	env := newFederationTestEnv(t)
+	fedID, replicaID := seedFailoverFederation(t, env)
+
+	rr := postFailover(t, env, fedID, replicaID, "replica-bucket")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for never-synced replica, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp ErrorResponse
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp.Error.Code != "REPLICA_NOT_SYNCED" {
+		t.Fatalf("expected code=REPLICA_NOT_SYNCED, got %q", resp.Error.Code)
+	}
+	// Primary must be unchanged and epoch must stay 0.
+	got := mustGetFederation(t, env.store, fedID)
+	if got.Primary.RegionID == replicaID {
+		t.Fatalf("never-synced replica must NOT be promoted; primary=%+v", got.Primary)
+	}
+	if got.FailoverEpoch != 0 {
+		t.Fatalf("epoch must stay 0 on refused failover, got %d", got.FailoverEpoch)
+	}
+}
+
+// TestFailoverFederation_RefusesStale: a manual failover to a replica that
+// is too far behind (now-LastSync > 10×LagAlertSec) is refused with 409
+// REPLICA_STALE, mirroring computeHealth's HealthStale bound. HealthStale
+// is never persisted, so this gate is computed from the actual lag.
+func TestFailoverFederation_RefusesStale(t *testing.T) {
+	env := newFederationTestEnv(t)
+	fedID, replicaID := seedFailoverFederation(t, env)
+
+	// Default LagAlertSec is 300 → stale bound is 3000s; -2h is well past it.
+	if err := env.store.UpdateReplicaHealth(context.Background(), fedID, replicaID, "replica-bucket", federation.ReplicaTarget{
+		LastSync: time.Now().Add(-2 * time.Hour),
+		Health:   federation.HealthLagging,
+	}); err != nil {
+		t.Fatalf("seed replica health: %v", err)
+	}
+
+	rr := postFailover(t, env, fedID, replicaID, "replica-bucket")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for stale replica, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp ErrorResponse
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp.Error.Code != "REPLICA_STALE" {
+		t.Fatalf("expected code=REPLICA_STALE, got %q", resp.Error.Code)
+	}
+}
+
+// epochConflictStore wraps a real FederatedBuckets store but forces
+// PromoteWithEpoch to return ErrEpochChanged, simulating a concurrent
+// failover that advanced the epoch between the handler's read and its CAS.
+type epochConflictStore struct {
+	federation.FederatedBuckets
+}
+
+func (s epochConflictStore) PromoteWithEpoch(_ context.Context, _ string, _ int, _ federation.FederatedBucket) (federation.FederatedBucket, error) {
+	return federation.FederatedBucket{}, federation.ErrEpochChanged
+}
+
+// TestFailoverFederation_ConcurrentEpochConflict: when the epoch-guarded
+// CAS reports ErrEpochChanged (a concurrent failover already advanced the
+// epoch), the manual-failover handler returns 409 CONCURRENT_FAILOVER
+// instead of clobbering the newer primary.
+func TestFailoverFederation_ConcurrentEpochConflict(t *testing.T) {
+	env := newFederationTestEnv(t)
+	fedID, replicaID := seedFailoverFederation(t, env)
+
+	// Make the replica eligible so we reach the CAS (past the safety gate).
+	if err := env.store.UpdateReplicaHealth(context.Background(), fedID, replicaID, "replica-bucket", federation.ReplicaTarget{
+		LastSync: time.Now().Add(-30 * time.Second),
+		Health:   federation.HealthInSync,
+	}); err != nil {
+		t.Fatalf("seed replica health: %v", err)
+	}
+
+	// Re-wire the server with a store that forces an epoch conflict on the
+	// CAS while still serving the handler's initial Get (ownership lookup).
+	env.srv.SetFederation(epochConflictStore{env.store}, env.engine)
+
+	rr := postFailover(t, env, fedID, replicaID, "replica-bucket")
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected 409 on epoch conflict, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp ErrorResponse
+	_ = json.NewDecoder(rr.Body).Decode(&resp)
+	if resp.Error.Code != "CONCURRENT_FAILOVER" {
+		t.Fatalf("expected code=CONCURRENT_FAILOVER, got %q", resp.Error.Code)
 	}
 }
 

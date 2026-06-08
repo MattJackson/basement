@@ -1950,10 +1950,18 @@ func (e *Engine) probePrimary(ctx context.Context, fb FederatedBucket) bool {
 //   - A replica that has NEVER synced (LastSync.IsZero()) is excluded —
 //     it has no proof of a single confirmed object, so promoting it
 //     would make an empty bucket the source of truth.
-//   - A replica with Health == HealthStale or HealthBroken is excluded
-//     — known too-far-behind / known-bad targets.
+//   - A replica that is too far behind is excluded. The engine only ever
+//     PERSISTS Health as InSync / Lagging / Broken (recordSuccess /
+//     recordDeleteSuccess / recordFailure) — HealthStale is a derived,
+//     display-only value produced by computeHealth and is NEVER written
+//     to a replica's stored Health field. So a `Health == HealthStale`
+//     check would be dead against production state. Instead we compute
+//     staleness directly here from the lag: a replica whose
+//     now-LastSync exceeds the stale bound (10 × LagAlertSec, mirroring
+//     computeHealth's HealthStale definition) is refused. The persisted
+//     HealthBroken value IS real and is still excluded.
 //
-// Only HealthInSync / HealthLagging replicas with a non-zero LastSync
+// Only sufficiently-fresh, non-broken replicas with a non-zero LastSync
 // are eligible. Returns (zero, false) when none qualify — the caller
 // MUST skip the failover in that case rather than promote.
 func pickHealthiestReplica(fb FederatedBucket, now time.Time) (ReplicaTarget, bool) {
@@ -1961,13 +1969,24 @@ func pickHealthiestReplica(fb FederatedBucket, now time.Time) (ReplicaTarget, bo
 		rep    ReplicaTarget
 		lagSec int64
 	}
+	// Staleness bound mirrors computeHealth's HealthStale threshold:
+	// behind by more than 10 × LagAlertSec. A non-positive LagAlertSec
+	// disables the lag-based staleness gate (computeHealth treats it as
+	// always-in-sync), so we only exclude broken/never-synced in that case.
+	var staleBound time.Duration
+	if fb.Policy.LagAlertSec > 0 {
+		staleBound = 10 * time.Duration(fb.Policy.LagAlertSec) * time.Second
+	}
 	var candidates []scored
 	for _, rep := range fb.Replicas {
-		// Eligibility gate: refuse never-synced / stale / broken targets.
+		// Eligibility gate: refuse never-synced / stale-by-lag / broken targets.
 		if rep.LastSync.IsZero() {
 			continue
 		}
-		if rep.Health == HealthStale || rep.Health == HealthBroken {
+		if rep.Health == HealthBroken {
+			continue
+		}
+		if staleBound > 0 && now.Sub(rep.LastSync) > staleBound {
 			continue
 		}
 		delta := now.Sub(rep.LastSync)
@@ -2028,7 +2047,7 @@ func (e *Engine) triggerAutoFailover(ctx context.Context, fb FederatedBucket) {
 		hasReplicas := len(fb.Replicas) > 0
 		reason := "no healthy replica available"
 		if hasReplicas {
-			reason = "no acceptably-fresh replica (candidates: never-synced/stale)"
+			reason = "no acceptably-fresh replica (candidates: never-synced/stale-by-lag/broken)"
 		}
 		e.logger.Error("federation engine: auto-failover skipped — no eligible replica",
 			"federationId", fb.ID, "primaryRegion", fb.Primary.RegionID,

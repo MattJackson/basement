@@ -1,7 +1,7 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useUser } from "@/shared/auth/useUser";
 import { useCan } from "@/shared/auth/useCan";
-import { CAP } from "@/shared/auth/capabilities";
+import { resolveAdminLanding } from "@/shared/auth/adminLanding";
 import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 
 // v1.13.35: root route is activeRole-aware. Operator was landing
@@ -11,13 +11,13 @@ import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 // someone who just elevated. New behavior:
 //
 //   - unauthenticated         → /login
-//   - activeRole: ui-admin    → /admin/clusters  (UI Admin is super-admin
-//                                                  on every cluster; the
-//                                                  cluster list is the
-//                                                  natural overview)
-//   - activeRole: cluster-admin (with cid)
-//                              → /admin/clusters/<cid>
-//   - activeRole: user / none → /files          (the user shell)
+//   - ui-admin                → /admin/clusters  (cluster.wiring.list)
+//   - cluster-admin (with cid)→ /admin/clusters/<cid>
+//   - user / none             → /files
+//
+// ADR-0009: the actual decision lives in resolveAdminLanding() so the
+// "/" entry here and the bare "/admin" entry in ProtectedRoute can't
+// diverge — both call the same capability-driven helper.
 //
 // Pre-v1.13.35 this route used a synchronous localStorage check
 // against "basement_auth_token" — that key was never written under
@@ -39,31 +39,17 @@ function RootRouteRedirect() {
     return <Navigate to="/login" replace />;
   }
 
-  const activeRole = data.activeRole;
-
-  // ADR-0009: landing surface follows capability. UI Admin (holds
-  // cluster.wiring.list) → the cross-cluster list overview.
-  if (can(CAP.CLUSTER_WIRING_LIST)) {
-    return <Navigate to="/admin/clusters" replace />;
-  }
-
-  // Cluster-admin has a single cluster and no list page — route them
-  // straight to their cluster detail. The cluster id is surface-
-  // routing data (which cluster), read off the active role.
-  if (can(CAP.CLUSTER_CONTENTS_READ) && activeRole?.cluster) {
+  // ADR-0009: landing surface follows capability via the shared
+  // resolver (kept in lockstep with ProtectedRoute's bare-/admin
+  // landing). Covers UI Admin → /admin/clusters, cluster-admin →
+  // their own cluster detail, and user / missing-activeRole → /files.
+  const landing = resolveAdminLanding(can, data.activeRole?.cluster);
+  if (landing.to === "/admin/clusters/$cid") {
     return (
-      <Navigate
-        to="/admin/clusters/$cid"
-        params={{ cid: activeRole.cluster }}
-        replace
-      />
+      <Navigate to="/admin/clusters/$cid" params={{ cid: landing.cid! }} replace />
     );
   }
-
-  // Default: user shell. Covers the user role, a missing activeRole
-  // (pre-v1.13.18 sessions during the grace window), and any future
-  // role with no admin capability.
-  return <Navigate to="/files" replace />;
+  return <Navigate to={landing.to} replace />;
 }
 
 export const Route = createFileRoute("/")({

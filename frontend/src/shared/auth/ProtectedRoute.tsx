@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useUser } from "./useUser";
 import { useCan } from "./useCan";
 import { resolveRequiredCapabilities } from "./route-capabilities";
+import { resolveAdminLanding } from "./adminLanding";
 import { CAP } from "./capabilities";
 import LoadingSpinner from "@/shared/ui/LoadingSpinner";
 
@@ -39,7 +40,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { data, isLoading } = useUser();
-  const { canAny } = useCan();
+  const { can, canAny } = useCan();
 
   useEffect(() => {
     if (isLoading) return;
@@ -68,21 +69,23 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
     // ── Surface-switching convenience redirects ──────────────────────
     // The bare /admin landing routes to the surface the active role
-    // owns (kind drives WHICH shell, not permission).
+    // owns (kind drives WHICH shell, not permission). The decision is
+    // delegated to the shared resolveAdminLanding() so this stays in
+    // lockstep with the "/" entry in RootRouteRedirect — the two used
+    // to disagree for a UI Admin (system vs clusters).
     if (pathname === "/admin" || pathname === "/admin/") {
-      if (isClusterAdmin && ownCluster) {
-        navigate({ to: `/admin/clusters/${ownCluster}` });
+      // A cluster-admin's cluster id comes off their active role; the
+      // resolver falls back to it for the contents.read branch.
+      const landing = resolveAdminLanding(can, ownCluster);
+      if (landing.to === "/files") {
+        bounceToFiles("Switch to an admin role to access this page.");
         return;
       }
-      if (canAny(CAP.PLATFORM_SYSTEM_READ)) {
-        navigate({ to: "/admin/system" });
+      if (landing.to === "/admin/clusters/$cid") {
+        navigate({ to: `/admin/clusters/${landing.cid}` });
         return;
       }
-      if (canAny(CAP.CLUSTER_WIRING_LIST)) {
-        navigate({ to: "/admin/clusters" });
-        return;
-      }
-      bounceToFiles("Switch to an admin role to access this page.");
+      navigate({ to: landing.to });
       return;
     }
 
@@ -136,7 +139,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       );
       return;
     }
-  }, [isLoading, data, navigate, location, canAny]);
+  }, [isLoading, data, navigate, location, can, canAny]);
 
   if (isLoading || !data) {
     return <LoadingSpinner />;

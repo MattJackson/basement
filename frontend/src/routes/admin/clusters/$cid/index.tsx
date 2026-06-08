@@ -79,7 +79,7 @@ function ClusterDetailScreen() {
   const canWiringDelete = can(CAP.CLUSTER_WIRING_DELETE);
 
   const { data: cluster, isLoading, error } = useGetCluster(cid);
-  const { data: nodes } = useNodes(cid);
+  const { data: nodes } = useNodes(cid, canContents);
   const { data: capabilities } = useCapabilities();
   const { data: buckets, isLoading: bucketsLoading } = useClusterBuckets(cid, canContents);
   const { data: keys, isLoading: keysLoading } = useClusterKeys(cid, canContents);
@@ -187,9 +187,12 @@ function ClusterDetailScreen() {
       <Card>
         <CardContent className="pt-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* ADR-0009: bucket/key counts are contents facts — only
-                shown to cluster.contents.read. The nodes count is a
-                wiring fact (shown to everyone with wiring.read). */}
+            {/* ADR-0009: bucket/key counts AND the nodes count are all
+                contents facts — the backend gates the buckets/keys/nodes
+                endpoints on cluster.contents.read, so only show these to
+                a viewer who holds it. A UI Admin (wiring.read only) sees
+                the wiring surface (label/driver/health/test/edit) but
+                none of these counts, and fires none of their queries. */}
             {canContents && (
               <>
                 <div className="text-center p-4 rounded-lg bg-muted/50">
@@ -204,12 +207,12 @@ function ClusterDetailScreen() {
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">{t("adminClustersList.keyCount")}</div>
                 </div>
+                <div className="text-center p-4 rounded-lg bg-muted/50">
+                  <div className="text-xl font-semibold tabular-nums">{nodes?.length ?? 0}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{t("adminClustersDetail.nodesTitle")}</div>
+                </div>
               </>
             )}
-            <div className="text-center p-4 rounded-lg bg-muted/50">
-              <div className="text-xl font-semibold tabular-nums">{nodes?.length ?? 0}</div>
-              <div className="text-xs text-muted-foreground mt-1">{t("adminClustersDetail.nodesTitle")}</div>
-            </div>
           </div>
         </CardContent>
       </Card>
@@ -368,8 +371,10 @@ function ClusterDetailScreen() {
         </>
       )}
 
-      {/* Nodes section - gated by capability */}
-      {capabilities?.layout !== "readonly" && (
+      {/* Nodes section — ADR-0009: nodes is a contents fact (the
+          endpoint is contents.read-gated), so hide it from a UI Admin;
+          the layout capability further hides it in readonly mode. */}
+      {canContents && capabilities?.layout !== "readonly" && (
         <Card>
           <CardHeader>{t("adminClustersDetail.nodesTitle")}</CardHeader>
           <CardContent className="pt-6">

@@ -65,10 +65,10 @@ type federatedBucketTargetRequest struct {
 // /user/federated-buckets. Policy is optional on create — when omitted
 // the server applies federation.DefaultPolicy.
 type federatedBucketCreateRequest struct {
-	Name     string                          `json:"name"`
-	Primary  federatedBucketTargetRequest    `json:"primary"`
-	Replicas []federatedBucketTargetRequest  `json:"replicas"`
-	Policy   *federation.FederationPolicy    `json:"policy,omitempty"`
+	Name     string                         `json:"name"`
+	Primary  federatedBucketTargetRequest   `json:"primary"`
+	Replicas []federatedBucketTargetRequest `json:"replicas"`
+	Policy   *federation.FederationPolicy   `json:"policy,omitempty"`
 }
 
 // federatedBucketFailoverRequest is the body shape for
@@ -573,6 +573,14 @@ func (s *Server) userDeleteFederationHandler(w http.ResponseWriter, r *http.Requ
 // re-evaluate. The lag/health fields on the demoted-old-primary entry
 // start zero so the engine treats it as fresh — first tick will
 // recompute health from scratch.
+//
+// Safety: the target replica is gated the same way auto-failover gates
+// promotion — a never-synced (no confirmed data), broken, or stale-by-lag
+// replica is refused with 409 so a manual failover can't promote an
+// empty/divergent backend to primary. The swap is persisted through the
+// epoch-guarded CAS (PromoteWithEpoch), so a manual failover racing an
+// auto-failover (or another manual one) can't silently clobber the other;
+// a lost race returns 409 CONCURRENT_FAILOVER and the client refetches.
 func (s *Server) userFailoverFederationHandler(w http.ResponseWriter, r *http.Request) {
 	existing, _, ok := s.requireOwnedFederation(w, r)
 	if !ok {
@@ -609,6 +617,38 @@ func (s *Server) userFailoverFederationHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Promotion-safety gate (mirrors the auto-failover data-safety gate in
+	// pickHealthiestReplica). A manual failover is an explicit operator
+	// choice, but promoting a backend that has no confirmed data — or is
+	// known-broken / hours-stale — would make an empty-or-divergent bucket
+	// the source of truth and silently strand the old primary's data. We
+	// refuse those targets with a clear error rather than let the operator
+	// foot-gun. The operator can re-issue once the target has actually
+	// caught up.
+	target := existing.Replicas[replicaIdx]
+	if target.LastSync.IsZero() {
+		writeErrorSimple(w, http.StatusConflict, "REPLICA_NOT_SYNCED",
+			"target replica has never completed a sync (no confirmed data); refusing to promote an unverified backend to primary")
+		return
+	}
+	if target.Health == federation.HealthBroken {
+		writeErrorSimple(w, http.StatusConflict, "REPLICA_BROKEN",
+			"target replica is currently broken (repeated sync failures); refusing to promote it to primary")
+		return
+	}
+	// Stale-by-lag check: the engine never PERSISTS HealthStale (it only
+	// stores InSync/Lagging/Broken), so compute staleness directly from the
+	// lag, mirroring federation.computeHealth's HealthStale bound of
+	// 10 × LagAlertSec. A non-positive LagAlertSec disables this gate.
+	if existing.Policy.LagAlertSec > 0 {
+		staleBound := 10 * time.Duration(existing.Policy.LagAlertSec) * time.Second
+		if time.Since(target.LastSync) > staleBound {
+			writeErrorSimple(w, http.StatusConflict, "REPLICA_STALE",
+				"target replica is too far behind (stale); refusing to promote it to primary — wait for it to catch up or pick a fresher replica")
+			return
+		}
+	}
+
 	// Build the patch: swap primary <-> that replica. Reset health/lag
 	// on the new-primary entry (it becomes the source of truth — no
 	// more lag to track), but preserve health/lag on the demoted entry
@@ -631,15 +671,30 @@ func (s *Server) userFailoverFederationHandler(w http.ResponseWriter, r *http.Re
 		}
 	}
 
+	// Route the manual promotion through the SAME epoch-guarded CAS as
+	// auto-failover so the two paths can't silently clobber each other. We
+	// read existing.FailoverEpoch at the top of the handler (via
+	// requireOwnedFederation) and bump it by one; PromoteWithEpoch only
+	// applies the swap if the stored epoch still matches. If a concurrent
+	// auto-failover (or another manual failover) landed in between, the CAS
+	// rejects us with ErrEpochChanged and we return 409 so the client
+	// refetches rather than overwriting the newer primary.
 	patch := federation.FederatedBucket{
-		Name:     existing.Name,
-		Primary:  newPrimary,
-		Replicas: newReplicas,
-		Policy:   existing.Policy,
+		Name:          existing.Name,
+		Primary:       newPrimary,
+		Replicas:      newReplicas,
+		Policy:        existing.Policy,
+		FailoverEpoch: existing.FailoverEpoch + 1,
 	}
 	store := s.userFederationsStore()
-	updated, err := store.Update(r.Context(), existing.ID, patch)
+	updated, err := store.PromoteWithEpoch(r.Context(), existing.ID, existing.FailoverEpoch, patch)
 	if err != nil {
+		if errors.Is(err, federation.ErrEpochChanged) {
+			s.auditFailure(r, "federation:failover", resourceFederation(existing.ID), err)
+			writeErrorSimple(w, http.StatusConflict, "CONCURRENT_FAILOVER",
+				"a concurrent failover already changed this federation's primary; refetch and retry")
+			return
+		}
 		s.auditFailure(r, "federation:failover", resourceFederation(existing.ID), err)
 		writeErrorSimple(w, http.StatusInternalServerError, "FEDERATION_STORE_ERROR",
 			"Failed to update federation: "+err.Error())
