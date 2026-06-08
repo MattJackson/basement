@@ -52,6 +52,63 @@ reports. The rest are surgical UX fixes.
 - v2.0.0-beta.4 (full app i18n extraction) is WIP-paused on branch `wip/v2.0.0-beta.4-2026-05-25` (12 files modified, ~100s of strings to extract still pending). Resume by checking out the branch and either redispatching the freshman with `prompts/v2.0.0-beta.4_full_i18n_extraction_2026-05-25.md` or finishing the extraction as senior.
 - v2.0.0-beta.5 (mass language pour to ~25-30 LTR locales) is the natural next freshman target post-beta.4.
 
+## v2.0.0-rc.5 — 2026-06-07
+
+Follow-on to rc.4: resolves the four items rc.4 flagged for operator decision,
+plus a privacy/hygiene pass. Validated by a dual-model file-by-file pre-tag
+review of the full `rc.4..HEAD` diff (0 blockers). All gates green.
+
+### Federation (full hardening)
+
+- **Promotion gating** — auto- AND manual-failover now refuse to promote a
+  replica that has never synced, is broken, or is stale-by-lag
+  (`now-LastSync > 10×LagAlertSec`); if no acceptably-fresh replica exists the
+  failover is skipped + audited rather than promoting an empty/stale backend.
+  (The old `HealthStale` exclusion was dead — that value is never persisted —
+  so it's now a real lag check.)
+- **Epoch/CAS fencing** — `FederatedBucket.FailoverEpoch` + `PromoteWithEpoch`
+  compare-and-swap: a promotion only lands if the stored epoch is unchanged, so
+  a stale/concurrent promotion can't clobber newer state. Covers both auto- and
+  **manual** failover (manual returns `409 CONCURRENT_FAILOVER` / `REPLICA_*` on
+  conflict or an unsafe target). Proportionate to a single-writer control plane
+  — not consensus.
+- **Replication correctness** — `LastSync` only advances to the high-water mark
+  of objects actually replicated; a truncated tick (>100-object cap) stays
+  `lagging` and re-scans the tail next tick instead of silently stranding
+  objects 101+. Deletes no longer advance `LastSync` past un-replicated content.
+
+### Capability-RBAC frontend (ADR-0009 Phase D/E)
+
+- Frontend now gates on backend-provided **capabilities** (`/auth/me`
+  `capabilities`) instead of role-kind/pathname: new `capabilities.ts` (mirrors
+  `internal/auth/capabilities.go`), `useCan()` (fail-closed, denies while
+  loading), `<Can>`, a route→capability map, and a rewritten `ProtectedRoute`.
+- **UI-Admin on a cluster-detail page now fires zero contents-gated queries**
+  (no 403 toasts) — the wiring view renders, contents sections/queries gate on
+  `cluster.contents.read`. **Cluster-admins get a usable nav rail.** Single-source
+  admin landing so entry points can't diverge.
+
+### Boot migrations (wired)
+
+- `MigrateLegacyUsers` (a v1-era `Role=admin` user keeps UI-admin on upgrade) and
+  `MigrateBucketUserAssignments` (drops legacy `bucket_user` rows) now run at boot
+  with correct ordering, idempotent, and **no-op without rewriting** on a clean store.
+
+### Security / docs
+
+- **At-rest KDF** documented as an accepted tradeoff (SECURITY.md + `crypto.go`):
+  `sha256(JWT_SECRET)` is adequate for the single-server model (high-entropy
+  input, not a password); the key-reuse caveat + the versioned-migration path for
+  multi-tenant are spelled out.
+
+### Privacy / hygiene
+
+- Purged the maintainer's private email + deploy hostname from the entire tracked
+  tree (69 files): security/disclosure contact → GitHub Security Advisories;
+  maintainer/licensing → `@MattJackson` / GitHub Discussions; deploy hostnames →
+  `example.com` / env-var-driven (smoke scripts default to `http://localhost:8080`,
+  the lighthouse CI job gated on a repo variable).
+
 ## v2.0.0-rc.4 — 2026-06-07
 
 Hardening release candidate. A **dual-model (Opus 4.8 + Sonnet 4.6) full-spectrum

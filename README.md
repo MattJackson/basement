@@ -112,7 +112,7 @@ The self-hosted S3 admin-UI landscape shifted in 2026 — upstream MinIO archive
 | Audit log UI                         | yes                                   | partial                 | partial               | no                      | no                |
 | Mobile / installable PWA             | yes                                   | no                      | no                    | partial (manifest only) | no                |
 | License                              | AGPL-3.0                              | AGPL-3.0                | AGPL-3.0              | MIT                     | MIT               |
-| Latest release / activity            | v2.0.0-rc.4 (2026-06)                 | last commit 2025-11     | last commit 2025-06   | v1.1.0 (2025-09)        | v0.6.2 (2026-05)  |
+| Latest release / activity            | v2.0.0-rc.5 (2026-06)                 | last commit 2025-11     | last commit 2025-06   | v1.1.0 (2025-09)        | v0.6.2 (2026-05)  |
 
 "n/a (backend)" means the upstream object store doesn't expose the feature, so no admin UI can ship it — Garage core does not implement versioning, Object Lock, or SSE-S3/SSE-KMS, and this isn't a UI gap. Rows for MinIO Console reflect the AGPL fork (opens3/console), since github.com/minio/console itself was retired alongside minio/minio in April 2026.
 
