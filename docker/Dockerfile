@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # Stage 1 — frontend build
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src
 RUN corepack enable && corepack prepare pnpm@latest --activate
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
