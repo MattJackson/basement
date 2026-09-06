@@ -60,14 +60,14 @@ By making a contribution to this project, I certify that:
 
 ## Project-specific addendum
 
-basement is licensed under AGPL-3.0 with a commercial dual-licensing
+basement is licensed under the MIT License with a commercial dual-licensing
 path retained by the project maintainer (see `CONTRIBUTING.md`). By
 signing off under the DCO, you are also confirming that you are
 comfortable with the maintainer relicensing your contribution as part
 of an aggregated commercial license offering — which is consistent
 with item (a) / (b) of the DCO above (you have the right to submit
 under the indicated open-source license, and the open-source license
-in question is AGPL-3.0 alongside the project's dual-licensing
+in question is the MIT License alongside the project's dual-licensing
 practice).
 
 If you cannot agree to that addendum, please reach out to the

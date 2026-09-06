@@ -1,14 +1,15 @@
 # basement
 
-[![Release](https://img.shields.io/github/v/release/mattjackson/basement)](https://github.com/mattjackson/basement/releases)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/mattjackson/basement)](https://github.com/mattjackson/basement/blob/main/go.mod)
-[![Container](https://img.shields.io/badge/ghcr.io-basement-2496ED?logo=docker&logoColor=white)](https://github.com/mattjackson/basement/pkgs/container/basement)
-[![SBOM](https://github.com/mattjackson/basement/actions/workflows/sbom.yml/badge.svg)](https://github.com/mattjackson/basement/actions/workflows/sbom.yml)
+[![CI](https://github.com/MattJackson/basement/actions/workflows/quality.yml/badge.svg)](https://github.com/MattJackson/basement/actions/workflows/quality.yml)
+[![Release](https://img.shields.io/github/v/release/MattJackson/basement)](https://github.com/MattJackson/basement/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/MattJackson/basement)](https://github.com/MattJackson/basement/blob/main/go.mod)
+[![Container](https://img.shields.io/badge/ghcr.io-basement-2496ED?logo=docker&logoColor=white)](https://github.com/MattJackson/basement/pkgs/container/basement)
+[![SBOM](https://github.com/MattJackson/basement/actions/workflows/sbom.yml/badge.svg)](https://github.com/MattJackson/basement/actions/workflows/sbom.yml)
 
 > One pane of glass for self-hosted S3-compatible object storage.
 > Manage many backends from one UI. Mount as a network drive.
-> Drive it from Claude via MCP. AGPLv3.
+> Drive it from Claude via MCP. MIT.
 
 ![Multi-cluster admin](docs/screenshots/v1.10/01-clusters-list.png)
 
@@ -46,7 +47,7 @@ No env vars, no bcrypt CLI, no JWT secret to generate up front — basement auto
 Prefer a guided one-liner that drops a `docker-compose.yml` alongside the container and prints the password for you?
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/mattjackson/basement/main/scripts/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/MattJackson/basement/main/scripts/install.sh | bash
 ```
 
 (Review-before-run recommended: `curl -sSLo install.sh https://.../install.sh && less install.sh && bash install.sh`.)
@@ -86,7 +87,7 @@ Shots ending in `-mocked.png` are Playwright-driven static-HTML renders for comp
 | v1.10 | Bucket versioning + Object Lock + SSE-S3 / SSE-KMS |
 | v1.11 | Launch readiness — first-run wizard, 5-min install, observability, deployment guide |
 
-v2.0 establishes the foundation for what comes next. Want to influence the roadmap? File an issue, start a discussion in [GitHub Discussions](https://github.com/mattjackson/basement/discussions), or join the conversation on our [question template](.github/ISSUE_TEMPLATE/question.yml).
+v2.0 establishes the foundation for what comes next. Want to influence the roadmap? File an issue, start a discussion in [GitHub Discussions](https://github.com/MattJackson/basement/discussions), or join the conversation on our [question template](.github/ISSUE_TEMPLATE/question.yml).
 
 ## Compared to other OSS admin UIs
 
@@ -111,7 +112,7 @@ The self-hosted S3 admin-UI landscape shifted in 2026 — upstream MinIO archive
 | Prometheus `/metrics` (UI-served)    | yes                                   | yes                     | yes                   | no                      | no                |
 | Audit log UI                         | yes                                   | partial                 | partial               | no                      | no                |
 | Mobile / installable PWA             | yes                                   | no                      | no                    | partial (manifest only) | no                |
-| License                              | AGPL-3.0                              | AGPL-3.0                | AGPL-3.0              | MIT                     | MIT               |
+| License                              | MIT                                   | AGPL-3.0                | AGPL-3.0              | MIT                     | MIT               |
 | Latest release / activity            | v2.0.0-rc.5 (2026-06)                 | last commit 2025-11     | last commit 2025-06   | v1.1.0 (2025-09)        | v0.6.2 (2026-05)  |
 
 "n/a (backend)" means the upstream object store doesn't expose the feature, so no admin UI can ship it — Garage core does not implement versioning, Object Lock, or SSE-S3/SSE-KMS, and this isn't a UI gap. Rows for MinIO Console reflect the AGPL fork (opens3/console), since github.com/minio/console itself was retired alongside minio/minio in April 2026.
@@ -148,7 +149,7 @@ Verified against project READMEs, source code searches, and latest release notes
 ## Getting Help / Community
 
 - **File a bug** → [bug_report.yml](.github/ISSUE_TEMPLATE/bug_report.yml)
-- **Ask a question** → [question.yml](.github/ISSUE_TEMPLATE/question.yml) or [GitHub Discussions](https://github.com/mattjackson/basement/discussions)
+- **Ask a question** → [question.yml](.github/ISSUE_TEMPLATE/question.yml) or [GitHub Discussions](https://github.com/MattJackson/basement/discussions)
 - **Security** → [`SECURITY.md`](SECURITY.md) (do not file in public)
 - **Chat**: OPEN — TODO: configure Discord / Matrix / IRC channel
 
@@ -170,6 +171,4 @@ CHANGELOG.md lists every release. Use the `latest` Docker tag for the rolling li
 
 ## License
 
-GNU Affero General Public License v3.0 — see [LICENSE](./LICENSE).
-
-For commercial dual-licensing (proprietary embedding, hosted SaaS without source disclosure, modifying without publishing changes): open a [GitHub Discussion](https://github.com/MattJackson/basement/discussions).
+MIT License — see [LICENSE](./LICENSE).

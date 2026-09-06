@@ -1,14 +1,14 @@
 # Contributing to basement
 
-basement is an AGPL-3.0 multi-backend storage control plane. Patches,
+basement is an MIT-licensed multi-backend storage control plane. Patches,
 bug reports, and integration drivers are welcome.
 
 ## License + contributor terms
 
-basement is licensed under the **GNU Affero General Public License,
-version 3** ([`LICENSE`](./LICENSE)). By submitting a pull request,
+basement is licensed under the **MIT License**
+([`LICENSE`](./LICENSE)). By submitting a pull request,
 patch, or any other contribution, you agree that **your contribution
-is licensed to the project and its users under AGPL-3.0**, in the
+is licensed to the project and its users under the MIT License**, in the
 same terms as the rest of the codebase.
 
 ### Commercial dual-licensing path
@@ -16,7 +16,7 @@ same terms as the rest of the codebase.
 The project maintainer (Matthew Jackson, `@MattJackson` on GitHub)
 reserves the right to grant **commercial licenses** to basement for
 proprietary embedding, hosted SaaS deployments, or other use cases
-the AGPL's copyleft does not suit. This requires the maintainer to
+the MIT license does not suit. This requires the maintainer to
 hold (or be permitted to relicense) the copyright on every
 contribution that ships in the binary.
 
@@ -62,7 +62,7 @@ React + Vite frontend (`frontend/`). The frontend builds into
 ### Clone + build
 
 ```bash
-git clone https://github.com/mattjackson/basement
+git clone https://github.com/MattJackson/basement
 cd basement
 
 # Frontend: install deps, build, drop dist/ into internal/web/dist/

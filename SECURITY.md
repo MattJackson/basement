@@ -188,7 +188,7 @@ is the closest thing to a supply-chain manifest we offer today.
 
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — contribution terms +
   DCO sign-off.
-- [`LICENSE`](./LICENSE) — AGPL-3.0.
+- [`LICENSE`](./LICENSE) — MIT.
 - [`docs/configuration.md`](./docs/configuration.md) — production
   environment variables (including the security-sensitive ones
   named in the threat model above).
