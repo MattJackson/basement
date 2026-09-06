@@ -8,4 +8,4 @@ contact_links:
     about: Full disclosure policy, response SLA, and threat model (SECURITY.md).
   - name: Commercial licensing
     url: https://github.com/MattJackson/basement/discussions
-    about: For proprietary embedding / hosted SaaS / AGPL escape-hatch enquiries, open a GitHub Discussion.
+    about: For proprietary embedding / hosted SaaS / commercial-licensing enquiries, open a GitHub Discussion.

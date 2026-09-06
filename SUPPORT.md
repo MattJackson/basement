@@ -1,6 +1,6 @@
 # Support
 
- basement is open-source software (AGPL-3.0). Here's where to get help:
+ basement is open-source software (MIT). Here's where to get help:
 
 ## Bugs
 
@@ -39,7 +39,7 @@ triage, fix, and disclosure.
 
 ## Commercial / Dual-Licensing
 
-For proprietary embedding, hosted SaaS without source disclosure, or other use
-cases the AGPL's copyleft doesn't suit: open a [GitHub Discussion](https://github.com/MattJackson/basement/discussions).
+For proprietary embedding, hosted SaaS, or other use
+cases the MIT license doesn't suit: open a [GitHub Discussion](https://github.com/MattJackson/basement/discussions).
 The maintainer reserves the right to grant commercial licenses on a
 case-by-case basis.

@@ -10,7 +10,7 @@ and upstream backend documentation.
 
 | Project | Repo | Latest release | Last push | License |
 |---|---|---|---|---|
-| basement | github.com/MattJackson/basement | v1.11.0.11 (2026-05) | active | AGPL-3.0 |
+| basement | github.com/MattJackson/basement | v1.11.0.11 (2026-05) | active | MIT |
 | MinIO Console (opens3 fork) | github.com/opens3/console | (no tagged releases; main moves) — last commit 2025-11-03 | 2025-11 | AGPL-3.0 |
 | OpenMaxIO Object Browser | github.com/OpenMaxIO/openmaxio-object-browser | inherited `v1.7.6` (pre-fork); last commit 2025-06-24 | 2025-06 | AGPL-3.0 |
 | khairul169/garage-webui | github.com/khairul169/garage-webui | v1.1.0 (2025-09-01) | 2025-09 | MIT |
@@ -158,7 +158,7 @@ named alternative.
 
 ### License
 
-- **basement** — AGPL-3.0.
+- **basement** — MIT.
 - **MinIO Console (opens3)** — AGPL-3.0.
 - **OpenMaxIO** — AGPL-3.0.
 - **khairul169/garage-webui** — MIT.

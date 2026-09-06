@@ -109,7 +109,7 @@ func TestContributingMD(t *testing.T) {
 	if len(text) < 500 {
 		t.Errorf("CONTRIBUTING.md: too short (%d bytes)", len(text))
 	}
-	mustMatch(t, "CONTRIBUTING.md AGPL", text, `AGPL-?3\.0`)
+	mustContain(t, "CONTRIBUTING.md MIT", text, "MIT")
 	mustContain(t, "CONTRIBUTING.md DCO sign-off line", text, "Signed-off-by")
 	mustContain(t, "CONTRIBUTING.md DCO acronym", text, "DCO")
 	mustContain(t, "CONTRIBUTING.md links DCO.md", text, "DCO.md")
