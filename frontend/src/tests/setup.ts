@@ -5,7 +5,7 @@
 // init time and never sees the shim. v1.13.32 fix.
 import "./shims-localstorage";
 
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/vitest";
 
 // Initialize i18n once for all tests so any component that calls
 // useTranslation() gets a resolved t() on first render — regardless
