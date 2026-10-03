@@ -265,7 +265,7 @@ describe("promptElevationFromAnywhere — non-React entrypoint", () => {
     vi.restoreAllMocks();
   });
 
-  it("rejects when no ElevationProvider is mounted", () => {
+  it("rejects when no ElevationProvider is mounted", async () => {
     const client = newClient();
     
     function TestComponent() {
@@ -278,7 +278,7 @@ describe("promptElevationFromAnywhere — non-React entrypoint", () => {
       </QueryClientProvider>,
     );
 
-    expect(promptElevationFromAnywhere("admin")).rejects.toThrow(
+    await expect(promptElevationFromAnywhere("admin")).rejects.toThrow(
       "ELEVATION_PROVIDER_NOT_MOUNTED",
     );
   });
